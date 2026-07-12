@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=15">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=16">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -94,6 +94,14 @@
                 <div class="dc-live-setups" id="dcLiveSetups" hidden>
                     <span class="dc-live-setups-label"><i class="fas fa-radar"></i> Live setups</span>
                     <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
+                </div>
+
+                <div class="dc-trade-churn-warn" id="dcTradeChurnWarn" hidden>
+                    Lock churn elevated — multiple symbols re-cycled today. Check promotion / R1·R2 behaviour.
+                </div>
+                <div class="dc-removals-strip" id="dcRemovalsStrip" hidden>
+                    <span class="dc-removals-label">Removed today</span>
+                    <div class="dc-removals-chips" id="dcRemovalsChips"></div>
                 </div>
 
                 <!-- GO Board: curated entry panel -->
@@ -210,6 +218,14 @@
                     <span class="dc-grade-lock" hidden title="Setup live but grade gate failed">🔒</span>
                     <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
                 </div>
+                <div class="dc-trade-row" hidden>
+                    <span class="dc-trade-state"></span>
+                    <span class="dc-trade-entry" title="Entry / limit"></span>
+                    <span class="dc-trade-sl" title="SL + INR risk"></span>
+                    <span class="dc-trade-rr" title="R:R to session S/R"></span>
+                    <span class="dc-trade-obs"></span>
+                    <span class="dc-trade-pos" hidden></span>
+                </div>
                 <div class="dc-card-meta" hidden>
                     <span class="dc-go-timing" hidden></span>
                 </div>
@@ -228,6 +244,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=15"></script>
+    <script src="dailyRSchecklist.js?v=16"></script>
 </body>
 </html>

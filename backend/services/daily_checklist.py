@@ -845,6 +845,28 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("checklist go board enrichment failed: %s", exc)
 
+    trade_obs: Dict[str, Any] = {
+        "churn_warning": False,
+        "churn_symbols": [],
+        "churn_count": 0,
+        "recent_removals": [],
+    }
+    try:
+        from backend.services.daily_checklist_trade_state import (
+            enrich_stocks_trade_state,
+            sort_stocks_by_trade_state,
+        )
+
+        trade_obs = enrich_stocks_trade_state(display_stocks, sd)
+        sorted_stocks = sort_stocks_by_trade_state(display_stocks, rank_map)
+        display_stocks[:] = sorted_stocks
+        if locked:
+            today_stocks[:] = sorted_stocks
+        else:
+            preview_stocks[:] = sorted_stocks
+    except Exception as exc:
+        logger.debug("checklist trade-state enrichment failed: %s", exc)
+
     return {
         "session_date": sd,
         "locked": locked,
@@ -865,6 +887,7 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         "fast_watch": fast_watch,
         "go_board": go_board,
         "checklist_config": checklist_cfg,
+        "trade_state_obs": trade_obs,
     }
 
 

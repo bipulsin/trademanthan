@@ -268,6 +268,101 @@ body[data-theme="dark"] .dc-rs--neg { color: #f87171 !important; }
     padding: 8px 12px; margin-bottom: 10px; border-radius: 10px;
     background: var(--theme-card-alt, #f8fafc); border: 1px solid var(--theme-border, #e2e8f0);
 }
+
+.dc-trade-churn-warn {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #92400e;
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+}
+.dc-trade-churn-warn[hidden] { display: none !important; }
+
+.dc-removals-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: var(--theme-card-alt, #f8fafc);
+    border: 1px solid var(--theme-border, #e2e8f0);
+    font-size: 11px;
+}
+.dc-removals-strip[hidden] { display: none !important; }
+.dc-removals-label {
+    font-weight: 700;
+    color: var(--theme-muted, #64748b);
+    white-space: nowrap;
+}
+.dc-removals-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dc-removal-chip {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #f1f5f9;
+    color: #475569;
+}
+.dc-removal-chip--r1 { background: #fee2e2; color: #991b1b; }
+.dc-removal-chip--r2 { background: #e0e7ff; color: #3730a3; }
+
+.dc-trade-row {
+    display: flex;
+    align-items: center;
+    gap: 6px 10px;
+    flex-wrap: wrap;
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 2px 2px 0;
+    color: var(--theme-muted, #64748b);
+}
+.dc-trade-row[hidden] { display: none !important; }
+.dc-trade-state {
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.dc-tstate--ready { color: #15803d; }
+.dc-tstate--recheck { color: #d97706; }
+.dc-tstate--wait { color: #64748b; }
+.dc-tstate--expired { color: #94a3b8; text-decoration: line-through; }
+.dc-tstate--blocked { color: #b91c1c; font-weight: 700; }
+.dc-trade-entry, .dc-trade-sl, .dc-trade-rr, .dc-trade-obs {
+    white-space: nowrap;
+    font-weight: 600;
+}
+.dc-trade-risk--over { color: #b91c1c; font-weight: 800; }
+.dc-trade-rr--low {
+    color: #b45309;
+    font-weight: 800;
+}
+.dc-trade-rr--low::after {
+    content: "";
+}
+.dc-trade-pos {
+    margin-left: auto;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.dc-trade-pos--hold { color: #15803d; }
+.dc-trade-pos--book { color: #b91c1c; }
+.dc-card--expired { opacity: 0.72; }
+
+body[data-theme="dark"] .dc-tstate--ready { color: #4ade80; }
+body[data-theme="dark"] .dc-tstate--recheck { color: #fbbf24; }
+body[data-theme="dark"] .dc-tstate--blocked,
+body[data-theme="dark"] .dc-trade-risk--over,
+body[data-theme="dark"] .dc-trade-pos--book { color: #f87171; }
+body[data-theme="dark"] .dc-trade-churn-warn {
+    background: #422006;
+    border-color: #92400e;
+    color: #fde68a;
+}
 .dc-live-setups-label { font-size: 11px; font-weight: 800; color: var(--theme-muted, #64748b); white-space: nowrap; }
 .dc-live-setups-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .dc-live-chip {

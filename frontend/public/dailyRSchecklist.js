@@ -36,6 +36,14 @@
         macd: "macd_ok", adx_entry: "adx_ok", volume: "volume_ok"
     };
     var SECTION_ORDER = { GO: 0, WATCH: 1, OUT: 2, NONE: 1 };
+    var TRADE_STATE_ORDER = {
+        "READY": 0,
+        "READY(RECHECK)": 1,
+        "WAIT FOR PULLBACK": 2,
+        "EXPIRED": 3,
+        "BLOCKED": 4
+    };
+    var GRADE_ORDER = { "A+": 0, "A": 1, "B": 2, "C": 3, "D": 4 };
 
     function $(id) { return document.getElementById(id); }
     function el(tag, cls, txt) {
@@ -383,6 +391,7 @@
                 ignEl.hidden = true;
             }
         }
+        patchTradeRow(card, stock);
         var gt = card.querySelector(".dc-go-timing");
         var meta = card.querySelector(".dc-card-meta");
         if (gt) {
@@ -404,13 +413,169 @@
         }
     }
 
+    function fmtInr(n) {
+        if (n == null || n === "") return "—";
+        var v = Math.round(Number(n));
+        return "₹" + v.toLocaleString("en-IN");
+    }
+
+    function fmtPx(n) {
+        if (n == null || n === "") return "—";
+        return Number(n).toFixed(2);
+    }
+
+    function fmtPromotedAt(iso) {
+        if (!iso) return "";
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return "";
+        return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+    }
+
+    function tradeStateClass(st) {
+        if (st === "READY") return "dc-tstate--ready";
+        if (st === "READY(RECHECK)") return "dc-tstate--recheck";
+        if (st === "WAIT FOR PULLBACK") return "dc-tstate--wait";
+        if (st === "EXPIRED") return "dc-tstate--expired";
+        if (st === "BLOCKED") return "dc-tstate--blocked";
+        return "";
+    }
+
+    function patchTradeRow(card, stock) {
+        var row = card.querySelector(".dc-trade-row");
+        if (!row) return;
+        var st = stock.trade_state;
+        if (!st) {
+            row.hidden = true;
+            card.classList.remove("dc-card--expired");
+            return;
+        }
+        row.hidden = false;
+        card.classList.toggle("dc-card--expired", st === "EXPIRED");
+
+        var stEl = row.querySelector(".dc-trade-state");
+        if (stEl) {
+            var label = st;
+            if (st === "READY(RECHECK)" && stock.trade_adx != null) {
+                label = "READY(RECHECK) · ADX " + stock.trade_adx;
+            }
+            if (st === "BLOCKED" && stock.trade_state_reason) {
+                label = stock.trade_state_reason;
+            }
+            stEl.textContent = label;
+            stEl.className = "dc-trade-state " + tradeStateClass(st);
+            stEl.title = stock.trade_state_reason || st;
+        }
+
+        var en = row.querySelector(".dc-trade-entry");
+        if (en) {
+            en.textContent = (st === "EXPIRED" || st === "BLOCKED")
+                ? "Entry —"
+                : ("Entry " + fmtPx(stock.trade_entry));
+        }
+        var sl = row.querySelector(".dc-trade-sl");
+        if (sl) {
+            var riskTxt = stock.trade_risk_inr != null ? fmtInr(stock.trade_risk_inr) : "—";
+            sl.innerHTML = "SL " + fmtPx(stock.trade_sl) +
+                ' · <span class="dc-trade-risk' + (stock.trade_risk_over ? " dc-trade-risk--over" : "") + '">' +
+                riskTxt + "</span>";
+        }
+        var rr = row.querySelector(".dc-trade-rr");
+        if (rr) {
+            if (stock.trade_rr_label) {
+                rr.textContent = stock.trade_rr_label + (stock.trade_rr_low ? " R:R low" : "");
+                rr.className = "dc-trade-rr" + (stock.trade_rr_low ? " dc-trade-rr--low" : "");
+            } else {
+                rr.textContent = "R:R —";
+                rr.className = "dc-trade-rr";
+            }
+        }
+        var obs = row.querySelector(".dc-trade-obs");
+        if (obs) {
+            var bits = [];
+            if (stock.promoted_at) bits.push("↗ " + fmtPromotedAt(stock.promoted_at));
+            if (stock.lock_cycles > 1) bits.push("cycles " + stock.lock_cycles);
+            obs.textContent = bits.join(" · ");
+            obs.style.display = bits.length ? "" : "none";
+        }
+        var pos = row.querySelector(".dc-trade-pos");
+        if (pos) {
+            var p = stock.position;
+            if (p && p.trail_state) {
+                pos.hidden = false;
+                var pnl = p.open_pnl_inr != null ? fmtInr(p.open_pnl_inr) : "—";
+                pos.textContent = p.trail_state + " · P&L " + pnl +
+                    (p.trail_sl != null ? " · trail " + fmtPx(p.trail_sl) : "");
+                pos.className = "dc-trade-pos" +
+                    (p.trail_state === "BOOK-NOW" ? " dc-trade-pos--book" : " dc-trade-pos--hold");
+                pos.title = p.trail_reason || p.trail_state;
+            } else {
+                pos.hidden = true;
+                pos.textContent = "";
+            }
+        }
+    }
+
+    function gradeRank(stock) {
+        var g = String(stock.confidence || stock.dashboard_kavach || "").toUpperCase().replace("*", "");
+        if (g.indexOf("A+") === 0) return 0;
+        if (g.indexOf("A") === 0) return 1;
+        if (g.indexOf("B") === 0) return 2;
+        if (g.indexOf("C") === 0) return 3;
+        if (g.indexOf("D") === 0) return 4;
+        return 9;
+    }
+
     function sortStocks(list) {
         return list.slice().sort(function (a, b) {
+            var ta = TRADE_STATE_ORDER[a.trade_state];
+            var tb = TRADE_STATE_ORDER[b.trade_state];
+            if (ta != null || tb != null) {
+                ta = ta != null ? ta : 9;
+                tb = tb != null ? tb : 9;
+                if (ta !== tb) return ta - tb;
+                var ga = gradeRank(a);
+                var gb = gradeRank(b);
+                if (ga !== gb) return ga - gb;
+                return (a.rs_pct == null ? 99 : -Number(a.rs_pct)) - (b.rs_pct == null ? 99 : -Number(b.rs_pct));
+            }
             var oa = SECTION_ORDER[decisionClass(a)] != null ? SECTION_ORDER[decisionClass(a)] : 1;
             var ob = SECTION_ORDER[decisionClass(b)] != null ? SECTION_ORDER[decisionClass(b)] : 1;
             if (oa !== ob) return oa - ob;
             return (b.rs_pct || 0) - (a.rs_pct || 0);
         });
+    }
+
+    function renderTradeObs() {
+        var warn = $("dcTradeChurnWarn");
+        var strip = $("dcRemovalsStrip");
+        var chips = $("dcRemovalsChips");
+        var obs = (state && state.trade_state_obs) || {};
+        if (warn) {
+            warn.hidden = !obs.churn_warning;
+            if (obs.churn_warning && obs.churn_symbols && obs.churn_symbols.length) {
+                warn.textContent = "Lock churn elevated (" + obs.churn_count +
+                    " symbols with cycles > 1: " + obs.churn_symbols.join(", ") +
+                    "). Check promotion / R1·R2 behaviour.";
+            }
+        }
+        if (!strip || !chips) return;
+        var rem = obs.recent_removals || [];
+        if (!rem.length) {
+            strip.hidden = true;
+            chips.innerHTML = "";
+            return;
+        }
+        strip.hidden = false;
+        chips.innerHTML = rem.map(function (r) {
+            var t = "";
+            if (r.at) {
+                var d = new Date(r.at);
+                if (!isNaN(d.getTime())) t = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+            }
+            return '<span class="dc-removal-chip dc-removal-chip--' +
+                String(r.rule_tag || "").toLowerCase() + '">' +
+                r.symbol + " · " + (r.rule_tag || "—") + (t ? " @" + t : "") + "</span>";
+        }).join("");
     }
 
     function renderLiveSetups() {
@@ -564,6 +729,7 @@
         }
 
         renderLiveSetups();
+        renderTradeObs();
         renderGoBoard();
         renderFastWatch();
         checkGoAlerts(stocks);
