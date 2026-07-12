@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=13">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=15">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -100,6 +100,11 @@
                 <section class="dc-go-board-section" id="dcGoBoard" hidden aria-label="GO Board entry panel">
                     <div class="dc-go-board-head">
                         <span class="dc-go-board-label"><i class="fas fa-crosshairs"></i> GO Board</span>
+                        <span class="dc-go-board-unvalidated" id="dcGoBoardUnvalidated"
+                              title="Historical validation in progress — cross-check against your chart before acting. Report: github.com/bipulsin/trademanthan/blob/main/docs/diagnostics/GO_BOARD_VALIDATION_REPORT.md">
+                            UNVALIDATED — cross-check against chart before acting
+                            <a class="dc-go-board-unvalidated-link" href="https://github.com/bipulsin/trademanthan/blob/main/docs/diagnostics/GO_BOARD_VALIDATION_REPORT.md" target="_blank" rel="noopener" title="Open validation report">ℹ</a>
+                        </span>
                         <span class="dc-go-board-window" id="dcGoBoardWindow"></span>
                     </div>
                     <div class="dc-go-board-empty" id="dcGoBoardEmpty" hidden>No qualifying entries this window</div>
@@ -194,6 +199,7 @@
             <div class="dc-card-face">
                 <div class="dc-card-row">
                     <span class="dc-symbol"></span>
+                    <span class="dc-persist" title="Persistence since lock"></span>
                     <span class="dc-rs"></span>
                     <span class="dc-conf"></span>
                     <span class="dc-score"></span>
@@ -222,6 +228,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=14"></script>
+    <script src="dailyRSchecklist.js?v=15"></script>
 </body>
 </html>

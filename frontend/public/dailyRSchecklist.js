@@ -322,6 +322,19 @@
         if ((stock.decision || "").indexOf("CHART REVERSED") >= 0) card.classList.add("dc-card--reversed");
         else card.classList.remove("dc-card--reversed");
         card.querySelector(".dc-symbol").textContent = stock.symbol;
+        var persEl = card.querySelector(".dc-persist");
+        if (persEl) {
+            var frac = stock.persistence_top5_frac;
+            if (frac == null || frac === "") {
+                persEl.textContent = "";
+                persEl.style.display = "none";
+            } else {
+                persEl.textContent = "P" + Math.round(Number(frac) * 100) + "%";
+                persEl.style.display = "";
+                persEl.title = "Top-5 persistence since lock: " + Math.round(Number(frac) * 100) +
+                    "%" + (stock.persistence_clean_bars != null ? (" · " + stock.persistence_clean_bars + " clean VWAP bars") : "");
+            }
+        }
         var sb = card.querySelector(".dc-sector-badge");
         if (sb) {
             sb.textContent = stock.sector_badge || "";

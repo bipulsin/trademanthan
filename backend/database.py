@@ -1134,6 +1134,65 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created rs_go_board_shadow_log (PostgreSQL)")
 
+            if "rs_go_board_backtest_log" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_go_board_backtest_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                flip_at TIMESTAMPTZ NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                is_reversal BOOLEAN DEFAULT FALSE,
+                                lock_direction TEXT,
+                                prev_kavach TEXT,
+                                new_kavach TEXT,
+                                flip_price DOUBLE PRECISION,
+                                adx DOUBLE PRECISION,
+                                regime TEXT,
+                                volume_label TEXT,
+                                purity_pct DOUBLE PRECISION,
+                                confidence_grade TEXT,
+                                vwap_slope DOUBLE PRECISION,
+                                freshness_pct DOUBLE PRECISION,
+                                stop_pct DOUBLE PRECISION,
+                                stop_level DOUBLE PRECISION,
+                                window_label TEXT,
+                                gate_regime_pass BOOLEAN,
+                                gate_adx_pass BOOLEAN,
+                                gate_slope_pass BOOLEAN,
+                                gate_freshness_pass BOOLEAN,
+                                gate_stop_pass BOOLEAN,
+                                gate_grade_pass BOOLEAN,
+                                combined_pass BOOLEAN,
+                                mfe_pct DOUBLE PRECISION,
+                                mae_pct DOUBLE PRECISION,
+                                hit_1p5_before_stop BOOLEAN,
+                                hit_2p0_before_stop BOOLEAN,
+                                stopped_out BOOLEAN,
+                                session_end_pct DOUBLE PRECISION,
+                                detail_json TEXT,
+                                created_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_go_board_bt_date "
+                            "ON rs_go_board_backtest_log (session_date DESC, flip_at)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_rs_go_board_bt_uniq "
+                            "ON rs_go_board_backtest_log (session_date, symbol, flip_at)"
+                        )
+                    )
+                    print("Applied migration: created rs_go_board_backtest_log (PostgreSQL)")
+
             # Daily checklist morning snapshot lock (Top 5+5 at/after 09:25 IST)
             if "daily_snapshot" not in table_names:
                 if db_engine.dialect.name == "postgresql":
@@ -1175,6 +1234,35 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created snapshot_lock (PostgreSQL)")
+
+            if "rs_lock_membership_audit" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE rs_lock_membership_audit (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                event_type TEXT NOT NULL,
+                                rule TEXT NOT NULL,
+                                rank INTEGER,
+                                persistence_top5_frac DOUBLE PRECISION,
+                                persistence_clean_bars INTEGER,
+                                detail JSONB,
+                                event_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_rs_lock_membership_audit_day "
+                            "ON rs_lock_membership_audit (session_date DESC, symbol, event_at)"
+                        )
+                    )
+                    print("Applied migration: created rs_lock_membership_audit (PostgreSQL)")
 
             # RS Conviction Score board + Setup Radar
             if "rs_conviction_config" not in table_names:

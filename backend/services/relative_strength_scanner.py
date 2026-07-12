@@ -9,8 +9,9 @@ Pipeline (run once every 5 min by the scheduler, never by the dashboard):
   3. Compute indicators (EMA 5/9/10, VWAP, Supertrend, MACD, ADX, Volume Ratio).
   4. Compute Relative Strength = Stock %% - NIFTY %%.
   5. Evaluate Kavach state + composite Trade Score (see ``kavach_engine``).
-  6. Rank Top 5 Bullish / Top 5 Bearish and bulk-insert into
-     ``relative_strength_snapshot``.
+  6. Rank Top-N Bullish / Bearish (persist Top-10 for lock-removal hysteresis;
+     actionable Top-5 remains the UI / morning-lock / entry band) and bulk-insert
+     into ``relative_strength_snapshot``.
 
 The dashboard reads the latest snapshot via :func:`get_latest_snapshot` — it
 never recalculates indicators.
@@ -72,6 +73,8 @@ CACHE_MAX_AGE_SEC = 900
 VOLUME_EMA_PERIOD = 20
 ADX_LENGTH = 14
 TOP_N = 5
+# Persist beyond Top-5 so lock-removal R2 can apply a wider hysteresis band (default Top-10).
+PERSIST_TOP_N = 10
 
 # NIFTY daily closes change once per session — cache the (expensive) daily-candle
 # fetch per IST date so a transient 429 storm cannot zero out RS. Also remember the
@@ -471,10 +474,12 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
         bucket.append(r)
 
     # Bullish: highest RS%% on top. Bearish: lowest RS%% on top. Trade Score breaks ties.
+    # Persist PERSIST_TOP_N so removal hysteresis can see ranks 6..band; actionable Top-N stays TOP_N.
+    persist_n = max(int(TOP_N), int(PERSIST_TOP_N))
     bullish.sort(key=lambda x: (-x["relative_strength"], -x["trade_score"]))
     bearish.sort(key=lambda x: (x["relative_strength"], -x["trade_score"]))
-    bullish = bullish[:TOP_N]
-    bearish = bearish[:TOP_N]
+    bullish = bullish[:persist_n]
+    bearish = bearish[:persist_n]
     for i, r in enumerate(bullish, start=1):
         r["rank_position"] = i
     for i, r in enumerate(bearish, start=1):
@@ -667,6 +672,9 @@ def get_latest_snapshot() -> Dict[str, Any]:
     for r in rows:
         if not last_updated and r.scan_time is not None:
             last_updated = r.scan_time.isoformat()
+        # Persist may include ranks beyond TOP_N for lock-removal hysteresis; UI stays Top-5.
+        if r.rank_position is not None and int(r.rank_position) > TOP_N:
+            continue
         mat = maturity_map.get(r.symbol) or default_maturity_fields()
         item = _row_to_dict(r, mat)
         if r.ranking_type == RANKING_BULLISH:

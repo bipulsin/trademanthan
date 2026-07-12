@@ -20,10 +20,12 @@ import pytz
 
 from backend.services.kavach_confidence import (
     REGIME_TREND,
+    VWAP_CONSISTENCY_BARS,
     compute_confidence_grade,
     compute_vwap_purity_pct,
     detect_market_regime,
     format_confidence_display,
+    vwap_opposite_side_consecutive,
 )
 from backend.services.kavach_engine import BEARISH_STATES, compute_trade_score, evaluate_kavach, KavachInput
 from backend.services.kavach_volume import (
@@ -246,6 +248,59 @@ def metrics_from_10m_candles(
         "timeframe": "10m",
         "scan_time": now or datetime.now(IST),
     }
+
+
+def lock_vwap_trend_broken_10m(
+    candles: List[Dict],
+    *,
+    lock_direction: str,
+    num_bars: int = VWAP_CONSISTENCY_BARS,
+    now: Optional[datetime] = None,
+) -> Optional[bool]:
+    """R1 lock removal: last N confirmed 10m closes all on opposite side of session VWAP.
+
+    Uses the same N as Layer 3 VWAP purity (``VWAP_CONSISTENCY_BARS``). Returns None
+    when candles are insufficient to evaluate (caller should not remove on None).
+    """
+    if not candles or len(candles) < 40:
+        return None
+    candles = _sorted_candles(candles)
+    split = _current_and_prev_day_close(candles)
+    if split is None:
+        return None
+    _, _, first_today = split
+    pair_end = last_closed_10m_pair_end_idx(candles, now=now)
+    if pair_end < first_today:
+        return None
+    bars_10m = _10m_series_upto(candles, pair_end)
+    if len(bars_10m) < num_bars:
+        return None
+
+    # Session VWAP on 5m through each 10m bar end; sample closes at 10m ends via bar_size=1
+    # on a dense series aligned to 10m closes + matching VWAP at those ends.
+    closes_10m: List[float] = []
+    vwaps_10m: List[float] = []
+    for b in bars_10m:
+        end_idx = int(b["end_5m_idx"])
+        t_highs = [_f(c.get("high")) for c in candles[first_today : end_idx + 1]]
+        t_lows = [_f(c.get("low")) for c in candles[first_today : end_idx + 1]]
+        t_closes = [_f(c.get("close")) for c in candles[first_today : end_idx + 1]]
+        t_vols = [_f(c.get("volume")) for c in candles[first_today : end_idx + 1]]
+        if not t_closes:
+            continue
+        v_series = cumulative_vwap(t_highs, t_lows, t_closes, t_vols)
+        closes_10m.append(float(b["close"]))
+        vwaps_10m.append(float(v_series[-1]))
+
+    if len(closes_10m) < num_bars:
+        return None
+    return vwap_opposite_side_consecutive(
+        closes_10m,
+        vwaps_10m,
+        lock_direction=lock_direction,
+        num_bars=num_bars,
+        bar_size=1,
+    )
 
 
 def timeline_states(

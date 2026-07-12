@@ -34,7 +34,9 @@ from backend.services.daily_checklist_snapshot import (
     is_snapshot_locked,
     lock_morning_snapshot,
     locked_direction_map,
+    persistence_map_for_session,
     promote_intraday_from_rs,
+    sort_by_persistence,
     sort_by_snapshot_rank,
 )
 
@@ -743,10 +745,18 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         preview_stocks: List[Dict[str, Any]] = []
 
         if locked:
-            today_stocks = sort_by_snapshot_rank(
-                [s for s in all_stocks if s["symbol"] in locked_syms],
-                rank_map,
-            )
+            pers_map = {}
+            try:
+                pers_map = persistence_map_for_session(db, sd)
+            except Exception as exc:
+                logger.debug("persistence map skipped: %s", exc)
+            locked_list = [s for s in all_stocks if s["symbol"] in locked_syms]
+            for s in locked_list:
+                p = pers_map.get(s["symbol"]) or {}
+                s["persistence_top5_frac"] = p.get("top5_fraction")
+                s["persistence_clean_bars"] = p.get("clean_vwap_bars")
+                s["persistence_scans"] = p.get("scans_since_promote")
+            today_stocks = sort_by_persistence(locked_list, pers_map, rank_map)
             carryover_stocks = [s for s in all_stocks if s["symbol"] not in locked_syms]
             for s in carryover_stocks:
                 s["is_carryover"] = True

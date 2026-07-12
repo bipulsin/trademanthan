@@ -82,6 +82,54 @@ def _purity_proven(purity_pct: float) -> bool:
     return purity_pct >= 60.0
 
 
+# Same window length as compute_vwap_purity_pct (Layer 3 VWAP consistency).
+VWAP_CONSISTENCY_BARS = 8
+
+
+def vwap_opposite_side_consecutive(
+    closes: List[float],
+    vwap_series: List[float],
+    *,
+    lock_direction: str,
+    num_bars: int = VWAP_CONSISTENCY_BARS,
+    bar_size: int = 2,
+) -> bool:
+    """True when last ``num_bars`` completed 10m closes are ALL opposite VWAP vs lock.
+
+    Reuses the same N / bar-resampling definition as :func:`compute_vwap_purity_pct`.
+    Opposite = below VWAP for LONG/BULL lock, above VWAP for SHORT/BEAR lock.
+    Confirmed closes only (caller must pass closed-bar series).
+    """
+    if not closes or not vwap_series or len(closes) != len(vwap_series):
+        return False
+    is_long = (lock_direction or "LONG").upper() not in ("SHORT", "BEAR", "BEARISH")
+    n = len(closes)
+    if n < bar_size:
+        return False
+    ends: List[int] = []
+    i = bar_size - 1
+    while i < n:
+        ends.append(i)
+        i += bar_size
+    if len(ends) < num_bars:
+        return False
+    sample = ends[-num_bars:]
+    for idx in sample:
+        c = closes[idx]
+        v = vwap_series[idx]
+        if v is None or v <= 0:
+            return False
+        if is_long:
+            # Opposite of LONG lock = close below VWAP
+            if not (c < v):
+                return False
+        else:
+            # Opposite of SHORT lock = close above VWAP
+            if not (c > v):
+                return False
+    return True
+
+
 def compute_confidence_grade(
     score: float,
     volume_label: VolumeLabel,
