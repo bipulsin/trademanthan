@@ -399,15 +399,28 @@ body[data-theme="dark"] .dc-rs--neg { color: #f87171 !important; }
     padding: 3px 10px;
     border-radius: 6px;
     background: #e2e8f0;
-    color: #334155;
+    color: #0f172a;
 }
-.dc-mkt-regime--trend { background: #dcfce7; color: #166534; }
-.dc-mkt-regime--chop { background: #fef3c7; color: #92400e; }
-.dc-mkt-regime--transition { background: #e0e7ff; color: #3730a3; }
+.dc-mkt-regime--trend { background: #dcfce7; color: #14532d; }
+.dc-mkt-regime--chop { background: #fef3c7; color: #78350f; }
+.dc-mkt-regime--transition {
+    background: #fef9c3;
+    color: #713f12;
+    border: 1px solid #eab308;
+}
 .dc-exit-rule {
     font-weight: 600;
-    color: var(--theme-muted, #64748b);
+    color: var(--theme-text, #0f172a);
+    opacity: 0.85;
 }
+body[data-theme="dark"] .dc-mkt-regime--trend { background: #14532d; color: #bbf7d0; border: none; }
+body[data-theme="dark"] .dc-mkt-regime--chop { background: #854d0e; color: #fef08a; border: none; }
+body[data-theme="dark"] .dc-mkt-regime--transition {
+    background: #a16207;
+    color: #fffbeb;
+    border: 1px solid #facc15;
+}
+body[data-theme="dark"] .dc-exit-rule { color: #e2e8f0; opacity: 0.9; }
 .dc-trade-gates {
     display: inline-flex;
     flex-wrap: wrap;

@@ -622,9 +622,17 @@
         var exitEl = $("dcExitRule");
         if (regimeEl) {
             var reg = obs.market_regime || "—";
-            regimeEl.textContent = reg + (obs.market_regime_label ? " · " + obs.market_regime_label : "");
+            var label = obs.market_regime_label || "";
+            // Avoid "TRANSITION · TRANSITION — …" duplication
+            if (label && label.toUpperCase().indexOf(String(reg).toUpperCase()) === 0) {
+                regimeEl.textContent = label;
+            } else if (label) {
+                regimeEl.textContent = reg + " · " + label;
+            } else {
+                regimeEl.textContent = reg;
+            }
             regimeEl.className = "dc-mkt-regime dc-mkt-regime--" + String(reg).toLowerCase();
-            regimeEl.title = (obs.chop_reasons || []).join("; ") || obs.market_regime_label || "";
+            regimeEl.title = (obs.chop_reasons || []).join("; ") || label || "";
         }
         if (exitEl) {
             exitEl.textContent = obs.exit_rule_reminder ||
@@ -833,7 +841,7 @@
         var cfg = (state && state.checklist_config) || {};
         var gb = (state && state.go_board) || {};
         var items = gb.symbols || [];
-        if (!cfg.go_board_ui_enabled) {
+        if (!cfg.go_board_ui_enabled || !items.length) {
             wrap.hidden = true;
             stack.innerHTML = "";
             if (empty) empty.hidden = true;
@@ -842,10 +850,6 @@
         wrap.hidden = false;
         if (winEl) winEl.textContent = gb.window ? ("Window " + gb.window) : "";
         stack.innerHTML = "";
-        if (!items.length) {
-            if (empty) empty.hidden = false;
-            return;
-        }
         if (empty) empty.hidden = true;
         items.forEach(function (item) {
             var card = el("div", "dc-go-board-card dc-go-board-card--" + (item.side === "SHORT" ? "short" : "long"));
