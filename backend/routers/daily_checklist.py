@@ -178,14 +178,3 @@ def exit_trade(trade_id: str, body: ExitTradeBody):
         logger.warning("exit trade failed: %s", exc)
         return {"ok": False, "error": str(exc)}
 
-
-@router.post("/open-trades/{trade_id}/cancel")
-def cancel_trade(trade_id: str):
-    try:
-        trade = ot.cancel_trade(trade_id)
-        return {"ok": True, "trade": trade, **ot.list_session_trades()}
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-    except Exception as exc:
-        logger.warning("cancel trade failed: %s", exc)
-        return {"ok": False, "error": str(exc)}

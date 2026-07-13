@@ -880,8 +880,6 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         open_map = {t["symbol"]: t for t in open_trades_payload.get("open_trades") or []}
         closed_map = {}
         for t in open_trades_payload.get("closed_trades") or []:
-            if t.get("was_cancelled"):
-                continue
             closed_map[t["symbol"]] = t
         for s in display_stocks:
             sym = s.get("symbol")

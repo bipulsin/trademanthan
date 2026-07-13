@@ -1071,32 +1071,6 @@
         exitBtn.type = "button";
         exitBtn.addEventListener("click", function () { beginExit(t); });
         row1.appendChild(exitBtn);
-
-        var menu = el("div", "dc-ot-menu");
-        var menuBtn = el("button", "dc-ot-menu-btn", "⋮");
-        menuBtn.type = "button";
-        var menuPop = el("div", "dc-ot-menu-pop");
-        menuPop.hidden = true;
-        var cancelBtn = el("button", "dc-ot-menu-item", "Cancel Trade Record");
-        cancelBtn.type = "button";
-        cancelBtn.disabled = !t.can_cancel;
-        cancelBtn.title = t.can_cancel ? "Cancel within 2 min of take" : "Cancel window expired";
-        cancelBtn.addEventListener("click", function () {
-            if (!confirm("Cancel this trade record (no fill)?")) return;
-            api("/open-trades/" + t.id + "/cancel", { method: "POST" })
-                .then(function (res) {
-                    if (!res.ok) toast(res.error || "Cancel failed");
-                    return api("/data");
-                }).then(function (s) { if (s) applyState(s); });
-        });
-        menuPop.appendChild(cancelBtn);
-        menuBtn.addEventListener("click", function (ev) {
-            ev.stopPropagation();
-            menuPop.hidden = !menuPop.hidden;
-        });
-        menu.appendChild(menuBtn);
-        menu.appendChild(menuPop);
-        row1.appendChild(menu);
         card.appendChild(row1);
 
         var row2 = el("div", "dc-ot-row dc-ot-row--math");

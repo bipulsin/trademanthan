@@ -34,19 +34,40 @@ REGIME_TRANSITION = "TRANSITION"
 
 FLIP_CLASSIFICATION = "RS confirmed but not promoted / direction flip"
 
-_SL_EXIT_REASONS = frozenset(
-    {
-        "SL_HIT",
-        "SL HIT",
-        "STOP_LOSS",
-        "STOP LOSS",
-        "TRAIL_STOP",
-        "EMA10",
-        "EMA10_CLOSE",
-        "EMA10 REVERSE",
-        "INDICATOR_2OF4",
-    }
-)
+REENTRY_BLOCK_LABEL = "SL hit earlier today · no re-entry regardless of direction"
+
+
+def exit_reason_blocks_reentry(reason: Optional[str]) -> bool:
+    """True if this exit should hard-block same-day re-entry (both directions).
+
+    Includes: SL / EMA10 / EMA5 / risk-cap / discretionary / session loss cap.
+    Excludes: 15:15 / EOD square-off (mechanical session end).
+    """
+    if not reason:
+        return False
+    r = str(reason).strip().upper().replace("-", " ").replace("_", " ")
+    r = " ".join(r.split())
+    # Session-end mechanical — do not block
+    if "15:15" in r or "1515" in r or "EOD" in r or "SQUARE OFF" in r or "SQUAREOFF" in r:
+        if "SESSION LOSS" not in r:
+            return False
+    if "DISCRETIONARY" in r:
+        return True
+    if "EMA10" in r:
+        return True
+    if "EMA5" in r:
+        return True
+    if "RISK CAP" in r or "RISK EXCEED" in r:
+        return True
+    if "SESSION LOSS" in r:
+        return True
+    if "SL" in r or "STOP LOSS" in r or "STOP_LOSS" in r.replace(" ", "_"):
+        return True
+    if r in ("SL HIT", "SL_HIT", "TRAIL STOP", "TRAIL_STOP", "INDICATOR 2OF4", "INDICATOR_2OF4"):
+        return True
+    if "TRAIL" in r and "STOP" in r:
+        return True
+    return False
 
 
 def _f(v: Any) -> Optional[float]:
@@ -426,7 +447,7 @@ def direction_unstable_flags(
 
 
 def stopped_out_today(db, session_date: str, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-    """Same-day SL / EMA10-style exit → hard re-entry block both directions."""
+    """Same-day re-entry block from daily_futures_user_trade ∪ kavach closed trades."""
     out: Dict[str, Dict[str, Any]] = {}
     if not symbols:
         return out
@@ -455,38 +476,26 @@ def stopped_out_today(db, session_date: str, symbols: List[str]) -> Dict[str, Di
             sym = str(r.underlying).upper()
             if sym in out:
                 continue
-            reason = (r.exit_reason or "").strip().upper().replace("-", "_").replace("  ", " ")
-            reason_compact = reason.replace(" ", "_")
-            is_sl = (
-                reason_compact in _SL_EXIT_REASONS
-                or "SL" in reason
-                or "EMA10" in reason
-                or "STOP" in reason
-            )
-            if not is_sl:
-                # Treat any same-day closed loss as stop-out for re-entry block
-                pnl = _f(r.pnl_rupees)
-                if pnl is not None and pnl < 0:
-                    is_sl = True
-                    reason = reason or "LOSS_EXIT"
-            if is_sl:
+            if exit_reason_blocks_reentry(r.exit_reason):
                 out[sym] = {
                     "blocked": True,
-                    "exit_reason": r.exit_reason or reason,
+                    "exit_reason": r.exit_reason,
                     "exit_time": r.exit_time,
                     "direction": r.direction_type,
-                    "label": "SL hit earlier today · no re-entry regardless of direction",
+                    "label": REENTRY_BLOCK_LABEL,
+                    "source": "daily_futures_user_trade",
                 }
     except Exception as exc:
-        logger.debug("stopped-out lookup skipped: %s", exc)
+        logger.debug("stopped-out daily_futures lookup skipped: %s", exc)
 
-    # Kavach Open Trades panel exits (checklist Take Trade → EXIT)
+    # Kavach Open Trades panel closed rows
     try:
         from backend.services.kavach_open_trades import closed_symbols_today
 
         for sym, meta in (closed_symbols_today(session_date) or {}).items():
-            if sym.upper() not in out and sym.upper() in {s.upper() for s in symbols}:
-                out[sym.upper()] = meta
+            su = sym.upper()
+            if su not in out and su in {s.upper() for s in symbols}:
+                out[su] = meta
     except Exception as exc:
         logger.debug("kavach closed-trade block skipped: %s", exc)
     return out

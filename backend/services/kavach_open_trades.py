@@ -1,7 +1,7 @@
 """Kavach Open Trades — checklist Take Trade / manage / EXIT NOW alarm.
 
-Single table ``kavach_checklist_trades`` (OPEN / CLOSED / CANCELLED) preserves id
-for audit continuity. Edits go to ``kavach_checklist_trade_edits``.
+Single table ``kavach_checklist_trades`` (OPEN / CLOSED) preserves id for audit
+continuity. Edits go to ``kavach_checklist_trade_edits``.
 """
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ STATE_EXIT_NOW = "EXIT_NOW"
 
 STATUS_OPEN = "OPEN"
 STATUS_CLOSED = "CLOSED"
-STATUS_CANCELLED = "CANCELLED"
 
 EXIT_REASONS = (
     "EMA10 reverse close (rule)",
@@ -36,8 +35,6 @@ EXIT_REASONS = (
     "15:15 square-off",
     "Session loss cap hit",
 )
-
-CANCEL_WINDOW_SEC = 120
 
 _ENSURED = False
 
@@ -78,7 +75,6 @@ def ensure_tables() -> None:
                     realized_pnl_points NUMERIC(18,4),
                     realized_pnl_inr NUMERIC(18,4),
                     exit_note TEXT,
-                    was_cancelled BOOLEAN NOT NULL DEFAULT FALSE,
                     last_eval_bar_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -86,6 +82,11 @@ def ensure_tables() -> None:
                 """
             )
         )
+        # Drop legacy cancel column if present (addendum: no cancel path)
+        try:
+            conn.execute(text("ALTER TABLE kavach_checklist_trades DROP COLUMN IF EXISTS was_cancelled"))
+        except Exception:
+            pass
         conn.execute(
             text(
                 """
@@ -255,20 +256,26 @@ def take_trade(
         if existing:
             raise ValueError("Position already open in Open Trades panel")
 
-        # Same-day re-entry block
-        blocked = db.execute(
+        # Same-day re-entry block (panel closed trades with blocking exit reasons)
+        from backend.services.daily_checklist_chop_gates import (
+            REENTRY_BLOCK_LABEL,
+            exit_reason_blocks_reentry,
+        )
+
+        prior = db.execute(
             text(
                 """
-                SELECT id, exit_reason FROM kavach_checklist_trades
+                SELECT exit_reason FROM kavach_checklist_trades
                 WHERE session_date = CAST(:d AS date) AND UPPER(symbol) = :s
-                  AND status = 'CLOSED' AND was_cancelled = FALSE
-                ORDER BY exit_time DESC NULLS LAST LIMIT 1
+                  AND status = 'CLOSED'
+                ORDER BY exit_time DESC NULLS LAST
                 """
             ),
             {"d": sd, "s": sym},
-        ).fetchone()
-        if blocked:
-            raise ValueError("SL hit earlier today · no re-entry regardless of direction")
+        ).fetchall()
+        for row in prior:
+            if exit_reason_blocks_reentry(row.exit_reason):
+                raise ValueError(REENTRY_BLOCK_LABEL)
 
         lot, _ = _lot_for_symbol(db, sym)
         px = entry_price if entry_price is not None else _live_price(db, sym)
@@ -373,7 +380,7 @@ def list_session_trades(session_date: Optional[str] = None) -> Dict[str, Any]:
             text(
                 """
                 SELECT * FROM kavach_checklist_trades
-                WHERE session_date = CAST(:d AS date) AND status IN ('CLOSED', 'CANCELLED')
+                WHERE session_date = CAST(:d AS date) AND status = 'CLOSED'
                 ORDER BY COALESCE(exit_time, updated_at) DESC
                 """
             ),
@@ -483,25 +490,9 @@ def enrich_trade_live(t: Dict[str, Any], db) -> Dict[str, Any]:
             "highest_rr_reached": peak,
             "held_minutes": held_min,
             "action_hint": hint,
-            "can_cancel": _can_cancel(t),
         }
     )
     return t
-
-
-def _can_cancel(t: Dict[str, Any]) -> bool:
-    if t.get("status") != STATUS_OPEN:
-        return False
-    try:
-        ct = t.get("created_at")
-        if not ct:
-            return False
-        cdt = datetime.fromisoformat(str(ct).replace("Z", "+00:00"))
-        if cdt.tzinfo is None:
-            cdt = IST.localize(cdt)
-        return (_now() - cdt.astimezone(IST)).total_seconds() <= CANCEL_WINDOW_SEC
-    except Exception:
-        return False
 
 
 def edit_trade_field(trade_id: str, field: str, value: Any) -> Dict[str, Any]:
@@ -565,40 +556,6 @@ def edit_trade_field(trade_id: str, field: str, value: Any) -> Dict[str, Any]:
                 "o": str(old) if old is not None else None,
                 "n": str(new_v) if not isinstance(new_v, datetime) else new_v.isoformat(),
             },
-        )
-        db.commit()
-        return get_trade(trade_id)
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-def cancel_trade(trade_id: str) -> Dict[str, Any]:
-    ensure_tables()
-    db = SessionLocal()
-    try:
-        r = db.execute(
-            text("SELECT * FROM kavach_checklist_trades WHERE id = :id AND status = 'OPEN'"),
-            {"id": trade_id},
-        ).fetchone()
-        if not r:
-            raise ValueError("open trade not found")
-        t = _row_to_dict(r)
-        if not _can_cancel(t):
-            raise ValueError("Cancel only allowed within 2 minutes of Take Trade")
-        db.execute(
-            text(
-                """
-                UPDATE kavach_checklist_trades
-                SET status = 'CANCELLED', was_cancelled = TRUE,
-                    exit_time = NOW(), exit_reason = 'Cancelled — no fill',
-                    updated_at = NOW()
-                WHERE id = :id
-                """
-            ),
-            {"id": trade_id},
         )
         db.commit()
         return get_trade(trade_id)
@@ -800,7 +757,12 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
 
 
 def closed_symbols_today(session_date: str) -> Dict[str, Dict[str, Any]]:
-    """Feed same-day re-entry block."""
+    """Feed same-day re-entry block from Panel closed trades (blocking reasons only)."""
+    from backend.services.daily_checklist_chop_gates import (
+        REENTRY_BLOCK_LABEL,
+        exit_reason_blocks_reentry,
+    )
+
     ensure_tables()
     db = SessionLocal()
     try:
@@ -811,21 +773,24 @@ def closed_symbols_today(session_date: str) -> Dict[str, Dict[str, Any]]:
                        realized_pnl_inr
                 FROM kavach_checklist_trades
                 WHERE session_date = CAST(:d AS date)
-                  AND status = 'CLOSED' AND was_cancelled = FALSE
+                  AND status = 'CLOSED'
                 """
             ),
             {"d": session_date},
         ).fetchall()
         out = {}
         for r in rows:
+            if not exit_reason_blocks_reentry(r.exit_reason):
+                continue
             sym = str(r.symbol).upper()
             out[sym] = {
                 "blocked": True,
                 "exit_reason": r.exit_reason,
                 "exit_time": str(r.exit_time) if r.exit_time else None,
                 "direction": r.direction,
-                "label": "SL hit earlier today · no re-entry regardless of direction",
+                "label": REENTRY_BLOCK_LABEL,
                 "pnl_inr": _f(r.realized_pnl_inr),
+                "source": "kavach_checklist_trades",
             }
         return out
     finally:
