@@ -867,6 +867,46 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("checklist trade-state enrichment failed: %s", exc)
 
+    open_trades_payload: Dict[str, Any] = {
+        "open_trades": [],
+        "closed_trades": [],
+        "exit_now_symbols": [],
+    }
+    try:
+        from backend.services import kavach_open_trades as ot
+
+        ot.ensure_tables()
+        open_trades_payload = ot.list_session_trades(sd)
+        open_map = {t["symbol"]: t for t in open_trades_payload.get("open_trades") or []}
+        closed_map = {}
+        for t in open_trades_payload.get("closed_trades") or []:
+            if t.get("was_cancelled"):
+                continue
+            closed_map[t["symbol"]] = t
+        for s in display_stocks:
+            sym = s.get("symbol")
+            if sym in open_map:
+                s["trade_taken"] = True
+                s["open_trade_id"] = open_map[sym].get("id")
+                s["trade_taken_label"] = "Trade taken · see Open Trades"
+            elif sym in closed_map:
+                ct = closed_map[sym]
+                pnl = ct.get("realized_pnl_inr")
+                et = ct.get("exit_time") or ""
+                hhmm = ""
+                try:
+                    from datetime import datetime as _dt
+                    d = _dt.fromisoformat(str(et).replace("Z", "+00:00"))
+                    hhmm = d.astimezone(IST).strftime("%H:%M")
+                except Exception:
+                    hhmm = str(et)[11:16] if et else ""
+                sign = "+" if (pnl or 0) >= 0 else ""
+                s["trade_exited"] = True
+                s["trade_exited_label"] = f"Exited {hhmm} · ₹{sign}{int(pnl or 0)}"
+                s["stopped_out_today"] = True
+    except Exception as exc:
+        logger.debug("checklist open-trades enrichment failed: %s", exc)
+
     return {
         "session_date": sd,
         "locked": locked,
@@ -888,6 +928,7 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
         "go_board": go_board,
         "checklist_config": checklist_cfg,
         "trade_state_obs": trade_obs,
+        "open_trades_panel": open_trades_payload,
     }
 
 

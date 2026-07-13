@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=17">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=18">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -86,6 +86,22 @@
                         <span class="dc-exit-rule" id="dcExitRule">Exit rule: 10m close beyond EMA10 reverse — not VWAP break</span>
                     </div>
                 </div>
+
+                <!-- Open Trades — manage active positions (above scanning sections) -->
+                <section class="dc-open-trades" id="dcOpenTrades" aria-label="Open trades">
+                    <div class="dc-open-trades-head">
+                        <h2 class="dc-open-trades-title"><i class="fas fa-briefcase"></i> Open Trades</h2>
+                        <span class="dc-open-trades-sub">Manage · 10m candle-close decisions · EXIT NOW alarms</span>
+                    </div>
+                    <div class="dc-open-trades-empty" id="dcOpenTradesEmpty">
+                        No open trades · click the take-trade button on any row below
+                    </div>
+                    <div class="dc-open-trades-stack" id="dcOpenTradesStack"></div>
+                    <div class="dc-exit-ack-banner" id="dcExitAckBanner" hidden>
+                        <span id="dcExitAckText">Audio blocked — click to play EXIT alarm</span>
+                        <button type="button" class="dc-btn dc-btn--danger" id="dcExitAckBtn">Play alarm</button>
+                    </div>
+                </section>
 
                 <!-- Hard rules -->
                 <div class="dc-hardrules">
@@ -207,9 +223,12 @@
 
     <!-- Compact stock card -->
     <template id="dcCardTpl">
-        <button type="button" class="dc-card" data-symbol="">
+        <div class="dc-card" data-symbol="" role="button" tabindex="0">
             <div class="dc-card-face">
                 <div class="dc-card-row">
+                    <button type="button" class="dc-take-trade" title="Mark trade taken" aria-label="Take trade">
+                        <i class="fas fa-play"></i>
+                    </button>
                     <span class="dc-symbol"></span>
                     <span class="dc-persist" title="Persistence since lock"></span>
                     <span class="dc-rs"></span>
@@ -220,6 +239,7 @@
                     <span class="dc-setup"></span>
                     <span class="dc-ignition" hidden>Ignition Building</span>
                     <span class="dc-grade-lock" hidden title="Setup live but grade gate failed">🔒</span>
+                    <span class="dc-trade-taken-label" hidden></span>
                     <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
                 </div>
                 <div class="dc-trade-row" hidden>
@@ -235,7 +255,7 @@
                     <span class="dc-go-timing" hidden></span>
                 </div>
             </div>
-        </button>
+        </div>
     </template>
 
     <!-- Carry-over compact row (no modal) -->
@@ -249,6 +269,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=17"></script>
+    <script src="dailyRSchecklist.js?v=18"></script>
 </body>
 </html>

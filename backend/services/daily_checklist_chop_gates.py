@@ -49,13 +49,6 @@ _SL_EXIT_REASONS = frozenset(
 )
 
 
-def _env_f(name: str, default: float) -> float:
-    try:
-        return float(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
 def _f(v: Any) -> Optional[float]:
     if v is None:
         return None
@@ -486,6 +479,16 @@ def stopped_out_today(db, session_date: str, symbols: List[str]) -> Dict[str, Di
                 }
     except Exception as exc:
         logger.debug("stopped-out lookup skipped: %s", exc)
+
+    # Kavach Open Trades panel exits (checklist Take Trade → EXIT)
+    try:
+        from backend.services.kavach_open_trades import closed_symbols_today
+
+        for sym, meta in (closed_symbols_today(session_date) or {}).items():
+            if sym.upper() not in out and sym.upper() in {s.upper() for s in symbols}:
+                out[sym.upper()] = meta
+    except Exception as exc:
+        logger.debug("kavach closed-trade block skipped: %s", exc)
     return out
 
 

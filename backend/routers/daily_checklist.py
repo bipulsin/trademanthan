@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.services import daily_checklist as svc
+from backend.services import kavach_open_trades as ot
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,27 @@ class UpdateBody(BaseModel):
 class SymbolBody(BaseModel):
     symbol: str
     session_date: Optional[str] = None
+
+
+class TakeTradeBody(BaseModel):
+    symbol: str
+    direction: str
+    entry_price: Optional[float] = None
+    entry_time: Optional[str] = None
+    session_date: Optional[str] = None
+    context: Optional[dict] = None
+
+
+class EditTradeBody(BaseModel):
+    field: str
+    value: Any
+
+
+class ExitTradeBody(BaseModel):
+    exit_price: float
+    exit_reason: str
+    exit_note: Optional[str] = None
+    exit_time: Optional[str] = None
 
 
 @router.get("/data")
@@ -96,3 +118,74 @@ def refresh():
     except Exception as exc:
         logger.warning("daily-checklist refresh failed: %s", exc)
         return {"error": str(exc)}
+
+
+@router.get("/open-trades")
+def open_trades(date: Optional[str] = None):
+    try:
+        ot.ensure_tables()
+        return ot.list_session_trades(date)
+    except Exception as exc:
+        logger.warning("open-trades list failed: %s", exc)
+        return {"open_trades": [], "closed_trades": [], "error": str(exc)}
+
+
+@router.post("/open-trades/take")
+def take_trade(body: TakeTradeBody):
+    try:
+        trade = ot.take_trade(
+            body.symbol,
+            direction=body.direction,
+            entry_price=body.entry_price,
+            entry_time=body.entry_time,
+            session_date=body.session_date,
+            context=body.context,
+        )
+        return {"ok": True, "trade": trade, **ot.list_session_trades(body.session_date)}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("take trade failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/open-trades/{trade_id}/edit")
+def edit_trade(trade_id: str, body: EditTradeBody):
+    try:
+        trade = ot.edit_trade_field(trade_id, body.field, body.value)
+        return {"ok": True, "trade": trade}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("edit trade failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/open-trades/{trade_id}/exit")
+def exit_trade(trade_id: str, body: ExitTradeBody):
+    try:
+        trade = ot.exit_trade(
+            trade_id,
+            exit_price=body.exit_price,
+            exit_reason=body.exit_reason,
+            exit_note=body.exit_note,
+            exit_time=body.exit_time,
+        )
+        return {"ok": True, "trade": trade, **ot.list_session_trades()}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("exit trade failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/open-trades/{trade_id}/cancel")
+def cancel_trade(trade_id: str):
+    try:
+        trade = ot.cancel_trade(trade_id)
+        return {"ok": True, "trade": trade, **ot.list_session_trades()}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("cancel trade failed: %s", exc)
+        return {"ok": False, "error": str(exc)}

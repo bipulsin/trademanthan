@@ -313,7 +313,24 @@
         if (cardEls[symbol]) return cardEls[symbol];
         var node = $("dcCardTpl").content.firstElementChild.cloneNode(true);
         node.dataset.symbol = symbol;
-        node.addEventListener("click", function () { openModal(symbol); });
+        node.addEventListener("click", function (ev) {
+            if (ev.target.closest && ev.target.closest(".dc-take-trade")) return;
+            openModal(symbol);
+        });
+        node.addEventListener("keydown", function (ev) {
+            if (ev.key === "Enter" || ev.key === " ") {
+                if (ev.target.closest && ev.target.closest(".dc-take-trade")) return;
+                openModal(symbol);
+            }
+        });
+        var takeBtn = node.querySelector(".dc-take-trade");
+        if (takeBtn) {
+            takeBtn.addEventListener("click", function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                takeTrade(symbol);
+            });
+        }
         cardEls[symbol] = node;
         return node;
     }
@@ -325,6 +342,7 @@
         if (opts.preview || stock.is_preview) card.classList.add("dc-card--preview");
         if (dcls === "GO") card.classList.add("dc-card--go");
         if (dcls === "OUT") card.classList.add("dc-card--out");
+        if (stock.trade_taken) card.classList.add("dc-card--taken");
         if (stock.carryover_warning) card.classList.add("dc-card--carryover");
         else card.classList.remove("dc-card--carryover");
         if ((stock.decision || "").indexOf("CHART REVERSED") >= 0) card.classList.add("dc-card--reversed");
@@ -392,6 +410,34 @@
             }
         }
         patchTradeRow(card, stock);
+        var takeBtn = card.querySelector(".dc-take-trade");
+        var takenLbl = card.querySelector(".dc-trade-taken-label");
+        if (takeBtn) {
+            var isBull = (stock.direction || "LONG") !== "SHORT";
+            takeBtn.className = "dc-take-trade " + (isBull ? "dc-take-trade--long" : "dc-take-trade--short");
+            if (stock.trade_taken) {
+                takeBtn.disabled = true;
+                takeBtn.title = "Position already open in Open Trades panel";
+            } else if (stock.stopped_out_today || stock.trade_exited || stock.trade_state === "BLOCKED") {
+                takeBtn.disabled = true;
+                takeBtn.title = stock.trade_state_reason || "Blocked — no re-entry today";
+            } else {
+                takeBtn.disabled = false;
+                takeBtn.title = "Mark trade taken";
+            }
+        }
+        if (takenLbl) {
+            if (stock.trade_taken) {
+                takenLbl.hidden = false;
+                takenLbl.textContent = stock.trade_taken_label || "Trade taken · see Open Trades";
+            } else if (stock.trade_exited) {
+                takenLbl.hidden = false;
+                takenLbl.textContent = stock.trade_exited_label || "Exited";
+            } else {
+                takenLbl.hidden = true;
+                takenLbl.textContent = "";
+            }
+        }
         var gt = card.querySelector(".dc-go-timing");
         var meta = card.querySelector(".dc-card-meta");
         if (gt) {
@@ -764,6 +810,7 @@
 
         renderLiveSetups();
         renderTradeObs();
+        renderOpenTrades();
         renderGoBoard();
         renderFastWatch();
         checkGoAlerts(stocks);
@@ -863,6 +910,281 @@
                 fillFastWatchStack(allBear, []);
             }
         }
+    }
+
+    var EXIT_REASONS = [
+        "EMA10 reverse close (rule)",
+        "EMA5 reverse close (profit protection)",
+        "Risk cap exceeded",
+        "Discretionary early exit",
+        "15:15 square-off",
+        "Session loss cap hit"
+    ];
+    var defaultDocTitle = document.title;
+    var pendingAlarmTradeId = null;
+    var exitAudio = null;
+
+    function alarmPlayedKey(trade) {
+        return "dc_alarm_" + trade.id + "_" + (trade.alarm_fired_at || "");
+    }
+
+    function playExitAlarm(trade) {
+        if (!trade || !trade.alarm_fired_at) return;
+        try {
+            if (sessionStorage.getItem(alarmPlayedKey(trade))) return;
+        } catch (e) { /* ignore */ }
+        if (!exitAudio) {
+            exitAudio = new Audio("audio/attention.mp3");
+            exitAudio.volume = 1;
+        }
+        var p = exitAudio.play();
+        if (p && p.then) {
+            p.then(function () {
+                try { sessionStorage.setItem(alarmPlayedKey(trade), "1"); } catch (e) {}
+                pendingAlarmTradeId = null;
+                var ban = $("dcExitAckBanner");
+                if (ban) ban.hidden = true;
+            }).catch(function () {
+                pendingAlarmTradeId = trade.id;
+                var ban = $("dcExitAckBanner");
+                var txt = $("dcExitAckText");
+                if (ban) ban.hidden = false;
+                if (txt) txt.textContent = "Audio blocked — click to play EXIT alarm for " + trade.symbol;
+            });
+        } else {
+            try { sessionStorage.setItem(alarmPlayedKey(trade), "1"); } catch (e) {}
+        }
+    }
+
+    function updateExitTabTitle(panel) {
+        var exits = (panel && panel.exit_now_symbols) || [];
+        if (exits.length) {
+            document.title = "🚨 EXIT · " + exits.join(", ");
+        } else {
+            document.title = defaultDocTitle;
+        }
+    }
+
+    function takeTrade(symbol) {
+        var stock = currentStock(symbol);
+        if (!stock) return;
+        var dir = (stock.direction || "LONG").toUpperCase() === "SHORT" ? "SHORT" : "LONG";
+        toast("Taking trade " + symbol + "…");
+        api("/open-trades/take", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                symbol: symbol,
+                direction: dir,
+                session_date: state && state.session_date,
+                context: {
+                    confidence: stock.confidence || stock.dashboard_kavach,
+                    rs_pct: stock.rs_pct,
+                    trade_score: stock.dashboard_score,
+                    trade_state: stock.trade_state,
+                    market_regime: (state.trade_state_obs || {}).market_regime
+                }
+            })
+        }).then(function (res) {
+            if (!res.ok) { toast(res.error || "Take trade failed"); return; }
+            toast(symbol + " → Open Trades");
+            return api("/data");
+        }).then(function (s) { if (s) applyState(s); }).catch(function () { toast("Take trade failed"); });
+    }
+
+    function fmtHm(iso) {
+        if (!iso) return "—";
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return String(iso).slice(11, 16) || "—";
+        return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+    }
+
+    function renderOpenTrades() {
+        var stack = $("dcOpenTradesStack");
+        var empty = $("dcOpenTradesEmpty");
+        if (!stack || !empty) return;
+        var panel = (state && state.open_trades_panel) || {};
+        var trades = panel.open_trades || [];
+        updateExitTabTitle(panel);
+        empty.hidden = trades.length > 0;
+        stack.innerHTML = "";
+        trades.forEach(function (t) {
+            stack.appendChild(buildOpenTradeCard(t));
+            if (t.state === "EXIT_NOW") playExitAlarm(t);
+        });
+    }
+
+    function buildOpenTradeCard(t) {
+        var card = el("div", "dc-ot-card" + (t.state === "EXIT_NOW" ? " dc-ot-card--exit" : ""));
+        card.dataset.tradeId = t.id;
+
+        var row1 = el("div", "dc-ot-row dc-ot-row--head");
+        row1.appendChild(el("span", "dc-ot-sym", t.symbol));
+        var dir = el("span", "dc-ot-dir dc-ot-dir--" + String(t.direction || "").toLowerCase(), t.direction || "—");
+        row1.appendChild(dir);
+
+        var etInp = document.createElement("input");
+        etInp.className = "dc-ot-edit";
+        etInp.type = "text";
+        etInp.value = fmtHm(t.entry_time);
+        etInp.title = "Entry time HH:MM";
+        etInp.addEventListener("change", function () { editOpenField(t.id, "entry_time", etInp.value); });
+        row1.appendChild(etInp);
+
+        var pxInp = document.createElement("input");
+        pxInp.className = "dc-ot-edit";
+        pxInp.type = "number";
+        pxInp.step = "0.01";
+        pxInp.value = t.entry_price != null ? Number(t.entry_price).toFixed(2) : "";
+        pxInp.title = "Entry price";
+        pxInp.addEventListener("change", function () { editOpenField(t.id, "entry_price", pxInp.value); });
+        row1.appendChild(pxInp);
+
+        var qtyInp = document.createElement("input");
+        qtyInp.className = "dc-ot-edit dc-ot-edit--qty";
+        qtyInp.type = "number";
+        qtyInp.value = t.entry_qty || "";
+        qtyInp.title = "Quantity (lots × size)";
+        qtyInp.addEventListener("change", function () { editOpenField(t.id, "entry_qty", qtyInp.value); });
+        row1.appendChild(qtyInp);
+
+        var dirSel = document.createElement("select");
+        dirSel.className = "dc-ot-edit";
+        ["LONG", "SHORT"].forEach(function (d) {
+            var o = document.createElement("option");
+            o.value = d; o.textContent = d;
+            if (d === t.direction) o.selected = true;
+            dirSel.appendChild(o);
+        });
+        dirSel.addEventListener("change", function () { editOpenField(t.id, "direction", dirSel.value); });
+        row1.appendChild(dirSel);
+
+        var stBadge = el("span", "dc-ot-state dc-ot-state--" + String(t.state || "").toLowerCase().replace("_", "-"),
+            (t.state || "").replace("_", " "));
+        row1.appendChild(stBadge);
+
+        if (t.alarm_fired_at) {
+            row1.appendChild(el("span", "dc-ot-alarm", "🔔 Alarm @" + fmtHm(t.alarm_fired_at)));
+        }
+
+        var exitBtn = el("button", "dc-btn dc-btn--danger dc-ot-exit-btn", "EXIT");
+        exitBtn.type = "button";
+        exitBtn.addEventListener("click", function () { beginExit(t); });
+        row1.appendChild(exitBtn);
+
+        var menu = el("div", "dc-ot-menu");
+        var menuBtn = el("button", "dc-ot-menu-btn", "⋮");
+        menuBtn.type = "button";
+        var menuPop = el("div", "dc-ot-menu-pop");
+        menuPop.hidden = true;
+        var cancelBtn = el("button", "dc-ot-menu-item", "Cancel Trade Record");
+        cancelBtn.type = "button";
+        cancelBtn.disabled = !t.can_cancel;
+        cancelBtn.title = t.can_cancel ? "Cancel within 2 min of take" : "Cancel window expired";
+        cancelBtn.addEventListener("click", function () {
+            if (!confirm("Cancel this trade record (no fill)?")) return;
+            api("/open-trades/" + t.id + "/cancel", { method: "POST" })
+                .then(function (res) {
+                    if (!res.ok) toast(res.error || "Cancel failed");
+                    return api("/data");
+                }).then(function (s) { if (s) applyState(s); });
+        });
+        menuPop.appendChild(cancelBtn);
+        menuBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            menuPop.hidden = !menuPop.hidden;
+        });
+        menu.appendChild(menuBtn);
+        menu.appendChild(menuPop);
+        row1.appendChild(menu);
+        card.appendChild(row1);
+
+        var row2 = el("div", "dc-ot-row dc-ot-row--math");
+        row2.appendChild(el("span", null, "LTP " + fmtPx(t.live_price)));
+        row2.appendChild(el("span", null, "SL " + fmtPx(t.display_sl)));
+        row2.appendChild(el("span", null, "ΔSL " + fmtPx(t.distance_sl_pts) + " / " + fmtInr(t.distance_sl_inr)));
+        var pnlCls = (t.unrealized_pnl_inr || 0) >= 0 ? "dc-ot-pnl--pos" : "dc-ot-pnl--neg";
+        row2.appendChild(el("span", pnlCls, "P&L " + fmtPx(t.unrealized_pnl_pts) + " / " + fmtInr(t.unrealized_pnl_inr)));
+        row2.appendChild(el("span", null, "R:R " + (t.achieved_rr != null ? t.achieved_rr + ":1" : "—")));
+        row2.appendChild(el("span", null, "Peak " + (t.highest_rr_reached != null ? t.highest_rr_reached + ":1" : "—")));
+        card.appendChild(row2);
+
+        var row3 = el("div", "dc-ot-row dc-ot-row--hint");
+        row3.appendChild(el("span", "dc-ot-held", t.held_minutes != null ? ("held " + t.held_minutes + " min") : ""));
+        row3.appendChild(el("span", "dc-ot-hint", t.action_hint || ""));
+        card.appendChild(row3);
+
+        var exitForm = el("div", "dc-ot-exit-form");
+        exitForm.hidden = true;
+        exitForm.innerHTML = "";
+        card.appendChild(exitForm);
+        card._exitForm = exitForm;
+        return card;
+    }
+
+    function editOpenField(tradeId, field, value) {
+        api("/open-trades/" + tradeId + "/edit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ field: field, value: value })
+        }).then(function (res) {
+            if (!res.ok) toast(res.error || "Edit failed");
+            return api("/data");
+        }).then(function (s) { if (s) applyState(s); });
+    }
+
+    function beginExit(t) {
+        var card = document.querySelector('.dc-ot-card[data-trade-id="' + t.id + '"]');
+        if (!card || !card._exitForm) return;
+        var form = card._exitForm;
+        form.hidden = false;
+        form.innerHTML = "";
+        var px = document.createElement("input");
+        px.type = "number"; px.step = "0.01"; px.className = "dc-ot-edit";
+        px.value = t.live_price != null ? Number(t.live_price).toFixed(2) : "";
+        px.placeholder = "Exit price";
+        var reason = document.createElement("select");
+        reason.className = "dc-ot-edit";
+        EXIT_REASONS.forEach(function (r) {
+            var o = document.createElement("option");
+            o.value = r; o.textContent = r;
+            if (t.exit_trigger_reason && r.indexOf((t.exit_trigger_reason || "").split(" ")[0]) === 0) o.selected = true;
+            if (t.state === "EXIT_NOW" && t.exit_trigger_reason) {
+                if (t.exit_trigger_reason.indexOf("EMA10") >= 0 && r.indexOf("EMA10") >= 0) o.selected = true;
+                if (t.exit_trigger_reason.indexOf("EMA5") >= 0 && r.indexOf("EMA5") >= 0) o.selected = true;
+                if (t.exit_trigger_reason.indexOf("Risk") >= 0 && r.indexOf("Risk") >= 0) o.selected = true;
+            }
+            reason.appendChild(o);
+        });
+        var note = document.createElement("input");
+        note.type = "text"; note.className = "dc-ot-edit dc-ot-edit--note";
+        note.placeholder = "Optional note";
+        var conf = el("button", "dc-btn dc-btn--danger", "Confirm EXIT");
+        conf.type = "button";
+        conf.addEventListener("click", function () {
+            api("/open-trades/" + t.id + "/exit", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    exit_price: Number(px.value),
+                    exit_reason: reason.value,
+                    exit_note: note.value || null
+                })
+            }).then(function (res) {
+                if (!res.ok) { toast(res.error || "Exit failed"); return; }
+                toast(t.symbol + " exited · " + fmtInr(res.trade && res.trade.realized_pnl_inr));
+                return api("/data");
+            }).then(function (s) { if (s) applyState(s); });
+        });
+        var cancel = el("button", "dc-btn", "Back");
+        cancel.type = "button";
+        cancel.addEventListener("click", function () { form.hidden = true; });
+        form.appendChild(el("span", "dc-ot-exit-label", "Confirm exit"));
+        form.appendChild(px);
+        form.appendChild(reason);
+        form.appendChild(note);
+        form.appendChild(conf);
+        form.appendChild(cancel);
     }
 
     function applyState(s) {
@@ -1213,6 +1535,18 @@
                 } catch (e) { /* ignore */ }
             });
         }
+        var ackBtn = $("dcExitAckBtn");
+        if (ackBtn) {
+            ackBtn.addEventListener("click", function () {
+                if (!exitAudio) exitAudio = new Audio("audio/attention.mp3");
+                exitAudio.volume = 1;
+                exitAudio.play().then(function () {
+                    var ban = $("dcExitAckBanner");
+                    if (ban) ban.hidden = true;
+                    pendingAlarmTradeId = null;
+                }).catch(function () {});
+            });
+        }
 
         api("/data").then(function (s) {
             if (s.locked && (!s.stocks || s.stocks.length === 0)) {
@@ -1234,6 +1568,15 @@
         setInterval(function () {
             api("/data").then(applyState).catch(function () {});
         }, 60000);
+        // Live LTP / PnL for open trades (state machine still candle-close gated server-side)
+        setInterval(function () {
+            if (!state || !state.open_trades_panel || !(state.open_trades_panel.open_trades || []).length) return;
+            api("/open-trades").then(function (p) {
+                if (!p || p.error) return;
+                state.open_trades_panel = p;
+                renderOpenTrades();
+            }).catch(function () {});
+        }, 20000);
     }
 
     if (document.readyState === "loading") {
