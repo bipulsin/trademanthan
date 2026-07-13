@@ -217,7 +217,7 @@ def _open_positions(db, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
             text(
                 """
                 SELECT UPPER(t.underlying) AS underlying, t.direction_type, t.entry_price,
-                       t.lot_size, t.instrument_key, t.entry_time
+                       t.lot_size, t.instrument_key, t.entry_time, t.peak_unrealized_pnl_rupees
                 FROM daily_futures_user_trade t
                 WHERE t.order_status = 'bought'
                   AND UPPER(t.underlying) IN :syms
@@ -235,6 +235,7 @@ def _open_positions(db, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
                 "entry_price": _f(r.entry_price),
                 "lot_size": int(r.lot_size or 1),
                 "instrument_key": r.instrument_key,
+                "peak_unrealized_pnl_rupees": _f(r.peak_unrealized_pnl_rupees),
             }
     except Exception as exc:
         logger.debug("open positions lookup skipped: %s", exc)
@@ -344,6 +345,12 @@ def compute_trade_state_for_stock(
     open_pos: Optional[Dict[str, Any]],
     promo: Optional[Dict[str, Any]],
     cfg: Optional[Dict[str, Any]] = None,
+    market_regime_idx: Optional[str] = None,
+    direction_unstable: bool = False,
+    unstable_reason: Optional[str] = None,
+    whipsaw_count: int = 0,
+    pullback_count: int = 0,
+    stopped: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     cfg = cfg or get_config()
     near_atr = float(cfg.get("convergence_atr") or 0.35)
@@ -369,7 +376,6 @@ def compute_trade_state_for_stock(
     # Intended entry / pullback level
     pullback_level = None
     if ema5 is not None and vwap is not None and price is not None:
-        # closer of EMA5 / VWAP to current price
         pullback_level = ema5 if abs(price - ema5) <= abs(price - vwap) else vwap
     elif ema5 is not None:
         pullback_level = ema5
@@ -391,14 +397,12 @@ def compute_trade_state_for_stock(
     near_ema5 = dist_ema5_atr is not None and dist_ema5_atr <= near_atr
     expired_move = dist_entry_atr is not None and dist_entry_atr > expiry_atr
 
-    # Risk at READY entry (EMA5 → EMA10)
     risk_pts_ready = None
     risk_inr_ready = None
     if entry_ready is not None and sl_price is not None:
         risk_pts_ready = abs(entry_ready - sl_price)
         risk_inr_ready = round(risk_pts_ready * max(lot, 1), 0)
 
-    # Risk at pullback entry
     risk_pts_pb = None
     risk_inr_pb = None
     if pullback_level is not None and sl_price is not None:
@@ -439,14 +443,36 @@ def compute_trade_state_for_stock(
         entry_price = round(entry_ready, 2) if entry_ready is not None else None
         display_risk = risk_inr_ready
     else:
-        # Extended but not expired, or risk only OK at pullback
         state = STATE_WAIT
         entry_price = round(pullback_level, 2) if pullback_level is not None else None
         display_risk = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
 
+    # Chop / whipsaw / flip / re-entry / pullback gates
+    from backend.services.daily_checklist_chop_gates import apply_state_downgrades
+
+    gated_state, gate_reason, gate_badges = apply_state_downgrades(
+        state=state,
+        market_regime=market_regime_idx or "",
+        direction_unstable=direction_unstable,
+        unstable_reason=unstable_reason,
+        whipsaw_count=whipsaw_count,
+        pullback_count=pullback_count,
+        stopped=stopped,
+    )
+    if gated_state != state or gate_reason:
+        state = gated_state
+        if gate_reason:
+            blocked_reason = gate_reason
+        if state in (STATE_BLOCKED, STATE_EXPIRED):
+            entry_price = None if state == STATE_BLOCKED else entry_price
+            if state == STATE_BLOCKED:
+                entry_price = None
+        elif state == STATE_WAIT and entry_price is None and pullback_level is not None:
+            entry_price = round(pullback_level, 2)
+            display_risk = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
+
     sl_out = round(sl_price, 2) if sl_price is not None else None
 
-    # R:R to session high (LONG resistance) / session low (SHORT support)
     rr = None
     rr_low = False
     if entry_price is not None and sl_out is not None:
@@ -461,7 +487,7 @@ def compute_trade_state_for_stock(
             if rr is not None and rr < RR_LOW:
                 rr_low = True
 
-    # Position trail overlay
+    # Position trail + optional PROFIT LOCKED (EMA5 alt exit) — display only
     trail = None
     if open_pos:
         pos_dir = (open_pos.get("direction") or direction).upper()
@@ -473,7 +499,6 @@ def compute_trade_state_for_stock(
             pts = (price - pos_entry) if pos_long else (pos_entry - price)
             open_pnl = round(pts * pos_lot, 0)
         trail_sl = sl_out
-        # BOOK-NOW: price closed beyond EMA10 against position, or risk>3k without 1:2
         book = False
         book_reason = None
         if price is not None and sl_out is not None:
@@ -486,12 +511,34 @@ def compute_trade_state_for_stock(
                 if cur_risk > MAX_INR_RISK and (rr is None or rr < RR_LOW):
                     book = True
                     book_reason = f"risk ₹{int(cur_risk):,}"
+
+        entry_risk_inr = None
+        if pos_entry is not None and sl_out is not None:
+            entry_risk_inr = abs(pos_entry - sl_out) * pos_lot
+        peak_pnl = _f(open_pos.get("peak_unrealized_pnl_rupees"))
+        fav = max(open_pnl or 0, peak_pnl or 0)
+        profit_locked = bool(
+            entry_risk_inr and entry_risk_inr > 0 and fav >= RR_LOW * entry_risk_inr
+        )
+        alt_exit = round(ema5, 2) if profit_locked and ema5 is not None else None
+
         trail = {
-            "trail_state": "BOOK-NOW" if book else "HOLD",
-            "trail_reason": book_reason,
+            "trail_state": "BOOK-NOW" if book else ("PROFIT LOCKED" if profit_locked else "HOLD"),
+            "trail_reason": book_reason or ("≥1:2 — consider EMA5 reverse close" if profit_locked else None),
             "open_pnl_inr": open_pnl,
             "trail_sl": trail_sl,
+            "profit_locked": profit_locked,
+            "alt_exit_ema5": alt_exit,
+            "entry_risk_inr": int(entry_risk_inr) if entry_risk_inr is not None else None,
         }
+
+    pb_label = None
+    if pullback_count >= 3:
+        pb_label = f"{pullback_count}th+ pullback"
+    elif pullback_count == 1:
+        pb_label = "1st pullback"
+    elif pullback_count == 2:
+        pb_label = "2nd pullback"
 
     return {
         "trade_state": state,
@@ -509,6 +556,12 @@ def compute_trade_state_for_stock(
         "promoted_at": (promo or {}).get("promoted_at"),
         "lock_cycles": int((promo or {}).get("cycles") or 0),
         "position": trail,
+        "whipsaw_count": whipsaw_count,
+        "pullback_count": pullback_count,
+        "pullback_label": pb_label,
+        "direction_unstable": bool(direction_unstable),
+        "gate_badges": gate_badges,
+        "stopped_out_today": bool(stopped and stopped.get("blocked")),
     }
 
 
@@ -517,28 +570,54 @@ def enrich_stocks_trade_state(
     session_date: str,
 ) -> Dict[str, Any]:
     """Mutate stocks in place with trade-state fields; return observation summary."""
+    empty_obs = {
+        "churn_warning": False,
+        "churn_symbols": [],
+        "churn_count": 0,
+        "recent_removals": [],
+        "market_regime": None,
+        "market_regime_label": None,
+        "exit_rule_reminder": "Exit rule: 10m close beyond EMA10 reverse — not VWAP break",
+    }
     if not stocks:
-        return {
-            "churn_warning": False,
-            "churn_symbols": [],
-            "churn_count": 0,
-            "recent_removals": [],
-        }
+        return empty_obs
 
     symbols = [s["symbol"] for s in stocks if s.get("symbol")]
     db = SessionLocal()
     try:
+        from backend.services.daily_checklist_chop_gates import (
+            compute_market_regime,
+            count_pullback_attempts,
+            count_whipsaw_reversals,
+            direction_unstable_flags,
+            stopped_out_today,
+        )
+        from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
+
         cfg = get_config()
+        near_atr = float(cfg.get("convergence_atr") or 0.35)
         levels_map = _load_price_levels(db, symbols, session_date)
         atr_pct_map = _load_atr_map(db, symbols)
         positions = _open_positions(db, symbols)
         promo = _promotion_meta(db, session_date, symbols)
         removals = _recent_removals(db, session_date)
+        mkt = compute_market_regime(session_date)
+        flips = direction_unstable_flags(
+            db,
+            session_date,
+            symbols,
+            current_dirs={s["symbol"]: s.get("direction") for s in stocks if s.get("symbol")},
+        )
+        stopped_map = stopped_out_today(db, session_date, symbols)
 
-        # Session hi/lo for R:R (cap candle fetches)
         hi_lo: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+        candle_cache: Dict[str, Any] = {}
         for sym in symbols[:25]:
             hi_lo[sym.upper()] = _session_hi_lo(db, sym, session_date)
+            try:
+                candle_cache[sym.upper()] = _load_candles_for_symbol(db, sym) or []
+            except Exception:
+                candle_cache[sym.upper()] = []
 
         lot_cache: Dict[str, int] = {}
         for s in stocks:
@@ -548,16 +627,34 @@ def enrich_stocks_trade_state(
             if sym not in lot_cache:
                 lot_cache[sym], _ = _lot_for_symbol(db, sym)
             hi, lo = hi_lo.get(sym, (None, None))
+            price = _f((levels_map.get(sym) or {}).get("price"))
+            atr_pct = float(atr_pct_map.get(sym) or 0.0)
+            atr = (price * atr_pct / 100.0) if price and atr_pct > 0 else None
+            is_long = (s.get("direction") or "LONG").upper() != "SHORT"
+            candles = candle_cache.get(sym) or []
+            whip = count_whipsaw_reversals(
+                candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
+            ) if candles else 0
+            pb = count_pullback_attempts(
+                candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
+            ) if candles else 0
+            flip = flips.get(sym) or {}
             ts = compute_trade_state_for_stock(
                 s,
                 levels=levels_map.get(sym) or {},
-                atr_pct=float(atr_pct_map.get(sym) or 0.0),
+                atr_pct=atr_pct,
                 lot=lot_cache[sym],
                 session_hi=hi,
                 session_lo=lo,
                 open_pos=positions.get(sym),
                 promo=promo.get(sym),
                 cfg=cfg,
+                market_regime_idx=mkt.get("market_regime"),
+                direction_unstable=bool(flip.get("unstable")),
+                unstable_reason=flip.get("reason"),
+                whipsaw_count=whip,
+                pullback_count=pb,
+                stopped=stopped_map.get(sym),
             )
             s.update(ts)
 
@@ -567,6 +664,7 @@ def enrich_stocks_trade_state(
             "churn_symbols": churn_syms,
             "churn_count": len(churn_syms),
             "recent_removals": removals,
+            **mkt,
         }
     finally:
         db.close()

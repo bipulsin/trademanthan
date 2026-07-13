@@ -497,16 +497,38 @@
             obs.textContent = bits.join(" · ");
             obs.style.display = bits.length ? "" : "none";
         }
+        var gates = row.querySelector(".dc-trade-gates");
+        if (gates) {
+            var badges = stock.gate_badges || [];
+            gates.innerHTML = badges.map(function (b) {
+                var cls = "dc-gate-badge";
+                var t = String(b);
+                if (t.indexOf("WHIPSAW") >= 0) cls += " dc-gate-badge--whip";
+                else if (t.indexOf("DIRECTION") >= 0 || t.indexOf("RE-ENTRY") >= 0) cls += " dc-gate-badge--flip";
+                else if (t.indexOf("1st") >= 0) cls += " dc-gate-badge--pb1";
+                else if (t.indexOf("2nd") >= 0) cls += " dc-gate-badge--pb2";
+                else if (t.indexOf("pullback") >= 0) cls += " dc-gate-badge--pb3";
+                else if (t.indexOf("CHOP") >= 0) cls += " dc-gate-badge--chop";
+                return '<span class="' + cls + '">' + t + "</span>";
+            }).join("");
+        }
         var pos = row.querySelector(".dc-trade-pos");
         if (pos) {
             var p = stock.position;
             if (p && p.trail_state) {
                 pos.hidden = false;
                 var pnl = p.open_pnl_inr != null ? fmtInr(p.open_pnl_inr) : "—";
-                pos.textContent = p.trail_state + " · P&L " + pnl +
-                    (p.trail_sl != null ? " · trail " + fmtPx(p.trail_sl) : "");
-                pos.className = "dc-trade-pos" +
-                    (p.trail_state === "BOOK-NOW" ? " dc-trade-pos--book" : " dc-trade-pos--hold");
+                var posTxt = p.trail_state + " · P&L " + pnl;
+                if (p.trail_sl != null) posTxt += " · trail " + fmtPx(p.trail_sl);
+                if (p.profit_locked && p.alt_exit_ema5 != null) {
+                    posTxt += " · alt EMA5 " + fmtPx(p.alt_exit_ema5);
+                }
+                pos.textContent = posTxt;
+                var pcls = "dc-trade-pos";
+                if (p.trail_state === "BOOK-NOW") pcls += " dc-trade-pos--book";
+                else if (p.profit_locked) pcls += " dc-trade-pos--locked";
+                else pcls += " dc-trade-pos--hold";
+                pos.className = pcls;
                 pos.title = p.trail_reason || p.trail_state;
             } else {
                 pos.hidden = true;
@@ -550,6 +572,18 @@
         var strip = $("dcRemovalsStrip");
         var chips = $("dcRemovalsChips");
         var obs = (state && state.trade_state_obs) || {};
+        var regimeEl = $("dcMktRegime");
+        var exitEl = $("dcExitRule");
+        if (regimeEl) {
+            var reg = obs.market_regime || "—";
+            regimeEl.textContent = reg + (obs.market_regime_label ? " · " + obs.market_regime_label : "");
+            regimeEl.className = "dc-mkt-regime dc-mkt-regime--" + String(reg).toLowerCase();
+            regimeEl.title = (obs.chop_reasons || []).join("; ") || obs.market_regime_label || "";
+        }
+        if (exitEl) {
+            exitEl.textContent = obs.exit_rule_reminder ||
+                "Exit rule: 10m close beyond EMA10 reverse — not VWAP break";
+        }
         if (warn) {
             warn.hidden = !obs.churn_warning;
             if (obs.churn_warning && obs.churn_symbols && obs.churn_symbols.length) {
