@@ -703,6 +703,10 @@
         return st === "READY" || st === "READY(RECHECK)";
     }
 
+    function isZone3Card(st) {
+        return isReadyState(st) || st === "EXPIRED";
+    }
+
     function nextTenMinBoundaryFromSecs(secs) {
         // Kavach 10m closes: minutes ending in 5
         var m = Math.floor(secs / 60) % (24 * 60);
@@ -790,8 +794,24 @@
             entry != null ? Number(entry).toFixed(2) : "—";
         card.querySelector(".dc-ready-sl").textContent = sl != null ? "SL " + Number(sl).toFixed(2) : "SL —";
         var risk = stock.trade_risk_inr;
-        card.querySelector(".dc-ready-risk").textContent = risk != null ? "Risk ₹" + Math.abs(Number(risk)).toLocaleString("en-IN") : "Risk —";
+        var riskEl = card.querySelector(".dc-ready-risk");
+        riskEl.textContent = risk != null ? "Risk ₹" + Math.abs(Number(risk)).toLocaleString("en-IN") : "Risk —";
+        riskEl.classList.toggle("dc-ready-risk--over", !!stock.trade_risk_cap_flag);
+        card.classList.toggle("dc-ready-card--risk-over", !!stock.trade_risk_cap_flag);
         card.querySelector(".dc-ready-rr").textContent = stock.trade_rr_label || "";
+
+        var expEl = card.querySelector(".dc-ready-expiry");
+        var expPx = stock.trade_expiry_price;
+        if (expEl) {
+            expEl.textContent = expPx != null
+                ? ("Expires beyond: ₹" + Number(expPx).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                : "";
+        }
+        var expired = stock.trade_state === "EXPIRED" || !!stock.trade_expiry_crossed;
+        card.classList.toggle("dc-ready-card--expired", expired);
+        var expLabel = card.querySelector(".dc-ready-expired-label");
+        if (expLabel) expLabel.hidden = !expired;
+
         var grade = stock.confidence || stock.dashboard_kavach || "—";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
         var pb = stock.pullback_label || "";
@@ -801,7 +821,13 @@
         var missedEl = card.querySelector(".dc-ready-missed");
         var recheck = card.querySelector(".dc-ready-recheck");
         var takeBtn = card.querySelector(".dc-ready-take");
-        if (win && win.missed) {
+        if (expired) {
+            card.classList.remove("dc-ready-card--missed");
+            if (missedEl) missedEl.hidden = true;
+            takeBtn.disabled = true;
+            timer.textContent = "";
+            if (recheck) recheck.hidden = true;
+        } else if (win && win.missed) {
             card.classList.add("dc-ready-card--missed");
             missedEl.hidden = false;
             var b = nextTenMinBoundaryFromSecs(nowIST().secs);
@@ -818,10 +844,10 @@
             var ss = rem % 60;
             timer.textContent = "Enter within " + mm + ":" + ("0" + ss).slice(-2);
         }
-        if (win && win.attempt > 1 && !(win && win.missed)) {
+        if (!expired && win && win.attempt > 1 && !(win && win.missed)) {
             recheck.hidden = false;
             recheck.textContent = "Recheck confirmed · attempt " + win.attempt;
-        } else {
+        } else if (recheck) {
             recheck.hidden = true;
         }
         takeBtn.onclick = function (e) {
@@ -857,8 +883,8 @@
     }
 
     function renderZones(stocks, preview) {
-        var ready = sortStocks(stocks.filter(function (s) { return isReadyState(s.trade_state); }));
-        var watching = sortStocks(stocks.filter(function (s) { return !isReadyState(s.trade_state); }));
+        var ready = sortStocks(stocks.filter(function (s) { return isZone3Card(s.trade_state); }));
+        var watching = sortStocks(stocks.filter(function (s) { return !isZone3Card(s.trade_state); }));
         var z3 = $("dcZone3Grid");
         var z3empty = $("dcZone3Empty");
         var z4 = $("dcZone4List");
@@ -1322,12 +1348,15 @@
         var row2 = el("div", "dc-ot-row dc-ot-row--math");
         row2.appendChild(el("span", null, "LTP " + fmtPx(t.live_price)));
         row2.appendChild(el("span", null, "SL " + fmtPx(t.display_sl)));
-        row2.appendChild(el("span", null, "ΔSL " + fmtPx(t.distance_sl_pts) + " / " + fmtInr(t.distance_sl_inr)));
+        var dSl = el("span", null, "ΔSL " + fmtPx(t.distance_sl_pts) + " / " + fmtInr(t.distance_sl_inr));
+        if (t.trade_risk_cap_flag) dSl.className = "dc-ot-risk--over";
+        row2.appendChild(dSl);
         var pnlCls = (t.unrealized_pnl_inr || 0) >= 0 ? "dc-ot-pnl--pos" : "dc-ot-pnl--neg";
         row2.appendChild(el("span", pnlCls, "P&L " + fmtPx(t.unrealized_pnl_pts) + " / " + fmtInr(t.unrealized_pnl_inr)));
         row2.appendChild(el("span", null, "R:R " + (t.achieved_rr != null ? t.achieved_rr + ":1" : "—")));
         row2.appendChild(el("span", null, "Peak " + (t.highest_rr_reached != null ? t.highest_rr_reached + ":1" : "—")));
         card.appendChild(row2);
+        if (t.trade_risk_cap_flag) card.classList.add("dc-ot-card--risk-over");
 
         var row3 = el("div", "dc-ot-row dc-ot-row--hint");
         row3.appendChild(el("span", "dc-ot-held", t.held_minutes != null ? ("held " + t.held_minutes + " min") : ""));
@@ -1337,19 +1366,29 @@
         var lrc = t.lock_removal_context;
         if (t.state === "EXIT_NOW" && lrc && lrc.label) {
             var ctxRow = el("div", "dc-ot-row dc-ot-row--rank-ctx");
-            var cls = (lrc.rule === "R2" && !lrc.price_closed_beyond_ema10)
-                ? "dc-ot-rank-ctx dc-ot-rank-ctx--r2"
-                : "dc-ot-rank-ctx dc-ot-rank-ctx--r1";
+            var isR1 = lrc.rule === "R1";
+            var cls = isR1
+                ? "dc-ot-rank-ctx dc-ot-rank-ctx--r1"
+                : ((lrc.rule === "R2" && !lrc.price_closed_beyond_ema10)
+                    ? "dc-ot-rank-ctx dc-ot-rank-ctx--r2"
+                    : "dc-ot-rank-ctx dc-ot-rank-ctx--r1");
             ctxRow.appendChild(el("span", cls, lrc.label));
-            var meta = "ranks " + (lrc.rank_trail || "—")
-                + " · " + (lrc.direction || "")
-                + (lrc.entry_rank != null ? (" · entry #" + lrc.entry_rank) : "")
-                + (lrc.removal_rank != null ? (" · remove #" + lrc.removal_rank) : "");
-            var pxNote = lrc.price_closed_beyond_ema10
-                ? " · confirmed close beyond EMA10"
-                : " · confirmed close NOT beyond EMA10";
-            if (lrc.price_closed_beyond_vwap) pxNote += " · beyond VWAP";
-            ctxRow.appendChild(el("span", "dc-ot-rank-meta", meta + pxNote));
+            var metaParts = [];
+            if (isR1) {
+                if (lrc.vwap_close_hm) metaParts.push("VWAP close @" + lrc.vwap_close_hm);
+                if (lrc.ema10_distance_pts != null) metaParts.push("ΔEMA10 " + lrc.ema10_distance_pts);
+                if (lrc.pnl_at_flag_inr != null) metaParts.push("P&L at flag " + fmtInr(lrc.pnl_at_flag_inr));
+                if (!lrc.price_closed_beyond_ema10) metaParts.push("EMA10 not yet crossed");
+            } else {
+                metaParts.push("ranks " + (lrc.rank_trail || "—"));
+                metaParts.push(lrc.direction || "");
+                if (lrc.entry_rank != null) metaParts.push("entry #" + lrc.entry_rank);
+                if (lrc.removal_rank != null) metaParts.push("remove #" + lrc.removal_rank);
+                metaParts.push(lrc.price_closed_beyond_ema10
+                    ? "confirmed close beyond EMA10"
+                    : "confirmed close NOT beyond EMA10");
+            }
+            ctxRow.appendChild(el("span", "dc-ot-rank-meta", metaParts.filter(Boolean).join(" · ")));
             card.appendChild(ctxRow);
         }
 

@@ -53,10 +53,14 @@ def format_lock_removal_exit_reason(rule: str, removed_at: Optional[datetime] = 
 
 
 def lock_removal_structure_label(rule: str, *, price_closed_beyond_ema10: bool) -> str:
-    """Trader-facing distinction: rank drop vs structural EMA10 break."""
+    """Trader-facing distinction: rank drop vs structural EMA10 / VWAP break."""
     tag = (rule or "").strip().upper()
     if tag == "R1":
-        return "R1 structure removal — price closed beyond EMA10"
+        if price_closed_beyond_ema10:
+            return "R1 structure removal — price closed beyond EMA10"
+        return (
+            "R1 — VWAP confirmed close against position (EMA10 not yet crossed)."
+        )
     if price_closed_beyond_ema10:
         return "R2 rank-based removal — price HAS closed beyond EMA10"
     return "R2 rank-based removal — price has NOT closed beyond EMA10"
@@ -121,6 +125,7 @@ def build_lock_removal_context(
     direction: str,
     entry_rank: Optional[int] = None,
     removed_at: Optional[datetime] = None,
+    trade: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Rank history + price-vs-structure status for EXIT NOW transparency."""
     bar = _confirmed_10m_levels(db, symbol)
@@ -128,6 +133,9 @@ def build_lock_removal_context(
     close = _f(bar.get("close"))
     ema10 = _f(bar.get("ema10")) or _f(levels.get("ema10"))
     vwap = _f(bar.get("vwap")) or _f(levels.get("vwap"))
+    live = _live_price(db, symbol)
+    if live is None:
+        live = close or _f(levels.get("price"))
     is_long = (direction or "LONG").upper() != "SHORT"
     beyond_ema10 = False
     beyond_vwap = False
@@ -142,6 +150,28 @@ def build_lock_removal_context(
         rank_strs.append("out" if item["rank"] is None else str(item["rank"]))
     rank_trail = "→".join(rank_strs) if rank_strs else "—"
     label = lock_removal_structure_label(rule, price_closed_beyond_ema10=beyond_ema10)
+
+    ema10_dist_pts = None
+    if live is not None and ema10 is not None:
+        ema10_dist_pts = round(abs(live - ema10), 2)
+    pnl_at_flag = None
+    if trade:
+        entry = _f(trade.get("entry_price"))
+        qty = int(trade.get("entry_qty") or 0)
+        if live is not None and entry is not None and qty:
+            pts = (live - entry) if is_long else (entry - live)
+            pnl_at_flag = round(pts * qty, 0)
+
+    when = removed_at or _now()
+    if isinstance(when, datetime):
+        if when.tzinfo is None:
+            when = IST.localize(when)
+        else:
+            when = when.astimezone(IST)
+        vwap_close_hm = when.strftime("%H:%M")
+    else:
+        vwap_close_hm = _bar_hm(bar.get("bar_at"))
+
     return {
         "rule": (rule or "").strip().upper(),
         "direction": (direction or "LONG").upper(),
@@ -155,10 +185,67 @@ def build_lock_removal_context(
         "confirmed_close": close,
         "ema10": ema10,
         "vwap": vwap,
-        "removed_at": (removed_at or _now()).isoformat()
-        if not isinstance(removed_at, str)
-        else removed_at,
+        "live_price": live,
+        "ema10_distance_pts": ema10_dist_pts,
+        "pnl_at_flag_inr": pnl_at_flag,
+        "vwap_close_hm": vwap_close_hm,
+        "removed_at": when.isoformat() if isinstance(when, datetime) else str(when),
     }
+
+
+def log_r1_early_warning(
+    db,
+    *,
+    trade_id: str,
+    symbol: str,
+    session_date: str,
+    direction: str,
+    context: Dict[str, Any],
+    exit_trigger_reason: str,
+    removed_at: Optional[datetime] = None,
+) -> None:
+    """Persist R1 VWAP early-warning events for 22-Jul discretionary-exit review."""
+    ensure_tables()
+    if (context.get("rule") or "").upper() != "R1":
+        return
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO kavach_r1_early_warning_log (
+                    trade_id, symbol, session_date, direction,
+                    vwap_close_price, vwap_close_hm,
+                    ema10, ema10_distance_pts, live_price,
+                    pnl_at_flag_inr, price_closed_beyond_ema10,
+                    exit_trigger_reason, label, removed_at
+                ) VALUES (
+                    :tid, :sym, CAST(:d AS date), :dir,
+                    :vwap, :hm,
+                    :ema10, :dist, :live,
+                    :pnl, :beyond,
+                    :reason, :label, :rat
+                )
+                """
+            ),
+            {
+                "tid": trade_id,
+                "sym": (symbol or "").upper(),
+                "d": session_date,
+                "dir": (direction or "LONG").upper(),
+                "vwap": context.get("vwap") or context.get("confirmed_close"),
+                "hm": context.get("vwap_close_hm"),
+                "ema10": context.get("ema10"),
+                "dist": context.get("ema10_distance_pts"),
+                "live": context.get("live_price"),
+                "pnl": context.get("pnl_at_flag_inr"),
+                "beyond": bool(context.get("price_closed_beyond_ema10")),
+                "reason": exit_trigger_reason,
+                "label": context.get("label"),
+                "rat": removed_at or _now(),
+            },
+        )
+    except Exception as exc:
+        logger.warning("r1_early_warning_log insert failed %s: %s", symbol, exc)
 
 
 def log_r2_exit_now(
@@ -371,6 +458,38 @@ def ensure_tables() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_kavach_r2_exit_session
                 ON kavach_r2_exit_now_log (session_date, symbol)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS kavach_r1_early_warning_log (
+                    id SERIAL PRIMARY KEY,
+                    trade_id VARCHAR(36),
+                    symbol VARCHAR(32) NOT NULL,
+                    session_date DATE NOT NULL,
+                    direction VARCHAR(8),
+                    vwap_close_price NUMERIC(18,4),
+                    vwap_close_hm VARCHAR(8),
+                    ema10 NUMERIC(18,4),
+                    ema10_distance_pts NUMERIC(18,4),
+                    live_price NUMERIC(18,4),
+                    pnl_at_flag_inr NUMERIC(18,2),
+                    price_closed_beyond_ema10 BOOLEAN,
+                    exit_trigger_reason TEXT,
+                    label TEXT,
+                    removed_at TIMESTAMPTZ,
+                    logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_kavach_r1_warn_session
+                ON kavach_r1_early_warning_log (session_date, symbol)
                 """
             )
         )
@@ -950,6 +1069,13 @@ def enrich_trade_live(t: Dict[str, Any], db) -> Dict[str, Any]:
             if lrc.get("rank_trail"):
                 hint = f"{hint} · ranks {lrc['rank_trail']}"
 
+    risk_cap_inr = MAX_INR_RISK
+    risk_now = dist_inr
+    risk_over = bool(risk_now is not None and risk_now > risk_cap_inr) or bool(
+        initial_risk and initial_risk > risk_cap_inr
+    )
+    risk_cap_flag = bool(risk_over and (rr is None or rr < RR_LOW))
+
     t.update(
         {
             "live_price": live,
@@ -962,6 +1088,9 @@ def enrich_trade_live(t: Dict[str, Any], db) -> Dict[str, Any]:
             "highest_rr_reached": peak,
             "held_minutes": held_min,
             "action_hint": hint,
+            "trade_risk_over": risk_over,
+            "trade_risk_cap_flag": risk_cap_flag,
+            "trade_risk_cap_inr": int(risk_cap_inr),
         }
     )
     snap = t.get("state_context_snapshot")
@@ -1200,7 +1329,8 @@ def mark_open_trades_exit_on_lock_removal(
     rows = db.execute(
         text(
             """
-            SELECT id, state, direction, provenance, state_context_snapshot
+            SELECT id, state, direction, provenance, state_context_snapshot,
+                   entry_price, entry_qty
             FROM kavach_checklist_trades
             WHERE session_date = CAST(:d AS date)
               AND status = 'OPEN'
@@ -1223,12 +1353,23 @@ def mark_open_trades_exit_on_lock_removal(
             direction=direction,
             entry_rank=_entry_rank_from_trade(t),
             removed_at=now,
+            trade=t,
         )
         detail_reason = reason
         if ctx.get("label"):
             detail_reason = f"{reason} | {ctx['label']}"
-            if ctx.get("rank_trail"):
+            if (rule or "").upper() == "R2" and ctx.get("rank_trail"):
                 detail_reason = f"{detail_reason} | ranks {ctx['rank_trail']}"
+            if (rule or "").upper() == "R1":
+                bits = []
+                if ctx.get("vwap_close_hm"):
+                    bits.append(f"VWAP@{ctx['vwap_close_hm']}")
+                if ctx.get("ema10_distance_pts") is not None:
+                    bits.append(f"ΔEMA10 {ctx['ema10_distance_pts']}")
+                if ctx.get("pnl_at_flag_inr") is not None:
+                    bits.append(f"P&L ₹{int(ctx['pnl_at_flag_inr'])}")
+                if bits:
+                    detail_reason = f"{detail_reason} | " + " · ".join(bits)
         snap = t.get("state_context_snapshot") if isinstance(t.get("state_context_snapshot"), dict) else {}
         snap = dict(snap or {})
         snap["lock_removal_context"] = ctx
@@ -1262,14 +1403,23 @@ def mark_open_trades_exit_on_lock_removal(
             exit_trigger_reason=detail_reason,
             removed_at=now,
         )
+        log_r1_early_warning(
+            db,
+            trade_id=str(row.id),
+            symbol=symbol,
+            session_date=session_date,
+            direction=direction,
+            context=ctx,
+            exit_trigger_reason=detail_reason,
+            removed_at=now,
+        )
         newly.append(str(row.id))
         logger.info(
-            "open_trades: EXIT_NOW on lock removal symbol=%s rule=%s trade=%s label=%s ranks=%s",
+            "open_trades: EXIT_NOW on lock removal symbol=%s rule=%s trade=%s label=%s",
             symbol,
             rule,
             row.id,
             ctx.get("label"),
-            ctx.get("rank_trail"),
         )
     return newly
 
@@ -1320,11 +1470,22 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
                     direction=t.get("direction") or "LONG",
                     entry_rank=_entry_rank_from_trade(t),
                     removed_at=rem.get("at"),
+                    trade=t,
                 )
                 if lock_ctx.get("label"):
                     trigger_reason = f"{trigger_reason} | {lock_ctx['label']}"
-                    if lock_ctx.get("rank_trail"):
+                    if (rem["rule"] or "").upper() == "R2" and lock_ctx.get("rank_trail"):
                         trigger_reason = f"{trigger_reason} | ranks {lock_ctx['rank_trail']}"
+                    if (rem["rule"] or "").upper() == "R1":
+                        bits = []
+                        if lock_ctx.get("vwap_close_hm"):
+                            bits.append(f"VWAP@{lock_ctx['vwap_close_hm']}")
+                        if lock_ctx.get("ema10_distance_pts") is not None:
+                            bits.append(f"ΔEMA10 {lock_ctx['ema10_distance_pts']}")
+                        if lock_ctx.get("pnl_at_flag_inr") is not None:
+                            bits.append(f"P&L ₹{int(lock_ctx['pnl_at_flag_inr'])}")
+                        if bits:
+                            trigger_reason = f"{trigger_reason} | " + " · ".join(bits)
                 lock_exit = True
 
         bar = _confirmed_10m_levels(db, sym)
@@ -1389,6 +1550,18 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
                 snap_json = json.dumps(snap)
                 if new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW:
                     log_r2_exit_now(
+                        db,
+                        trade_id=str(tid),
+                        symbol=sym,
+                        session_date=session_date,
+                        direction=t.get("direction") or "LONG",
+                        context=lock_ctx,
+                        exit_trigger_reason=trigger_reason or "",
+                        removed_at=lock_ctx.get("removed_at")
+                        if isinstance(lock_ctx.get("removed_at"), datetime)
+                        else _parse_ts(lock_ctx.get("removed_at")),
+                    )
+                    log_r1_early_warning(
                         db,
                         trade_id=str(tid),
                         symbol=sym,

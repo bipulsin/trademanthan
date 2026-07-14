@@ -136,7 +136,7 @@ def test_mark_open_trades_exit_on_lock_removal():
         ot, "_row_to_dict", return_value=trade_dict
     ), patch.object(ot, "build_lock_removal_context", return_value=ctx), patch.object(
         ot, "log_r2_exit_now"
-    ) as log_mock:
+    ) as log_mock, patch.object(ot, "log_r1_early_warning"):
         ids = ot.mark_open_trades_exit_on_lock_removal(
             db, "2026-07-14", "MANAPPURAM", "R2", removed_at=removed_at
         )
@@ -204,7 +204,7 @@ def test_evaluate_prioritizes_lock_removal_over_ema():
         return_value={"close": 2820.0, "ema5": 2830.0, "ema10": 2840.0, "bar_at": "2026-07-14T10:25:00+05:30"},
     ), patch.object(ot, "build_lock_removal_context", return_value=ctx), patch.object(
         ot, "log_r2_exit_now"
-    ):
+    ), patch.object(ot, "log_r1_early_warning"):
         newly = ot.evaluate_open_trades(db, "2026-07-14")
 
     assert newly == ["t1"]
@@ -249,6 +249,9 @@ def test_click_revalidation_warns_borderline_live():
 def test_lock_removal_structure_labels():
     from backend.services.kavach_open_trades import lock_removal_structure_label
 
+    r1 = lock_removal_structure_label("R1", price_closed_beyond_ema10=False)
+    assert "VWAP confirmed close" in r1
+    assert "EMA10 not yet crossed" in r1
     assert "R1 structure" in lock_removal_structure_label("R1", price_closed_beyond_ema10=True)
     assert "NOT closed" in lock_removal_structure_label("R2", price_closed_beyond_ema10=False)
     assert "HAS closed" in lock_removal_structure_label("R2", price_closed_beyond_ema10=True)

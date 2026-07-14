@@ -1057,6 +1057,41 @@ body[data-theme="dark"] .dc-go-board-card {
     color: var(--theme-text, #f8fafc) !important;
     font-variant-numeric: tabular-nums;
 }
+.dc-ready-card--risk-over {
+    border-color: #ef4444 !important;
+    box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.45);
+}
+.dc-ready-risk--over {
+    color: #fca5a5 !important;
+    font-weight: 900 !important;
+    font-size: 15px;
+}
+.dc-ready-expiry {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--theme-muted, #94a3b8);
+    margin: 2px 0 6px;
+}
+.dc-ready-card--expired {
+    opacity: 0.55;
+    border-color: #64748b !important;
+    filter: grayscale(0.35);
+}
+.dc-ready-expired-label {
+    font-size: 12px;
+    font-weight: 800;
+    color: #fbbf24 !important;
+    margin-bottom: 4px;
+}
+.dc-ready-expired-label[hidden] { display: none !important; }
+.dc-ot-card--risk-over {
+    border-color: #ef4444;
+    box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.4);
+}
+.dc-ot-risk--over {
+    color: #fca5a5 !important;
+    font-weight: 800;
+}
 .dc-ready-prices {
     display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; font-weight: 700;
     margin-bottom: 4px;

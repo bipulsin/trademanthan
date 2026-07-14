@@ -70,7 +70,9 @@ def test_expired_past_1_5_atr():
     # ATR=2 → expiry=3. price 104 → dist 2 ATR → EXPIRED
     out = _compute(levels={"price": 104.0, "ema5": 100.0})
     assert out["trade_state"] == STATE_EXPIRED
-    assert out["trade_entry"] is None
+    assert out["trade_expiry_crossed"] is True
+    assert out["trade_expiry_price"] == 103.12  # 100 + 1.5 * (104 * 0.02)
+    assert out["trade_entry"] == 100.0  # intended entry kept for display
 
 
 def test_blocked_d_grade():
@@ -86,10 +88,21 @@ def test_blocked_flat_regime():
     assert "regime" in (out["trade_state_reason"] or "").lower()
 
 
-def test_blocked_risk_over_3k():
+def test_blocked_risk_over_3k_flags_not_blocks():
+    """Risk > ₹3k stays READY with visual flag — Take Trade still available."""
     out = _compute(levels={"ema10": 60.0}, lot=100)
-    assert out["trade_state"] == STATE_BLOCKED
-    assert "risk" in (out["trade_state_reason"] or "").lower()
+    assert out["trade_state"] == STATE_READY
+    assert out["trade_risk_over"] is True
+    assert out["trade_risk_cap_flag"] is True
+    assert out["trade_risk_inr"] and out["trade_risk_inr"] > 3000
+    assert out["trade_entry"] == 100.0
+
+
+def test_ready_includes_expiry_price():
+    out = _compute()
+    assert out["trade_state"] == STATE_READY
+    # atr_pct=2 → ATR=2 at price 100; expiry = 100 + 1.5*2 = 103
+    assert out["trade_expiry_price"] == 103.0
 
 
 def test_rr_low_badge_not_block():
@@ -97,6 +110,14 @@ def test_rr_low_badge_not_block():
     assert out["trade_state"] == STATE_READY
     assert out["trade_rr_low"] is True
     assert out["trade_rr_label"] == "1:0.5"
+
+
+def test_risk_cap_flag_suppressed_when_rr_high():
+    # Large session high → high RR; risk over but waiver suppresses flag
+    out = _compute(levels={"ema10": 60.0}, lot=100, session_hi=200.0)
+    assert out["trade_risk_over"] is True
+    assert out["trade_rr"] is not None and out["trade_rr"] >= 2
+    assert out["trade_risk_cap_flag"] is False
 
 
 def test_short_symmetric():

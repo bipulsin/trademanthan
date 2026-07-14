@@ -532,9 +532,14 @@ def compute_trade_state_for_stock(
     elif adx is None:
         block_reasons.append("ADX —")
 
-    risk_for_block = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
-    if risk_for_block is not None and risk_for_block > MAX_INR_RISK:
-        block_reasons.append(f"risk ₹{int(risk_for_block):,}")
+    # Risk > ₹3k is a visual flag / waiver case — not a hard READY block.
+    # (Trader may still take when R:R > 1:2; Take Trade stays enabled.)
+
+    # Pullback expiry boundary: entry ± 1.5 ATR away from the setup.
+    expiry_price = None
+    if intended is not None and atr and atr > 0:
+        span = float(expiry_atr) * atr
+        expiry_price = round(intended + span, 2) if is_long else round(intended - span, 2)
 
     state = STATE_BLOCKED
     blocked_reason = None
@@ -547,13 +552,15 @@ def compute_trade_state_for_stock(
         entry_price = None
     elif expired_move:
         state = STATE_EXPIRED
-        entry_price = None
-    elif near_ema5 and risk_inr_ready is not None and risk_inr_ready <= MAX_INR_RISK:
+        # Keep intended entry visible so the card can show what expired.
+        entry_price = round(intended, 2) if intended is not None else None
+        display_risk = risk_inr_ready if risk_inr_ready is not None else risk_inr_pb
+    elif near_ema5 and entry_ready is not None:
         if adx is not None and ADX_MIN <= adx < ADX_READY:
             state = STATE_READY_RECHECK
         else:
             state = STATE_READY
-        entry_price = round(entry_ready, 2) if entry_ready is not None else None
+        entry_price = round(entry_ready, 2)
         display_risk = risk_inr_ready
     else:
         state = STATE_WAIT
@@ -647,11 +654,15 @@ def compute_trade_state_for_stock(
 
     pb_label = None
     if pullback_count >= 3:
-        pb_label = f"{pullback_count}th+ pullback"
+        pb_label = f"{pullback_count}+ pullback"
     elif pullback_count == 1:
         pb_label = "1st pullback"
     elif pullback_count == 2:
         pb_label = "2nd pullback"
+
+    risk_over = bool(display_risk is not None and display_risk > MAX_INR_RISK)
+    # Waiver: R:R already ≥ 1:2 → suppress visual flag (still show the risk number).
+    risk_cap_flag = bool(risk_over and (rr is None or rr < RR_LOW))
 
     return {
         "trade_state": state,
@@ -659,7 +670,12 @@ def compute_trade_state_for_stock(
         "trade_entry": entry_price,
         "trade_sl": sl_out,
         "trade_risk_inr": int(display_risk) if display_risk is not None else None,
-        "trade_risk_over": bool(display_risk is not None and display_risk > MAX_INR_RISK),
+        "trade_risk_over": risk_over,
+        "trade_risk_cap_flag": risk_cap_flag,
+        "trade_risk_cap_inr": int(MAX_INR_RISK),
+        "trade_expiry_price": expiry_price,
+        "trade_expiry_atr": float(expiry_atr),
+        "trade_expiry_crossed": bool(state == STATE_EXPIRED or expired_move),
         "trade_rr": rr,
         "trade_rr_low": rr_low,
         "trade_rr_label": (f"1:{rr}" if rr is not None else None),
