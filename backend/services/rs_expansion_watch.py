@@ -20,10 +20,9 @@ from sqlalchemy import text
 
 from backend.database import SessionLocal
 from backend.services.kavach_10m import aggregate_10m_bars, last_closed_10m_pair_end_idx
-from backend.services.kavach_momentum_ignition_validate import THRESHOLD_VWAP_SLOPE
-from backend.services.relative_strength_scanner import _f, _sorted_candles
+from backend.services.relative_strength_scanner import _sorted_candles
 from backend.services.rs_conviction_config import get_config
-from backend.services.rs_conviction_signals import normalized_vwap_slope
+from backend.services.rs_vwap_quality import vwap_slope_steepening
 from backend.services.vajra.indicators import ema_series
 
 logger = logging.getLogger(__name__)
@@ -67,34 +66,6 @@ def fno_universe(db) -> List[str]:
     return [str(r.symbol).upper() for r in rows if r.symbol]
 
 
-def _signed_slope_ok(score: float, signed: float, side: str) -> bool:
-    if score < THRESHOLD_VWAP_SLOPE:
-        return False
-    if side == "SHORT":
-        return signed < 0
-    return signed > 0
-
-
-def _signed_vwap_slope_atr(candles: List[Dict], atr_daily_pct: float) -> float:
-    from backend.services.kavach_volume import last_closed_bar_index
-    from backend.services.rs_conviction_signals import _today_slice, _vwap_series_today
-
-    today, first_today = _today_slice(candles)
-    vwap_s = _vwap_series_today(candles)
-    closed = last_closed_bar_index(candles)
-    if closed < first_today or len(vwap_s) < 7:
-        return 0.0
-    idx_now = min(len(vwap_s) - 1, closed - first_today)
-    idx_prev = max(0, idx_now - 6)
-    if idx_now <= idx_prev:
-        return 0.0
-    price = _f(candles[closed].get("close"), 1.0)
-    atr = price * max(atr_daily_pct, 0.001) / 100.0
-    if atr <= 0:
-        return 0.0
-    return (vwap_s[idx_now] - vwap_s[idx_prev]) / atr
-
-
 def evaluate_candles_for_expansion(
     candles: List[Dict[str, Any]],
     *,
@@ -134,12 +105,13 @@ def evaluate_candles_for_expansion(
     if aligned < EMA_ALIGN_BARS:
         return None
 
-    score = normalized_vwap_slope(candles, atr_daily_pct, cfg)
-    signed = _signed_vwap_slope_atr(candles, atr_daily_pct)
-    if not _signed_slope_ok(score, signed, "LONG" if is_long else "SHORT"):
+    # Reuse shared VWAP-slope steepening (same fn as READY gate).
+    steep_ok, score, signed = vwap_slope_steepening(
+        candles, side=side, atr_daily_pct=atr_daily_pct, cfg=cfg
+    )
+    if not steep_ok:
         return None
 
-    # Breakout reference = close of the oldest bar in the EMA alignment window
     breakout_close = closes[-EMA_ALIGN_BARS]
     last_close = closes[-1]
     price = last_close

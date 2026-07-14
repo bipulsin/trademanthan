@@ -6,9 +6,18 @@ Uses existing thresholds only:
   - Max INR risk = ₹3,000 / lot (runbook)
   - ADX ready ≥ 25, recheck 20–25, blocked < 20
   - Confidence ≥ B; regime TREND or TRANSITION
+
+READY NOW note (2026-07-14):
+  ``compute_trade_state_for_stock`` historically set READY from live levels /
+  ADX / proximity alone — it did **not** check ``daily_snapshot`` lock
+  membership. Display list is filtered to locked symbols in ``get_state``, but
+  that is a separate source of truth from the badge math. Consistency is logged
+  every refresh; VWAP-quality weighting of READY is behind
+  ``READY_VWAP_QUALITY_GATE`` (default off / shadow).
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 from sqlalchemy import bindparam, text
 
-from backend.database import SessionLocal
+from backend.database import SessionLocal, engine
 from backend.services.rs_conviction_config import get_config
 from backend.services.smart_futures_picker.position_sizing import (
     get_futures_lot_size_by_instrument_key,
@@ -35,6 +44,110 @@ STATE_READY_RECHECK = "READY(RECHECK)"
 STATE_WAIT = "WAIT FOR PULLBACK"
 STATE_EXPIRED = "EXPIRED"
 STATE_BLOCKED = "BLOCKED"
+
+_READY_LOG_ENSURED = False
+
+
+def ensure_ready_consistency_log() -> None:
+    global _READY_LOG_ENSURED
+    if _READY_LOG_ENSURED:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS kavach_ready_consistency_log (
+                    id SERIAL PRIMARY KEY,
+                    session_date DATE NOT NULL,
+                    symbol VARCHAR(32) NOT NULL,
+                    direction VARCHAR(8),
+                    rendered_state VARCHAR(32),
+                    pre_gate_state VARCHAR(32),
+                    in_lock BOOLEAN,
+                    lock_rank INTEGER,
+                    lock_direction VARCHAR(16),
+                    lock_mismatch BOOLEAN,
+                    vwap_slope_score NUMERIC(12,4),
+                    steep_ok BOOLEAN,
+                    flip_flop BOOLEAN,
+                    whipsaw_crosses INTEGER,
+                    quality_pass BOOLEAN,
+                    vwap_gate_enabled BOOLEAN,
+                    vwap_would_block BOOLEAN,
+                    vwap_gate_applied BOOLEAN,
+                    inputs JSONB,
+                    logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ready_consistency_session
+                ON kavach_ready_consistency_log (session_date, symbol)
+                """
+            )
+        )
+    _READY_LOG_ENSURED = True
+
+
+def log_ready_consistency(db, rows: List[Dict[str, Any]]) -> None:
+    """Background diagnostic — not user-facing. Best-effort per refresh."""
+    if not rows:
+        return
+    try:
+        ensure_ready_consistency_log()
+        for r in rows:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO kavach_ready_consistency_log (
+                        session_date, symbol, direction,
+                        rendered_state, pre_gate_state,
+                        in_lock, lock_rank, lock_direction, lock_mismatch,
+                        vwap_slope_score, steep_ok, flip_flop, whipsaw_crosses,
+                        quality_pass, vwap_gate_enabled, vwap_would_block,
+                        vwap_gate_applied, inputs
+                    ) VALUES (
+                        CAST(:d AS date), :sym, :dir,
+                        :rst, :pst,
+                        :il, :lr, :ld, :mm,
+                        :vs, :so, :ff, :wc,
+                        :qp, :vge, :vwb,
+                        :vga, CAST(:inp AS jsonb)
+                    )
+                    """
+                ),
+                {
+                    "d": r.get("session_date"),
+                    "sym": r.get("symbol"),
+                    "dir": r.get("direction"),
+                    "rst": r.get("rendered_state"),
+                    "pst": r.get("pre_gate_state"),
+                    "il": r.get("in_lock"),
+                    "lr": r.get("lock_rank"),
+                    "ld": r.get("lock_direction"),
+                    "mm": r.get("lock_mismatch"),
+                    "vs": r.get("vwap_slope_score"),
+                    "so": r.get("steep_ok"),
+                    "ff": r.get("flip_flop"),
+                    "wc": r.get("whipsaw_crosses"),
+                    "qp": r.get("quality_pass"),
+                    "vge": r.get("vwap_gate_enabled"),
+                    "vwb": r.get("vwap_would_block"),
+                    "vga": r.get("vwap_gate_applied"),
+                    "inp": json.dumps(r.get("inputs") or {}),
+                },
+            )
+        db.commit()
+    except Exception as exc:
+        logger.debug("ready consistency log failed: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
 
 _STATE_SORT = {
     STATE_READY: 0,
@@ -585,6 +698,8 @@ def enrich_stocks_trade_state(
         "direction_imbalance": None,
         "compromised_lock": None,
         "session_window_text": "Entry 09:45–14:30 · Square-off 15:15",
+        "ready_vwap_gate_enabled": False,
+        "ready_consistency_logged": 0,
     }
     if not stocks:
         from backend.services.daily_checklist_zones import build_zone1_obs
@@ -636,6 +751,16 @@ def enrich_stocks_trade_state(
                 candle_cache[sym.upper()] = []
 
         lot_cache: Dict[str, int] = {}
+        consistency_rows: List[Dict[str, Any]] = []
+        from backend.services.daily_checklist_zones import morning_locked_symbols
+        from backend.services.rs_vwap_quality import (
+            ready_vwap_quality_gate_enabled,
+            score_vwap_quality,
+        )
+
+        lock_map = morning_locked_symbols(db, session_date)
+        vwap_gate_on = ready_vwap_quality_gate_enabled()
+
         for s in stocks:
             sym = (s.get("symbol") or "").upper()
             if not sym:
@@ -674,6 +799,84 @@ def enrich_stocks_trade_state(
             )
             s.update(ts)
 
+            lock_row = lock_map.get(sym)
+            in_lock = lock_row is not None
+            s["in_lock"] = in_lock
+            s["lock_rank"] = (lock_row or {}).get("rank")
+            s["lock_direction"] = (lock_row or {}).get("direction")
+
+            pre_gate = s.get("trade_state")
+            is_ready_pre = pre_gate in (STATE_READY, STATE_READY_RECHECK)
+
+            # VWAP-quality in same enrich pass (candles already loaded — no extra latency path).
+            qualify_since = (promo.get(sym) or {}).get("promoted_at")
+            vq = score_vwap_quality(
+                candles,
+                side=s.get("direction") or "LONG",
+                atr_daily_pct=atr_pct if atr_pct > 0 else 1.0,
+                cfg=cfg,
+                since=qualify_since,
+            )
+            s["vwap_quality"] = vq
+            would_block = is_ready_pre and not bool(vq.get("quality_pass"))
+            gate_applied = False
+            if is_ready_pre and vwap_gate_on and not vq.get("quality_pass"):
+                # Prefer slope over raw RS-rank: unstable / flat VWAP cannot stay READY.
+                s["trade_state"] = STATE_WAIT
+                reason = "VWAP quality"
+                if vq.get("flip_flop"):
+                    reason = "VWAP flip-flop since qualify"
+                elif not vq.get("steep_ok"):
+                    reason = "VWAP slope not steep"
+                elif vq.get("unstable"):
+                    reason = "VWAP unstable"
+                s["trade_state_reason"] = reason
+                s["zone_downgrade"] = "vwap_quality"
+                gate_applied = True
+
+            rendered = s.get("trade_state")
+            lock_mismatch = bool(is_ready_pre and not in_lock)
+            # Log every pre-gate READY (incl. shadow near-misses) and any lock mismatch.
+            if is_ready_pre or lock_mismatch or gate_applied:
+                consistency_rows.append(
+                    {
+                        "session_date": session_date,
+                        "symbol": sym,
+                        "direction": s.get("direction"),
+                        "rendered_state": rendered,
+                        "pre_gate_state": pre_gate,
+                        "in_lock": in_lock,
+                        "lock_rank": s.get("lock_rank"),
+                        "lock_direction": s.get("lock_direction"),
+                        "lock_mismatch": lock_mismatch,
+                        "vwap_slope_score": vq.get("slope_score"),
+                        "steep_ok": vq.get("steep_ok"),
+                        "flip_flop": vq.get("flip_flop"),
+                        "whipsaw_crosses": vq.get("whipsaw_crosses"),
+                        "quality_pass": vq.get("quality_pass"),
+                        "vwap_gate_enabled": vwap_gate_on,
+                        "vwap_would_block": would_block,
+                        "vwap_gate_applied": gate_applied,
+                        "inputs": {
+                            "adverse_closes": vq.get("adverse_closes"),
+                            "first_adverse_hm": vq.get("first_adverse_hm"),
+                            "signed_slope_atr": vq.get("signed_slope_atr"),
+                            "promoted_at": str(qualify_since) if qualify_since else None,
+                            "atr_pct": atr_pct,
+                        },
+                    }
+                )
+                if lock_mismatch:
+                    logger.warning(
+                        "READY lock mismatch symbol=%s state=%s in_lock=%s (logged for 22-Jul)",
+                        sym,
+                        pre_gate,
+                        in_lock,
+                    )
+
+        if consistency_rows:
+            log_ready_consistency(db, consistency_rows)
+
         churn_syms = [s["symbol"] for s in stocks if int(s.get("lock_cycles") or 0) > 1]
         from backend.services.daily_checklist_zones import (
             apply_zone_downgrades,
@@ -695,6 +898,8 @@ def enrich_stocks_trade_state(
             "churn_symbols": churn_syms,
             "churn_count": len(churn_syms),
             "recent_removals": removals,
+            "ready_vwap_gate_enabled": vwap_gate_on,
+            "ready_consistency_logged": len(consistency_rows),
             **mkt,
             **zone1,
         }
@@ -713,8 +918,13 @@ def sort_stocks_by_trade_state(
         state_i = _STATE_SORT.get(st, 9)
         grade = _norm_grade(s.get("confidence") or s.get("dashboard_kavach"))
         grade_i = _GRADE_RANK.get(grade, 9)
+        # When VWAP quality available, prefer steep/clean over raw RS rank.
+        vq = s.get("vwap_quality") or {}
+        slope = float(vq.get("slope_score") or 0)
+        # Higher slope first among same state/grade (negate for ascending sort).
+        slope_key = -slope if vq else 0
         sym = s.get("symbol") or ""
         rs_rank = rank_map.get(sym, (0, 99))[1]
-        return (state_i, grade_i, rs_rank, sym)
+        return (state_i, grade_i, slope_key, rs_rank, sym)
 
     return sorted(stocks, key=key)

@@ -786,7 +786,8 @@
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
         var entry = stock.trade_entry;
         var sl = stock.trade_sl;
-        card.querySelector(".dc-ready-entry").textContent = entry != null ? "Entry " + Number(entry).toFixed(2) : "Entry —";
+        card.querySelector(".dc-ready-entry").textContent =
+            entry != null ? Number(entry).toFixed(2) : "—";
         card.querySelector(".dc-ready-sl").textContent = sl != null ? "SL " + Number(sl).toFixed(2) : "SL —";
         var risk = stock.trade_risk_inr;
         card.querySelector(".dc-ready-risk").textContent = risk != null ? "Risk ₹" + Math.abs(Number(risk)).toLocaleString("en-IN") : "Risk —";
