@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>READY Shadow Log Review · TWCTO</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --panel-2: #232d3a;
+      --border: #334155;
+      --text: #e8eef4;
+      --muted: #94a3b8;
+      --accent: #0d9488;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --ok: #22c55e;
+      --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: var(--font); color: var(--text); font-size: 13px; line-height: 1.4;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a32 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 16px 18px 48px; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 14px; }
+    .field { margin: 0; }
+    label { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+    input, select {
+      background: var(--panel-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 7px 8px; font: inherit;
+    }
+    button {
+      appearance: none; border: 1px solid var(--border); background: var(--panel-2);
+      color: var(--text); border-radius: 6px; padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #042f2e; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { border: none; border-radius: 0; background: transparent; }
+    .seg button.active { background: var(--accent); color: #042f2e; }
+    .agg { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .agg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .agg-card .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .agg-card .v { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .status { color: var(--muted); margin-bottom: 10px; min-height: 1.2em; }
+    .status.err { color: #fca5a5; }
+    .table-wrap {
+      overflow: auto; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--panel); max-height: calc(100vh - 280px);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+    th {
+      position: sticky; top: 0; background: #15202b; z-index: 2;
+      font-size: 11px; color: var(--muted); font-weight: 700; white-space: nowrap;
+    }
+    tr:hover td { background: rgba(13, 148, 136, 0.06); }
+    tr.needs-class td { background: rgba(245, 158, 11, 0.06); }
+    tr.mismatch td { box-shadow: inset 3px 0 0 var(--danger); }
+    .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .pill {
+      display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+      background: var(--panel-2); border: 1px solid var(--border);
+    }
+    .pill.ok { color: #86efac; border-color: #166534; }
+    .pill.bad { color: #fca5a5; border-color: #7f1d1d; }
+    .pill.warn { color: #fcd34d; border-color: #854d0e; }
+    td.edit { padding: 4px 6px; }
+    td.edit select, td.edit input {
+      width: 100%; min-width: 120px; padding: 5px 6px; font-size: 12px;
+    }
+    td.edit input:focus, td.edit select:focus {
+      outline: 2px solid var(--accent); border-color: var(--accent);
+    }
+    .empty { padding: 28px; text-align: center; color: var(--muted); }
+    .save-ok { color: var(--ok); font-size: 10px; margin-left: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>READY Shadow Log Review</h1>
+        <p class="sub">
+          Backend rollup of <span class="mono">kavach_ready_consistency_log</span> —
+          lock mismatches and VWAP-quality shadow gate decisions. Classify rows, then export for the 22-Jul checkpoint.
+          No login required. Does not change live flags.
+        </p>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <div class="field">
+        <label for="sessionDate">Session date</label>
+        <input type="date" id="sessionDate">
+      </div>
+      <div class="field">
+        <label>Filter</label>
+        <div class="seg" id="filterSeg">
+          <button type="button" data-filter="all" class="active">All</button>
+          <button type="button" data-filter="mismatches">Mismatches</button>
+          <button type="button" data-filter="shadow_excludes">Shadow excludes</button>
+        </div>
+      </div>
+      <button type="button" class="primary" id="btnLoad">Load</button>
+      <button type="button" id="btnCsv">Export CSV</button>
+      <button type="button" id="btnJson">Export JSON</button>
+    </div>
+
+    <div class="agg" id="rollup"></div>
+    <div class="status" id="status"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Logged at</th>
+            <th>Symbol</th>
+            <th>Dir</th>
+            <th>Rendered</th>
+            <th>In lock</th>
+            <th>Mismatch</th>
+            <th>Slope</th>
+            <th>Flip-flop</th>
+            <th>Whipsaw</th>
+            <th>Quality</th>
+            <th>Shadow</th>
+            <th>Outcome classification</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="13" class="empty">Load a session to begin.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+(function () {
+  var API =
+    window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+      ? "http://localhost:8000"
+      : window.location.origin;
+
+  var state = { filter: "all", rows: [], choices: [], sessionDate: null, saving: {} };
+
+  function $(id) { return document.getElementById(id); }
+
+  function todayIST() {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
+      }).format(new Date());
+    } catch (e) {
+      var d = new Date();
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  function fmtHm(iso) {
+    if (!iso) return "—";
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso).slice(11, 16) || "—";
+      return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2)
+        + ":" + ("0" + d.getSeconds()).slice(-2);
+    } catch (e) { return "—"; }
+  }
+
+  function pill(ok, yes, no) {
+    return '<span class="pill ' + (ok ? "ok" : "bad") + '">' + (ok ? yes : no) + "</span>";
+  }
+
+  function setStatus(msg, isErr) {
+    var el = $("status");
+    el.textContent = msg || "";
+    el.className = "status" + (isErr ? " err" : "");
+  }
+
+  function renderRollup(r) {
+    r = r || {};
+    $("rollup").innerHTML = [
+      ["Total rows", r.total_rows],
+      ["Lock mismatches", r.mismatch_count],
+      ["Shadow excludes", r.shadow_exclude_count],
+      ["Shadow includes", r.shadow_include_count],
+      ["Need classification", r.needs_classification_count],
+      ["Classified", r.classified_count]
+    ].map(function (pair) {
+      return '<div class="agg-card"><div class="k">' + pair[0] + '</div><div class="v">'
+        + (pair[1] != null ? pair[1] : "—") + "</div></div>";
+    }).join("");
+  }
+
+  function choiceOptions(selected) {
+    var opts = ['<option value="">—</option>'];
+    (state.choices || []).forEach(function (c) {
+      opts.push('<option value="' + c + '"' + (selected === c ? " selected" : "") + ">" + c + "</option>");
+    });
+    return opts.join("");
+  }
+
+  function shadowLabel(row) {
+    if (row.shadow_would_exclude) return '<span class="pill warn">would exclude</span>';
+    if (row.shadow_would_include) return '<span class="pill ok">would include</span>';
+    return '<span class="pill">n/a</span>';
+  }
+
+  function renderRows(rows) {
+    var tb = $("tbody");
+    if (!rows || !rows.length) {
+      tb.innerHTML = '<tr><td colspan="13" class="empty">No rows for this filter / date.</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows.map(function (row, idx) {
+      var cls = [];
+      if (row.needs_classification) cls.push("needs-class");
+      if (row.lock_mismatch) cls.push("mismatch");
+      return '<tr class="' + cls.join(" ") + '" data-log-id="' + row.log_id + '" data-idx="' + idx + '">'
+        + '<td class="mono">' + fmtHm(row.logged_at) + "</td>"
+        + "<td><strong>" + (row.symbol || "") + "</strong></td>"
+        + "<td>" + (row.direction || "—") + "</td>"
+        + '<td class="mono">' + (row.rendered_state || "—")
+        + (row.rendered_ready ? ' <span class="pill ok">READY</span>' : "") + "</td>"
+        + "<td>" + pill(!!row.symbol_in_lock, "yes", "no") + "</td>"
+        + "<td>" + (row.lock_mismatch ? '<span class="pill bad">MISMATCH</span>' : "—") + "</td>"
+        + '<td class="mono">' + (row.vwap_slope_score != null ? row.vwap_slope_score : "—") + "</td>"
+        + "<td>" + (row.flip_flop ? '<span class="pill bad">yes</span>' : "no") + "</td>"
+        + '<td class="mono">' + (row.whipsaw_crosses != null ? row.whipsaw_crosses : "—") + "</td>"
+        + "<td>" + pill(!!row.quality_pass, "pass", "fail") + "</td>"
+        + "<td>" + shadowLabel(row) + "</td>"
+        + '<td class="edit"><select class="js-outcome" tabindex="0"'
+        + (row.needs_classification ? "" : ' title="Optional"') + ">"
+        + choiceOptions(row.outcome_classification) + "</select>"
+        + '<span class="save-ok js-saved" hidden>✓</span></td>'
+        + '<td class="edit"><input class="js-note" type="text" tabindex="0" value="'
+        + escapeAttr(row.note || "") + '" placeholder="note…"></td>'
+        + "</tr>";
+    }).join("");
+    bindEditors();
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  }
+
+  function bindEditors() {
+    Array.prototype.forEach.call(document.querySelectorAll("#tbody tr[data-log-id]"), function (tr) {
+      var id = Number(tr.getAttribute("data-log-id"));
+      var sel = tr.querySelector(".js-outcome");
+      var note = tr.querySelector(".js-note");
+      var saved = tr.querySelector(".js-saved");
+      function persist() {
+        if (state.saving[id]) return;
+        state.saving[id] = true;
+        fetch(API + "/api/ready-shadow-review/" + id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            outcome_classification: sel.value,
+            note: note.value
+          }),
+          cache: "no-store"
+        }).then(function (res) { return res.json(); }).then(function (data) {
+          state.saving[id] = false;
+          if (!data.ok) { setStatus(data.error || "Save failed", true); return; }
+          saved.hidden = false;
+          setTimeout(function () { saved.hidden = true; }, 1200);
+          var row = state.rows.find(function (r) { return r.log_id === id; });
+          if (row) {
+            row.outcome_classification = data.outcome_classification;
+            row.note = data.note;
+          }
+        }).catch(function (e) {
+          state.saving[id] = false;
+          setStatus(String(e), true);
+        });
+      }
+      sel.addEventListener("change", persist);
+      note.addEventListener("change", persist);
+      note.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); note.blur(); }
+        if (e.key === "Tab" && !e.shiftKey) {
+          // default tab moves to next control
+        }
+      });
+    });
+  }
+
+  function load() {
+    var sd = $("sessionDate").value || todayIST();
+    setStatus("Loading…");
+    $("btnLoad").disabled = true;
+    var q = API + "/api/ready-shadow-review?session_date=" + encodeURIComponent(sd)
+      + "&filter=" + encodeURIComponent(state.filter);
+    fetch(q, { cache: "no-store" })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        $("btnLoad").disabled = false;
+        if (!data.ok) {
+          setStatus(data.error || "Load failed", true);
+          renderRollup({});
+          renderRows([]);
+          return;
+        }
+        state.rows = data.rows || [];
+        state.choices = data.outcome_choices || ["correct exclusion", "wrong exclusion", "unclear"];
+        state.sessionDate = data.session_date;
+        renderRollup(data.rollup);
+        renderRows(state.rows);
+        setStatus(
+          data.session_date + " · showing " + (data.row_count || 0)
+          + " of " + ((data.rollup && data.rollup.total_rows) || 0)
+          + " · filter=" + (data.filter || "all")
+        );
+      })
+      .catch(function (e) {
+        $("btnLoad").disabled = false;
+        setStatus(String(e), true);
+      });
+  }
+
+  function download(fmt) {
+    var sd = $("sessionDate").value || todayIST();
+    var url = API + "/api/ready-shadow-review/export?session_date="
+      + encodeURIComponent(sd) + "&format=" + encodeURIComponent(fmt);
+    window.location.href = url;
+  }
+
+  $("sessionDate").value = todayIST();
+  Array.prototype.forEach.call($("filterSeg").querySelectorAll("button"), function (btn) {
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call($("filterSeg").querySelectorAll("button"), function (b) {
+        b.classList.remove("active");
+      });
+      btn.classList.add("active");
+      state.filter = btn.getAttribute("data-filter") || "all";
+      load();
+    });
+  });
+  $("btnLoad").addEventListener("click", load);
+  $("btnCsv").addEventListener("click", function () { download("csv"); });
+  $("btnJson").addEventListener("click", function () { download("json"); });
+  $("sessionDate").addEventListener("change", load);
+
+  load();
+})();
+  </script>
+</body>
+</html>
