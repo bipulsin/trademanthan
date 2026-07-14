@@ -1211,6 +1211,10 @@
                     rs_pct: stock.rs_pct,
                     trade_score: stock.dashboard_score,
                     trade_state: stock.trade_state,
+                    decision: stock.decision,
+                    decision_label: stock.decision,
+                    gate_badges: stock.gate_badges || [],
+                    zone: isReadyState(stock.trade_state) ? "Zone 3 READY" : "Zone 4",
                     market_regime: (state.trade_state_obs || {}).market_regime
                 }
             })
@@ -1291,6 +1295,10 @@
         var stBadge = el("span", "dc-ot-state dc-ot-state--" + String(t.state || "").toLowerCase().replace("_", "-"),
             (t.state || "").replace("_", " "));
         row1.appendChild(stBadge);
+
+        if (t.provenance || (t.state_context_snapshot && t.state_context_snapshot.provenance)) {
+            row1.appendChild(el("span", "dc-ot-prov", "📌 Provenance captured"));
+        }
 
         if (t.alarm_fired_at) {
             row1.appendChild(el("span", "dc-ot-alarm", "🔔 Alarm @" + fmtHm(t.alarm_fired_at)));

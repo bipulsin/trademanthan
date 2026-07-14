@@ -121,6 +121,15 @@ def ensure_tables() -> None:
             conn.execute(text("ALTER TABLE kavach_checklist_trades DROP COLUMN IF EXISTS was_cancelled"))
         except Exception:
             pass
+        try:
+            conn.execute(
+                text(
+                    "ALTER TABLE kavach_checklist_trades "
+                    "ADD COLUMN IF NOT EXISTS provenance JSONB"
+                )
+            )
+        except Exception:
+            pass
         conn.execute(
             text(
                 """
@@ -258,6 +267,74 @@ def _confirmed_10m_levels(db, symbol: str) -> Dict[str, Any]:
         return {}
 
 
+def build_take_trade_provenance(
+    db,
+    session_date: str,
+    symbol: str,
+    *,
+    direction: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Snapshot of checklist / lock / board state at Take Trade click."""
+    from backend.services.daily_checklist_zones import morning_locked_symbols
+
+    ctx = dict(context or {})
+    sym = (symbol or "").upper()
+    lock_map = morning_locked_symbols(db, session_date)
+    lock_row = lock_map.get(sym)
+    in_morning_lock = lock_row is not None
+    # GO board / Fast Watch (best-effort)
+    in_go_board = False
+    in_fast_watch_top2 = False
+    try:
+        from backend.services.rs_go_board import get_go_board
+
+        gb = get_go_board(session_date) or {}
+        go_syms = {
+            str(x.get("symbol") or "").upper()
+            for x in (gb.get("symbols") or [])
+            if isinstance(x, dict)
+        }
+        in_go_board = sym in go_syms
+    except Exception:
+        pass
+    try:
+        from backend.services.rs_fast_watch import get_fast_watch
+
+        fw = get_fast_watch(session_date) or {}
+        featured = fw.get("featured") or {}
+        top = []
+        for side in ("long", "short"):
+            top.extend(featured.get(side) or [])
+        top2 = {
+            str(x.get("symbol") or "").upper()
+            for x in top[:4]
+            if isinstance(x, dict)
+        }
+        in_fast_watch_top2 = sym in top2
+    except Exception:
+        pass
+
+    badges = ctx.get("gate_badges") or []
+    if isinstance(badges, str):
+        badges = [badges]
+    return {
+        "captured_at": _now().isoformat(),
+        "in_morning_lock": in_morning_lock,
+        "morning_lock_rank": (lock_row or {}).get("rank"),
+        "morning_lock_direction": (lock_row or {}).get("direction"),
+        "in_go_board": in_go_board,
+        "in_fast_watch_top2": in_fast_watch_top2,
+        "decision_label": ctx.get("decision") or ctx.get("decision_label"),
+        "trade_state": ctx.get("trade_state"),
+        "downgrade_badges": list(badges),
+        "zone_at_click": ctx.get("zone") or ("Zone 3 READY" if ctx.get("trade_state") in ("READY", "READY(RECHECK)") else "Zone 4"),
+        "market_regime": ctx.get("market_regime"),
+        "confidence": ctx.get("confidence"),
+        "rs_pct": ctx.get("rs_pct"),
+    }
+
+
 def take_trade(
     symbol: str,
     *,
@@ -337,6 +414,10 @@ def take_trade(
         ctx = dict(context or {})
         ctx.setdefault("confidence", levels.get("confidence_grade"))
         ctx.setdefault("market_regime", levels.get("market_regime"))
+        provenance = build_take_trade_provenance(
+            db, sd, sym, direction=direction, context=ctx
+        )
+        ctx["provenance"] = provenance
 
         db.execute(
             text(
@@ -344,11 +425,11 @@ def take_trade(
                 INSERT INTO kavach_checklist_trades (
                     id, symbol, direction, entry_price, entry_time, entry_qty, session_date,
                     initial_ema10_at_entry, initial_sl_inr, state, current_sl_price,
-                    highest_rr_reached, state_context_snapshot, status
+                    highest_rr_reached, state_context_snapshot, provenance, status
                 ) VALUES (
                     :id, :sym, :dir, :px, :et, :qty, CAST(:d AS date),
                     :ema10, :sl_inr, :state, :sl_px,
-                    0, CAST(:ctx AS jsonb), 'OPEN'
+                    0, CAST(:ctx AS jsonb), CAST(:prov AS jsonb), 'OPEN'
                 )
                 """
             ),
@@ -365,6 +446,7 @@ def take_trade(
                 "state": STATE_TRAILING,
                 "sl_px": ema10,
                 "ctx": json.dumps(ctx),
+                "prov": json.dumps(provenance),
             },
         )
         db.commit()

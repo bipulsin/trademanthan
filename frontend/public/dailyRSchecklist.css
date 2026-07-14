@@ -1055,3 +1055,4 @@ body[data-theme="dark"] .dc-go-board-card {
     display: inline-flex; align-items: center; gap: 6px;
 }
 .dc-zone5-toggle i { transition: transform 0.15s ease; font-size: 10px; }
+.dc-ot-prov { font-size: 10px; font-weight: 600; color: #94a3b8; margin-left: 6px; }
