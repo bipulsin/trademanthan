@@ -480,11 +480,36 @@ body[data-theme="dark"] .dc-exit-rule { color: #e2e8f0; opacity: 0.9; }
     font-weight: 700;
     padding: 2px 7px;
     border-radius: 4px;
+    border: 1px solid #cbd5e1;
     background: #f1f5f9;
-    color: #475569;
+    /* Beat theme.css `body.theme-page span { color: inherit }` on pale chips */
+    color: #334155 !important;
 }
-.dc-removal-chip--r1 { background: #fee2e2; color: #991b1b; }
-.dc-removal-chip--r2 { background: #e0e7ff; color: #3730a3; }
+.dc-removal-chip--r1 {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    color: #991b1b !important;
+}
+.dc-removal-chip--r2 {
+    background: #e0e7ff;
+    border-color: #a5b4fc;
+    color: #3730a3 !important;
+}
+body[data-theme="dark"] .dc-removal-chip {
+    background: #334155;
+    border-color: #64748b;
+    color: #e2e8f0 !important;
+}
+body[data-theme="dark"] .dc-removal-chip--r1 {
+    background: #7f1d1d;
+    border-color: #f87171;
+    color: #fecaca !important;
+}
+body[data-theme="dark"] .dc-removal-chip--r2 {
+    background: #312e81;
+    border-color: #818cf8;
+    color: #c7d2fe !important;
+}
 
 .dc-trade-row {
     display: flex;
@@ -542,10 +567,20 @@ body[data-theme="dark"] .dc-trade-churn-warn {
 .dc-live-setups-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .dc-live-chip {
     font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 999px;
-    background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd;
+    background: #dbeafe; color: #1e40af !important; border: 1px solid #93c5fd;
 }
-.dc-live-chip--triggered { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
-.dc-live-chip--triggered_chop, .dc-live-chip--late { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.dc-live-chip--triggered { background: #d1fae5; color: #065f46 !important; border-color: #6ee7b7; }
+.dc-live-chip--triggered_chop, .dc-live-chip--late { background: #fef3c7; color: #92400e !important; border-color: #fcd34d; }
+body[data-theme="dark"] .dc-live-chip {
+    background: #1e3a8a; border-color: #60a5fa; color: #bfdbfe !important;
+}
+body[data-theme="dark"] .dc-live-chip--triggered {
+    background: #064e3b; border-color: #34d399; color: #a7f3d0 !important;
+}
+body[data-theme="dark"] .dc-live-chip--triggered_chop,
+body[data-theme="dark"] .dc-live-chip--late {
+    background: #78350f; border-color: #fbbf24; color: #fde68a !important;
+}
 .dc-ignition {
     font-size: 10px; font-weight: 800; color: #7c2d12; background: #ffedd5;
     padding: 2px 6px; border-radius: 999px; border: 1px solid #fdba74;
