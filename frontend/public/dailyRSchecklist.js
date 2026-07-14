@@ -891,18 +891,7 @@
         Array.prototype.slice.call(z4.querySelectorAll(".dc-watch-row")).forEach(function (ch) {
             if (!watchSyms[ch.dataset.symbol]) z4.removeChild(ch);
         });
-
-        // Keep modal card pool in legacy grids (hidden)
-        var bullGrid = $("dcBullGrid");
-        var bearGrid = $("dcBearGrid");
-        if (bullGrid && bearGrid) {
-            stocks.forEach(function (stock) {
-                var card = ensureCard(stock.symbol);
-                patchCard(card, stock, { preview: preview });
-                var grid = stock.direction === "SHORT" ? bearGrid : bullGrid;
-                if (card.parentNode !== grid) grid.appendChild(card);
-            });
-        }
+        // Detail lives in the modal (openModal → currentStock); no duplicate fat-card columns.
     }
 
     function renderLiveSetups() {
