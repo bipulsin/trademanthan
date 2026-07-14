@@ -101,24 +101,53 @@ def test_mark_open_trades_exit_on_lock_removal():
 
     ist = pytz.timezone("Asia/Kolkata")
     removed_at = ist.localize(datetime(2026, 7, 14, 10, 25))
+    row = SimpleNamespace(
+        id="t-mana",
+        state=ot.STATE_TRAILING,
+        direction="SHORT",
+        provenance=None,
+        state_context_snapshot=None,
+    )
     db = MagicMock()
     db.execute.side_effect = [
         # SELECT open trades
-        MagicMock(fetchall=lambda: [SimpleNamespace(id="t-mana", state=ot.STATE_TRAILING)]),
+        MagicMock(fetchall=lambda: [row]),
         # UPDATE
         MagicMock(),
     ]
-    with patch.object(ot, "ensure_tables"):
+    ctx = {
+        "rule": "R2",
+        "label": "R2 rank-based removal — price has NOT closed beyond EMA10",
+        "rank_trail": "4→8→out",
+        "entry_rank": 4,
+        "removal_rank": None,
+        "last_3_ranks": [],
+        "price_closed_beyond_ema10": False,
+        "price_closed_beyond_vwap": False,
+    }
+    trade_dict = {
+        "id": "t-mana",
+        "state": ot.STATE_TRAILING,
+        "direction": "SHORT",
+        "provenance": None,
+        "state_context_snapshot": {},
+    }
+    with patch.object(ot, "ensure_tables"), patch.object(
+        ot, "_row_to_dict", return_value=trade_dict
+    ), patch.object(ot, "build_lock_removal_context", return_value=ctx), patch.object(
+        ot, "log_r2_exit_now"
+    ) as log_mock:
         ids = ot.mark_open_trades_exit_on_lock_removal(
             db, "2026-07-14", "MANAPPURAM", "R2", removed_at=removed_at
         )
     assert ids == ["t-mana"]
-    # second execute is UPDATE
     update_call = db.execute.call_args_list[1]
     params = update_call[0][1]
     assert params["st"] == ot.STATE_EXIT_NOW
     assert "Lock removed via R2 at 10:25" in params["tr"]
+    assert "R2 rank-based removal" in params["tr"]
     assert params["alarm"] == removed_at
+    log_mock.assert_called_once()
 
 
 def test_evaluate_prioritizes_lock_removal_over_ema():
@@ -148,12 +177,24 @@ def test_evaluate_prioritizes_lock_removal_over_ema():
         "last_eval_bar_at": None,
         "entry_time": entry.isoformat(),
         "created_at": entry.isoformat(),
+        "state_context_snapshot": {},
     }
     db = MagicMock()
     db.execute.side_effect = [
         MagicMock(fetchall=lambda: [SimpleNamespace(**trade)]),  # open rows
         MagicMock(),  # UPDATE
     ]
+    ctx = {
+        "rule": "R2",
+        "label": "R2 rank-based removal — price has NOT closed beyond EMA10",
+        "rank_trail": "3→9→out",
+        "entry_rank": 3,
+        "removal_rank": None,
+        "last_3_ranks": [],
+        "price_closed_beyond_ema10": False,
+        "price_closed_beyond_vwap": False,
+        "removed_at": rem_at.isoformat(),
+    }
 
     with patch.object(ot, "_row_to_dict", return_value=trade), patch.object(
         ot, "latest_r_lock_removal", return_value={"rule": "R2", "at": rem_at}
@@ -161,6 +202,8 @@ def test_evaluate_prioritizes_lock_removal_over_ema():
         ot,
         "_confirmed_10m_levels",
         return_value={"close": 2820.0, "ema5": 2830.0, "ema10": 2840.0, "bar_at": "2026-07-14T10:25:00+05:30"},
+    ), patch.object(ot, "build_lock_removal_context", return_value=ctx), patch.object(
+        ot, "log_r2_exit_now"
     ):
         newly = ot.evaluate_open_trades(db, "2026-07-14")
 
@@ -168,3 +211,44 @@ def test_evaluate_prioritizes_lock_removal_over_ema():
     params = db.execute.call_args_list[-1][0][1]
     assert params["st"] == ot.STATE_EXIT_NOW
     assert "Lock removed via R2 at 10:25" in params["tr"]
+    assert "R2 rank-based removal" in params["tr"]
+
+
+def test_click_revalidation_blocks_confirmed_ema10_break():
+    from backend.services.kavach_open_trades import classify_click_revalidation
+
+    v = classify_click_revalidation(
+        is_long=True,
+        live=100.0,
+        confirmed_close=98.0,
+        ema10=99.0,
+        vwap=99.5,
+        bar_hm="10:40",
+    )
+    assert v["blocked"] is True
+    assert "beyond EMA10 at 10:40" in v["message"]
+    assert "Re-scan required" in v["message"]
+
+
+def test_click_revalidation_warns_borderline_live():
+    from backend.services.kavach_open_trades import classify_click_revalidation
+
+    v = classify_click_revalidation(
+        is_long=True,
+        live=98.5,
+        confirmed_close=100.5,
+        ema10=99.0,
+        vwap=99.2,
+        bar_hm="10:40",
+    )
+    assert v["blocked"] is False
+    assert v["warning"]
+    assert "Borderline" in v["warning"]
+
+
+def test_lock_removal_structure_labels():
+    from backend.services.kavach_open_trades import lock_removal_structure_label
+
+    assert "R1 structure" in lock_removal_structure_label("R1", price_closed_beyond_ema10=True)
+    assert "NOT closed" in lock_removal_structure_label("R2", price_closed_beyond_ema10=False)
+    assert "HAS closed" in lock_removal_structure_label("R2", price_closed_beyond_ema10=True)

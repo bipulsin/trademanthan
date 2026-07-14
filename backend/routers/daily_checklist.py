@@ -141,7 +141,10 @@ def take_trade(body: TakeTradeBody):
             session_date=body.session_date,
             context=body.context,
         )
-        return {"ok": True, "trade": trade, **ot.list_session_trades(body.session_date)}
+        out = {"ok": True, "trade": trade, **ot.list_session_trades(body.session_date)}
+        if trade.get("take_warning"):
+            out["take_warning"] = trade["take_warning"]
+        return out
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:

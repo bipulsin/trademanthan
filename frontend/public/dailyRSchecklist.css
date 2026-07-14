@@ -256,6 +256,27 @@ button.dc-card:hover, .dc-card[role="button"]:hover { box-shadow: 0 2px 8px rgba
     margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.12);
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
 }
+.dc-ot-row--rank-ctx {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.dc-ot-rank-ctx {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+.dc-ot-rank-ctx--r2 { color: #fbbf24; }
+.dc-ot-rank-ctx--r1 { color: #f87171; }
+.dc-ot-rank-meta {
+    font-size: 11px;
+    color: #94a3b8;
+}
 .dc-exit-ack-banner {
     margin-top: 10px; padding: 10px; border-radius: 8px;
     background: #7f1d1d; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;

@@ -1209,9 +1209,28 @@
             })
         }).then(function (res) {
             if (!res.ok) { toast(res.error || "Take trade failed"); return; }
-            toast(symbol + " → Open Trades");
+            if (res.take_warning) {
+                toast("⚠ " + res.take_warning);
+                showTakeWarningBanner(symbol, res.take_warning);
+            } else {
+                toast(symbol + " → Open Trades");
+            }
             return api("/data");
         }).then(function (s) { if (s) applyState(s); }).catch(function () { toast("Take trade failed"); });
+    }
+
+    function showTakeWarningBanner(symbol, msg) {
+        var elBan = $("dcTakeWarnBanner");
+        if (!elBan) {
+            elBan = document.createElement("div");
+            elBan.id = "dcTakeWarnBanner";
+            elBan.className = "dc-warn-banner show";
+            var host = $("dcOpenTrades") || document.body;
+            host.insertBefore(elBan, host.firstChild);
+        }
+        elBan.hidden = false;
+        elBan.classList.add("show");
+        elBan.textContent = symbol + ": " + msg;
     }
 
     function fmtHm(iso) {
@@ -1313,6 +1332,25 @@
         row3.appendChild(el("span", "dc-ot-held", t.held_minutes != null ? ("held " + t.held_minutes + " min") : ""));
         row3.appendChild(el("span", "dc-ot-hint", t.action_hint || ""));
         card.appendChild(row3);
+
+        var lrc = t.lock_removal_context;
+        if (t.state === "EXIT_NOW" && lrc && lrc.label) {
+            var ctxRow = el("div", "dc-ot-row dc-ot-row--rank-ctx");
+            var cls = (lrc.rule === "R2" && !lrc.price_closed_beyond_ema10)
+                ? "dc-ot-rank-ctx dc-ot-rank-ctx--r2"
+                : "dc-ot-rank-ctx dc-ot-rank-ctx--r1";
+            ctxRow.appendChild(el("span", cls, lrc.label));
+            var meta = "ranks " + (lrc.rank_trail || "—")
+                + " · " + (lrc.direction || "")
+                + (lrc.entry_rank != null ? (" · entry #" + lrc.entry_rank) : "")
+                + (lrc.removal_rank != null ? (" · remove #" + lrc.removal_rank) : "");
+            var pxNote = lrc.price_closed_beyond_ema10
+                ? " · confirmed close beyond EMA10"
+                : " · confirmed close NOT beyond EMA10";
+            if (lrc.price_closed_beyond_vwap) pxNote += " · beyond VWAP";
+            ctxRow.appendChild(el("span", "dc-ot-rank-meta", meta + pxNote));
+            card.appendChild(ctxRow);
+        }
 
         var exitForm = el("div", "dc-ot-exit-form");
         exitForm.hidden = true;
@@ -1646,8 +1684,6 @@
         api("/reset", { method: "POST" })
             .then(function (s) {
                 cardEls = {};
-                $("dcBullGrid").innerHTML = "";
-                $("dcBearGrid").innerHTML = "";
                 if ($("dcZone3Grid")) $("dcZone3Grid").innerHTML = "";
                 if ($("dcZone4List")) $("dcZone4List").innerHTML = "";
                 closeModal();
