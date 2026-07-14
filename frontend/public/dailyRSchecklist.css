@@ -205,6 +205,10 @@ button.dc-card:hover, .dc-card[role="button"]:hover { box-shadow: 0 2px 8px rgba
     box-shadow: 0 0 0 1px #ef4444, 0 0 18px rgba(239, 68, 68, 0.35);
     animation: dc-ot-pulse 1.4s ease-in-out infinite;
 }
+.dc-ot-card--plan-exit {
+    border-color: #fbbf24;
+    box-shadow: 0 0 0 1px #f59e0b, 0 0 14px rgba(245, 158, 11, 0.3);
+}
 @keyframes dc-ot-pulse {
     0%, 100% { box-shadow: 0 0 0 1px #ef4444, 0 0 10px rgba(239, 68, 68, 0.25); }
     50% { box-shadow: 0 0 0 2px #fca5a5, 0 0 22px rgba(239, 68, 68, 0.55); }
@@ -220,6 +224,7 @@ button.dc-card:hover, .dc-card[role="button"]:hover { box-shadow: 0 2px 8px rgba
 .dc-ot-state { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 5px; letter-spacing: 0.04em; }
 .dc-ot-state--trailing { background: #1d4ed8; }
 .dc-ot-state--profit-locked { background: #0369a1; }
+.dc-ot-state--plan-exit { background: #b45309; color: #fef3c7; }
 .dc-ot-state--exit-now { background: #dc2626; }
 .dc-ot-edit {
     background: rgba(15,23,42,0.55);
@@ -273,6 +278,7 @@ button.dc-card:hover, .dc-card[role="button"]:hover { box-shadow: 0 2px 8px rgba
 }
 .dc-ot-rank-ctx--r2 { color: #fbbf24; }
 .dc-ot-rank-ctx--r1 { color: #f87171; }
+.dc-ot-rank-ctx--plan { color: #fcd34d; }
 .dc-ot-rank-meta {
     font-size: 11px;
     color: #94a3b8;

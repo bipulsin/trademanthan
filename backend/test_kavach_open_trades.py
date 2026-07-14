@@ -252,6 +252,102 @@ def test_lock_removal_structure_labels():
     r1 = lock_removal_structure_label("R1", price_closed_beyond_ema10=False)
     assert "VWAP confirmed close" in r1
     assert "EMA10 not yet crossed" in r1
+    plan = lock_removal_structure_label(
+        "R1", price_closed_beyond_ema10=False, plan_exit=True
+    )
+    assert "PLAN EXIT" in plan
     assert "R1 structure" in lock_removal_structure_label("R1", price_closed_beyond_ema10=True)
     assert "NOT closed" in lock_removal_structure_label("R2", price_closed_beyond_ema10=False)
     assert "HAS closed" in lock_removal_structure_label("R2", price_closed_beyond_ema10=True)
+
+
+def test_classify_r1_plan_exit_when_vwap_breached_ema10_ok():
+    from backend.services.kavach_open_trades import (
+        STATE_PLAN_EXIT,
+        R1_PATH_PLAN_EXIT,
+        classify_r1_signal,
+    )
+
+    # SHORT: adverse VWAP (close > vwap) but still on correct side of EMA10 (close <= ema10)
+    d = classify_r1_signal(close=396.4, ema10=400.6, vwap=395.0, is_long=False)
+    assert d["plan_exit"] is True
+    assert d["state"] == STATE_PLAN_EXIT
+    assert d["path"] == R1_PATH_PLAN_EXIT
+
+
+def test_classify_r1_exit_now_when_ema10_between_or_crossed():
+    from backend.services.kavach_open_trades import (
+        STATE_EXIT_NOW,
+        R1_PATH_EXIT_NOW_BETWEEN,
+        R1_PATH_EXIT_NOW_CROSSED,
+        classify_r1_signal,
+    )
+
+    d = classify_r1_signal(close=155.49, ema10=155.40, vwap=154.0, is_long=False)
+    assert d["plan_exit"] is False
+    assert d["state"] == STATE_EXIT_NOW
+    assert d["path"] in (R1_PATH_EXIT_NOW_BETWEEN, R1_PATH_EXIT_NOW_CROSSED)
+
+    d2 = classify_r1_signal(close=2376.5, ema10=2380.2, vwap=2390.0, is_long=True)
+    assert d2["state"] == STATE_EXIT_NOW
+    assert d2["plan_exit"] is False
+
+
+def test_mark_open_trades_r1_plan_exit():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+    import pytz
+    from backend.services import kavach_open_trades as ot
+
+    ist = pytz.timezone("Asia/Kolkata")
+    removed_at = ist.localize(datetime(2026, 7, 14, 10, 10))
+    row = SimpleNamespace(
+        id="t-abc",
+        state=ot.STATE_TRAILING,
+        direction="SHORT",
+        provenance=None,
+        state_context_snapshot=None,
+        entry_price=400.0,
+        entry_qty=1,
+    )
+    db = MagicMock()
+    db.execute.side_effect = [
+        MagicMock(fetchall=lambda: [row]),
+        MagicMock(),
+    ]
+    ctx = {
+        "rule": "R1",
+        "label": "PLAN EXIT — R1 VWAP confirmed close against position (EMA10 not yet crossed).",
+        "plan_exit": True,
+        "target_state": ot.STATE_PLAN_EXIT,
+        "signal_path": ot.R1_PATH_PLAN_EXIT,
+        "rank_trail": "—",
+        "price_closed_beyond_ema10": False,
+        "vwap_close_hm": "10:10",
+        "ema10_distance_pts": 4.2,
+        "pnl_at_flag_inr": 100,
+    }
+    trade_dict = {
+        "id": "t-abc",
+        "state": ot.STATE_TRAILING,
+        "direction": "SHORT",
+        "provenance": None,
+        "state_context_snapshot": {},
+        "entry_price": 400.0,
+        "entry_qty": 1,
+    }
+    with patch.object(ot, "ensure_tables"), patch.object(
+        ot, "_row_to_dict", return_value=trade_dict
+    ), patch.object(ot, "build_lock_removal_context", return_value=ctx), patch.object(
+        ot, "log_r2_exit_now"
+    ), patch.object(ot, "log_r1_early_warning") as log_r1:
+        ids = ot.mark_open_trades_exit_on_lock_removal(
+            db, "2026-07-14", "ABCAPITAL", "R1", removed_at=removed_at
+        )
+    assert ids == ["t-abc"]
+    params = db.execute.call_args_list[1][0][1]
+    assert params["st"] == ot.STATE_PLAN_EXIT
+    assert "PLAN EXIT" in params["tr"]
+    assert params["alarm"] == removed_at
+    assert log_r1.call_args.kwargs.get("signal_path") == ot.R1_PATH_PLAN_EXIT

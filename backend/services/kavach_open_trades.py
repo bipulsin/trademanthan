@@ -22,7 +22,14 @@ IST = pytz.timezone("Asia/Kolkata")
 
 STATE_TRAILING = "TRAILING"
 STATE_PROFIT_LOCKED = "PROFIT_LOCKED"
+STATE_PLAN_EXIT = "PLAN_EXIT"
 STATE_EXIT_NOW = "EXIT_NOW"
+
+# R1 signal_path values persisted on kavach_r1_early_warning_log
+R1_PATH_PLAN_EXIT = "plan_exit"
+R1_PATH_EXIT_NOW_BETWEEN = "exit_now_ema10_between_price_vwap"
+R1_PATH_EXIT_NOW_CROSSED = "exit_now_ema10_already_crossed"
+R1_PATH_PLAN_THEN_EMA10 = "plan_exit_then_exit_now"
 
 STATUS_OPEN = "OPEN"
 STATUS_CLOSED = "CLOSED"
@@ -52,10 +59,33 @@ def format_lock_removal_exit_reason(rule: str, removed_at: Optional[datetime] = 
     return f"Lock removed via {tag} at {when.strftime('%H:%M')} — setup no longer qualified"
 
 
-def lock_removal_structure_label(rule: str, *, price_closed_beyond_ema10: bool) -> str:
+def format_r1_plan_exit_reason(removed_at: Optional[datetime] = None) -> str:
+    """Informational PLAN EXIT reason (R1 VWAP early warning — not an exit trigger)."""
+    when = removed_at or _now()
+    if when.tzinfo is None:
+        when = IST.localize(when)
+    else:
+        when = when.astimezone(IST)
+    return (
+        f"PLAN EXIT — R1 VWAP confirmed close against position at "
+        f"{when.strftime('%H:%M')} (EMA10 not yet crossed)"
+    )
+
+
+def lock_removal_structure_label(
+    rule: str,
+    *,
+    price_closed_beyond_ema10: bool,
+    plan_exit: bool = False,
+) -> str:
     """Trader-facing distinction: rank drop vs structural EMA10 / VWAP break."""
     tag = (rule or "").strip().upper()
     if tag == "R1":
+        if plan_exit and not price_closed_beyond_ema10:
+            return (
+                "PLAN EXIT — R1 VWAP confirmed close against position "
+                "(EMA10 not yet crossed)."
+            )
         if price_closed_beyond_ema10:
             return "R1 structure removal — price closed beyond EMA10"
         return (
@@ -64,6 +94,67 @@ def lock_removal_structure_label(rule: str, *, price_closed_beyond_ema10: bool) 
     if price_closed_beyond_ema10:
         return "R2 rank-based removal — price HAS closed beyond EMA10"
     return "R2 rank-based removal — price has NOT closed beyond EMA10"
+
+
+def classify_r1_signal(
+    *,
+    close: Optional[float],
+    ema10: Optional[float],
+    vwap: Optional[float],
+    is_long: bool,
+) -> Dict[str, Any]:
+    """Decide PLAN EXIT vs EXIT NOW for R1 VWAP lock-removal.
+
+    - VWAP adverse + EMA10 not breached → PLAN EXIT (informational).
+    - EMA10 already breached, or EMA10 sits between price and VWAP (so a VWAP
+      adverse breach implies EMA10 was crossed too) → EXIT NOW directly.
+    """
+    beyond_ema10 = False
+    beyond_vwap = False
+    ema10_between = False
+    if close is not None and ema10 is not None:
+        beyond_ema10 = (close < ema10) if is_long else (close > ema10)
+    if close is not None and vwap is not None:
+        beyond_vwap = (close < vwap) if is_long else (close > vwap)
+    if close is not None and ema10 is not None and vwap is not None:
+        lo = min(close, vwap)
+        hi = max(close, vwap)
+        ema10_between = lo < ema10 < hi
+
+    # Between-price-and-VWAP with adverse VWAP ⇒ EMA10 already on the wrong side
+    if beyond_ema10 or (beyond_vwap and ema10_between):
+        path = (
+            R1_PATH_EXIT_NOW_BETWEEN
+            if ema10_between
+            else R1_PATH_EXIT_NOW_CROSSED
+        )
+        return {
+            "path": path,
+            "state": STATE_EXIT_NOW,
+            "plan_exit": False,
+            "price_closed_beyond_ema10": True if beyond_ema10 else bool(ema10_between),
+            "ema10_between_price_vwap": ema10_between,
+            "price_closed_beyond_vwap": beyond_vwap,
+        }
+    return {
+        "path": R1_PATH_PLAN_EXIT,
+        "state": STATE_PLAN_EXIT,
+        "plan_exit": True,
+        "price_closed_beyond_ema10": False,
+        "ema10_between_price_vwap": ema10_between,
+        "price_closed_beyond_vwap": beyond_vwap,
+    }
+
+
+def _r1_detail_bits(ctx: Dict[str, Any]) -> str:
+    bits = []
+    if ctx.get("vwap_close_hm"):
+        bits.append(f"VWAP@{ctx['vwap_close_hm']}")
+    if ctx.get("ema10_distance_pts") is not None:
+        bits.append(f"ΔEMA10 {ctx['ema10_distance_pts']}")
+    if ctx.get("pnl_at_flag_inr") is not None:
+        bits.append(f"P&L ₹{int(ctx['pnl_at_flag_inr'])}")
+    return " · ".join(bits)
 
 
 def _side_from_trade_direction(direction: str) -> str:
@@ -127,7 +218,7 @@ def build_lock_removal_context(
     removed_at: Optional[datetime] = None,
     trade: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Rank history + price-vs-structure status for EXIT NOW transparency."""
+    """Rank history + price-vs-structure status for EXIT NOW / PLAN EXIT transparency."""
     bar = _confirmed_10m_levels(db, symbol)
     levels = _levels_for_symbol(db, symbol, session_date)
     close = _f(bar.get("close"))
@@ -149,7 +240,21 @@ def build_lock_removal_context(
     for item in reversed(ranks):  # oldest → newest for arrow trail
         rank_strs.append("out" if item["rank"] is None else str(item["rank"]))
     rank_trail = "→".join(rank_strs) if rank_strs else "—"
-    label = lock_removal_structure_label(rule, price_closed_beyond_ema10=beyond_ema10)
+
+    r1_decision: Optional[Dict[str, Any]] = None
+    plan_exit = False
+    if (rule or "").strip().upper() == "R1":
+        r1_decision = classify_r1_signal(
+            close=close, ema10=ema10, vwap=vwap, is_long=is_long
+        )
+        plan_exit = bool(r1_decision.get("plan_exit"))
+        # Prefer classifier's beyond flags (between-case may force EXIT NOW)
+        beyond_ema10 = bool(r1_decision.get("price_closed_beyond_ema10"))
+        beyond_vwap = bool(r1_decision.get("price_closed_beyond_vwap", beyond_vwap))
+
+    label = lock_removal_structure_label(
+        rule, price_closed_beyond_ema10=beyond_ema10, plan_exit=plan_exit
+    )
 
     ema10_dist_pts = None
     if live is not None and ema10 is not None:
@@ -172,7 +277,7 @@ def build_lock_removal_context(
     else:
         vwap_close_hm = _bar_hm(bar.get("bar_at"))
 
-    return {
+    out: Dict[str, Any] = {
         "rule": (rule or "").strip().upper(),
         "direction": (direction or "LONG").upper(),
         "label": label,
@@ -191,6 +296,12 @@ def build_lock_removal_context(
         "vwap_close_hm": vwap_close_hm,
         "removed_at": when.isoformat() if isinstance(when, datetime) else str(when),
     }
+    if r1_decision:
+        out["signal_path"] = r1_decision.get("path")
+        out["plan_exit"] = plan_exit
+        out["target_state"] = r1_decision.get("state")
+        out["ema10_between_price_vwap"] = r1_decision.get("ema10_between_price_vwap")
+    return out
 
 
 def log_r1_early_warning(
@@ -203,11 +314,13 @@ def log_r1_early_warning(
     context: Dict[str, Any],
     exit_trigger_reason: str,
     removed_at: Optional[datetime] = None,
+    signal_path: Optional[str] = None,
 ) -> None:
-    """Persist R1 VWAP early-warning events for 22-Jul discretionary-exit review."""
+    """Persist R1 VWAP events (PLAN EXIT or EXIT NOW) for 22-Jul review."""
     ensure_tables()
     if (context.get("rule") or "").upper() != "R1":
         return
+    path = signal_path or context.get("signal_path")
     try:
         db.execute(
             text(
@@ -217,13 +330,13 @@ def log_r1_early_warning(
                     vwap_close_price, vwap_close_hm,
                     ema10, ema10_distance_pts, live_price,
                     pnl_at_flag_inr, price_closed_beyond_ema10,
-                    exit_trigger_reason, label, removed_at
+                    exit_trigger_reason, label, removed_at, signal_path
                 ) VALUES (
                     :tid, :sym, CAST(:d AS date), :dir,
                     :vwap, :hm,
                     :ema10, :dist, :live,
                     :pnl, :beyond,
-                    :reason, :label, :rat
+                    :reason, :label, :rat, :path
                 )
                 """
             ),
@@ -242,6 +355,7 @@ def log_r1_early_warning(
                 "reason": exit_trigger_reason,
                 "label": context.get("label"),
                 "rat": removed_at or _now(),
+                "path": path,
             },
         )
     except Exception as exc:
@@ -480,8 +594,17 @@ def ensure_tables() -> None:
                     exit_trigger_reason TEXT,
                     label TEXT,
                     removed_at TIMESTAMPTZ,
+                    signal_path TEXT,
                     logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE kavach_r1_early_warning_log
+                ADD COLUMN IF NOT EXISTS signal_path TEXT
                 """
             )
         )
@@ -978,6 +1101,9 @@ def list_session_trades(session_date: Optional[str] = None) -> Dict[str, Any]:
             "exit_now_symbols": [
                 t["symbol"] for t in open_list if t.get("state") == STATE_EXIT_NOW
             ],
+            "plan_exit_symbols": [
+                t["symbol"] for t in open_list if t.get("state") == STATE_PLAN_EXIT
+            ],
         }
     finally:
         db.close()
@@ -1058,6 +1184,19 @@ def enrich_trade_live(t: Dict[str, Any], db) -> Dict[str, Any]:
     elif state == STATE_PROFIT_LOCKED:
         side = "below" if is_long else "above"
         hint = f"R:R hit 1:2 · trail tightened to EMA5 close (₹{disp_sl:.2f})" if disp_sl else "R:R hit 1:2 · trail on EMA5"
+    elif state == STATE_PLAN_EXIT:
+        side = "below" if is_long else "above"
+        hint = (
+            "PLAN EXIT — VWAP breached; hold until 10m close "
+            f"{side} EMA10 (₹{disp_sl:.2f})" if disp_sl
+            else "PLAN EXIT — VWAP breached; hold until confirmed EMA10 close"
+        )
+        lrc = None
+        snap = t.get("state_context_snapshot")
+        if isinstance(snap, dict):
+            lrc = snap.get("lock_removal_context")
+        if isinstance(lrc, dict) and lrc.get("label"):
+            hint = f"{hint} · {lrc['label']}"
     elif state == STATE_EXIT_NOW:
         hint = f"EXIT at current candle close · reason: {t.get('exit_trigger_reason') or '—'}"
         lrc = None
@@ -1314,12 +1453,17 @@ def mark_open_trades_exit_on_lock_removal(
     *,
     removed_at: Optional[datetime] = None,
 ) -> List[str]:
-    """Force EXIT NOW on OPEN panel trades for ``symbol`` after R1/R2 removal.
+    """Apply lock-removal signal on OPEN panel trades for ``symbol``.
 
-    Does not auto-close — trader still confirms EXIT. Returns newly EXIT_NOW ids.
+    R2 → always EXIT NOW (+ alarm).
+    R1 → PLAN EXIT (informational) when EMA10 not yet breached; EXIT NOW when
+    EMA10 already breached or sits between price and VWAP.
+
+    Does not auto-close — trader still confirms EXIT on EXIT NOW.
+    Returns ids newly moved to EXIT_NOW or PLAN_EXIT.
     """
     ensure_tables()
-    reason = format_lock_removal_exit_reason(rule, removed_at)
+    tag = (rule or "").strip().upper()
     now = removed_at or _now()
     if isinstance(now, datetime):
         if now.tzinfo is None:
@@ -1341,7 +1485,8 @@ def mark_open_trades_exit_on_lock_removal(
     ).fetchall()
     newly: List[str] = []
     for row in rows:
-        if (row.state or "") == STATE_EXIT_NOW:
+        prev_state = row.state or ""
+        if prev_state == STATE_EXIT_NOW:
             continue
         t = _row_to_dict(row)
         direction = (t.get("direction") or "LONG").upper()
@@ -1349,44 +1494,57 @@ def mark_open_trades_exit_on_lock_removal(
             db,
             session_date,
             symbol,
-            rule,
+            tag,
             direction=direction,
             entry_rank=_entry_rank_from_trade(t),
             removed_at=now,
             trade=t,
         )
+
+        if tag == "R1":
+            target = ctx.get("target_state") or STATE_PLAN_EXIT
+            if prev_state == STATE_PLAN_EXIT and target == STATE_PLAN_EXIT:
+                continue
+            if target == STATE_PLAN_EXIT:
+                reason = format_r1_plan_exit_reason(now)
+            else:
+                reason = format_lock_removal_exit_reason("R1", now)
+        else:
+            target = STATE_EXIT_NOW
+            reason = format_lock_removal_exit_reason(tag, now)
+
         detail_reason = reason
         if ctx.get("label"):
             detail_reason = f"{reason} | {ctx['label']}"
-            if (rule or "").upper() == "R2" and ctx.get("rank_trail"):
+            if tag == "R2" and ctx.get("rank_trail"):
                 detail_reason = f"{detail_reason} | ranks {ctx['rank_trail']}"
-            if (rule or "").upper() == "R1":
-                bits = []
-                if ctx.get("vwap_close_hm"):
-                    bits.append(f"VWAP@{ctx['vwap_close_hm']}")
-                if ctx.get("ema10_distance_pts") is not None:
-                    bits.append(f"ΔEMA10 {ctx['ema10_distance_pts']}")
-                if ctx.get("pnl_at_flag_inr") is not None:
-                    bits.append(f"P&L ₹{int(ctx['pnl_at_flag_inr'])}")
+            if tag == "R1":
+                bits = _r1_detail_bits(ctx)
                 if bits:
-                    detail_reason = f"{detail_reason} | " + " · ".join(bits)
+                    detail_reason = f"{detail_reason} | {bits}"
+
         snap = t.get("state_context_snapshot") if isinstance(t.get("state_context_snapshot"), dict) else {}
         snap = dict(snap or {})
         snap["lock_removal_context"] = ctx
+        alarm_sql = (
+            "alarm_fired_at = :alarm"
+            if prev_state == STATE_PLAN_EXIT and target == STATE_EXIT_NOW
+            else "alarm_fired_at = COALESCE(alarm_fired_at, :alarm)"
+        )
         db.execute(
             text(
-                """
+                f"""
                 UPDATE kavach_checklist_trades SET
                     state = :st,
                     exit_trigger_reason = :tr,
-                    alarm_fired_at = COALESCE(alarm_fired_at, :alarm),
+                    {alarm_sql},
                     state_context_snapshot = CAST(:snap AS jsonb),
                     updated_at = NOW()
                 WHERE id = :id AND state <> :st
                 """
             ),
             {
-                "st": STATE_EXIT_NOW,
+                "st": target,
                 "tr": detail_reason,
                 "alarm": now,
                 "snap": json.dumps(snap),
@@ -1412,22 +1570,24 @@ def mark_open_trades_exit_on_lock_removal(
             context=ctx,
             exit_trigger_reason=detail_reason,
             removed_at=now,
+            signal_path=ctx.get("signal_path") if tag == "R1" else None,
         )
         newly.append(str(row.id))
         logger.info(
-            "open_trades: EXIT_NOW on lock removal symbol=%s rule=%s trade=%s label=%s",
+            "open_trades: %s on lock removal symbol=%s rule=%s trade=%s path=%s",
+            target,
             symbol,
-            rule,
+            tag,
             row.id,
-            ctx.get("label"),
+            ctx.get("signal_path"),
         )
     return newly
 
 
 def evaluate_open_trades(db, session_date: str) -> List[str]:
-    """Candle-close state machine + R1/R2 lock-removal EXIT NOW.
+    """Candle-close state machine + R1/R2 lock-removal signals.
 
-    Returns trade ids that newly entered EXIT_NOW.
+    Returns trade ids that newly entered EXIT_NOW (not PLAN_EXIT).
     """
     newly_exit: List[str] = []
     rows = db.execute(
@@ -1453,40 +1613,52 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
         last_eval = str(t.get("last_eval_bar_at") or "")
         bar_at = last_eval
         lock_exit = False
-
-        # Lock removal while open — do not wait for next 10m candle
         lock_ctx: Optional[Dict[str, Any]] = None
+        force_new_alarm = False
+        r1_log_path: Optional[str] = None
+
         if state != STATE_EXIT_NOW:
             since = _parse_ts(t.get("entry_time")) or _parse_ts(t.get("created_at"))
             rem = latest_r_lock_removal(db, session_date, sym, since=since)
             if rem and not _symbol_on_lock(db, session_date, sym):
-                new_state = STATE_EXIT_NOW
-                trigger_reason = format_lock_removal_exit_reason(rem["rule"], rem.get("at"))
+                rule = (rem["rule"] or "").upper()
                 lock_ctx = build_lock_removal_context(
                     db,
                     session_date,
                     sym,
-                    rem["rule"],
+                    rule,
                     direction=t.get("direction") or "LONG",
                     entry_rank=_entry_rank_from_trade(t),
                     removed_at=rem.get("at"),
                     trade=t,
                 )
-                if lock_ctx.get("label"):
-                    trigger_reason = f"{trigger_reason} | {lock_ctx['label']}"
-                    if (rem["rule"] or "").upper() == "R2" and lock_ctx.get("rank_trail"):
-                        trigger_reason = f"{trigger_reason} | ranks {lock_ctx['rank_trail']}"
-                    if (rem["rule"] or "").upper() == "R1":
-                        bits = []
-                        if lock_ctx.get("vwap_close_hm"):
-                            bits.append(f"VWAP@{lock_ctx['vwap_close_hm']}")
-                        if lock_ctx.get("ema10_distance_pts") is not None:
-                            bits.append(f"ΔEMA10 {lock_ctx['ema10_distance_pts']}")
-                        if lock_ctx.get("pnl_at_flag_inr") is not None:
-                            bits.append(f"P&L ₹{int(lock_ctx['pnl_at_flag_inr'])}")
-                        if bits:
-                            trigger_reason = f"{trigger_reason} | " + " · ".join(bits)
-                lock_exit = True
+                if rule == "R1":
+                    target = lock_ctx.get("target_state") or STATE_PLAN_EXIT
+                    if state == STATE_PLAN_EXIT and target == STATE_PLAN_EXIT:
+                        lock_exit = False
+                    else:
+                        new_state = target
+                        if target == STATE_PLAN_EXIT:
+                            trigger_reason = format_r1_plan_exit_reason(rem.get("at"))
+                        else:
+                            trigger_reason = format_lock_removal_exit_reason("R1", rem.get("at"))
+                        if lock_ctx.get("label"):
+                            trigger_reason = f"{trigger_reason} | {lock_ctx['label']}"
+                            bits = _r1_detail_bits(lock_ctx)
+                            if bits:
+                                trigger_reason = f"{trigger_reason} | {bits}"
+                        r1_log_path = lock_ctx.get("signal_path")
+                        lock_exit = True
+                        if state == STATE_PLAN_EXIT and target == STATE_EXIT_NOW:
+                            force_new_alarm = True
+                else:
+                    new_state = STATE_EXIT_NOW
+                    trigger_reason = format_lock_removal_exit_reason(rule, rem.get("at"))
+                    if lock_ctx.get("label"):
+                        trigger_reason = f"{trigger_reason} | {lock_ctx['label']}"
+                        if lock_ctx.get("rank_trail"):
+                            trigger_reason = f"{trigger_reason} | ranks {lock_ctx['rank_trail']}"
+                    lock_exit = True
 
         bar = _confirmed_10m_levels(db, sym)
         if bar.get("close"):
@@ -1507,7 +1679,17 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
             peak = max(peak, rr)
 
             if state != STATE_EXIT_NOW and not lock_exit:
-                if state == STATE_TRAILING:
+                if state == STATE_PLAN_EXIT:
+                    new_sl = ema10 if ema10 is not None else new_sl
+                    if ema10 is not None:
+                        beyond = (close < ema10) if is_long else (close > ema10)
+                        if beyond:
+                            new_state = STATE_EXIT_NOW
+                            trigger_reason = "EMA10 reverse close"
+                            trigger_px = close
+                            force_new_alarm = True
+                            r1_log_path = R1_PATH_PLAN_THEN_EMA10
+                elif state == STATE_TRAILING:
                     new_sl = ema10
                     if ema10 is not None and rr < RR_LOW:
                         risk_now = abs(close - ema10) * qty
@@ -1535,20 +1717,25 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
         elif not lock_exit:
             continue
 
-        if new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW and not alarm_at:
-            alarm_at = _now()
+        entered_exit_now = new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW
+        entered_plan_exit = new_state == STATE_PLAN_EXIT and state != STATE_PLAN_EXIT
+        if entered_exit_now:
+            if force_new_alarm or not alarm_at:
+                alarm_at = _now()
             newly_exit.append(tid)
+        elif entered_plan_exit and not alarm_at:
+            alarm_at = _now()
 
         if lock_exit or bar_at != last_eval or new_state != state or (
             new_sl != _f(t.get("current_sl_price"))
         ):
             snap_json = None
+            snap = t.get("state_context_snapshot") if isinstance(t.get("state_context_snapshot"), dict) else {}
+            snap = dict(snap or {})
             if lock_exit and lock_ctx:
-                snap = t.get("state_context_snapshot") if isinstance(t.get("state_context_snapshot"), dict) else {}
-                snap = dict(snap or {})
                 snap["lock_removal_context"] = lock_ctx
                 snap_json = json.dumps(snap)
-                if new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW:
+                if new_state in (STATE_EXIT_NOW, STATE_PLAN_EXIT) and new_state != state:
                     log_r2_exit_now(
                         db,
                         trade_id=str(tid),
@@ -1572,64 +1759,86 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
                         removed_at=lock_ctx.get("removed_at")
                         if isinstance(lock_ctx.get("removed_at"), datetime)
                         else _parse_ts(lock_ctx.get("removed_at")),
+                        signal_path=r1_log_path or lock_ctx.get("signal_path"),
                     )
+            elif entered_exit_now and r1_log_path == R1_PATH_PLAN_THEN_EMA10:
+                prior = snap.get("lock_removal_context") if isinstance(snap.get("lock_removal_context"), dict) else {}
+                ctx_for_log = dict(prior) if prior else {"rule": "R1", "label": trigger_reason}
+                ctx_for_log["rule"] = "R1"
+                ctx_for_log["signal_path"] = R1_PATH_PLAN_THEN_EMA10
+                snap["lock_removal_context"] = ctx_for_log
+                snap_json = json.dumps(snap)
+                log_r1_early_warning(
+                    db,
+                    trade_id=str(tid),
+                    symbol=sym,
+                    session_date=session_date,
+                    direction=t.get("direction") or "LONG",
+                    context=ctx_for_log,
+                    exit_trigger_reason=trigger_reason or "",
+                    removed_at=_now(),
+                    signal_path=R1_PATH_PLAN_THEN_EMA10,
+                )
+
+            alarm_param = None
+            if entered_exit_now or entered_plan_exit:
+                alarm_param = alarm_at if isinstance(alarm_at, datetime) else _parse_ts(alarm_at) or _now()
+
+            if force_new_alarm and entered_exit_now:
+                alarm_set_sql = "alarm_fired_at = :alarm"
+            else:
+                alarm_set_sql = "alarm_fired_at = COALESCE(alarm_fired_at, :alarm)"
+
+            params = {
+                "st": new_state,
+                "sl": new_sl,
+                "peak": peak,
+                "tr": trigger_reason,
+                "tpx": trigger_px,
+                "alarm": alarm_param,
+                "bar": bar_at or None,
+                "id": tid,
+            }
             if snap_json is not None:
+                params["snap"] = snap_json
                 db.execute(
                     text(
-                        """
+                        f"""
                         UPDATE kavach_checklist_trades SET
                             state = :st,
                             current_sl_price = :sl,
                             highest_rr_reached = :peak,
                             exit_trigger_reason = :tr,
                             exit_trigger_price = :tpx,
-                            alarm_fired_at = COALESCE(alarm_fired_at, :alarm),
+                            {alarm_set_sql},
                             last_eval_bar_at = COALESCE(:bar, last_eval_bar_at),
                             state_context_snapshot = CAST(:snap AS jsonb),
                             updated_at = NOW()
                         WHERE id = :id
                         """
                     ),
-                    {
-                        "st": new_state,
-                        "sl": new_sl,
-                        "peak": peak,
-                        "tr": trigger_reason,
-                        "tpx": trigger_px,
-                        "alarm": alarm_at if new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW else None,
-                        "bar": bar_at or None,
-                        "snap": snap_json,
-                        "id": tid,
-                    },
+                    params,
                 )
             else:
                 db.execute(
                     text(
-                        """
+                        f"""
                         UPDATE kavach_checklist_trades SET
                             state = :st,
                             current_sl_price = :sl,
                             highest_rr_reached = :peak,
                             exit_trigger_reason = :tr,
                             exit_trigger_price = :tpx,
-                            alarm_fired_at = COALESCE(alarm_fired_at, :alarm),
+                            {alarm_set_sql},
                             last_eval_bar_at = COALESCE(:bar, last_eval_bar_at),
                             updated_at = NOW()
                         WHERE id = :id
                         """
                     ),
-                    {
-                        "st": new_state,
-                        "sl": new_sl,
-                        "peak": peak,
-                        "tr": trigger_reason,
-                        "tpx": trigger_px,
-                        "alarm": alarm_at if new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW else None,
-                        "bar": bar_at or None,
-                        "id": tid,
-                    },
+                    params,
                 )
     return newly_exit
+
 
 
 def closed_symbols_today(session_date: str) -> Dict[str, Dict[str, Any]]:

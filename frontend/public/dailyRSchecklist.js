@@ -1194,7 +1194,7 @@
                 var ban = $("dcExitAckBanner");
                 var txt = $("dcExitAckText");
                 if (ban) ban.hidden = false;
-                if (txt) txt.textContent = "Audio blocked — click to play EXIT alarm for " + trade.symbol;
+                if (txt) txt.textContent = "Audio blocked — click to play alarm for " + trade.symbol;
             });
         } else {
             try { sessionStorage.setItem(alarmPlayedKey(trade), "1"); } catch (e) {}
@@ -1203,8 +1203,11 @@
 
     function updateExitTabTitle(panel) {
         var exits = (panel && panel.exit_now_symbols) || [];
+        var plans = (panel && panel.plan_exit_symbols) || [];
         if (exits.length) {
             document.title = "🚨 EXIT · " + exits.join(", ");
+        } else if (plans.length) {
+            document.title = "⚠ PLAN EXIT · " + plans.join(", ");
         } else {
             document.title = defaultDocTitle;
         }
@@ -1278,12 +1281,15 @@
         stack.innerHTML = "";
         trades.forEach(function (t) {
             stack.appendChild(buildOpenTradeCard(t));
-            if (t.state === "EXIT_NOW") playExitAlarm(t);
+            if (t.state === "EXIT_NOW" || t.state === "PLAN_EXIT") playExitAlarm(t);
         });
     }
 
     function buildOpenTradeCard(t) {
-        var card = el("div", "dc-ot-card" + (t.state === "EXIT_NOW" ? " dc-ot-card--exit" : ""));
+        var cardCls = "dc-ot-card";
+        if (t.state === "EXIT_NOW") cardCls += " dc-ot-card--exit";
+        else if (t.state === "PLAN_EXIT") cardCls += " dc-ot-card--plan-exit";
+        var card = el("div", cardCls);
         card.dataset.tradeId = t.id;
 
         var row1 = el("div", "dc-ot-row dc-ot-row--head");
@@ -1327,8 +1333,8 @@
         dirSel.addEventListener("change", function () { editOpenField(t.id, "direction", dirSel.value); });
         row1.appendChild(dirSel);
 
-        var stBadge = el("span", "dc-ot-state dc-ot-state--" + String(t.state || "").toLowerCase().replace("_", "-"),
-            (t.state || "").replace("_", " "));
+        var stBadge = el("span", "dc-ot-state dc-ot-state--" + String(t.state || "").toLowerCase().replace(/_/g, "-"),
+            (t.state || "").replace(/_/g, " "));
         row1.appendChild(stBadge);
 
         if (t.provenance || (t.state_context_snapshot && t.state_context_snapshot.provenance)) {
@@ -1364,21 +1370,24 @@
         card.appendChild(row3);
 
         var lrc = t.lock_removal_context;
-        if (t.state === "EXIT_NOW" && lrc && lrc.label) {
+        if ((t.state === "EXIT_NOW" || t.state === "PLAN_EXIT") && lrc && lrc.label) {
             var ctxRow = el("div", "dc-ot-row dc-ot-row--rank-ctx");
             var isR1 = lrc.rule === "R1";
-            var cls = isR1
-                ? "dc-ot-rank-ctx dc-ot-rank-ctx--r1"
-                : ((lrc.rule === "R2" && !lrc.price_closed_beyond_ema10)
-                    ? "dc-ot-rank-ctx dc-ot-rank-ctx--r2"
-                    : "dc-ot-rank-ctx dc-ot-rank-ctx--r1");
+            var isPlan = t.state === "PLAN_EXIT" || lrc.plan_exit;
+            var cls = isPlan
+                ? "dc-ot-rank-ctx dc-ot-rank-ctx--plan"
+                : (isR1
+                    ? "dc-ot-rank-ctx dc-ot-rank-ctx--r1"
+                    : ((lrc.rule === "R2" && !lrc.price_closed_beyond_ema10)
+                        ? "dc-ot-rank-ctx dc-ot-rank-ctx--r2"
+                        : "dc-ot-rank-ctx dc-ot-rank-ctx--r1"));
             ctxRow.appendChild(el("span", cls, lrc.label));
             var metaParts = [];
             if (isR1) {
-                if (lrc.vwap_close_hm) metaParts.push("VWAP close @" + lrc.vwap_close_hm);
+                if (lrc.vwap_close_hm) metaParts.push("VWAP@" + lrc.vwap_close_hm);
                 if (lrc.ema10_distance_pts != null) metaParts.push("ΔEMA10 " + lrc.ema10_distance_pts);
                 if (lrc.pnl_at_flag_inr != null) metaParts.push("P&L at flag " + fmtInr(lrc.pnl_at_flag_inr));
-                if (!lrc.price_closed_beyond_ema10) metaParts.push("EMA10 not yet crossed");
+                if (isPlan || !lrc.price_closed_beyond_ema10) metaParts.push("EMA10 not yet crossed");
             } else {
                 metaParts.push("ranks " + (lrc.rank_trail || "—"));
                 metaParts.push(lrc.direction || "");
