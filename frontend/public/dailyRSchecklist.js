@@ -920,6 +920,8 @@
         "EMA10 reverse close (rule)",
         "EMA5 reverse close (profit protection)",
         "Risk cap exceeded",
+        "Lock removed via R1",
+        "Lock removed via R2",
         "Discretionary early exit",
         "15:15 square-off",
         "Session loss cap hit"
@@ -1131,6 +1133,8 @@
                 if (t.exit_trigger_reason.indexOf("EMA10") >= 0 && r.indexOf("EMA10") >= 0) o.selected = true;
                 if (t.exit_trigger_reason.indexOf("EMA5") >= 0 && r.indexOf("EMA5") >= 0) o.selected = true;
                 if (t.exit_trigger_reason.indexOf("Risk") >= 0 && r.indexOf("Risk") >= 0) o.selected = true;
+                if (t.exit_trigger_reason.indexOf("Lock removed via R1") >= 0 && r === "Lock removed via R1") o.selected = true;
+                if (t.exit_trigger_reason.indexOf("Lock removed via R2") >= 0 && r === "Lock removed via R2") o.selected = true;
             }
             reason.appendChild(o);
         });

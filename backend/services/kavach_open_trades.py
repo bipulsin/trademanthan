@@ -31,10 +31,44 @@ EXIT_REASONS = (
     "EMA10 reverse close (rule)",
     "EMA5 reverse close (profit protection)",
     "Risk cap exceeded",
+    "Lock removed via R1",
+    "Lock removed via R2",
     "Discretionary early exit",
     "15:15 square-off",
     "Session loss cap hit",
 )
+
+
+def format_lock_removal_exit_reason(rule: str, removed_at: Optional[datetime] = None) -> str:
+    """Panel EXIT NOW label when lock membership is revoked via R1/R2."""
+    tag = (rule or "").strip().upper()
+    if tag not in ("R1", "R2"):
+        tag = "R2"
+    when = removed_at or _now()
+    if when.tzinfo is None:
+        when = IST.localize(when)
+    else:
+        when = when.astimezone(IST)
+    return f"Lock removed via {tag} at {when.strftime('%H:%M')} — setup no longer qualified"
+
+
+def canonical_exit_reason(raw: str) -> str:
+    """Map state-machine / UI trigger strings onto EXIT_REASONS."""
+    if raw in EXIT_REASONS:
+        return raw
+    mapped = {
+        "EMA10 reverse close": "EMA10 reverse close (rule)",
+        "EMA5 reverse close after profit protection": "EMA5 reverse close (profit protection)",
+        "Risk cap exceeded before 1:2": "Risk cap exceeded",
+    }
+    if raw in mapped:
+        return mapped[raw]
+    u = (raw or "").strip().upper()
+    if u.startswith("LOCK REMOVED VIA R1"):
+        return "Lock removed via R1"
+    if u.startswith("LOCK REMOVED VIA R2"):
+        return "Lock removed via R2"
+    return raw
 
 _ENSURED = False
 
@@ -576,13 +610,7 @@ def exit_trade(
 ) -> Dict[str, Any]:
     ensure_tables()
     if exit_reason not in EXIT_REASONS:
-        # allow trigger reasons from state machine mapped to enum
-        mapped = {
-            "EMA10 reverse close": "EMA10 reverse close (rule)",
-            "EMA5 reverse close after profit protection": "EMA5 reverse close (profit protection)",
-            "Risk cap exceeded before 1:2": "Risk cap exceeded",
-        }
-        exit_reason = mapped.get(exit_reason, exit_reason)
+        exit_reason = canonical_exit_reason(exit_reason)
         if exit_reason not in EXIT_REASONS:
             raise ValueError(f"exit_reason must be one of {EXIT_REASONS}")
 
@@ -641,8 +669,136 @@ def exit_trade(
         db.close()
 
 
+def _parse_ts(val: Any) -> Optional[datetime]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        dt = val
+    else:
+        try:
+            dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        return IST.localize(dt)
+    return dt.astimezone(IST)
+
+
+def _symbol_on_lock(db, session_date: str, symbol: str) -> bool:
+    r = db.execute(
+        text(
+            """
+            SELECT 1 FROM daily_snapshot
+            WHERE snapshot_date = CAST(:d AS date) AND UPPER(symbol) = :sym
+            LIMIT 1
+            """
+        ),
+        {"d": session_date, "sym": (symbol or "").upper()},
+    ).fetchone()
+    return r is not None
+
+
+def latest_r_lock_removal(
+    db,
+    session_date: str,
+    symbol: str,
+    *,
+    since: Optional[datetime] = None,
+) -> Optional[Dict[str, Any]]:
+    """Latest R1/R2 remove audit row for symbol (optionally after ``since``)."""
+    binds: Dict[str, Any] = {"d": session_date, "sym": (symbol or "").upper()}
+    since_sql = ""
+    if since is not None:
+        since_sql = " AND event_at >= :since"
+        binds["since"] = since
+    try:
+        r = db.execute(
+            text(
+                f"""
+                SELECT rule, event_at
+                FROM rs_lock_membership_audit
+                WHERE session_date = CAST(:d AS date)
+                  AND UPPER(symbol) = :sym
+                  AND event_type = 'remove'
+                  AND rule IN ('R1', 'R2')
+                  {since_sql}
+                ORDER BY event_at DESC
+                LIMIT 1
+                """
+            ),
+            binds,
+        ).fetchone()
+    except Exception as exc:
+        logger.debug("latest_r_lock_removal skipped: %s", exc)
+        return None
+    if not r:
+        return None
+    return {"rule": str(r.rule).upper(), "at": _parse_ts(r.event_at)}
+
+
+def mark_open_trades_exit_on_lock_removal(
+    db,
+    session_date: str,
+    symbol: str,
+    rule: str,
+    *,
+    removed_at: Optional[datetime] = None,
+) -> List[str]:
+    """Force EXIT NOW on OPEN panel trades for ``symbol`` after R1/R2 removal.
+
+    Does not auto-close — trader still confirms EXIT. Returns newly EXIT_NOW ids.
+    """
+    ensure_tables()
+    reason = format_lock_removal_exit_reason(rule, removed_at)
+    now = removed_at or _now()
+    if isinstance(now, datetime):
+        if now.tzinfo is None:
+            now = IST.localize(now)
+        else:
+            now = now.astimezone(IST)
+    rows = db.execute(
+        text(
+            """
+            SELECT id, state FROM kavach_checklist_trades
+            WHERE session_date = CAST(:d AS date)
+              AND status = 'OPEN'
+              AND UPPER(symbol) = :sym
+            """
+        ),
+        {"d": session_date, "sym": (symbol or "").upper()},
+    ).fetchall()
+    newly: List[str] = []
+    for row in rows:
+        if (row.state or "") == STATE_EXIT_NOW:
+            continue
+        db.execute(
+            text(
+                """
+                UPDATE kavach_checklist_trades SET
+                    state = :st,
+                    exit_trigger_reason = :tr,
+                    alarm_fired_at = COALESCE(alarm_fired_at, :alarm),
+                    updated_at = NOW()
+                WHERE id = :id AND state <> :st
+                """
+            ),
+            {"st": STATE_EXIT_NOW, "tr": reason, "alarm": now, "id": row.id},
+        )
+        newly.append(str(row.id))
+        logger.info(
+            "open_trades: EXIT_NOW on lock removal symbol=%s rule=%s trade=%s",
+            symbol,
+            rule,
+            row.id,
+        )
+    return newly
+
+
 def evaluate_open_trades(db, session_date: str) -> List[str]:
-    """Candle-close state machine. Returns trade ids that newly entered EXIT_NOW."""
+    """Candle-close state machine + R1/R2 lock-removal EXIT NOW.
+
+    Returns trade ids that newly entered EXIT_NOW.
+    """
     newly_exit: List[str] = []
     rows = db.execute(
         text(
@@ -657,76 +813,80 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
         t = _row_to_dict(r)
         tid = t["id"]
         sym = t["symbol"]
-        bar = _confirmed_10m_levels(db, sym)
-        if not bar.get("close"):
-            continue
-        bar_at = str(bar.get("bar_at") or "")
-        last_eval = str(t.get("last_eval_bar_at") or "")
-        # Only evaluate once per confirmed bar
-        if bar_at and last_eval and bar_at == last_eval:
-            # still update display SL from bar when trailing
-            pass
-
-        close = float(bar["close"])
-        ema5 = _f(bar.get("ema5"))
-        ema10 = _f(bar.get("ema10"))
-        is_long = (t.get("direction") or "LONG").upper() != "SHORT"
         state = t.get("state") or STATE_TRAILING
-        qty = int(t.get("entry_qty") or 1)
-        entry = _f(t.get("entry_price"))
-        initial_risk = _f(t.get("initial_sl_inr")) or 0
-
-        pnl_inr = 0.0
-        if entry is not None:
-            pts = (close - entry) if is_long else (entry - close)
-            pnl_inr = pts * qty
-        rr = (pnl_inr / initial_risk) if initial_risk > 0 else 0.0
-        peak = max(_f(t.get("highest_rr_reached")) or 0, rr)
-
         new_state = state
         new_sl = _f(t.get("current_sl_price"))
         trigger_reason = t.get("exit_trigger_reason")
         trigger_px = _f(t.get("exit_trigger_price"))
         alarm_at = t.get("alarm_fired_at")
+        peak = _f(t.get("highest_rr_reached")) or 0.0
+        last_eval = str(t.get("last_eval_bar_at") or "")
+        bar_at = last_eval
+        lock_exit = False
 
-        # Skip re-evaluation once EXIT_NOW
+        # Lock removal while open — do not wait for next 10m candle
         if state != STATE_EXIT_NOW:
-            if state == STATE_TRAILING:
-                new_sl = ema10
-                # Risk cap before 1:2
-                if ema10 is not None and rr < RR_LOW:
-                    risk_now = abs(close - ema10) * qty
-                    if risk_now > MAX_INR_RISK:
-                        new_state = STATE_EXIT_NOW
-                        trigger_reason = "Risk cap exceeded before 1:2"
-                        trigger_px = close
-                # EMA10 reverse
-                if new_state != STATE_EXIT_NOW and ema10 is not None:
-                    beyond = (close < ema10) if is_long else (close > ema10)
-                    if beyond:
-                        new_state = STATE_EXIT_NOW
-                        trigger_reason = "EMA10 reverse close"
-                        trigger_px = close
-                # Profit lock
-                if new_state == STATE_TRAILING and rr >= RR_LOW:
-                    new_state = STATE_PROFIT_LOCKED
-                    new_sl = ema5
+            since = _parse_ts(t.get("entry_time")) or _parse_ts(t.get("created_at"))
+            rem = latest_r_lock_removal(db, session_date, sym, since=since)
+            if rem and not _symbol_on_lock(db, session_date, sym):
+                new_state = STATE_EXIT_NOW
+                trigger_reason = format_lock_removal_exit_reason(rem["rule"], rem.get("at"))
+                lock_exit = True
 
-            elif state == STATE_PROFIT_LOCKED:
-                new_sl = ema5
-                if ema5 is not None:
-                    beyond = (close < ema5) if is_long else (close > ema5)
-                    if beyond:
-                        new_state = STATE_EXIT_NOW
-                        trigger_reason = "EMA5 reverse close after profit protection"
-                        trigger_px = close
+        bar = _confirmed_10m_levels(db, sym)
+        if bar.get("close"):
+            bar_at = str(bar.get("bar_at") or "")
+            close = float(bar["close"])
+            ema5 = _f(bar.get("ema5"))
+            ema10 = _f(bar.get("ema10"))
+            is_long = (t.get("direction") or "LONG").upper() != "SHORT"
+            qty = int(t.get("entry_qty") or 1)
+            entry = _f(t.get("entry_price"))
+            initial_risk = _f(t.get("initial_sl_inr")) or 0
+
+            pnl_inr = 0.0
+            if entry is not None:
+                pts = (close - entry) if is_long else (entry - close)
+                pnl_inr = pts * qty
+            rr = (pnl_inr / initial_risk) if initial_risk > 0 else 0.0
+            peak = max(peak, rr)
+
+            if state != STATE_EXIT_NOW and not lock_exit:
+                if state == STATE_TRAILING:
+                    new_sl = ema10
+                    if ema10 is not None and rr < RR_LOW:
+                        risk_now = abs(close - ema10) * qty
+                        if risk_now > MAX_INR_RISK:
+                            new_state = STATE_EXIT_NOW
+                            trigger_reason = "Risk cap exceeded before 1:2"
+                            trigger_px = close
+                    if new_state != STATE_EXIT_NOW and ema10 is not None:
+                        beyond = (close < ema10) if is_long else (close > ema10)
+                        if beyond:
+                            new_state = STATE_EXIT_NOW
+                            trigger_reason = "EMA10 reverse close"
+                            trigger_px = close
+                    if new_state == STATE_TRAILING and rr >= RR_LOW:
+                        new_state = STATE_PROFIT_LOCKED
+                        new_sl = ema5
+                elif state == STATE_PROFIT_LOCKED:
+                    new_sl = ema5
+                    if ema5 is not None:
+                        beyond = (close < ema5) if is_long else (close > ema5)
+                        if beyond:
+                            new_state = STATE_EXIT_NOW
+                            trigger_reason = "EMA5 reverse close after profit protection"
+                            trigger_px = close
+        elif not lock_exit:
+            continue
 
         if new_state == STATE_EXIT_NOW and state != STATE_EXIT_NOW and not alarm_at:
             alarm_at = _now()
             newly_exit.append(tid)
 
-        # Only write when bar advances or state changes
-        if bar_at != last_eval or new_state != state or (new_sl != _f(t.get("current_sl_price"))):
+        if lock_exit or bar_at != last_eval or new_state != state or (
+            new_sl != _f(t.get("current_sl_price"))
+        ):
             db.execute(
                 text(
                     """
@@ -737,7 +897,7 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
                         exit_trigger_reason = :tr,
                         exit_trigger_price = :tpx,
                         alarm_fired_at = COALESCE(alarm_fired_at, :alarm),
-                        last_eval_bar_at = :bar,
+                        last_eval_bar_at = COALESCE(:bar, last_eval_bar_at),
                         updated_at = NOW()
                     WHERE id = :id
                     """

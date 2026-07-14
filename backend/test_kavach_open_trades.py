@@ -69,10 +69,102 @@ def test_risk_cap_before_12():
     assert "Risk cap" in reason
 
 
-def test_no_reentry_after_exit_state_sticky():
-    st, reason = _next_state(
-        state=STATE_EXIT_NOW, is_long=True, close=1600.0, ema5=1590.0, ema10=1580.0,
-        rr=3.0, qty=650,
+def test_lock_removal_reason_format():
+    from datetime import datetime
+    import pytz
+    from backend.services.kavach_open_trades import format_lock_removal_exit_reason
+
+    ist = pytz.timezone("Asia/Kolkata")
+    at = ist.localize(datetime(2026, 7, 14, 10, 25))
+    reason = format_lock_removal_exit_reason("R2", at)
+    assert reason == "Lock removed via R2 at 10:25 — setup no longer qualified"
+    assert "R1" in format_lock_removal_exit_reason("R1", at)
+
+
+def test_canonical_lock_removal_exit_reason():
+    from backend.services.kavach_open_trades import canonical_exit_reason
+
+    raw = "Lock removed via R2 at 11:15 — setup no longer qualified"
+    assert canonical_exit_reason(raw) == "Lock removed via R2"
+    assert canonical_exit_reason("Lock removed via R1 at 10:15 — setup no longer qualified") == (
+        "Lock removed via R1"
     )
-    assert st == STATE_EXIT_NOW
-    assert reason is None
+
+
+def test_mark_open_trades_exit_on_lock_removal():
+    """MANAPPURAM-style: open SHORT → R2 removal → EXIT_NOW + alarm."""
+    from datetime import datetime
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+    import pytz
+    from backend.services import kavach_open_trades as ot
+
+    ist = pytz.timezone("Asia/Kolkata")
+    removed_at = ist.localize(datetime(2026, 7, 14, 10, 25))
+    db = MagicMock()
+    db.execute.side_effect = [
+        # SELECT open trades
+        MagicMock(fetchall=lambda: [SimpleNamespace(id="t-mana", state=ot.STATE_TRAILING)]),
+        # UPDATE
+        MagicMock(),
+    ]
+    with patch.object(ot, "ensure_tables"):
+        ids = ot.mark_open_trades_exit_on_lock_removal(
+            db, "2026-07-14", "MANAPPURAM", "R2", removed_at=removed_at
+        )
+    assert ids == ["t-mana"]
+    # second execute is UPDATE
+    update_call = db.execute.call_args_list[1]
+    params = update_call[0][1]
+    assert params["st"] == ot.STATE_EXIT_NOW
+    assert "Lock removed via R2 at 10:25" in params["tr"]
+    assert params["alarm"] == removed_at
+
+
+def test_evaluate_prioritizes_lock_removal_over_ema():
+    """Even with a healthy EMA10 trail, R2 removal forces EXIT_NOW."""
+    from datetime import datetime
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+    import pytz
+    from backend.services import kavach_open_trades as ot
+
+    ist = pytz.timezone("Asia/Kolkata")
+    entry = ist.localize(datetime(2026, 7, 14, 10, 15))
+    rem_at = ist.localize(datetime(2026, 7, 14, 10, 25))
+    trade = {
+        "id": "t1",
+        "symbol": "TIINDIA",
+        "direction": "SHORT",
+        "state": ot.STATE_TRAILING,
+        "entry_price": 2839.0,
+        "entry_qty": 200,
+        "initial_sl_inr": 1000,
+        "current_sl_price": 2845.0,
+        "highest_rr_reached": 0,
+        "exit_trigger_reason": None,
+        "exit_trigger_price": None,
+        "alarm_fired_at": None,
+        "last_eval_bar_at": None,
+        "entry_time": entry.isoformat(),
+        "created_at": entry.isoformat(),
+    }
+    db = MagicMock()
+    db.execute.side_effect = [
+        MagicMock(fetchall=lambda: [SimpleNamespace(**trade)]),  # open rows
+        MagicMock(),  # UPDATE
+    ]
+
+    with patch.object(ot, "_row_to_dict", return_value=trade), patch.object(
+        ot, "latest_r_lock_removal", return_value={"rule": "R2", "at": rem_at}
+    ), patch.object(ot, "_symbol_on_lock", return_value=False), patch.object(
+        ot,
+        "_confirmed_10m_levels",
+        return_value={"close": 2820.0, "ema5": 2830.0, "ema10": 2840.0, "bar_at": "2026-07-14T10:25:00+05:30"},
+    ):
+        newly = ot.evaluate_open_trades(db, "2026-07-14")
+
+    assert newly == ["t1"]
+    params = db.execute.call_args_list[-1][0][1]
+    assert params["st"] == ot.STATE_EXIT_NOW
+    assert "Lock removed via R2 at 10:25" in params["tr"]

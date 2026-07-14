@@ -668,6 +668,21 @@ def apply_lock_removals(
             persistence_top5_frac=pers.get("top5_fraction"),
             persistence_clean_bars=pers.get("clean_vwap_bars"),
         )
+        try:
+            from backend.services.kavach_open_trades import (
+                mark_open_trades_exit_on_lock_removal,
+            )
+
+            mark_open_trades_exit_on_lock_removal(
+                db, session_date, sym, rule, removed_at=now
+            )
+        except Exception as exc:
+            logger.warning(
+                "open_trades EXIT_NOW on lock removal failed %s %s: %s",
+                sym,
+                rule,
+                exc,
+            )
         removed.append({"symbol": sym, "direction": side, "rule": rule})
 
     if removed:

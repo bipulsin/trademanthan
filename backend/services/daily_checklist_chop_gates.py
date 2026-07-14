@@ -59,6 +59,8 @@ def exit_reason_blocks_reentry(reason: Optional[str]) -> bool:
         return True
     if "RISK CAP" in r or "RISK EXCEED" in r:
         return True
+    if "LOCK REMOVED" in r:
+        return True
     if "SESSION LOSS" in r:
         return True
     if "SL" in r or "STOP LOSS" in r or "STOP_LOSS" in r.replace(" ", "_"):

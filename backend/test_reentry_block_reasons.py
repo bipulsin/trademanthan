@@ -28,3 +28,11 @@ def test_state_machine_raw_reasons_block():
     assert exit_reason_blocks_reentry("EMA10 reverse close") is True
     assert exit_reason_blocks_reentry("EMA5 reverse close after profit protection") is True
     assert exit_reason_blocks_reentry("Risk cap exceeded before 1:2") is True
+
+
+def test_lock_removed_blocks_reentry():
+    assert exit_reason_blocks_reentry("Lock removed via R1") is True
+    assert exit_reason_blocks_reentry("Lock removed via R2") is True
+    assert exit_reason_blocks_reentry(
+        "Lock removed via R2 at 10:25 — setup no longer qualified"
+    ) is True
