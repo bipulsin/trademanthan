@@ -14,7 +14,7 @@ import pytz
 from sqlalchemy import text
 
 from backend.services.daily_checklist import _auto_fields_from_rs
-from backend.services.kavach_10m import metrics_from_10m_candles
+from backend.services.kavach_10m import metrics_from_10m_candles, timeline_states
 from backend.services.rs_conviction_candles import candles_cache_only, load_instrument_atr_maps
 from backend.services.rs_live_kavach_audit import last_audit_state, latest_audit_pair, persist_live_kavach_audit, prune_old_audit_rows
 from backend.services.relative_strength_scanner import RANKING_BEARISH, RANKING_BULLISH
@@ -60,6 +60,27 @@ def recompute_locked_symbol(
         return None
     candles = candles_cache_only(ikey)
     if not candles:
+        # After process restart the in-memory candle cache is empty; fetch for
+        # the small locked universe so refresh / Fast Watch edges keep working.
+        try:
+            from backend.config import settings
+            from backend.services.relative_strength_scanner import (
+                CANDLE_DAYS_BACK,
+                CANDLE_INTERVAL,
+                MIN_BARS,
+                _sorted_candles,
+            )
+            from backend.services.upstox_service import UpstoxService
+
+            raw = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET).get_historical_candles_by_instrument_key(
+                ikey, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
+            )
+            if raw and len(raw) >= MIN_BARS:
+                candles = _sorted_candles(raw)
+        except Exception as exc:
+            logger.debug("live kavach candle fetch skipped for %s: %s", sym, exc)
+            candles = None
+    if not candles:
         return None
     ranking = _ranking_for_direction(direction)
     nifty_pct = _latest_nifty_pct(db)
@@ -69,6 +90,15 @@ def recompute_locked_symbol(
 
     sd = session_date or metrics["bar_evaluated_at"].astimezone(IST).strftime("%Y-%m-%d")
     prev_state = last_audit_state(db, sd, sym) if persist_audit else None
+    # After a cold start / failed refresh morning, audit is empty — recover prev
+    # from the prior closed 10m bar so Fast Watch can still see the latest edge.
+    if persist_audit and prev_state is None:
+        try:
+            tl = timeline_states(candles, ranking_type=ranking, nifty_pct=nifty_pct)
+            if len(tl) >= 2:
+                prev_state = tl[-2].get("kavach_state")
+        except Exception as exc:
+            logger.debug("timeline prev_state recovery skipped for %s: %s", sym, exc)
     if persist_audit:
         try:
             persist_live_kavach_audit(
@@ -82,7 +112,8 @@ def recompute_locked_symbol(
         except Exception as exc:
             logger.debug("live kavach audit persist skipped: %s", exc)
 
-    row = SimpleNamespace(**metrics, symbol=sym, scan_time=metrics["bar_evaluated_at"])
+    # metrics already includes scan_time; override so checklist uses bar_evaluated_at.
+    row = SimpleNamespace(**{**metrics, "symbol": sym, "scan_time": metrics["bar_evaluated_at"]})
     fields = _auto_fields_from_rs(row, direction, live_map={})
     fields["chart_reversed"] = _chart_reversed(metrics.get("kavach_state"), direction)
     computed_at = metrics["bar_evaluated_at"]
