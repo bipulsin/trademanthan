@@ -169,6 +169,47 @@
                 display: block;
             }
         }
+        .admin-quick-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 4px 0 2px;
+        }
+        .admin-tool-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #0f172a;
+            font-size: 13px;
+            font-weight: 700;
+            text-decoration: none;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+        .admin-tool-chip:hover {
+            border-color: #0d9488;
+            background: #ecfeff;
+            color: #134e4a;
+        }
+        .admin-tool-chip i {
+            color: #0d9488;
+        }
+        body[data-theme="dark"] .admin-tool-chip {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(148, 163, 184, 0.45);
+            color: #f1f5f9;
+        }
+        body[data-theme="dark"] .admin-tool-chip:hover {
+            background: rgba(13, 148, 136, 0.2);
+            border-color: #2dd4bf;
+            color: #ccfbf1;
+        }
+        body[data-theme="dark"] .admin-tool-chip i {
+            color: #5eead4;
+        }
     </style>
 </head>
 <body class="theme-page">
@@ -196,6 +237,23 @@
             </div>
 
             <div class="settings-content">
+                <div class="settings-section">
+                    <div class="section-header">
+                        <div>
+                            <h2><i class="fas fa-screwdriver-wrench"></i> Diagnostics</h2>
+                            <p>Quick links to review tools (open in this tab).</p>
+                        </div>
+                    </div>
+                    <div class="admin-quick-chips">
+                        <a class="admin-tool-chip" href="shadow.html">
+                            <i class="fas fa-shield-halved"></i> READY Shadow Log
+                        </a>
+                        <a class="admin-tool-chip" href="rscd.html">
+                            <i class="fas fa-chart-area"></i> RS–Confidence Divergence
+                        </a>
+                    </div>
+                </div>
+
                 <div class="settings-section">
                     <div class="section-header admin-collapsible-header" id="smartFuturesToggle">
                         <div>
