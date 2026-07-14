@@ -568,6 +568,9 @@ def compute_trade_state_for_stock(
 def enrich_stocks_trade_state(
     stocks: List[Dict[str, Any]],
     session_date: str,
+    *,
+    locked_by: Optional[str] = None,
+    rotation_day: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Mutate stocks in place with trade-state fields; return observation summary."""
     empty_obs = {
@@ -578,8 +581,21 @@ def enrich_stocks_trade_state(
         "market_regime": None,
         "market_regime_label": None,
         "exit_rule_reminder": "Exit rule: 10m close beyond EMA10 reverse — not VWAP break",
+        "rotation_chip": None,
+        "direction_imbalance": None,
+        "compromised_lock": None,
+        "session_window_text": "Entry 09:45–14:30 · Square-off 15:15",
     }
     if not stocks:
+        from backend.services.daily_checklist_zones import build_zone1_obs
+
+        empty_obs.update(
+            build_zone1_obs(
+                rotation_day=rotation_day,
+                removals=[],
+                locked_by=locked_by,
+            )
+        )
         return empty_obs
 
     symbols = [s["symbol"] for s in stocks if s.get("symbol")]
@@ -659,12 +675,28 @@ def enrich_stocks_trade_state(
             s.update(ts)
 
         churn_syms = [s["symbol"] for s in stocks if int(s.get("lock_cycles") or 0) > 1]
+        from backend.services.daily_checklist_zones import (
+            apply_zone_downgrades,
+            build_zone1_obs,
+        )
+
+        zone1 = build_zone1_obs(
+            rotation_day=rotation_day,
+            removals=removals,
+            locked_by=locked_by,
+        )
+        apply_zone_downgrades(
+            stocks,
+            imbalance=zone1.get("direction_imbalance"),
+            compromised=zone1.get("compromised_lock"),
+        )
         return {
             "churn_warning": len(churn_syms) >= 3,
             "churn_symbols": churn_syms,
             "churn_count": len(churn_syms),
             "recent_removals": removals,
             **mkt,
+            **zone1,
         }
     finally:
         db.close()

@@ -959,3 +959,99 @@ body[data-theme="dark"] .dc-go-board-card {
     #left-menu-container, .mobile-title-bar, .dc-actions, .dc-modal, .dc-toast { display: none !important; }
     button.dc-card { break-inside: avoid; }
 }
+
+/* —— Zone 1 session bar —— */
+.dc-zone1 {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px;
+    min-height: 48px; padding: 8px 10px; margin-top: 6px;
+    border-top: 1px solid var(--theme-border, #334155);
+}
+.dc-z1-chip {
+    font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px;
+    background: #78350f; color: #fde68a !important; border: 1px solid #fbbf24;
+}
+.dc-z1-chip--warn {
+    background: #7f1d1d; color: #fecaca !important; border-color: #f87171;
+}
+.dc-z1-chip--caution {
+    background: #422006; color: #fdba74 !important; border-color: #ea580c;
+}
+.dc-z1-session {
+    font-size: 11px; font-weight: 600; color: var(--theme-muted, #94a3b8);
+}
+.dc-zone1 .dc-exit-rule { font-size: 11px; color: var(--theme-muted, #94a3b8); }
+
+/* —— Zone 3 READY NOW —— */
+.dc-zone3 { margin: 12px 0 18px; }
+.dc-zone-title {
+    font-size: 13px; font-weight: 800; margin: 0 0 8px;
+    color: var(--theme-text, #e2e8f0);
+}
+.dc-zone-title--muted { color: var(--theme-muted, #94a3b8); font-weight: 700; }
+.dc-zone3-empty {
+    font-size: 12px; color: var(--theme-muted, #64748b); padding: 10px 4px;
+}
+.dc-zone3-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px;
+}
+.dc-ready-card {
+    background: var(--theme-card, #1e293b); border: 1px solid #22c55e;
+    border-radius: 10px; padding: 12px 14px; cursor: pointer;
+}
+.dc-ready-card--missed { opacity: 0.4; border-color: #64748b; }
+.dc-ready-top {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.dc-ready-symbol { font-size: 18px; font-weight: 800; letter-spacing: 0.02em; }
+.dc-ready-dir {
+    font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px;
+}
+.dc-ready-dir--long { background: #14532d; color: #86efac !important; }
+.dc-ready-dir--short { background: #7f1d1d; color: #fca5a5 !important; }
+.dc-ready-take {
+    margin-left: auto; font-size: 12px; font-weight: 800;
+    padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
+    background: #16a34a; color: #fff !important;
+}
+.dc-ready-take:disabled { background: #475569; cursor: not-allowed; opacity: 0.7; }
+.dc-ready-prices {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; font-weight: 700;
+    margin-bottom: 4px;
+}
+.dc-ready-entry { font-size: 15px; }
+.dc-ready-meta, .dc-ready-timer, .dc-ready-recheck, .dc-ready-missed {
+    font-size: 11px; color: var(--theme-muted, #94a3b8); margin-top: 2px;
+}
+.dc-ready-timer { font-weight: 700; color: #86efac !important; }
+.dc-ready-missed { font-weight: 800; color: #fbbf24 !important; }
+
+/* —— Zone 4 Watching —— */
+.dc-zone4 { margin: 8px 0 16px; }
+.dc-zone4-list { display: flex; flex-direction: column; gap: 2px; }
+.dc-watch-row {
+    display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
+    padding: 5px 8px; border-radius: 6px; cursor: pointer;
+    font-size: 12px; color: var(--theme-muted, #94a3b8);
+}
+.dc-watch-row:hover { background: rgba(148, 163, 184, 0.08); }
+.dc-watch-sym { font-weight: 600; color: var(--theme-text, #e2e8f0); min-width: 88px; }
+.dc-watch-sym--expired { text-decoration: line-through; color: #64748b; }
+.dc-watch-dir {
+    font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 999px;
+}
+.dc-watch-dir--long { background: #14532d; color: #86efac !important; }
+.dc-watch-dir--short { background: #7f1d1d; color: #fca5a5 !important; }
+.dc-watch-state { font-weight: 700; }
+.dc-tstate--reversed { color: #fbbf24 !important; }
+.dc-watch-reason { font-size: 11px; opacity: 0.85; }
+.dc-watch-meta { margin-left: auto; font-size: 11px; opacity: 0.75; }
+
+/* —— Zone 5 activity —— */
+.dc-zone5 { margin: 6px 0 10px; }
+.dc-zone5-toggle {
+    background: transparent; border: none; color: var(--theme-muted, #94a3b8);
+    font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 0;
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.dc-zone5-toggle i { transition: transform 0.15s ease; font-size: 10px; }

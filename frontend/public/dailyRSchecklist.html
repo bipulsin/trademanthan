@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=21">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=22">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -81,8 +81,13 @@
                         ⚠ Gap reversal detected — RS+ stocks may be dragged lower. Wait for the 9:35 candle direction.
                     </div>
                     <div class="dc-rotation-banner" id="dcRotationBanner" hidden></div>
-                    <div class="dc-mkt-regime-bar" id="dcMktRegimeBar">
+                    <!-- Zone 1 — session status bar (~60px) -->
+                    <div class="dc-zone1" id="dcZone1">
                         <span class="dc-mkt-regime" id="dcMktRegime">—</span>
+                        <span class="dc-z1-chip" id="dcRotationChip" hidden>ROTATION DAY</span>
+                        <span class="dc-z1-chip dc-z1-chip--warn" id="dcImbalanceChip" hidden></span>
+                        <span class="dc-z1-chip dc-z1-chip--caution" id="dcCompromisedChip" hidden></span>
+                        <span class="dc-z1-session" id="dcSessionWindow">Entry 09:45–14:30 · Square-off 15:15</span>
                         <span class="dc-exit-rule" id="dcExitRule">Exit rule: 10m close beyond EMA10 reverse — not VWAP break</span>
                     </div>
                 </div>
@@ -103,12 +108,7 @@
                     </div>
                 </section>
 
-                <!-- Hard rules -->
-                <div class="dc-hardrules">
-                    <span class="dc-hardrule">⚠ No entries before 9:45 AM</span>
-                    <span class="dc-hardrule">✗ No entries after 2:30 PM</span>
-                    <span class="dc-hardrule">✓ Square-off by 3:15 PM</span>
-                </div>
+                <!-- Hard rules moved into Zone 1 session_window_text -->
 
                 <!-- Live setup radar strip -->
                 <div class="dc-live-setups" id="dcLiveSetups" hidden>
@@ -119,10 +119,17 @@
                 <div class="dc-trade-churn-warn" id="dcTradeChurnWarn" hidden>
                     Lock churn elevated — multiple symbols re-cycled today. Check promotion / R1·R2 behaviour.
                 </div>
-                <div class="dc-removals-strip" id="dcRemovalsStrip" hidden>
-                    <span class="dc-removals-label">Removed today</span>
-                    <div class="dc-removals-chips" id="dcRemovalsChips"></div>
-                </div>
+
+                <!-- Zone 5 — recent activity (collapsed) -->
+                <section class="dc-zone5" id="dcZone5">
+                    <button type="button" class="dc-zone5-toggle" id="dcRemovalsToggle" aria-expanded="false">
+                        <i class="fas fa-chevron-right"></i>
+                        Removed today (<span id="dcRemovalsCount">0</span>)
+                    </button>
+                    <div class="dc-removals-strip" id="dcRemovalsStrip" hidden>
+                        <div class="dc-removals-chips" id="dcRemovalsChips"></div>
+                    </div>
+                </section>
 
                 <!-- GO Board: curated entry panel -->
                 <section class="dc-go-board-section" id="dcGoBoard" hidden aria-label="GO Board entry panel">
@@ -180,7 +187,24 @@
                         <h2 class="dc-section-title" id="dcLockedTitle"><i class="fas fa-lock"></i> Today's Kavach List</h2>
                         <span class="dc-locked-at" id="dcLockedAt"></span>
                     </div>
-                    <div class="dc-columns-grid">
+
+                    <!-- Zone 3 — READY NOW -->
+                    <section class="dc-zone3" id="dcZone3" aria-label="Ready now">
+                        <h3 class="dc-zone-title"><i class="fas fa-bolt"></i> READY NOW</h3>
+                        <div class="dc-zone3-empty" id="dcZone3Empty">
+                            No READY setups right now. Rechecks at :05, :15, :25, :35, :45, :55 past every hour.
+                        </div>
+                        <div class="dc-zone3-grid" id="dcZone3Grid"></div>
+                    </section>
+
+                    <!-- Zone 4 — Watching (compact) -->
+                    <section class="dc-zone4" id="dcZone4" aria-label="Watching">
+                        <h3 class="dc-zone-title dc-zone-title--muted"><i class="fas fa-eye"></i> Watching</h3>
+                        <div class="dc-zone4-list" id="dcZone4List"></div>
+                    </section>
+
+                    <!-- Legacy grids kept for GO-board / modal card pool; hidden when zones active -->
+                    <div class="dc-columns-grid" id="dcLegacyGrids" hidden>
                         <section class="dc-col dc-col--bull">
                             <h3 class="dc-col-title"><i class="fas fa-arrow-trend-up"></i> Bullish · LONG</h3>
                             <div class="dc-card-list" id="dcBullGrid"></div>
@@ -221,7 +245,39 @@
         </div>
     </div>
 
-    <!-- Compact stock card -->
+    <!-- Zone 3 READY action card -->
+    <template id="dcReadyTpl">
+        <div class="dc-ready-card" data-symbol="">
+            <div class="dc-ready-top">
+                <span class="dc-ready-symbol"></span>
+                <span class="dc-ready-dir"></span>
+                <button type="button" class="dc-ready-take">Take Trade</button>
+            </div>
+            <div class="dc-ready-prices">
+                <span class="dc-ready-entry"></span>
+                <span class="dc-ready-sl"></span>
+                <span class="dc-ready-risk"></span>
+                <span class="dc-ready-rr"></span>
+            </div>
+            <div class="dc-ready-meta"></div>
+            <div class="dc-ready-timer"></div>
+            <div class="dc-ready-missed" hidden>MISSED WINDOW · re-evaluating</div>
+            <div class="dc-ready-recheck" hidden></div>
+        </div>
+    </template>
+
+    <!-- Zone 4 Watching compact row -->
+    <template id="dcWatchTpl">
+        <div class="dc-watch-row" data-symbol="" role="button" tabindex="0">
+            <span class="dc-watch-sym"></span>
+            <span class="dc-watch-dir"></span>
+            <span class="dc-watch-state"></span>
+            <span class="dc-watch-reason"></span>
+            <span class="dc-watch-meta"></span>
+        </div>
+    </template>
+
+    <!-- Compact stock card (modal / legacy) -->
     <template id="dcCardTpl">
         <div class="dc-card" data-symbol="" role="button" tabindex="0">
             <div class="dc-card-face">
@@ -269,6 +325,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=21"></script>
+    <script src="dailyRSchecklist.js?v=22"></script>
 </body>
 </html>

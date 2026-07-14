@@ -483,6 +483,7 @@
         if (st === "WAIT FOR PULLBACK") return "dc-tstate--wait";
         if (st === "EXPIRED") return "dc-tstate--expired";
         if (st === "BLOCKED") return "dc-tstate--blocked";
+        if (st === "CHART REVERSED") return "dc-tstate--reversed";
         return "";
     }
 
@@ -617,13 +618,14 @@
         var warn = $("dcTradeChurnWarn");
         var strip = $("dcRemovalsStrip");
         var chips = $("dcRemovalsChips");
+        var remCount = $("dcRemovalsCount");
         var obs = (state && state.trade_state_obs) || {};
         var regimeEl = $("dcMktRegime");
         var exitEl = $("dcExitRule");
+        var sessEl = $("dcSessionWindow");
         if (regimeEl) {
             var reg = obs.market_regime || "—";
             var label = obs.market_regime_label || "";
-            // Avoid "TRANSITION · TRANSITION — …" duplication
             if (label && label.toUpperCase().indexOf(String(reg).toUpperCase()) === 0) {
                 regimeEl.textContent = label;
             } else if (label) {
@@ -638,6 +640,33 @@
             exitEl.textContent = obs.exit_rule_reminder ||
                 "Exit rule: 10m close beyond EMA10 reverse — not VWAP break";
         }
+        if (sessEl) {
+            sessEl.textContent = obs.session_window_text || "Entry 09:45–14:30 · Square-off 15:15";
+        }
+        var rotChip = $("dcRotationChip");
+        if (rotChip) {
+            var rc = obs.rotation_chip;
+            rotChip.hidden = !(rc && rc.active);
+            if (rc && rc.active) {
+                rotChip.textContent = rc.label || "ROTATION DAY";
+                rotChip.title = rc.subtitle || "";
+            }
+        }
+        var imbChip = $("dcImbalanceChip");
+        if (imbChip) {
+            var imb = obs.direction_imbalance;
+            imbChip.hidden = !(imb && imb.active);
+            if (imb && imb.active) imbChip.textContent = imb.label || "";
+        }
+        var compChip = $("dcCompromisedChip");
+        if (compChip) {
+            var comp = obs.compromised_lock;
+            compChip.hidden = !(comp && comp.active);
+            if (comp && comp.active) {
+                compChip.textContent = "⚠ Manual lock recovery";
+                compChip.title = comp.label || "";
+            }
+        }
         if (warn) {
             warn.hidden = !obs.churn_warning;
             if (obs.churn_warning && obs.churn_symbols && obs.churn_symbols.length) {
@@ -648,12 +677,12 @@
         }
         if (!strip || !chips) return;
         var rem = obs.recent_removals || [];
+        if (remCount) remCount.textContent = String(rem.length);
         if (!rem.length) {
             strip.hidden = true;
             chips.innerHTML = "";
             return;
         }
-        strip.hidden = false;
         chips.innerHTML = rem.map(function (r) {
             var t = "";
             if (r.at) {
@@ -664,6 +693,216 @@
                 String(r.rule_tag || "").toLowerCase() + '">' +
                 r.symbol + " · " + (r.rule_tag || "—") + (t ? " @" + t : "") + "</span>";
         }).join("");
+        // keep collapsed unless expanded
+        var tog = $("dcRemovalsToggle");
+        if (tog && tog.getAttribute("aria-expanded") === "true") strip.hidden = false;
+        else strip.hidden = true;
+    }
+
+    function isReadyState(st) {
+        return st === "READY" || st === "READY(RECHECK)";
+    }
+
+    function nextTenMinBoundaryFromSecs(secs) {
+        // Kavach 10m closes: minutes ending in 5
+        var m = Math.floor(secs / 60) % (24 * 60);
+        var minute = m % 60;
+        var hour = Math.floor(m / 60);
+        var targets = [5, 15, 25, 35, 45, 55];
+        var i, t;
+        for (i = 0; i < targets.length; i++) {
+            t = targets[i];
+            if (minute < t) return { hour: hour, minute: t, dayMin: hour * 60 + t };
+        }
+        hour = (hour + 1) % 24;
+        return { hour: hour, minute: 5, dayMin: hour * 60 + 5 + (hour === 0 ? 24 * 60 : 0) };
+    }
+
+    function secsToNextTenMin() {
+        var n = nowIST();
+        var b = nextTenMinBoundaryFromSecs(n.secs);
+        var targetSecs = b.dayMin * 60;
+        if (targetSecs <= n.secs) targetSecs += 24 * 3600;
+        return Math.max(0, targetSecs - n.secs);
+    }
+
+    function readyWindowKey(sym) {
+        return "dc_ready_win_" + ((state && state.session_date) || "") + "_" + sym;
+    }
+
+    function getReadyWindowMeta(sym, stock) {
+        var key = readyWindowKey(sym);
+        var meta = null;
+        try { meta = JSON.parse(sessionStorage.getItem(key) || "null"); } catch (e) { meta = null; }
+        var st = stock.trade_state;
+        if (!isReadyState(st)) {
+            try { sessionStorage.removeItem(key); } catch (e) {}
+            return null;
+        }
+        var nowSec = Math.floor(Date.now() / 1000);
+        if (!meta || meta.state !== st) {
+            meta = { state: st, startedAt: nowSec, attempt: (meta && meta.attempt) || 1, missed: false, startBoundary: secsToNextTenMin() };
+            try { sessionStorage.setItem(key, JSON.stringify(meta)); } catch (e) {}
+        }
+        var remaining = secsToNextTenMin();
+        // Crossed into a new 10m slot since start → missed until early in next slot
+        if (!meta.missed && meta.startBoundary != null && remaining > meta.startBoundary + 30) {
+            meta.missed = true;
+            meta.attempt = (meta.attempt || 1) + 1;
+            try { sessionStorage.setItem(key, JSON.stringify(meta)); } catch (e) {}
+        }
+        if (meta.missed && remaining > 9 * 60) {
+            meta.missed = false;
+            meta.startedAt = nowSec;
+            meta.startBoundary = remaining;
+            try { sessionStorage.setItem(key, JSON.stringify(meta)); } catch (e) {}
+        }
+        return { remaining: remaining, missed: !!meta.missed, attempt: meta.attempt || 1, active: !meta.missed };
+    }
+
+    function oneWordReason(stock) {
+        var r = String(stock.trade_state_reason || "").toLowerCase();
+        var d = String(stock.decision || "").toUpperCase();
+        if (d.indexOf("CHART REVERSED") >= 0) return "chart reversed";
+        if (r.indexOf("whip") >= 0) return "whipsawed";
+        if (r.indexOf("extend") >= 0) return "extended";
+        if (r.indexOf("risk") >= 0) return "risk high";
+        if (r.indexOf("sl") >= 0 || stock.stopped_out_today) return "SL earlier today";
+        if (r.indexOf("unstable") >= 0 || stock.direction_unstable) return "direction unstable";
+        if (r.indexOf("manual") >= 0 || stock.zone_downgrade === "compromised_lock") return "caution";
+        if (stock.trade_state === "WAIT FOR PULLBACK") return "wait pullback";
+        if (stock.trade_state === "BLOCKED") return "blocked";
+        if (stock.trade_state === "EXPIRED") return "expired";
+        return (stock.trade_state_reason || "").split(/[·—-]/)[0].trim().slice(0, 24) || "";
+    }
+
+    function patchReadyCard(card, stock) {
+        var sym = stock.symbol;
+        card.dataset.symbol = sym;
+        card.querySelector(".dc-ready-symbol").textContent = sym;
+        var dir = (stock.direction || "LONG").toUpperCase();
+        var dirEl = card.querySelector(".dc-ready-dir");
+        dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
+        dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
+        var entry = stock.trade_entry;
+        var sl = stock.trade_sl;
+        card.querySelector(".dc-ready-entry").textContent = entry != null ? "Entry " + Number(entry).toFixed(2) : "Entry —";
+        card.querySelector(".dc-ready-sl").textContent = sl != null ? "SL " + Number(sl).toFixed(2) : "SL —";
+        var risk = stock.trade_risk_inr;
+        card.querySelector(".dc-ready-risk").textContent = risk != null ? "Risk ₹" + Math.abs(Number(risk)).toLocaleString("en-IN") : "Risk —";
+        card.querySelector(".dc-ready-rr").textContent = stock.trade_rr_label || "";
+        var grade = stock.confidence || stock.dashboard_kavach || "—";
+        var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
+        var pb = stock.pullback_label || "";
+        card.querySelector(".dc-ready-meta").textContent = [grade, rs, pb].filter(Boolean).join(" · ");
+        var win = getReadyWindowMeta(sym, stock);
+        var timer = card.querySelector(".dc-ready-timer");
+        var missedEl = card.querySelector(".dc-ready-missed");
+        var recheck = card.querySelector(".dc-ready-recheck");
+        var takeBtn = card.querySelector(".dc-ready-take");
+        if (win && win.missed) {
+            card.classList.add("dc-ready-card--missed");
+            missedEl.hidden = false;
+            var b = nextTenMinBoundaryFromSecs(nowIST().secs);
+            missedEl.textContent = "MISSED WINDOW · re-evaluating at " +
+                ("0" + b.hour).slice(-2) + ":" + ("0" + b.minute).slice(-2);
+            takeBtn.disabled = true;
+            timer.textContent = "";
+        } else {
+            card.classList.remove("dc-ready-card--missed");
+            missedEl.hidden = true;
+            takeBtn.disabled = !!(stock.trade_taken || stock.stopped_out_today || stock.trade_exited);
+            var rem = win ? win.remaining : secsToNextTenMin();
+            var mm = Math.floor(rem / 60);
+            var ss = rem % 60;
+            timer.textContent = "Enter within " + mm + ":" + ("0" + ss).slice(-2);
+        }
+        if (win && win.attempt > 1 && !(win && win.missed)) {
+            recheck.hidden = false;
+            recheck.textContent = "Recheck confirmed · attempt " + win.attempt;
+        } else {
+            recheck.hidden = true;
+        }
+        takeBtn.onclick = function (e) {
+            e.stopPropagation();
+            if (takeBtn.disabled) return;
+            takeTrade(sym);
+        };
+        card.onclick = function () { openModal(sym); };
+    }
+
+    function patchWatchRow(row, stock) {
+        row.dataset.symbol = stock.symbol;
+        var symEl = row.querySelector(".dc-watch-sym");
+        symEl.textContent = stock.symbol;
+        symEl.classList.toggle("dc-watch-sym--expired", stock.trade_state === "EXPIRED");
+        var dir = (stock.direction || "LONG").toUpperCase();
+        var dirEl = row.querySelector(".dc-watch-dir");
+        dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
+        dirEl.className = "dc-watch-dir dc-watch-dir--" + (dir === "SHORT" ? "short" : "long");
+        var st = stock.trade_state || stock.section || "—";
+        var stEl = row.querySelector(".dc-watch-state");
+        stEl.textContent = st;
+        stEl.className = "dc-watch-state " + tradeStateClass(st);
+        if (String(stock.decision || "").indexOf("CHART REVERSED") >= 0) {
+            stEl.className = "dc-watch-state dc-tstate--reversed";
+            stEl.textContent = "CHART REVERSED";
+        }
+        row.querySelector(".dc-watch-reason").textContent = oneWordReason(stock);
+        var grade = stock.confidence || stock.dashboard_kavach || "";
+        var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
+        row.querySelector(".dc-watch-meta").textContent = [rs, grade].filter(Boolean).join(" · ");
+        row.onclick = function () { openModal(stock.symbol); };
+    }
+
+    function renderZones(stocks, preview) {
+        var ready = sortStocks(stocks.filter(function (s) { return isReadyState(s.trade_state); }));
+        var watching = sortStocks(stocks.filter(function (s) { return !isReadyState(s.trade_state); }));
+        var z3 = $("dcZone3Grid");
+        var z3empty = $("dcZone3Empty");
+        var z4 = $("dcZone4List");
+        if (!z3 || !z4) return;
+
+        var readySyms = {};
+        ready.forEach(function (stock) {
+            readySyms[stock.symbol] = true;
+            var card = z3.querySelector('.dc-ready-card[data-symbol="' + stock.symbol + '"]');
+            if (!card) {
+                card = $("dcReadyTpl").content.firstElementChild.cloneNode(true);
+                z3.appendChild(card);
+            }
+            patchReadyCard(card, stock);
+        });
+        Array.prototype.slice.call(z3.querySelectorAll(".dc-ready-card")).forEach(function (ch) {
+            if (!readySyms[ch.dataset.symbol]) z3.removeChild(ch);
+        });
+        if (z3empty) z3empty.hidden = ready.length > 0;
+
+        var watchSyms = {};
+        watching.forEach(function (stock) {
+            watchSyms[stock.symbol] = true;
+            var row = z4.querySelector('.dc-watch-row[data-symbol="' + stock.symbol + '"]');
+            if (!row) {
+                row = $("dcWatchTpl").content.firstElementChild.cloneNode(true);
+                z4.appendChild(row);
+            }
+            patchWatchRow(row, stock);
+        });
+        Array.prototype.slice.call(z4.querySelectorAll(".dc-watch-row")).forEach(function (ch) {
+            if (!watchSyms[ch.dataset.symbol]) z4.removeChild(ch);
+        });
+
+        // Keep modal card pool in legacy grids (hidden)
+        var bullGrid = $("dcBullGrid");
+        var bearGrid = $("dcBearGrid");
+        if (bullGrid && bearGrid) {
+            stocks.forEach(function (stock) {
+                var card = ensureCard(stock.symbol);
+                patchCard(card, stock, { preview: preview });
+                var grid = stock.direction === "SHORT" ? bearGrid : bullGrid;
+                if (card.parentNode !== grid) grid.appendChild(card);
+            });
+        }
     }
 
     function renderLiveSetups() {
@@ -766,25 +1005,9 @@
 
         var bull = sortStocks(stocks.filter(function (s) { return s.direction === "LONG"; }));
         var bear = sortStocks(stocks.filter(function (s) { return s.direction === "SHORT"; }));
-        var bullGrid = $("dcBullGrid");
-        var bearGrid = $("dcBearGrid");
-        bull.forEach(function (stock) {
-            var card = ensureCard(stock.symbol);
-            patchCard(card, stock, { preview: preview });
-            if (card.parentNode !== bullGrid) bullGrid.appendChild(card);
-        });
-        bear.forEach(function (stock) {
-            var card = ensureCard(stock.symbol);
-            patchCard(card, stock, { preview: preview });
-            if (card.parentNode !== bearGrid) bearGrid.appendChild(card);
-        });
-        [bullGrid, bearGrid].forEach(function (grid) {
-            var syms = {};
-            stocks.forEach(function (s) { syms[s.symbol] = true; });
-            Array.prototype.slice.call(grid.children).forEach(function (ch) {
-                if (!syms[ch.dataset.symbol]) grid.removeChild(ch);
-            });
-        });
+        renderZones(stocks, preview);
+        // Keep pill counts from section decisions
+        void bull; void bear;
 
         var coSec = $("dcCarryoverSection");
         var coGrid = $("dcCarryoverGrid");
@@ -1428,6 +1651,8 @@
                 cardEls = {};
                 $("dcBullGrid").innerHTML = "";
                 $("dcBearGrid").innerHTML = "";
+                if ($("dcZone3Grid")) $("dcZone3Grid").innerHTML = "";
+                if ($("dcZone4List")) $("dcZone4List").innerHTML = "";
                 closeModal();
                 applyState(s);
                 toast("Day reset");
@@ -1463,6 +1688,14 @@
                 lastAdxRecheckAlertKey = null;
             }
         }
+        // Refresh Zone 3 entry countdowns each second
+        if (state && state.stocks && $("dcZone3Grid")) {
+            var ready = (state.stocks || []).filter(function (s) { return isReadyState(s.trade_state); });
+            ready.forEach(function (stock) {
+                var card = $("dcZone3Grid").querySelector('.dc-ready-card[data-symbol="' + stock.symbol + '"]');
+                if (card) patchReadyCard(card, stock);
+            });
+        }
     }
 
     function boot() {
@@ -1497,6 +1730,18 @@
             this.setAttribute("aria-expanded", open ? "true" : "false");
             this.querySelector(".dc-carryover-chevron").classList.toggle("dc-carryover-chevron--open", open);
         });
+        var remTog = $("dcRemovalsToggle");
+        if (remTog) {
+            remTog.addEventListener("click", function () {
+                var strip = $("dcRemovalsStrip");
+                if (!strip) return;
+                var open = strip.hidden;
+                strip.hidden = !open;
+                this.setAttribute("aria-expanded", open ? "true" : "false");
+                var icon = this.querySelector("i");
+                if (icon) icon.classList.toggle("dc-carryover-chevron--open", open);
+            });
+        }
         var fwExpand = $("dcFastWatchExpand");
         if (fwExpand) {
             fwExpand.addEventListener("click", function () {

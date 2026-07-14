@@ -857,7 +857,12 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
             sort_stocks_by_trade_state,
         )
 
-        trade_obs = enrich_stocks_trade_state(display_stocks, sd)
+        trade_obs = enrich_stocks_trade_state(
+            display_stocks,
+            sd,
+            locked_by=(lock_info or {}).get("locked_by") if lock_info else None,
+            rotation_day=rotation,
+        )
         sorted_stocks = sort_stocks_by_trade_state(display_stocks, rank_map)
         display_stocks[:] = sorted_stocks
         if locked:
