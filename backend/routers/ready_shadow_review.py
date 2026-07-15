@@ -73,6 +73,28 @@ def export_analysis(session_date: Optional[str] = Query(None)):
     )
 
 
+@router.get("/api/ready-shadow-review/export-shortlist-adx")
+@router.get("/ready-shadow-review/export-shortlist-adx")
+def export_shortlist_adx():
+    """Steep-outside-lock shortlist: universe VWAP scan rows + Kavach ADX(14).
+
+    Research-only. Re-fetches Upstox 5m OHLC for the fixed shortlist (raw bars
+    from the VWAP backfill were not retained), joins ADX without altering scan values.
+    """
+    from backend.services.kavach_shortlist_adx_export import build_shortlist_adx_export
+
+    data = build_shortlist_adx_export()
+    if not data.get("ok"):
+        return data
+    filename = "shortlist-adx-steep-outside-lock-20260713-15.json"
+    body = json.dumps(data, indent=2, default=str)
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/ready-shadow-review")
 @router.get("/ready-shadow-review")
 def get_review(

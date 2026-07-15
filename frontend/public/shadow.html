@@ -97,6 +97,7 @@
         <p class="sub">
           Backend rollup of <span class="mono">kavach_ready_consistency_log</span> —
           lock mismatches and VWAP-quality shadow gate decisions. Classify rows, then export for the 22-Jul checkpoint.
+          <strong>Export Shortlist ADX</strong> joins Kavach ADX(14) onto the steep-outside-lock symbol/date shortlist.
           <strong>Export for Analysis</strong> bundles consistency + universe VWAP scan + raw lock VWAP + R1/R2 + snapshot
           into one JSON. No login required. Does not change live flags.
         </p>
@@ -120,6 +121,7 @@
       <button type="button" id="btnCsv">Export CSV</button>
       <button type="button" id="btnJson">Export JSON</button>
       <button type="button" class="primary" id="btnBundle" title="All shadow tables for this date (Claude handoff)">Export for Analysis</button>
+      <button type="button" id="btnShortlistAdx" title="Steep-outside-lock shortlist + Kavach ADX(14) join">Export Shortlist ADX</button>
     </div>
 
     <div class="agg" id="rollup"></div>
@@ -374,6 +376,35 @@
       });
   }
 
+  function downloadShortlistAdx() {
+    var btn = $("btnShortlistAdx");
+    btn.disabled = true;
+    setStatus("Building shortlist ADX join (Upstox fetch + scan)…");
+    fetch(API + "/api/ready-shadow-review/export-shortlist-adx", { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        var cd = res.headers.get("Content-Disposition") || "";
+        var m = /filename=\"?([^\";]+)\"?/.exec(cd);
+        var fname = (m && m[1]) || "shortlist-adx-steep-outside-lock-20260713-15.json";
+        return res.blob().then(function (blob) { return { blob: blob, fname: fname }; });
+      })
+      .then(function (pack) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(pack.blob);
+        a.download = pack.fname;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+        btn.disabled = false;
+        setStatus("Downloaded " + pack.fname);
+      })
+      .catch(function (e) {
+        btn.disabled = false;
+        setStatus(String(e), true);
+      });
+  }
+
   $("sessionDate").value = todayIST();
   Array.prototype.forEach.call($("filterSeg").querySelectorAll("button"), function (btn) {
     btn.addEventListener("click", function () {
@@ -389,6 +420,7 @@
   $("btnCsv").addEventListener("click", function () { download("csv"); });
   $("btnJson").addEventListener("click", function () { download("json"); });
   $("btnBundle").addEventListener("click", downloadAnalysisBundle);
+  $("btnShortlistAdx").addEventListener("click", downloadShortlistAdx);
   $("sessionDate").addEventListener("change", load);
 
   load();
