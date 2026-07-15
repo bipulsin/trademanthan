@@ -209,9 +209,14 @@ def lock_morning_snapshot(
     bear_rows: List[Any],
     *,
     locked_by: str = "auto",
+    now: Optional[datetime] = None,
 ) -> int:
     """Persist Top-5 bull/bear into daily_snapshot and write snapshot_lock. Returns count locked."""
-    now = datetime.now(IST)
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
     count = 0
     for rank, row in enumerate(bull_rows[:5], start=1):
         sym = getattr(row, "symbol", None) or row.get("symbol")
