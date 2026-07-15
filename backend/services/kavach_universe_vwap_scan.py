@@ -404,7 +404,18 @@ def backfill_universe_vwap_scan(
             day_rows: List[Dict[str, Any]] = []
             fetched = 0
             failed = 0
-            for sym, ik in universe:
+            # Clear prior backfill for this day to allow re-run
+            db.execute(
+                text(
+                    """
+                    DELETE FROM kavach_universe_vwap_scan
+                    WHERE session_date = CAST(:d AS date) AND source = 'backfill'
+                    """
+                ),
+                {"d": sd},
+            )
+            db.commit()
+            for i, (sym, ik) in enumerate(universe, start=1):
                 try:
                     candles = upstox.get_historical_candles_by_instrument_key(
                         ik,
@@ -422,6 +433,7 @@ def backfill_universe_vwap_scan(
                     continue
                 fetched += 1
                 atr = atrs.get(sym, 1.0)
+                batch: List[Dict[str, Any]] = []
                 for as_of in stamps:
                     sliced = _truncate_candles(candles, as_of)
                     lock_set = (
@@ -437,19 +449,26 @@ def backfill_universe_vwap_scan(
                         logged_at=as_of,
                     )
                     if scored:
-                        day_rows.append(scored)
-            # Clear prior backfill for this day to allow re-run
-            db.execute(
-                text(
-                    """
-                    DELETE FROM kavach_universe_vwap_scan
-                    WHERE session_date = CAST(:d AS date) AND source = 'backfill'
-                    """
-                ),
-                {"d": sd},
-            )
-            db.commit()
-            n = insert_scan_rows(db, day_rows)
+                        batch.append(scored)
+                if batch:
+                    insert_scan_rows(db, batch)
+                    day_rows.extend(batch)
+                if i % 20 == 0 or i == len(universe):
+                    logger.info(
+                        "universe VWAP backfill %s progress %s/%s fetched=%s failed=%s rows=%s",
+                        sd,
+                        i,
+                        len(universe),
+                        fetched,
+                        failed,
+                        len(day_rows),
+                    )
+                    print(
+                        f"progress {sd} {i}/{len(universe)} fetched={fetched} "
+                        f"failed={failed} rows={len(day_rows)}",
+                        flush=True,
+                    )
+            n = len(day_rows)
             summary["days"][sd] = {
                 "rows": n,
                 "symbols_fetched": fetched,
@@ -463,6 +482,10 @@ def backfill_universe_vwap_scan(
                 n,
                 fetched,
                 failed,
+            )
+            print(
+                f"done {sd} rows={n} fetched={fetched} failed={failed}",
+                flush=True,
             )
         return summary
     except Exception as exc:
