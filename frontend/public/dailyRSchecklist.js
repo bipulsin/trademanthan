@@ -1022,9 +1022,13 @@
         if (state.banknifty != null) nifty += (nifty ? " · " : "") + "BANKNIFTY <b>" + state.banknifty + "</b>";
         $("dcNifty").innerHTML = nifty;
         var c = state.counts || { go: 0, watch: 0, out: 0 };
-        $("dcPillGo").textContent = "🟢 " + c.go + " GO";
-        $("dcPillWatch").textContent = "🟡 " + c.watch + " WATCH";
-        $("dcPillOut").textContent = "🔴 " + c.out + " OUT";
+        var gatePill = $("dcPillGate");
+        if (gatePill) {
+            gatePill.textContent = "Gate " + c.go + " GO · " + c.watch + " WATCH · " + c.out + " OUT";
+            gatePill.title =
+                "9-condition checklist section (GO/WATCH/OUT from gate_score) — "
+                + "not the READY NOW / WAIT / BLOCKED trade-state system used on cards";
+        }
 
         var sel = $("dcNiftyDir");
         if (document.activeElement !== sel) sel.value = state.nifty_open_direction || "";

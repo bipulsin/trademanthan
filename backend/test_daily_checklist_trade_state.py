@@ -107,10 +107,15 @@ def test_blocked_flat_regime():
 
 
 def test_blocked_risk_over_3k_hard_gate():
-    """Risk > ₹3k with R:R < 1:2 → BLOCKED (hard), Take Trade off."""
+    """Risk > ₹3k with R:R < 1:2 → BLOCKED (hard), Take Trade off.
+
+    R:R floor alone also blocks; with ema10=60 risk is huge and R:R tiny, so
+    either the standalone R:R gate or the ₹3k+R:R gate may fire first.
+    """
     out = _compute(levels={"ema10": 60.0}, lot=100)
     assert out["trade_state"] == STATE_BLOCKED
-    assert "risk" in (out["trade_state_reason"] or "").lower()
+    reason = (out["trade_state_reason"] or "").lower()
+    assert "r:r" in reason or "risk" in reason
     assert out["trade_take_enabled"] is False
     assert out["trade_risk_inr"] and out["trade_risk_inr"] > 3000
 
@@ -122,11 +127,14 @@ def test_ready_includes_expiry_price():
     assert out["trade_expiry_price"] == 103.0
 
 
-def test_rr_low_badge_not_block():
+def test_rr_below_minimum_blocks_even_when_under_3k_cap():
+    """Former display-only trade_rr_low — now a hard BLOCKED (DLF class)."""
     out = _compute(session_hi=101.0)
-    assert out["trade_state"] == STATE_READY
     assert out["trade_rr_low"] is True
     assert out["trade_rr_label"] == "1:0.5"
+    assert out["trade_state"] == STATE_BLOCKED
+    assert out["trade_take_enabled"] is False
+    assert "R:R below minimum" in (out["trade_state_reason"] or "")
 
 
 def test_risk_cap_waived_when_rr_high():
@@ -459,6 +467,78 @@ def test_overlay_live_momentum_empty_candles_keeps_prior():
     out = overlay_live_momentum_from_candles(stock, [], nifty_pct=0.0)
     assert out["ema_vs_vwap"] == "Above"
     assert stock["macd"] == "Bearish"
+
+
+def test_rr_below_minimum_blocks_ready_even_under_risk_cap():
+    """DLF-style: R:R 1:0.8 must BLOCK even when INR risk is under ₹3k."""
+    # entry 100, sl 98 → risk/share 2; session_hi 101.6 → reward 1.6 → R:R 0.8
+    out = _compute(
+        stock={"symbol": "DLF", "trading_state": "BUY", "trend": "Bullish",
+               "supertrend": "Bullish", "macd": "Bullish"},
+        levels={"price": 100.0, "ema5": 100.0, "ema10": 98.0, "vwap": 99.0, "adx": 28.0},
+        session_hi=101.6,
+        session_lo=95.0,
+        atr_pct=2.0,
+        lot=50,  # risk INR = 2*50 = 100 << 3000
+    )
+    assert out["trade_rr"] == 0.8
+    assert out["trade_state"] == STATE_BLOCKED
+    assert out["trade_take_enabled"] is False
+    assert "R:R below minimum" in (out["trade_state_reason"] or "")
+
+
+def test_warning_stack_two_badges_downgrades_ready():
+    from backend.services.daily_checklist_trade_state import apply_warning_stack_downgrades
+
+    stocks = [
+        {
+            "symbol": "DLF",
+            "trade_state": STATE_READY,
+            "trade_take_enabled": True,
+            "pullback_count": 1,
+            "gate_badges": ["DIR CONFLICT", "REGIME UNSTABLE", "ATR 46%"],
+        }
+    ]
+    n = apply_warning_stack_downgrades(stocks)
+    assert n == 1
+    assert stocks[0]["trade_state"] == STATE_WAIT
+    assert stocks[0]["trade_take_enabled"] is False
+    assert "warning stack" in (stocks[0]["trade_state_reason"] or "")
+
+
+def test_second_pullback_plus_one_warning_downgrades_ready():
+    from backend.services.daily_checklist_trade_state import apply_warning_stack_downgrades
+
+    stocks = [
+        {
+            "symbol": "DLF",
+            "trade_state": STATE_READY,
+            "trade_take_enabled": True,
+            "pullback_count": 2,
+            "pullback_label": "2nd pullback",
+            "gate_badges": ["DIR CONFLICT", "1st pullback"],  # pullback badge ignored
+        }
+    ]
+    n = apply_warning_stack_downgrades(stocks)
+    assert n == 1
+    assert stocks[0]["trade_state"] == STATE_WAIT
+    assert "pullback" in (stocks[0]["trade_state_reason"] or "").lower()
+
+
+def test_single_warning_badge_alone_keeps_ready():
+    from backend.services.daily_checklist_trade_state import apply_warning_stack_downgrades
+
+    stocks = [
+        {
+            "symbol": "CLEAN",
+            "trade_state": STATE_READY,
+            "trade_take_enabled": True,
+            "pullback_count": 1,
+            "gate_badges": ["DIR CONFLICT", "ATR 40%"],
+        }
+    ]
+    assert apply_warning_stack_downgrades(stocks) == 0
+    assert stocks[0]["trade_state"] == STATE_READY
 
 
 def test_atr_consumed_metrics_from_open_and_opening_range():

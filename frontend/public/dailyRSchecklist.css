@@ -68,6 +68,17 @@
 .dc-pill--out, .dc-decision--OUT, .dc-window.closed {
     background: var(--out-bg) !important; color: var(--out-ink) !important; border-color: var(--out-bd) !important;
 }
+.dc-pill--gate {
+    background: #f1f5f9 !important;
+    color: #334155 !important;
+    border-color: #cbd5e1 !important;
+    font-weight: 600;
+}
+body[data-theme="dark"] .dc-pill--gate {
+    background: #334155 !important;
+    color: #e2e8f0 !important;
+    border-color: #475569 !important;
+}
 .dc-decision--NONE {
     background: #e2e8f0 !important; color: #475569 !important; border-color: #cbd5e1 !important;
 }

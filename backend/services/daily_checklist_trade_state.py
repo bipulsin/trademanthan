@@ -21,6 +21,9 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - Entry must be live EMA5 (±ENTRY_EMA5_TOL_PCT); no VWAP-blend limit.
   - Missing SL / Risk → not READY; Take Trade disabled.
   - Risk > ₹3k with R:R < 1:2 → BLOCKED (hard). R:R ≥ 1:2 → cap waived label.
+  - Computed R:R < 1:2 alone → BLOCKED (independent of ₹3k; was a DLF gap).
+  - ≥2 of {REGIME UNSTABLE, CHURN, DIR CONFLICT} on READY → WAIT (heuristic).
+  - 2nd+ pullback combined with any of those warnings → WAIT.
   - Live panel Trend (price vs VWAP) / Supertrend / MACD ≥2-of-3 oppose lock
     → WAIT (DIR CONFLICT). Also WAIT when live Kavach state is opposite the
     lock, or Trading State is HOLD/WATCH. Overlay uses forming 10m bars so
@@ -153,6 +156,82 @@ def risk_cap_blocks_ready(
     if risk_inr is None or risk_inr <= MAX_INR_RISK:
         return False
     return rr is None or rr < RR_LOW
+
+
+def rr_below_minimum(rr: Optional[float]) -> bool:
+    """True when a computable R:R exists and is below the 1:2 floor."""
+    return rr is not None and rr < RR_LOW
+
+
+def warning_stack_flags(gate_badges: Optional[List[Any]]) -> List[str]:
+    """Visibility badges that stack into a READY suppression heuristic."""
+    flags: List[str] = []
+    for b in gate_badges or []:
+        t = str(b)
+        if t == "DIR CONFLICT" or t.startswith("DIR CONFLICT"):
+            if "DIR CONFLICT" not in flags:
+                flags.append("DIR CONFLICT")
+        elif t == "REGIME UNSTABLE" or t.startswith("REGIME UNSTABLE"):
+            if "REGIME UNSTABLE" not in flags:
+                flags.append("REGIME UNSTABLE")
+        elif t.startswith("CHURN"):
+            if "CHURN" not in flags:
+                flags.append("CHURN")
+    return flags
+
+
+def apply_warning_stack_downgrades(stocks: List[Dict[str, Any]]) -> int:
+    """Downgrade READY when multiple warning badges stack (conservative heuristic).
+
+    Rules (logged for later backtest):
+      - ≥2 of {REGIME UNSTABLE, CHURN, DIR CONFLICT} → WAIT
+      - 2nd+ pullback AND ≥1 of those warnings → WAIT
+    Does not change BLOCKED/EXPIRED. Returns number of cards downgraded.
+    """
+    n = 0
+    for s in stocks:
+        state = s.get("trade_state")
+        if state not in (STATE_READY, STATE_READY_RECHECK):
+            continue
+        flags = warning_stack_flags(s.get("gate_badges"))
+        pb = int(s.get("pullback_count") or 0)
+        # Also parse from label if count missing.
+        if pb <= 0:
+            lab = str(s.get("pullback_label") or "")
+            if lab.startswith("2nd") or lab.startswith("3") or "+" in lab:
+                pb = 2
+        reason = None
+        if len(flags) >= 2:
+            reason = (
+                "WAIT · warning stack ("
+                + "+".join(flags)
+                + ") — Take Trade disabled"
+            )
+        elif pb >= 2 and len(flags) >= 1:
+            reason = (
+                f"WAIT · {pb}nd+ pullback with "
+                + "+".join(flags)
+                + " — Take Trade disabled"
+            )
+        if not reason:
+            continue
+        s["trade_state"] = STATE_WAIT
+        s["trade_state_reason"] = reason
+        s["trade_take_enabled"] = False
+        s["zone_downgrade"] = "warning_stack"
+        s["warning_stack"] = {
+            "flags": flags,
+            "pullback_count": pb,
+            "action": "WAIT",
+        }
+        n += 1
+        logger.info(
+            "WARNING STACK suppress READY %s: flags=%s pullback=%s",
+            s.get("symbol"),
+            flags,
+            pb,
+        )
+    return n
 
 
 def take_trade_structurally_ok(
@@ -1182,8 +1261,17 @@ def compute_trade_state_for_stock(
     )
     rr_low = bool(rr is not None and rr < RR_LOW)
 
-    # Hard ₹3k risk gate (not display-only): over cap + weak/missing R:R → BLOCKED.
-    if state in (STATE_READY, STATE_READY_RECHECK) and risk_cap_blocks_ready(display_risk, rr):
+    # Hard R:R floor (independent of ₹3k cap): computed R:R < 1:2 → BLOCKED.
+    # Previously R:R only mattered when risk was already over ₹3k (DLF 1:0.8 gap).
+    if state in (STATE_READY, STATE_READY_RECHECK) and rr_below_minimum(rr):
+        state = STATE_BLOCKED
+        blocked_reason = (
+            f"BLOCKED · R:R below minimum "
+            f"(1:{rr} < 1:{RR_LOW:g})"
+        )
+        risk_cap_waived = False
+    # Hard ₹3k risk gate: over cap + weak/missing R:R → BLOCKED.
+    elif state in (STATE_READY, STATE_READY_RECHECK) and risk_cap_blocks_ready(display_risk, rr):
         state = STATE_BLOCKED
         blocked_reason = (
             f"BLOCKED · risk ₹{int(display_risk)} > ₹{int(MAX_INR_RISK)} "
@@ -1271,6 +1359,7 @@ def compute_trade_state_for_stock(
         and entry_window_open_ist(clock)
         and take_trade_structurally_ok(entry=entry_price, sl=sl_out, risk_inr=display_risk)
         and not risk_cap_blocks_ready(display_risk, rr)
+        and not rr_below_minimum(rr)
     )
     waiver_label = None
     if risk_cap_waived and rr is not None:
@@ -1530,6 +1619,7 @@ def enrich_stocks_trade_state(
                         risk_inr=s.get("trade_risk_inr"),
                     )
                     and not risk_cap_blocks_ready(s.get("trade_risk_inr"), s.get("trade_rr"))
+                    and not rr_below_minimum(s.get("trade_rr"))
                 )
             s["trade_entry_window_open"] = entry_window_open_ist()
 
@@ -1632,6 +1722,8 @@ def enrich_stocks_trade_state(
             imbalance=zone1_early.get("direction_imbalance"),
             removals=removals,
         )
+        # After regime badges exist: stack of warnings / 2nd+ pullback combo → WAIT.
+        stack_n = apply_warning_stack_downgrades(stocks)
         return {
             "churn_warning": len(churn_syms) >= 3,
             "churn_symbols": churn_syms,
@@ -1639,6 +1731,7 @@ def enrich_stocks_trade_state(
             "recent_removals": removals,
             "ready_vwap_gate_enabled": vwap_gate_on,
             "ready_consistency_logged": len(consistency_rows),
+            "warning_stack_downgraded": stack_n,
             **mkt,
             **zone1_early,
         }
