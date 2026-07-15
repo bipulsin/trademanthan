@@ -2,6 +2,7 @@
 from backend.services.rs_vwap_quality import (
     ready_vwap_quality_gate_enabled,
     score_vwap_quality,
+    vwap_extension_pct,
     vwap_slope_steepening,
 )
 
@@ -59,6 +60,41 @@ def test_score_vwap_quality_shape():
     assert "quality_pass" in q
     assert "whipsaw_crosses" in q
     assert q["quality_pass"] == (q["steep_ok"] and not q["unstable"])
+
+
+def test_vwap_extension_pct_signed():
+    candles = _trend_candles(90, up=True)
+    ext = vwap_extension_pct(candles)
+    assert ext is not None
+    # Strong uptrend → close typically above session VWAP
+    assert isinstance(ext, float)
+
+    down = _trend_candles(90, up=False)
+    ext_d = vwap_extension_pct(down)
+    assert ext_d is not None
+    assert ext_d < ext
+
+
+def test_build_raw_row_minimal():
+    from backend.services.kavach_vwap_raw_log import build_raw_row, lock_direction_to_side
+
+    assert lock_direction_to_side("BEAR") == "SHORT"
+    assert lock_direction_to_side("BULL") == "LONG"
+    row = build_raw_row(
+        session_date="2026-07-16",
+        symbol="bankindia",
+        direction="LONG",
+        lock_rank=2,
+        lock_direction="BULL",
+        slope_score=55.0,
+        steep_ok=True,
+        vwap_extension_pct=0.012345,
+    )
+    assert row["symbol"] == "BANKINDIA"
+    assert row["steep_ok"] is True
+    assert row["vwap_extension_pct"] == 0.012345
+    assert "rendered_state" not in row
+    assert "quality_pass" not in row
 
 
 def test_sort_prefers_vwap_slope_over_rank():

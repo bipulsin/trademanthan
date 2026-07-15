@@ -1429,6 +1429,7 @@ def enrich_stocks_trade_state(
         "session_window_text": "Entry 09:45–14:30 · Square-off 15:15",
         "ready_vwap_gate_enabled": False,
         "ready_consistency_logged": 0,
+        "vwap_raw_logged": 0,
     }
     if not stocks:
         from backend.services.daily_checklist_zones import build_zone1_obs
@@ -1500,14 +1501,35 @@ def enrich_stocks_trade_state(
 
         lot_cache: Dict[str, int] = {}
         consistency_rows: List[Dict[str, Any]] = []
+        vwap_raw_rows: List[Dict[str, Any]] = []
         from backend.services.daily_checklist_zones import morning_locked_symbols
+        from backend.services.kavach_vwap_raw_log import (
+            build_raw_row,
+            lock_direction_to_side,
+            log_vwap_raw,
+        )
         from backend.services.rs_vwap_quality import (
             ready_vwap_quality_gate_enabled,
             score_vwap_quality,
+            vwap_extension_pct,
         )
 
         lock_map = morning_locked_symbols(db, session_date)
         vwap_gate_on = ready_vwap_quality_gate_enabled()
+        # Ensure lock-universe candles exist for the raw VWAP shadow series
+        # (may include symbols not yet READY / not in the current display slice).
+        for lock_sym in list(lock_map.keys()):
+            if lock_sym in candle_cache:
+                continue
+            try:
+                candle_cache[lock_sym] = _load_candles_for_symbol(db, lock_sym) or []
+            except Exception:
+                candle_cache[lock_sym] = []
+            if lock_sym not in atr_pct_map:
+                try:
+                    atr_pct_map.update(_load_atr_map(db, [lock_sym]))
+                except Exception:
+                    pass
 
         nifty_pct = 0.0
         try:
@@ -1581,6 +1603,20 @@ def enrich_stocks_trade_state(
                 since=qualify_since,
             )
             s["vwap_quality"] = vq
+            # Shadow raw VWAP series: every lock member every poll (not READY-gated).
+            if in_lock:
+                vwap_raw_rows.append(
+                    build_raw_row(
+                        session_date=session_date,
+                        symbol=sym,
+                        direction=s.get("direction"),
+                        lock_rank=s.get("lock_rank"),
+                        lock_direction=s.get("lock_direction"),
+                        slope_score=vq.get("slope_score"),
+                        steep_ok=vq.get("steep_ok"),
+                        vwap_extension_pct=vwap_extension_pct(candles),
+                    )
+                )
             would_block = is_ready_pre and not bool(vq.get("quality_pass"))
             gate_applied = False
             if is_ready_pre and vwap_gate_on and not vq.get("quality_pass"):
@@ -1703,6 +1739,36 @@ def enrich_stocks_trade_state(
         if consistency_rows:
             log_ready_consistency(db, consistency_rows)
 
+        # Lock members missing from the stocks loop (edge case) still get a raw row.
+        logged_raw = {(r.get("symbol") or "").upper() for r in vwap_raw_rows}
+
+        for lock_sym, lock_row in lock_map.items():
+            su = (lock_sym or "").upper()
+            if not su or su in logged_raw:
+                continue
+            candles = candle_cache.get(su) or []
+            atr_pct = float(atr_pct_map.get(su) or 0.0)
+            side = lock_direction_to_side((lock_row or {}).get("direction"))
+            vq = score_vwap_quality(
+                candles,
+                side=side,
+                atr_daily_pct=atr_pct if atr_pct > 0 else 1.0,
+                cfg=cfg,
+            )
+            vwap_raw_rows.append(
+                build_raw_row(
+                    session_date=session_date,
+                    symbol=su,
+                    direction=side,
+                    lock_rank=(lock_row or {}).get("rank"),
+                    lock_direction=(lock_row or {}).get("direction"),
+                    slope_score=vq.get("slope_score"),
+                    steep_ok=vq.get("steep_ok"),
+                    vwap_extension_pct=vwap_extension_pct(candles),
+                )
+            )
+        vwap_raw_n = log_vwap_raw(db, vwap_raw_rows) if vwap_raw_rows else 0
+
         churn_syms = [s["symbol"] for s in stocks if int(s.get("lock_cycles") or 0) > 1]
         from backend.services.daily_checklist_zones import (
             annotate_regime_context,
@@ -1731,6 +1797,7 @@ def enrich_stocks_trade_state(
             "recent_removals": removals,
             "ready_vwap_gate_enabled": vwap_gate_on,
             "ready_consistency_logged": len(consistency_rows),
+            "vwap_raw_logged": vwap_raw_n,
             "warning_stack_downgraded": stack_n,
             **mkt,
             **zone1_early,

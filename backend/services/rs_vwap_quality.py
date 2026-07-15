@@ -56,6 +56,28 @@ def signed_vwap_slope_atr(candles: List[Dict], atr_daily_pct: float) -> float:
     return (vwap_s[idx_now] - vwap_s[idx_prev]) / atr
 
 
+def vwap_extension_pct(candles: List[Dict[str, Any]]) -> Optional[float]:
+    """Signed (close - vwap) / vwap on the last closed bar. Shadow research only."""
+    if not candles:
+        return None
+    candles = _sorted_candles(candles)
+    today, first_today = _today_slice(candles)
+    vwap_s = _vwap_series_today(candles)
+    closed = last_closed_bar_index(candles)
+    if closed < 0 or closed < first_today or not vwap_s:
+        return None
+    idx = min(len(vwap_s) - 1, closed - first_today)
+    if idx < 0:
+        return None
+    vwap = float(vwap_s[idx] or 0.0)
+    if vwap <= 0:
+        return None
+    close = _f(candles[closed].get("close"))
+    if close is None:
+        return None
+    return round((float(close) - vwap) / vwap, 6)
+
+
 def vwap_slope_steepening(
     candles: List[Dict[str, Any]],
     *,
