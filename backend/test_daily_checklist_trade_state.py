@@ -11,6 +11,7 @@ from backend.services.daily_checklist_trade_state import (
     STATE_SCANNING,
     STATE_WAIT,
     compute_trade_state_for_stock,
+    entry_off_live_ema5,
     entry_outside_session_range,
     sort_stocks_by_trade_state,
 )
@@ -99,14 +100,13 @@ def test_blocked_flat_regime():
     assert "regime" in (out["trade_state_reason"] or "").lower()
 
 
-def test_blocked_risk_over_3k_flags_not_blocks():
-    """Risk > ₹3k stays READY with visual flag — Take Trade still available."""
+def test_blocked_risk_over_3k_hard_gate():
+    """Risk > ₹3k with R:R < 1:2 → BLOCKED (hard), Take Trade off."""
     out = _compute(levels={"ema10": 60.0}, lot=100)
-    assert out["trade_state"] == STATE_READY
-    assert out["trade_risk_over"] is True
-    assert out["trade_risk_cap_flag"] is True
+    assert out["trade_state"] == STATE_BLOCKED
+    assert "risk" in (out["trade_state_reason"] or "").lower()
+    assert out["trade_take_enabled"] is False
     assert out["trade_risk_inr"] and out["trade_risk_inr"] > 3000
-    assert out["trade_entry"] == 100.0
 
 
 def test_ready_includes_expiry_price():
@@ -123,12 +123,17 @@ def test_rr_low_badge_not_block():
     assert out["trade_rr_label"] == "1:0.5"
 
 
-def test_risk_cap_flag_suppressed_when_rr_high():
-    # Large session high → high RR; risk over but waiver suppresses flag
+def test_risk_cap_waived_when_rr_high():
+    # Large session high → high RR; risk over but R:R waiver keeps READY
     out = _compute(levels={"ema10": 60.0}, lot=100, session_hi=200.0)
+    assert out["trade_state"] == STATE_READY
     assert out["trade_risk_over"] is True
     assert out["trade_rr"] is not None and out["trade_rr"] >= 2
+    assert out["trade_risk_cap_waived"] is True
     assert out["trade_risk_cap_flag"] is False
+    assert out["trade_risk_cap_waiver_label"]
+    assert "cap waived" in out["trade_risk_cap_waiver_label"]
+    assert out["trade_take_enabled"] is True
 
 
 def test_short_symmetric():
@@ -216,3 +221,36 @@ def test_ready_after_0945_take_enabled():
     assert out["trade_state"] == STATE_READY
     assert out["trade_take_enabled"] is True
     assert out["trade_entry_window_open"] is True
+
+
+def test_wait_entry_is_ema5_not_vwap():
+    """Pullback entry must be EMA5, never a VWAP blend."""
+    out = _compute(levels={"price": 101.5, "ema5": 100.0, "vwap": 101.2})
+    assert out["trade_state"] == STATE_WAIT
+    assert out["trade_entry"] == 100.0
+
+
+def test_entry_off_live_ema5_helper():
+    # CHOLAFIN-style: entry well below live EMA5 under a tight band
+    assert entry_off_live_ema5(1818.55, 1820.78, tol_pct=0.05)
+    assert not entry_off_live_ema5(1820.78, 1820.78)
+    assert entry_off_live_ema5(None, 100.0)
+    assert entry_off_live_ema5(100.0, None)
+
+
+def test_no_ready_without_sl_or_risk():
+    out = _compute(levels={"ema10": None})
+    assert out["trade_state"] == STATE_WAIT
+    assert "SL/Risk" in (out["trade_state_reason"] or "")
+    assert out["trade_sl"] is None
+    assert out["trade_take_enabled"] is False
+
+
+def test_ready_ema5_anchored_within_cap():
+    out = _compute()
+    assert out["trade_state"] == STATE_READY
+    assert out["trade_entry"] == 100.0
+    assert out["trade_sl"] == 98.0
+    assert out["trade_risk_inr"] == 100
+    assert out["trade_take_enabled"] is True
+    assert out["trade_risk_cap_waived"] is False

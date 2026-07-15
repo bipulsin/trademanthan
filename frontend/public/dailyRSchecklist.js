@@ -811,10 +811,23 @@
 
         var expEl = card.querySelector(".dc-ready-expiry");
         var expPx = stock.trade_expiry_price;
+        var atrN = stock.trade_expiry_atr != null ? Number(stock.trade_expiry_atr) : 1.5;
         if (expEl) {
             expEl.textContent = expPx != null
-                ? ("Expires beyond: ₹" + Number(expPx).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+                ? ("Invalidation (not SL): price beyond ₹" +
+                    Number(expPx).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+                    " · " + atrN + " ATR from EMA5 entry")
                 : "";
+        }
+        var waivedEl = card.querySelector(".dc-ready-waiver");
+        if (waivedEl) {
+            if (stock.trade_risk_cap_waived && stock.trade_risk_cap_waiver_label) {
+                waivedEl.hidden = false;
+                waivedEl.textContent = stock.trade_risk_cap_waiver_label;
+            } else {
+                waivedEl.hidden = true;
+                waivedEl.textContent = "";
+            }
         }
         var expired = stock.trade_state === "EXPIRED" || !!stock.trade_expiry_crossed;
         card.classList.toggle("dc-ready-card--expired", expired);

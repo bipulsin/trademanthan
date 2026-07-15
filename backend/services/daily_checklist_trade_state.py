@@ -18,6 +18,9 @@ READY NOW note (2026-07-14 / 2026-07-15):
   2026-07-15 gates:
   - No READY / Take Trade before 09:45 IST (SCANNING until then).
   - Entry outside today's session high/low → EXPIRED (stale/gap).
+  - Entry must be live EMA5 (±ENTRY_EMA5_TOL_PCT); no VWAP-blend limit.
+  - Missing SL / Risk → not READY; Take Trade disabled.
+  - Risk > ₹3k with R:R < 1:2 → BLOCKED (hard). R:R ≥ 1:2 → cap waived label.
 """
 from __future__ import annotations
 
@@ -42,6 +45,8 @@ MAX_INR_RISK = 3000.0
 ADX_READY = 25.0
 ADX_MIN = 20.0
 RR_LOW = 2.0
+# READY entry must sit within this % of live EMA5 (stale / wrong-anchor guard).
+ENTRY_EMA5_TOL_PCT = 0.5
 
 STATE_READY = "READY"
 STATE_READY_RECHECK = "READY(RECHECK)"
@@ -95,6 +100,61 @@ def entry_outside_session_range(
     if (not is_long) and session_hi is not None and entry > session_hi:
         return True
     return False
+
+
+def entry_off_live_ema5(
+    entry: Optional[float],
+    ema5: Optional[float],
+    *,
+    tol_pct: float = ENTRY_EMA5_TOL_PCT,
+) -> bool:
+    """True when entry is missing EMA5 or outside ±tol_pct of live EMA5."""
+    if entry is None or ema5 is None:
+        return True
+    if abs(ema5) < 1e-9:
+        return True
+    return abs(entry - ema5) / abs(ema5) * 100.0 > float(tol_pct)
+
+
+def session_rr(
+    *,
+    is_long: bool,
+    entry: Optional[float],
+    sl: Optional[float],
+    session_hi: Optional[float],
+    session_lo: Optional[float],
+) -> Optional[float]:
+    """R:R to session extreme from entry/SL (same definition used on cards)."""
+    if entry is None or sl is None:
+        return None
+    risk = abs(entry - sl)
+    if risk <= 0:
+        return None
+    if is_long and session_hi is not None and session_hi > entry:
+        return round((session_hi - entry) / risk, 1)
+    if (not is_long) and session_lo is not None and session_lo < entry:
+        return round((entry - session_lo) / risk, 1)
+    return None
+
+
+def risk_cap_blocks_ready(
+    risk_inr: Optional[float],
+    rr: Optional[float],
+) -> bool:
+    """Hard block when INR risk > cap and R:R is missing or below 1:2."""
+    if risk_inr is None or risk_inr <= MAX_INR_RISK:
+        return False
+    return rr is None or rr < RR_LOW
+
+
+def take_trade_structurally_ok(
+    *,
+    entry: Optional[float],
+    sl: Optional[float],
+    risk_inr: Optional[float],
+) -> bool:
+    """Take Trade needs a computable entry, stop, and INR risk."""
+    return entry is not None and sl is not None and risk_inr is not None
 
 
 def ensure_ready_consistency_log() -> None:
@@ -538,16 +598,9 @@ def compute_trade_state_for_stock(
     if price is not None and atr_pct and atr_pct > 0:
         atr = price * atr_pct / 100.0
 
-    # Intended entry / pullback level
-    pullback_level = None
-    if ema5 is not None and vwap is not None and price is not None:
-        pullback_level = ema5 if abs(price - ema5) <= abs(price - vwap) else vwap
-    elif ema5 is not None:
-        pullback_level = ema5
-    elif vwap is not None:
-        pullback_level = vwap
-
-    entry_ready = ema5  # READY uses EMA5 as limit
+    # Pullback / READY entry is always live EMA5 (never VWAP blend).
+    pullback_level = ema5
+    entry_ready = ema5
     sl_price = ema10
 
     dist_ema5_atr = None
@@ -584,10 +637,7 @@ def compute_trade_state_for_stock(
     elif adx is None:
         block_reasons.append("ADX —")
 
-    # Risk > ₹3k is a visual flag / waiver case — not a hard READY block.
-    # (Trader may still take when R:R > 1:2; Take Trade stays enabled.)
-
-    # Pullback expiry boundary: entry ± 1.5 ATR away from the setup.
+    # Pullback expiry boundary: entry ± 1.5 ATR away from the setup (invalidation, not SL).
     expiry_price = None
     if intended is not None and atr and atr > 0:
         span = float(expiry_atr) * atr
@@ -597,6 +647,8 @@ def compute_trade_state_for_stock(
     blocked_reason = None
     entry_price = None
     display_risk = risk_inr_ready
+    gate_badges: List[str] = []
+    risk_cap_waived = False
 
     if block_reasons:
         state = STATE_BLOCKED
@@ -612,12 +664,42 @@ def compute_trade_state_for_stock(
             state = STATE_READY_RECHECK
         else:
             state = STATE_READY
-        entry_price = round(entry_ready, 2)
+        entry_price = round(float(entry_ready), 2)
         display_risk = risk_inr_ready
     else:
         state = STATE_WAIT
         entry_price = round(pullback_level, 2) if pullback_level is not None else None
         display_risk = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
+
+    # EMA5 anchor sanity: READY entry must match live EMA5 within tolerance.
+    if state in (STATE_READY, STATE_READY_RECHECK):
+        if ema5 is None or entry_off_live_ema5(entry_price, ema5):
+            logger.warning(
+                "READY entry off live EMA5 %s: entry=%s ema5=%s source=%s",
+                stock.get("symbol"),
+                entry_price,
+                ema5,
+                levels.get("source"),
+            )
+            state = STATE_WAIT
+            blocked_reason = (
+                f"WAIT · entry not anchored to EMA5 "
+                f"(entry {entry_price}, EMA5 {ema5})"
+            )
+            entry_price = round(ema5, 2) if ema5 is not None else entry_price
+            display_risk = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
+        else:
+            # Re-assert exact live EMA5 (no blend / stale override).
+            entry_price = round(float(ema5), 2)
+            display_risk = risk_inr_ready
+
+    # Missing SL or INR risk → never READY / Take Trade.
+    if state in (STATE_READY, STATE_READY_RECHECK) and not take_trade_structurally_ok(
+        entry=entry_price, sl=sl_price, risk_inr=display_risk
+    ):
+        state = STATE_WAIT
+        blocked_reason = "WAIT · SL/Risk not computed — Take Trade disabled"
+        display_risk = risk_inr_ready if risk_inr_ready is not None else risk_inr_pb
 
     # Stale / gapped entry: level sits outside today's traded range → EXPIRED
     # (same bucket as >1.5 ATR pullback expiry). Re-checked every refresh.
@@ -692,19 +774,42 @@ def compute_trade_state_for_stock(
 
     sl_out = round(sl_price, 2) if sl_price is not None else None
 
-    rr = None
-    rr_low = False
-    if entry_price is not None and sl_out is not None:
-        risk = abs(entry_price - sl_out)
-        if risk > 0:
-            if is_long and session_hi is not None and session_hi > entry_price:
-                reward = session_hi - entry_price
-                rr = round(reward / risk, 1)
-            elif (not is_long) and session_lo is not None and session_lo < entry_price:
-                reward = entry_price - session_lo
-                rr = round(reward / risk, 1)
-            if rr is not None and rr < RR_LOW:
-                rr_low = True
+    rr = session_rr(
+        is_long=is_long,
+        entry=entry_price,
+        sl=sl_out,
+        session_hi=session_hi,
+        session_lo=session_lo,
+    )
+    rr_low = bool(rr is not None and rr < RR_LOW)
+
+    # Hard ₹3k risk gate (not display-only): over cap + weak/missing R:R → BLOCKED.
+    if state in (STATE_READY, STATE_READY_RECHECK) and risk_cap_blocks_ready(display_risk, rr):
+        state = STATE_BLOCKED
+        blocked_reason = (
+            f"BLOCKED · risk ₹{int(display_risk)} > ₹{int(MAX_INR_RISK)} "
+            f"and R:R {('1:' + str(rr)) if rr is not None else '—'} < 1:{RR_LOW:g}"
+        )
+        risk_cap_waived = False
+    elif (
+        state in (STATE_READY, STATE_READY_RECHECK)
+        and display_risk is not None
+        and display_risk > MAX_INR_RISK
+        and rr is not None
+        and rr >= RR_LOW
+    ):
+        risk_cap_waived = True
+        badges = list(gate_badges or [])
+        if "CAP WAIVED" not in badges:
+            badges.append("CAP WAIVED")
+        gate_badges = badges
+
+    # Final structural Take Trade check after all mutations.
+    if state in (STATE_READY, STATE_READY_RECHECK) and not take_trade_structurally_ok(
+        entry=entry_price, sl=sl_out, risk_inr=display_risk
+    ):
+        state = STATE_WAIT
+        blocked_reason = "WAIT · SL/Risk not computed — Take Trade disabled"
 
     # Position trail + optional PROFIT LOCKED (EMA5 alt exit) — display only
     trail = None
@@ -760,8 +865,17 @@ def compute_trade_state_for_stock(
         pb_label = "2nd pullback"
 
     risk_over = bool(display_risk is not None and display_risk > MAX_INR_RISK)
-    # Waiver: R:R already ≥ 1:2 → suppress visual flag (still show the risk number).
-    risk_cap_flag = bool(risk_over and (rr is None or rr < RR_LOW))
+    # Visual flag when over cap without an explicit R:R waiver.
+    risk_cap_flag = bool(risk_over and not risk_cap_waived)
+    take_ok = bool(
+        state in (STATE_READY, STATE_READY_RECHECK)
+        and entry_window_open_ist(clock)
+        and take_trade_structurally_ok(entry=entry_price, sl=sl_out, risk_inr=display_risk)
+        and not risk_cap_blocks_ready(display_risk, rr)
+    )
+    waiver_label = None
+    if risk_cap_waived and rr is not None:
+        waiver_label = f"cap waived — R:R 1:{rr}"
 
     return {
         "trade_state": state,
@@ -771,6 +885,8 @@ def compute_trade_state_for_stock(
         "trade_risk_inr": int(display_risk) if display_risk is not None else None,
         "trade_risk_over": risk_over,
         "trade_risk_cap_flag": risk_cap_flag,
+        "trade_risk_cap_waived": bool(risk_cap_waived),
+        "trade_risk_cap_waiver_label": waiver_label,
         "trade_risk_cap_inr": int(MAX_INR_RISK),
         "trade_expiry_price": expiry_price,
         "trade_expiry_atr": float(expiry_atr),
@@ -782,9 +898,7 @@ def compute_trade_state_for_stock(
         "trade_lot": lot,
         "trade_levels_source": levels.get("source"),
         "trade_entry_window_open": entry_window_open_ist(clock),
-        "trade_take_enabled": bool(
-            state in (STATE_READY, STATE_READY_RECHECK) and entry_window_open_ist(clock)
-        ),
+        "trade_take_enabled": take_ok,
         "promoted_at": (promo or {}).get("promoted_at"),
         "lock_cycles": int((promo or {}).get("cycles") or 0),
         "position": trail,
@@ -969,6 +1083,12 @@ def enrich_stocks_trade_state(
                 s["trade_take_enabled"] = bool(
                     s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK)
                     and entry_window_open_ist()
+                    and take_trade_structurally_ok(
+                        entry=s.get("trade_entry"),
+                        sl=s.get("trade_sl"),
+                        risk_inr=s.get("trade_risk_inr"),
+                    )
+                    and not risk_cap_blocks_ready(s.get("trade_risk_inr"), s.get("trade_rr"))
                 )
             s["trade_entry_window_open"] = entry_window_open_ist()
 

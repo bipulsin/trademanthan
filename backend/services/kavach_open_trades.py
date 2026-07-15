@@ -932,7 +932,14 @@ def take_trade(
 
     db = SessionLocal()
     try:
-        from backend.services.daily_checklist_trade_state import before_entry_window_ist
+        from backend.services.daily_checklist_trade_state import (
+            before_entry_window_ist,
+            risk_cap_blocks_ready,
+            session_rr,
+            take_trade_structurally_ok,
+            MAX_INR_RISK,
+            RR_LOW,
+        )
 
         if before_entry_window_ist():
             raise ValueError("Take Trade disabled before 09:45 IST — waiting for 3 clean 10m bars")
@@ -995,7 +1002,36 @@ def take_trade(
         levels = _levels_for_symbol(db, sym, sd)
         bar = _confirmed_10m_levels(db, sym)
         ema10 = _f(bar.get("ema10")) or _f(levels.get("ema10"))
-        initial_sl = abs(px - ema10) * lot if ema10 is not None else None
+        ema5 = _f(bar.get("ema5")) or _f(levels.get("ema5"))
+        if ema10 is None:
+            raise ValueError("Take Trade disabled — SL (EMA10) not available")
+        initial_sl = abs(px - ema10) * lot
+        if not take_trade_structurally_ok(entry=px, sl=ema10, risk_inr=initial_sl):
+            raise ValueError("Take Trade disabled — SL/Risk not computed")
+
+        from backend.services.daily_checklist_trade_state import (
+            _session_hi_lo,
+            entry_off_live_ema5,
+        )
+
+        hi, lo = _session_hi_lo(db, sym, sd)
+        rr = session_rr(
+            is_long=(direction == "LONG"),
+            entry=px,
+            sl=ema10,
+            session_hi=hi,
+            session_lo=lo,
+        )
+        if risk_cap_blocks_ready(initial_sl, rr):
+            raise ValueError(
+                f"Take Trade blocked — risk ₹{int(initial_sl)} > ₹{int(MAX_INR_RISK)} "
+                f"and R:R {('1:' + str(rr)) if rr is not None else '—'} < 1:{RR_LOW:g}"
+            )
+        if ema5 is not None and entry_off_live_ema5(px, ema5):
+            logger.warning(
+                "take_trade entry off EMA5 %s: entry=%s ema5=%s", sym, px, ema5
+            )
+
         tid = str(uuid.uuid4())
         ctx = dict(context or {})
         ctx.setdefault("confidence", levels.get("confidence_grade"))
