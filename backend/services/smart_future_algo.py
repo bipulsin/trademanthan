@@ -1285,6 +1285,45 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: RS full-universe Kavach archive (15:40 IST, Mon–Fri)"
             )
 
+            def _run_universe_vwap_scan():
+                """Research-only: full F&O universe VWAP slope every 5m (cache-only)."""
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("Universe VWAP slope scan", now):
+                    return
+                try:
+                    from backend.services.kavach_universe_vwap_scan import (
+                        run_live_universe_vwap_scan,
+                    )
+
+                    out = run_live_universe_vwap_scan()
+                    if out.get("skipped"):
+                        logger.debug("Universe VWAP scan skipped: %s", out.get("reason"))
+                    else:
+                        logger.info("✅ Universe VWAP slope scan: %s", out)
+                except Exception as e:
+                    logger.error("❌ Universe VWAP slope scan failed: %s", e, exc_info=True)
+
+            # Offset +1 min from centralized_market_data_5m so shared candle_cache is warm.
+            self.scheduler.add_job(
+                _run_universe_vwap_scan,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="1,6,11,16,21,26,31,36,41,46,51,56",
+                    timezone="Asia/Kolkata",
+                ),
+                id="kavach_universe_vwap_scan_5m",
+                name="Universe VWAP slope scan (research, every 5m)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=120,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Universe VWAP slope scan (Mon–Fri :01/:06… IST, research)"
+            )
+
             def _run_daily_checklist_refresh():
                 ist = pytz.timezone("Asia/Kolkata")
                 now = datetime.now(ist)

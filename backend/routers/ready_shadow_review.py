@@ -55,6 +55,24 @@ def export_review(
     )
 
 
+@router.get("/api/ready-shadow-review/export-analysis")
+@router.get("/ready-shadow-review/export-analysis")
+def export_analysis(session_date: Optional[str] = Query(None)):
+    """Combined shadow/diagnostic JSON for Claude analysis handoff."""
+    data = svc.export_analysis_bundle(session_date)
+    if not data.get("ok"):
+        return data
+    filename = data.get("filename") or "shadow-analysis-bundle.json"
+    # Drop non-serializable helpers from response body
+    payload = {k: v for k, v in data.items() if k != "filename"}
+    body = json.dumps(payload, indent=2, default=str)
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/ready-shadow-review")
 @router.get("/ready-shadow-review")
 def get_review(

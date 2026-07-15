@@ -97,7 +97,8 @@
         <p class="sub">
           Backend rollup of <span class="mono">kavach_ready_consistency_log</span> —
           lock mismatches and VWAP-quality shadow gate decisions. Classify rows, then export for the 22-Jul checkpoint.
-          No login required. Does not change live flags.
+          <strong>Export for Analysis</strong> bundles consistency + universe VWAP scan + raw lock VWAP + R1/R2 + snapshot
+          into one JSON. No login required. Does not change live flags.
         </p>
       </div>
     </header>
@@ -118,6 +119,7 @@
       <button type="button" class="primary" id="btnLoad">Load</button>
       <button type="button" id="btnCsv">Export CSV</button>
       <button type="button" id="btnJson">Export JSON</button>
+      <button type="button" class="primary" id="btnBundle" title="All shadow tables for this date (Claude handoff)">Export for Analysis</button>
     </div>
 
     <div class="agg" id="rollup"></div>
@@ -340,6 +342,38 @@
     window.location.href = url;
   }
 
+  function downloadAnalysisBundle() {
+    var sd = $("sessionDate").value || todayIST();
+    var btn = $("btnBundle");
+    btn.disabled = true;
+    setStatus("Building analysis bundle for " + sd + "…");
+    var url = API + "/api/ready-shadow-review/export-analysis?session_date="
+      + encodeURIComponent(sd);
+    fetch(url, { cache: "no-store" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        var cd = res.headers.get("Content-Disposition") || "";
+        var m = /filename=\"?([^\";]+)\"?/.exec(cd);
+        var fname = (m && m[1]) || ("shadow-analysis-bundle-" + sd + ".json");
+        return res.blob().then(function (blob) { return { blob: blob, fname: fname }; });
+      })
+      .then(function (pack) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(pack.blob);
+        a.download = pack.fname;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+        btn.disabled = false;
+        setStatus("Downloaded " + pack.fname);
+      })
+      .catch(function (e) {
+        btn.disabled = false;
+        setStatus(String(e), true);
+      });
+  }
+
   $("sessionDate").value = todayIST();
   Array.prototype.forEach.call($("filterSeg").querySelectorAll("button"), function (btn) {
     btn.addEventListener("click", function () {
@@ -354,6 +388,7 @@
   $("btnLoad").addEventListener("click", load);
   $("btnCsv").addEventListener("click", function () { download("csv"); });
   $("btnJson").addEventListener("click", function () { download("json"); });
+  $("btnBundle").addEventListener("click", downloadAnalysisBundle);
   $("sessionDate").addEventListener("change", load);
 
   load();

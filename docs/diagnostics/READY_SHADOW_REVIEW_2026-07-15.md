@@ -85,3 +85,17 @@ Schema logs slope / `steep_ok` only. Propose shadow-only `vwap_extension_pct = (
 - `kavach_ready_consistency_log` write rules **unchanged**.
 - No live READY / gate / lock changes.
 - No backfill of 2026-07-15; live forward from deploy for 22-Jul comparison.
+
+---
+
+## Phase 3 (2026-07-15 evening) — Option C full-universe VWAP slope sweep
+
+**Question:** Do non-lock symbols ever show `vwap_slope_score >= 50` during the day?
+
+**Change (shadow-only):**
+- Table `kavach_universe_vwap_scan` — full ~200 F&O universe every 5m RTH
+- Live path: **cache-only** (rides `centralized_market_data_5m` candle_cache; no Upstox storm)
+- Scheduler: Mon–Fri `:01/:06/…` IST (offset +1m after market-data refresh)
+- Columns include `in_lock_at_time`, `source` (`live`|`backfill`), `vwap_extension_pct`
+- Backfill script: `scripts/backfill_universe_vwap_scan.py` via Upstox historical 5m (`range_end_date`) for 13/14/15-Jul
+- `shadow.html` → **Export for Analysis** bundles consistency + universe scan + raw log + R1/R2 + snapshot

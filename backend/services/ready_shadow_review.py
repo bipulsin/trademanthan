@@ -357,3 +357,158 @@ def export_session(session_date: Optional[str] = None, *, fmt: str = "json") -> 
         "rows": flat,
         "row_count": len(flat),
     }
+
+
+def _serialize_rows(raw_rows: List[Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for r in raw_rows:
+        if hasattr(r, "_mapping"):
+            d = dict(r._mapping)
+        elif isinstance(r, dict):
+            d = dict(r)
+        else:
+            d = {k: getattr(r, k) for k in r.keys()} if hasattr(r, "keys") else {}
+        for k, v in list(d.items()):
+            if isinstance(v, datetime):
+                if v.tzinfo is None:
+                    v = IST.localize(v)
+                d[k] = v.astimezone(IST).isoformat()
+            elif isinstance(v, date):
+                d[k] = v.isoformat()
+        out.append(d)
+    return out
+
+
+def _safe_table_fetch(db, sql: str, params: Dict[str, Any], key: str) -> Dict[str, Any]:
+    try:
+        rows = db.execute(text(sql), params).fetchall()
+        ser = _serialize_rows(rows)
+        meta = {"row_count": len(ser)}
+        if len(ser) >= 50_000:
+            meta["warning"] = f"{key} has {len(ser)} rows (large export)"
+        return {"ok": True, "rows": ser, **meta}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "rows": [], "row_count": 0}
+
+
+def export_analysis_bundle(session_date: Optional[str] = None) -> Dict[str, Any]:
+    """One-click Claude handoff: all shadow/diagnostic tables for a session date."""
+    ensure_review_table()
+    from backend.services.kavach_universe_vwap_scan import ensure_universe_vwap_scan
+    from backend.services.kavach_vwap_raw_log import ensure_vwap_raw_log
+
+    ensure_vwap_raw_log()
+    ensure_universe_vwap_scan()
+    sd = session_date or today_ist()
+    db = SessionLocal()
+    try:
+        consistency = list_session_review(sd, filter="all")
+        bundle: Dict[str, Any] = {
+            "ok": True,
+            "session_date": sd,
+            "exported_at": datetime.now(IST).isoformat(),
+            "notes": [
+                "Read-only shadow/diagnostic export for analysis.",
+                "kavach_universe_vwap_scan: full-universe 5m slope (live|backfill).",
+                "kavach_vwap_raw_log: lock-universe every poll (Phase 2).",
+                "kavach_ready_consistency_log: READY-triggered consistency + review.",
+            ],
+            "warnings": [],
+            "table_meta": {},
+        }
+
+        # Ready consistency (with review classifications) — reuse list view
+        cons_rows = consistency.get("rows") or []
+        bundle["kavach_ready_consistency_log"] = cons_rows
+        bundle["ready_consistency_rollup"] = consistency.get("rollup")
+        bundle["table_meta"]["kavach_ready_consistency_log"] = {
+            "row_count": len(cons_rows),
+            "ok": bool(consistency.get("ok")),
+        }
+
+        sections = [
+            (
+                "kavach_universe_vwap_scan",
+                """
+                SELECT id, session_date, symbol, direction, vwap_slope_score, steep_ok,
+                       vwap_extension_pct, in_lock_at_time, source, logged_at
+                FROM kavach_universe_vwap_scan
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY logged_at, symbol
+                """,
+            ),
+            (
+                "kavach_vwap_raw_log",
+                """
+                SELECT id, session_date, symbol, direction, lock_rank, lock_direction,
+                       vwap_slope_score, steep_ok, vwap_extension_pct, logged_at
+                FROM kavach_vwap_raw_log
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY logged_at, symbol
+                """,
+            ),
+            (
+                "kavach_r1_early_warning_log",
+                """
+                SELECT * FROM kavach_r1_early_warning_log
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY 1
+                """,
+            ),
+            (
+                "kavach_r2_exit_now_log",
+                """
+                SELECT * FROM kavach_r2_exit_now_log
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY 1
+                """,
+            ),
+            (
+                "daily_snapshot",
+                """
+                SELECT snapshot_date, symbol, direction, rank, rs_score, locked_at
+                FROM daily_snapshot
+                WHERE snapshot_date = CAST(:d AS date)
+                ORDER BY direction, rank
+                """,
+            ),
+            (
+                "snapshot_lock",
+                """
+                SELECT lock_date, locked_at, locked_by
+                FROM snapshot_lock
+                WHERE lock_date = CAST(:d AS date)
+                """,
+            ),
+            (
+                "rs_lock_membership_audit",
+                """
+                SELECT id, session_date, symbol, direction, event_type, rule, rank,
+                       persistence_top5_frac, persistence_clean_bars, detail, event_at
+                FROM rs_lock_membership_audit
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY event_at, id
+                """,
+            ),
+        ]
+        for key, sql in sections:
+            block = _safe_table_fetch(db, sql, {"d": sd}, key)
+            bundle[key] = block.get("rows") or []
+            bundle["table_meta"][key] = {
+                "ok": block.get("ok"),
+                "row_count": block.get("row_count", 0),
+                "error": block.get("error"),
+                "warning": block.get("warning"),
+            }
+            if block.get("warning"):
+                bundle["warnings"].append(block["warning"])
+            if block.get("error"):
+                bundle["warnings"].append(f"{key}: {block['error']}")
+
+        bundle["filename"] = f"shadow-analysis-bundle-{sd}.json"
+        return bundle
+    except Exception as exc:
+        logger.warning("analysis bundle export failed: %s", exc)
+        return {"ok": False, "error": str(exc), "session_date": sd}
+    finally:
+        db.close()
