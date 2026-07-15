@@ -21,7 +21,10 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - Entry must be live EMA5 (±ENTRY_EMA5_TOL_PCT); no VWAP-blend limit.
   - Missing SL / Risk → not READY; Take Trade disabled.
   - Risk > ₹3k with R:R < 1:2 → BLOCKED (hard). R:R ≥ 1:2 → cap waived label.
-  - Live Trend/Supertrend/MACD ≥2-of-3 oppose lock direction → WAIT (DIR CONFLICT).
+  - Live panel Trend (price vs VWAP) / Supertrend / MACD ≥2-of-3 oppose lock
+    → WAIT (DIR CONFLICT). Also WAIT when live Kavach state is opposite the
+    lock, or Trading State is HOLD/WATCH. Overlay uses forming 10m bars so
+    votes track the TradingView panel, not only the last closed bucket.
     Root cause: sticky daily_snapshot direction (no swap after f11e1b7) vs live
     10m Kavach fields; READY historically ignored that disagreement.
   - ATR consumed (from open + from opening range) logged for research only —
@@ -164,24 +167,30 @@ def take_trade_structurally_ok(
 
 def live_momentum_sides(
     *,
+    trend: Optional[str] = None,
     ema_vs_vwap: Optional[str] = None,
     supertrend: Optional[str] = None,
     macd: Optional[str] = None,
 ) -> Dict[str, Optional[str]]:
-    """Map checklist live labels → BULL / BEAR / None (neutral/unknown).
+    """Map Kavach panel labels → BULL / BEAR / None (neutral/unknown).
 
-    Same three fields shown on the TradingView Kavach panel (Trend≈EMA5 vs VWAP,
-    Supertrend, MACD). Crossing / At VWAP count as neutral, not a vote.
+    Panel Trend = price vs VWAP (Bullish/Bearish). ``ema_vs_vwap`` (Above/Below)
+    is the fallback when Trend is missing. Crossing / At VWAP = neutral.
     """
+    tr = (trend or "").strip().lower()
     ema = (ema_vs_vwap or "").strip().lower()
     st = (supertrend or "").strip().lower()
     md = (macd or "").strip().lower()
 
-    ema_side = None
-    if ema == "above":
-        ema_side = "BULL"
+    trend_side = None
+    if tr in ("bullish", "above"):
+        trend_side = "BULL"
+    elif tr in ("bearish", "below"):
+        trend_side = "BEAR"
+    elif ema == "above":
+        trend_side = "BULL"
     elif ema == "below":
-        ema_side = "BEAR"
+        trend_side = "BEAR"
 
     st_side = None
     if st == "bullish":
@@ -196,7 +205,7 @@ def live_momentum_sides(
         macd_side = "BEAR"
     # "crossing" → neutral
 
-    return {"ema_vs_vwap": ema_side, "supertrend": st_side, "macd": macd_side}
+    return {"trend": trend_side, "supertrend": st_side, "macd": macd_side}
 
 
 def overlay_live_momentum_from_candles(
@@ -205,13 +214,13 @@ def overlay_live_momentum_from_candles(
     *,
     nifty_pct: float = 0.0,
 ) -> Dict[str, Optional[str]]:
-    """Refresh Trend/ST/MACD labels from closed 10m candles (every enrich poll).
+    """Refresh panel Trend/ST/MACD from live 10m candles (incl. forming bar).
 
-    Checklist DB rows can lag the live recompute path; conflict checks must not
-    depend on sticky morning labels. Mutates stock in place when metrics resolve.
-    Returns the labels used (overlay or prior).
+    Applies to every enrich symbol (no allowlist — ABB/IEX/etc. identical path).
+    Mutates stock in place when metrics resolve.
     """
     prior = {
+        "trend": stock.get("trend"),
         "ema_vs_vwap": stock.get("ema_vs_vwap"),
         "supertrend": stock.get("supertrend"),
         "macd": stock.get("macd"),
@@ -223,17 +232,24 @@ def overlay_live_momentum_from_candles(
             _ema_vs_vwap_label,
             _macd_label,
             _supertrend_label,
+            _trading_state_label,
+            _trend_label,
         )
         from backend.services.kavach_10m import metrics_from_10m_candles
         from backend.services.relative_strength_scanner import RANKING_BEARISH, RANKING_BULLISH
 
         direction = (stock.get("direction") or "LONG").upper()
         ranking = RANKING_BEARISH if direction == "SHORT" else RANKING_BULLISH
+        # include_forming=True: match TradingView panel (updates on open bucket).
         metrics = metrics_from_10m_candles(
-            candles, ranking_type=ranking, nifty_pct=float(nifty_pct or 0.0)
+            candles,
+            ranking_type=ranking,
+            nifty_pct=float(nifty_pct or 0.0),
+            include_forming=True,
         )
         if not metrics:
             return prior
+        trend_lbl = _trend_label(_f(metrics.get("price")), _f(metrics.get("vwap")))
         ema_lbl = _ema_vs_vwap_label(_f(metrics.get("ema5")), _f(metrics.get("vwap")))
         st_lbl = _supertrend_label(_f(metrics.get("supertrend")))
         macd_lbl = _macd_label(
@@ -241,15 +257,22 @@ def overlay_live_momentum_from_candles(
             _f(metrics.get("macd_signal")),
             _f(metrics.get("macd_histogram")),
         )
+        if trend_lbl is not None:
+            stock["trend"] = trend_lbl
         if ema_lbl is not None:
             stock["ema_vs_vwap"] = ema_lbl
         if st_lbl is not None:
             stock["supertrend"] = st_lbl
         if macd_lbl is not None:
             stock["macd"] = macd_lbl
-        if metrics.get("kavach_state"):
-            stock["dashboard_kavach_live"] = metrics.get("kavach_state")
+        kav = metrics.get("kavach_state")
+        if kav:
+            stock["dashboard_kavach_live"] = kav
+            ts_lbl = _trading_state_label(kav, direction)
+            if ts_lbl:
+                stock["trading_state"] = ts_lbl
         return {
+            "trend": stock.get("trend"),
             "ema_vs_vwap": stock.get("ema_vs_vwap"),
             "supertrend": stock.get("supertrend"),
             "macd": stock.get("macd"),
@@ -262,19 +285,23 @@ def overlay_live_momentum_from_candles(
 def direction_live_conflict(
     *,
     direction: str,
+    trend: Optional[str] = None,
     ema_vs_vwap: Optional[str] = None,
     supertrend: Optional[str] = None,
     macd: Optional[str] = None,
+    kavach_state: Optional[str] = None,
+    trading_state: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Compare sticky checklist lock direction vs live Trend/ST/MACD.
+    """Compare sticky checklist lock direction vs live panel Trend/ST/MACD.
 
-    Returns conflict count (0–3), opposing field names, and live lean.
-    ≥2 opposing votes → suppress READY (caller). Does not flip lock direction.
+    Trend = price vs VWAP (Bullish/Bearish); falls back to EMA5 vs VWAP labels.
+    ≥2 opposing votes → suppress READY. Also suppress when live Kavach state is
+    fully opposite the lock, or Trading State is HOLD/WATCH (not entry-PASS).
     """
     is_long = (direction or "LONG").upper() != "SHORT"
     expect = "BULL" if is_long else "BEAR"
     sides = live_momentum_sides(
-        ema_vs_vwap=ema_vs_vwap, supertrend=supertrend, macd=macd
+        trend=trend, ema_vs_vwap=ema_vs_vwap, supertrend=supertrend, macd=macd
     )
     opposing: List[str] = []
     agreeing: List[str] = []
@@ -297,9 +324,11 @@ def direction_live_conflict(
     n = len(opposing)
     checklist_dir = "LONG" if is_long else "SHORT"
     reason = None
+    suppress = n >= 2
     if n >= 2:
         fields = "+".join(
             {
+                "trend": "Trend",
                 "ema_vs_vwap": "Trend",
                 "supertrend": "Supertrend",
                 "macd": "MACD",
@@ -310,13 +339,45 @@ def direction_live_conflict(
             f"direction conflict: checklist {checklist_dir} vs live "
             f"{live_lean or 'opposing'} {fields}"
         )
+
+    # Live Kavach state opposite the lock (panel Trading State SELL vs LONG, etc.).
+    from backend.services.kavach_engine import BEARISH_STATES, BULLISH_STATES
+
+    kav = (kavach_state or "").strip().upper()
+    if kav:
+        if is_long and kav in BEARISH_STATES:
+            suppress = True
+            reason = reason or (
+                f"direction conflict: checklist LONG vs live Kavach {kav}"
+            )
+            if "kavach_state" not in opposing:
+                opposing.append("kavach_state")
+                n = max(n, 2)
+        elif (not is_long) and kav in BULLISH_STATES:
+            suppress = True
+            reason = reason or (
+                f"direction conflict: checklist SHORT vs live Kavach {kav}"
+            )
+            if "kavach_state" not in opposing:
+                opposing.append("kavach_state")
+                n = max(n, 2)
+
+    # HOLD/WATCH is not an entry-PASS trading state — cannot stay READY NOW.
+    ts = (trading_state or "").strip().upper()
+    if ts in ("HOLD/WATCH", "HOLD", "WATCH"):
+        suppress = True
+        reason = reason or "direction conflict: live Trading State HOLD/WATCH"
+        if "trading_state" not in opposing:
+            opposing.append("trading_state")
+            n = max(n, 1)
+
     return {
         "conflict_count": n,
         "opposing_fields": opposing,
         "agreeing_fields": agreeing,
         "live_lean": live_lean,
         "checklist_direction": checklist_dir,
-        "suppress_ready": n >= 2,
+        "suppress_ready": suppress,
         "reason": reason,
         "sides": sides,
     }
@@ -974,11 +1035,15 @@ def compute_trade_state_for_stock(
 
     # Sticky lock direction vs live Trend/Supertrend/MACD (Kavach panel fields).
     # ≥2 of 3 opposing → cannot be READY (post-f11e1b7 locks no longer flip side).
+    # Also: opposing Kavach state / HOLD-WATCH trading state (panel parity).
     dir_conflict = direction_live_conflict(
         direction=direction,
+        trend=stock.get("trend"),
         ema_vs_vwap=stock.get("ema_vs_vwap") or levels.get("ema_vs_vwap"),
         supertrend=stock.get("supertrend") or levels.get("supertrend"),
         macd=stock.get("macd") or levels.get("macd"),
+        kavach_state=stock.get("dashboard_kavach_live") or levels.get("kavach_state"),
+        trading_state=stock.get("trading_state"),
     )
     if state in (STATE_READY, STATE_READY_RECHECK) and dir_conflict.get("suppress_ready"):
         state = STATE_WAIT
@@ -1079,11 +1144,11 @@ def compute_trade_state_for_stock(
         gate_badges = badges
 
     # Visibility: DIR CONFLICT badge whenever live momentum opposes lock (≥1 field),
-    # including WAIT after ≥2 suppress and soft 1-of-3 on READY.
+    # including WAIT after suppress and soft 1-of-3 on READY — plus HOLD/WATCH.
     if (
         int(dir_conflict.get("conflict_count") or 0) >= 1
-        and state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT, STATE_SCANNING)
-    ):
+        or dir_conflict.get("suppress_ready")
+    ) and state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT, STATE_SCANNING):
         badges = list(gate_badges or [])
         if "DIR CONFLICT" not in badges:
             badges.append("DIR CONFLICT")

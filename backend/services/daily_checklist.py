@@ -391,6 +391,15 @@ def _ema_vs_vwap_label(ema5: Optional[float], vwap: Optional[float]) -> Optional
     return "Above" if ema5 > vwap else "Below"
 
 
+def _trend_label(price: Optional[float], vwap: Optional[float]) -> Optional[str]:
+    """Kavach panel Trend row: price vs session VWAP (Bullish / Bearish)."""
+    if price is None or vwap is None or vwap == 0:
+        return None
+    if abs(price - vwap) / vwap < 0.0005:
+        return "At VWAP"
+    return "Bullish" if price > vwap else "Bearish"
+
+
 def _supertrend_label(st: Optional[float]) -> Optional[str]:
     if st is None:
         return None
@@ -400,10 +409,14 @@ def _supertrend_label(st: Optional[float]) -> Optional[str]:
 def _macd_label(
     macd: Optional[float], sig: Optional[float], hist: Optional[float]
 ) -> Optional[str]:
+    """Kavach panel MACD: histogram green/red (checklist spec); Crossing near zero."""
+    if hist is not None:
+        ref = max(abs(macd or 0.0), abs(sig or 0.0), 1.0)
+        if abs(hist) < ref * 0.03:
+            return "Crossing"
+        return "Bullish" if hist > 0 else "Bearish"
     if macd is None or sig is None:
         return None
-    if hist is not None and abs(hist) < max(abs(macd), 1.0) * 0.03:
-        return "Crossing"
     return "Bullish" if macd > sig else "Bearish"
 
 

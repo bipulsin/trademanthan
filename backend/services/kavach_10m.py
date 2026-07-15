@@ -111,14 +111,84 @@ def _volume_ratio_10m(volumes_10m: List[float]) -> float:
     return (volumes_10m[-1] / denom) if denom > 0 else 0.0
 
 
+def last_live_10m_pair_end_idx(candles: List[Dict], *, now: Optional[datetime] = None) -> int:
+    """Like ``last_closed_10m_pair_end_idx`` but includes the latest fetched 5m bar.
+
+    TradingView panel indicators update on the forming bar; conflict checks that
+    only use the last *closed* 10m bar can lag the panel by up to ~10 minutes.
+    """
+    if not candles:
+        return -1
+    candles = _sorted_candles(candles)
+    last = len(candles) - 1
+    last_date = _parse_ist_date(candles[last].get("timestamp"))
+    first_today = 0
+    for i, c in enumerate(candles):
+        if _parse_ist_date(c.get("timestamp")) == last_date:
+            first_today = i
+            break
+    rel = last - first_today
+    if rel < 0:
+        return -1
+    # Prefer a complete 10m pair when available; otherwise allow the unpaired
+    # trailing 5m (forming first half) as the eval end so live panel can flip.
+    if rel >= 1 and rel % 2 == 1:
+        return last
+    if rel >= 1 and rel % 2 == 0:
+        # Odd-length day relative index 0,2,4… → incomplete pair; still use last.
+        return last
+    return last if rel == 0 else -1
+
+
+def _10m_series_upto_live(candles: List[Dict], end_5m_idx: int) -> List[Dict[str, Any]]:
+    """Complete 10m bars through end, plus a synthetic forming bar if needed."""
+    candles = _sorted_candles(candles)
+    if end_5m_idx < 0 or end_5m_idx >= len(candles):
+        return []
+    last_date = _parse_ist_date(candles[end_5m_idx].get("timestamp"))
+    first_today = 0
+    for i, c in enumerate(candles):
+        if _parse_ist_date(c.get("timestamp")) == last_date:
+            first_today = i
+            break
+    rel = end_5m_idx - first_today
+    if rel % 2 == 1:
+        return _10m_series_upto(candles, end_5m_idx)
+    # Incomplete pair: all complete pairs before this bar + synthetic 10m from
+    # the single trailing 5m (matches TV updating on the open 10m bucket).
+    complete_end = end_5m_idx - 1 if rel >= 1 else -1
+    bars = _10m_series_upto(candles, complete_end) if complete_end >= first_today else []
+    c = candles[end_5m_idx]
+    end_ts = _parse_ist(c.get("timestamp"))
+    bars.append(
+        {
+            "open": _f(c.get("open") or c.get("close")),
+            "high": _f(c.get("high")),
+            "low": _f(c.get("low")),
+            "close": _f(c.get("close")),
+            "volume": _f(c.get("volume")),
+            "end_5m_idx": end_5m_idx,
+            "timestamp": c.get("timestamp"),
+            "bar_end": (end_ts + timedelta(minutes=BAR_MINUTES_5M)) if end_ts else None,
+            "forming": True,
+        }
+    )
+    return bars
+
+
 def metrics_from_10m_candles(
     candles: List[Dict],
     *,
     ranking_type: str,
     nifty_pct: float,
     now: Optional[datetime] = None,
+    include_forming: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """Evaluate Kavach on closed 10m bars through ``now`` (or wall clock)."""
+    """Evaluate Kavach on 10m bars through ``now`` (or wall clock).
+
+    When ``include_forming`` is True, include the latest fetched 5m bar so live
+    panel Trend/ST/MACD can flip before the 10m bucket closes (DIR CONFLICT).
+    """
     if not candles or len(candles) < 40:
         return None
     candles = _sorted_candles(candles)
@@ -127,11 +197,15 @@ def metrics_from_10m_candles(
         return None
     _, previous_close, first_today = split
 
-    pair_end = last_closed_10m_pair_end_idx(candles, now=now)
+    if include_forming:
+        pair_end = last_live_10m_pair_end_idx(candles, now=now)
+        bars_10m = _10m_series_upto_live(candles, pair_end)
+    else:
+        pair_end = last_closed_10m_pair_end_idx(candles, now=now)
+        bars_10m = _10m_series_upto(candles, pair_end)
     if pair_end < first_today:
         return None
 
-    bars_10m = _10m_series_upto(candles, pair_end)
     if len(bars_10m) < 5:
         return None
 
@@ -247,6 +321,8 @@ def metrics_from_10m_candles(
         "pair_end_5m_idx": pair_end,
         "timeframe": "10m",
         "scan_time": now or datetime.now(IST),
+        "include_forming": bool(include_forming),
+        "forming": bool(last_bar.get("forming")),
     }
 
 

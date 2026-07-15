@@ -266,7 +266,7 @@ def test_direction_live_conflict_helper():
     # HCLTECH-style: SHORT lock vs live bullish Trend+ST+MACD
     c = direction_live_conflict(
         direction="SHORT",
-        ema_vs_vwap="Above",
+        trend="Bullish",
         supertrend="Bullish",
         macd="Bullish",
     )
@@ -278,7 +278,7 @@ def test_direction_live_conflict_helper():
     # MANKIND-style: LONG lock vs live bearish
     c2 = direction_live_conflict(
         direction="LONG",
-        ema_vs_vwap="Below",
+        trend="Bearish",
         supertrend="Bearish",
         macd="Bearish",
     )
@@ -289,12 +289,33 @@ def test_direction_live_conflict_helper():
     # Clean LONG aligned
     c3 = direction_live_conflict(
         direction="LONG",
-        ema_vs_vwap="Above",
+        trend="Bullish",
         supertrend="Bullish",
         macd="Bullish",
     )
     assert c3["conflict_count"] == 0
     assert c3["suppress_ready"] is False
+
+    # HOLD/WATCH trading state alone blocks READY
+    c4 = direction_live_conflict(
+        direction="LONG",
+        trend="Bullish",
+        supertrend="Bullish",
+        macd="Bullish",
+        trading_state="HOLD/WATCH",
+    )
+    assert c4["suppress_ready"] is True
+    assert "HOLD/WATCH" in (c4["reason"] or "")
+
+    # Opposite Kavach state blocks even if ST still agrees
+    c5 = direction_live_conflict(
+        direction="LONG",
+        trend="Bullish",
+        supertrend="Bullish",
+        macd="Bearish",
+        kavach_state="SELL",
+    )
+    assert c5["suppress_ready"] is True
 
 
 def test_hcltech_style_short_vs_live_bullish_suppresses_ready():
@@ -303,6 +324,7 @@ def test_hcltech_style_short_vs_live_bullish_suppresses_ready():
             "symbol": "HCLTECH",
             "direction": "SHORT",
             "confidence": "A",
+            "trend": "Bullish",
             "ema_vs_vwap": "Above",
             "supertrend": "Bullish",
             "macd": "Bullish",
@@ -332,6 +354,7 @@ def test_mankind_style_long_vs_live_bearish_suppresses_ready():
             "symbol": "MANKIND",
             "direction": "LONG",
             "confidence": "A",
+            "trend": "Bearish",
             "ema_vs_vwap": "Below",
             "supertrend": "Bearish",
             "macd": "Bearish",
@@ -359,9 +382,11 @@ def test_mankind_style_long_vs_live_bearish_suppresses_ready():
 def test_aligned_live_momentum_still_ready():
     out = _compute(
         stock={
+            "trend": "Bullish",
             "ema_vs_vwap": "Above",
             "supertrend": "Bullish",
             "macd": "Bullish",
+            "trading_state": "BUY",
         }
     )
     assert out["trade_state"] == STATE_READY
@@ -374,9 +399,11 @@ def test_one_of_three_conflict_flags_but_stays_ready():
     """Soft visibility: single opposing field badges but does not suppress READY."""
     out = _compute(
         stock={
+            "trend": "Bullish",
             "ema_vs_vwap": "Above",
             "supertrend": "Bullish",
             "macd": "Bearish",  # 1 opposing
+            "trading_state": "MANAGE LONG",
         }
     )
     assert out["trade_state"] == STATE_READY
@@ -386,11 +413,44 @@ def test_one_of_three_conflict_flags_but_stays_ready():
     assert out["trade_take_enabled"] is True
 
 
+def test_abb_and_any_symbol_use_same_conflict_path():
+    """No symbol allowlist — ABB gets identical DIR CONFLICT math as IEX/HCLTECH."""
+    out = _compute(
+        stock={
+            "symbol": "ABB",
+            "direction": "LONG",
+            "trend": "Bearish",
+            "supertrend": "Bearish",
+            "macd": "Bearish",
+            "trading_state": "HOLD/WATCH",
+        }
+    )
+    assert out["trade_state"] == STATE_WAIT
+    assert out["trade_take_enabled"] is False
+    assert "DIR CONFLICT" in (out["gate_badges"] or [])
+    assert out["dir_conflict"]["suppress_ready"] is True
+
+
+def test_hold_watch_trading_state_suppresses_ready_even_if_fields_align():
+    out = _compute(
+        stock={
+            "symbol": "IEX",
+            "trend": "Bullish",
+            "supertrend": "Bullish",
+            "macd": "Bullish",
+            "trading_state": "HOLD/WATCH",
+        }
+    )
+    assert out["trade_state"] == STATE_WAIT
+    assert out["trade_take_enabled"] is False
+    assert "DIR CONFLICT" in (out["gate_badges"] or [])
+
+
 def test_overlay_live_momentum_empty_candles_keeps_prior():
     from backend.services.daily_checklist_trade_state import overlay_live_momentum_from_candles
 
     stock = {
-        "symbol": "IEX",
+        "symbol": "ABB",
         "direction": "LONG",
         "ema_vs_vwap": "Above",
         "supertrend": "Bullish",

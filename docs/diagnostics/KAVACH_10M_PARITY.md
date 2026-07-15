@@ -20,6 +20,7 @@
 2. **VWAP:** Built from 5m constituents, not 10m typical price — matches existing session-VWAP definition in RS scanner.
 3. **UI label "EMA10":** Pine display may show EMA10; engine thresholds use **EMA5/EMA9** per `kavach_engine.KavachInput` (unchanged spec).
 4. **Warmup:** MACD/ADX need sufficient prior 10m history; first ~30–60 min may differ slightly if cache window is short.
+5. **DIR CONFLICT panel parity (2026-07-15):** Conflict overlay uses `include_forming=True` and panel **Trend = price vs VWAP** (not only EMA5 vs VWAP). HOLD/WATCH trading state and opposite Kavach state also suppress READY. SuperTrend still ATR(10)×3 on 10m — if TV Pine uses a different factor, ST votes can still disagree until Pine settings are confirmed.
 
 ## Audit trail
 
