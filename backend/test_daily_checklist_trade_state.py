@@ -10,6 +10,7 @@ from backend.services.daily_checklist_trade_state import (
     STATE_READY_RECHECK,
     STATE_SCANNING,
     STATE_WAIT,
+    compute_atr_consumed_metrics,
     compute_trade_state_for_stock,
     direction_live_conflict,
     entry_off_live_ema5,
@@ -25,7 +26,8 @@ BEFORE_ENTRY = IST.localize(datetime(2026, 7, 15, 9, 33))
 
 
 def _compute(levels=None, stock=None, atr_pct=2.0, lot=50, session_hi=106.0, session_lo=94.0,
-             open_pos=None, promo=None, now=None):
+             open_pos=None, promo=None, now=None,
+             session_open=None, opening_candle_high=None, opening_candle_low=None):
     base_stock = {"symbol": "TEST", "direction": "LONG", "confidence": "B"}
     if stock:
         base_stock.update(stock)
@@ -52,6 +54,9 @@ def _compute(levels=None, stock=None, atr_pct=2.0, lot=50, session_hi=106.0, ses
         promo=promo,
         cfg=CFG,
         now=now or AFTER_ENTRY,
+        session_open=session_open,
+        opening_candle_high=opening_candle_high,
+        opening_candle_low=opening_candle_low,
     )
 
 
@@ -379,3 +384,47 @@ def test_one_of_three_conflict_flags_but_stays_ready():
     assert out["dir_conflict"]["suppress_ready"] is False
     assert "DIR CONFLICT" in (out["gate_badges"] or [])
     assert out["trade_take_enabled"] is True
+
+
+def test_atr_consumed_metrics_from_open_and_opening_range():
+    # daily ATR = 20; open 100 → price 114 = 70% from open
+    m = compute_atr_consumed_metrics(
+        price=114.0,
+        atr=20.0,
+        atr_pct=2.0,
+        session_open=100.0,
+        opening_candle_high=102.0,
+        opening_candle_low=99.0,
+        is_long=True,
+    )
+    assert m["atr_consumed_pct_from_open"] == 70.0
+    assert m["move_from_open"] == 14.0
+    # LONG uses opening high 102 → |114-102|/20 = 60%
+    assert m["atr_consumed_pct_from_opening_range"] == 60.0
+    assert m["opening_range_ref"] == "opening_high"
+
+    m_short = compute_atr_consumed_metrics(
+        price=90.0,
+        atr=20.0,
+        session_open=100.0,
+        opening_candle_high=102.0,
+        opening_candle_low=98.0,
+        is_long=False,
+    )
+    assert m_short["atr_consumed_pct_from_open"] == 50.0
+    assert m_short["atr_consumed_pct_from_opening_range"] == 40.0  # |90-98|/20
+    assert m_short["opening_range_ref"] == "opening_low"
+
+
+def test_atr_consumed_logged_on_ready_no_gating():
+    """ATR chip is informational — does not change READY / Take Trade."""
+    out = _compute(
+        session_open=98.0,
+        opening_candle_high=99.0,
+        opening_candle_low=97.5,
+    )
+    assert out["trade_state"] == STATE_READY
+    assert out["trade_take_enabled"] is True
+    ac = out["atr_consumed"]
+    assert ac["atr_consumed_pct_from_open"] is not None
+    assert any(str(b).startswith("ATR ") for b in (out["gate_badges"] or []))

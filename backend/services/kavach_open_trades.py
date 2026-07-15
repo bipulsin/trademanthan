@@ -924,6 +924,38 @@ def build_take_trade_provenance(
             "counter_regime": ctx.get("counter_regime"),
         }
 
+    # ATR consumed at click (research — same 14d ATR as checklist expiry).
+    atr_at_click: Dict[str, Any] = dict(ctx.get("atr_consumed") or {})
+    try:
+        from backend.services.daily_checklist_trade_state import (
+            _load_atr_map,
+            _session_day_levels,
+            compute_atr_consumed_metrics,
+        )
+
+        levels_px = _f(ctx.get("entry_price")) or _f(ctx.get("live_price"))
+        if levels_px is None:
+            levels_px = _live_price(db, sym) or _f(
+                (_levels_for_symbol(db, sym, session_date) or {}).get("price")
+            )
+        atr_pct_map = _load_atr_map(db, [sym])
+        atr_pct = float(atr_pct_map.get(sym) or 0.0)
+        atr_abs = (levels_px * atr_pct / 100.0) if levels_px and atr_pct > 0 else None
+        smeta = _session_day_levels(db, sym, session_date)
+        atr_at_click = compute_atr_consumed_metrics(
+            price=levels_px,
+            atr=atr_abs,
+            atr_pct=atr_pct,
+            session_open=smeta.get("session_open"),
+            opening_candle_high=smeta.get("opening_candle_high"),
+            opening_candle_low=smeta.get("opening_candle_low"),
+            is_long=(direction or "LONG").upper() != "SHORT",
+        )
+        if ctx.get("atr_consumed"):
+            atr_at_click["checklist_at_signal"] = ctx.get("atr_consumed")
+    except Exception as exc:
+        logger.debug("take_trade ATR consumed snapshot skipped: %s", exc)
+
     return {
         "captured_at": _now().isoformat(),
         "in_morning_lock": in_morning_lock,
@@ -943,6 +975,7 @@ def build_take_trade_provenance(
         "regime_lean": regime_at_click.get("regime_lean"),
         "removals_last_hour": regime_at_click.get("removals_last_hour"),
         "counter_regime": regime_at_click.get("counter_regime"),
+        "atr_consumed_at_click": atr_at_click,
     }
 
 

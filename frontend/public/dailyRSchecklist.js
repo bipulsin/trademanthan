@@ -586,6 +586,7 @@
         t = String(t || "");
         if (t.indexOf("WHIPSAW") >= 0) cls += " dc-gate-badge--whip";
         else if (t.indexOf("DIR CONFLICT") >= 0) cls += " dc-gate-badge--dirconflict";
+        else if (t.indexOf("ATR ") === 0) cls += " dc-gate-badge--atr";
         else if (t.indexOf("COUNTER-REGIME") >= 0) cls += " dc-gate-badge--counter";
         else if (t.indexOf("REGIME") >= 0) cls += " dc-gate-badge--regime";
         else if (t.indexOf("CHURN") >= 0) cls += " dc-gate-badge--churn";
@@ -854,6 +855,7 @@
                     || t.indexOf("COUNTER") >= 0
                     || t.indexOf("CHURN") === 0
                     || t.indexOf("DIR CONFLICT") >= 0
+                    || t.indexOf("ATR ") === 0
                 ) {
                     if (show.indexOf(t) < 0) show.push(t);
                 }
@@ -1313,7 +1315,10 @@
                     removals_last_hour: (stock.regime_context || {}).removals_last_hour
                         != null ? (stock.regime_context || {}).removals_last_hour
                         : (state.trade_state_obs || {}).removals_last_hour,
-                    counter_regime: !!(stock.regime_context || {}).counter_regime
+                    counter_regime: !!(stock.regime_context || {}).counter_regime,
+                    atr_consumed: stock.atr_consumed || null,
+                    entry_price: stock.trade_entry,
+                    live_price: stock.trade_entry
                 }
             })
         }).then(function (res) {

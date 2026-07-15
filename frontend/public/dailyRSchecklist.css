@@ -472,8 +472,59 @@ body[data-theme="dark"] .dc-exit-rule { color: #e2e8f0; opacity: 0.9; }
 .dc-gate-badge--regime { background: #e0f2fe; color: #075985; }
 .dc-gate-badge--counter { background: #fce7f3; color: #9d174d; }
 .dc-gate-badge--churn { background: #ffedd5; color: #9a3412; }
+.dc-gate-badge--atr { background: #e2e8f0; color: #334155; }
 .dc-gate-badge--dirconflict { background: #fee2e2; color: #991b1b; font-weight: 800; }
 .dc-gate-badge--waiver { background: #fef3c7; color: #92400e; }
+
+/* Dark theme: high-contrast chips (regime / churn / ATR / counter) */
+body[data-theme="dark"] .dc-gate-badge {
+    background: #334155;
+    color: #e2e8f0;
+}
+body[data-theme="dark"] .dc-gate-badge--regime {
+    background: #0c4a6e;
+    color: #bae6fd;
+}
+body[data-theme="dark"] .dc-gate-badge--counter {
+    background: #9d174d;
+    color: #fce7f3;
+}
+body[data-theme="dark"] .dc-gate-badge--churn {
+    background: #9a3412;
+    color: #ffedd5;
+}
+body[data-theme="dark"] .dc-gate-badge--atr {
+    background: #1e293b;
+    color: #f8fafc;
+    border: 1px solid #64748b;
+}
+body[data-theme="dark"] .dc-gate-badge--dirconflict {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+body[data-theme="dark"] .dc-gate-badge--whip,
+body[data-theme="dark"] .dc-gate-badge--flip,
+body[data-theme="dark"] .dc-gate-badge--reentry {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+body[data-theme="dark"] .dc-gate-badge--chop,
+body[data-theme="dark"] .dc-gate-badge--waiver {
+    background: #854d0e;
+    color: #fef3c7;
+}
+body[data-theme="dark"] .dc-gate-badge--pb1 {
+    background: #14532d;
+    color: #bbf7d0;
+}
+body[data-theme="dark"] .dc-gate-badge--pb2 {
+    background: #334155;
+    color: #cbd5e1;
+}
+body[data-theme="dark"] .dc-gate-badge--pb3 {
+    background: #9a3412;
+    color: #ffedd5;
+}
 .dc-ready-flags {
     display: flex;
     flex-wrap: wrap;

@@ -24,6 +24,8 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - Live Trend/Supertrend/MACD ≥2-of-3 oppose lock direction → WAIT (DIR CONFLICT).
     Root cause: sticky daily_snapshot direction (no swap after f11e1b7) vs live
     10m Kavach fields; READY historically ignored that disagreement.
+  - ATR consumed (from open + from opening range) logged for research only —
+    same atr14 used for 1.5× expiry; never gates READY.
 """
 from __future__ import annotations
 
@@ -508,30 +510,122 @@ def _load_atr_map(db, symbols: List[str]) -> Dict[str, float]:
 
 def _session_hi_lo(db, symbol: str, session_date: str) -> Tuple[Optional[float], Optional[float]]:
     """Nearest S/R proxy: session high / low from today's candles (via cache/Upstox)."""
+    meta = _session_day_levels(db, symbol, session_date)
+    return meta.get("session_hi"), meta.get("session_lo")
+
+
+def session_day_levels_from_candles(
+    candles: Optional[List[Any]],
+    session_date: str,
+) -> Dict[str, Optional[float]]:
+    """Session H/L/open + opening-candle H/L from sorted intraday candles."""
+    out: Dict[str, Optional[float]] = {
+        "session_hi": None,
+        "session_lo": None,
+        "session_open": None,
+        "opening_candle_high": None,
+        "opening_candle_low": None,
+    }
+    if not candles:
+        return out
     try:
-        from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
         from backend.services.relative_strength_scanner import _parse_ist_date, _sorted_candles
 
-        candles = _load_candles_for_symbol(db, symbol)
-        if not candles:
-            return None, None
-        candles = _sorted_candles(candles)
-        hi = lo = None
-        for c in candles:
+        sorted_c = _sorted_candles(candles)
+        first = True
+        for c in sorted_c:
             d = _parse_ist_date(c.get("timestamp"))
             if not d or str(d) != session_date:
                 continue
+            o = _f(c.get("open"))
             h = _f(c.get("high"))
             l = _f(c.get("low"))
+            if first:
+                out["session_open"] = o
+                out["opening_candle_high"] = h
+                out["opening_candle_low"] = l
+                first = False
             if h is not None:
-                hi = h if hi is None else max(hi, h)
+                out["session_hi"] = h if out["session_hi"] is None else max(out["session_hi"], h)
             if l is not None:
-                lo = l if lo is None else min(lo, l)
-        return hi, lo
+                out["session_lo"] = l if out["session_lo"] is None else min(out["session_lo"], l)
     except Exception as exc:
-        logger.debug("session hi/lo skipped for %s: %s", symbol, exc)
-        return None, None
+        logger.debug("session day levels from candles skipped: %s", exc)
+    return out
 
+
+def _session_day_levels(db, symbol: str, session_date: str) -> Dict[str, Optional[float]]:
+    try:
+        from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
+
+        candles = _load_candles_for_symbol(db, symbol)
+        return session_day_levels_from_candles(candles, session_date)
+    except Exception as exc:
+        logger.debug("session day levels skipped for %s: %s", symbol, exc)
+        return {
+            "session_hi": None,
+            "session_lo": None,
+            "session_open": None,
+            "opening_candle_high": None,
+            "opening_candle_low": None,
+        }
+
+
+def compute_atr_consumed_metrics(
+    *,
+    price: Optional[float],
+    atr: Optional[float],
+    atr_pct: Optional[float] = None,
+    session_open: Optional[float] = None,
+    opening_candle_high: Optional[float] = None,
+    opening_candle_low: Optional[float] = None,
+    is_long: bool = True,
+) -> Dict[str, Any]:
+    """Research metrics: share of daily ATR already consumed (no gating).
+
+    Uses the same 14-day ATR convention as pullback expiry (price × atr14_pct / 100).
+    """
+    empty = {
+        "daily_atr": round(atr, 4) if atr is not None else None,
+        "atr_pct": float(atr_pct) if atr_pct is not None else None,
+        "session_open": session_open,
+        "opening_candle_high": opening_candle_high,
+        "opening_candle_low": opening_candle_low,
+        "move_from_open": None,
+        "move_from_opening_range": None,
+        "atr_consumed_pct_from_open": None,
+        "atr_consumed_pct_from_opening_range": None,
+        "opening_range_ref": None,
+    }
+    if price is None or atr is None or atr <= 0:
+        return empty
+
+    move_open = None
+    pct_open = None
+    if session_open is not None:
+        move_open = abs(price - session_open)
+        pct_open = round(move_open / atr * 100.0, 1)
+
+    # Upside extension → opening high; downside → opening low.
+    ref = opening_candle_high if is_long else opening_candle_low
+    move_or = None
+    pct_or = None
+    if ref is not None:
+        move_or = abs(price - ref)
+        pct_or = round(move_or / atr * 100.0, 1)
+
+    return {
+        "daily_atr": round(float(atr), 4),
+        "atr_pct": float(atr_pct) if atr_pct is not None else None,
+        "session_open": session_open,
+        "opening_candle_high": opening_candle_high,
+        "opening_candle_low": opening_candle_low,
+        "move_from_open": round(move_open, 4) if move_open is not None else None,
+        "move_from_opening_range": round(move_or, 4) if move_or is not None else None,
+        "atr_consumed_pct_from_open": pct_open,
+        "atr_consumed_pct_from_opening_range": pct_or,
+        "opening_range_ref": "opening_high" if is_long else "opening_low",
+    }
 
 def _open_positions(db, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     """Map underlying → open daily_futures_user_trade (any user, order_status=bought)."""
@@ -678,6 +772,9 @@ def compute_trade_state_for_stock(
     pullback_count: int = 0,
     stopped: Optional[Dict[str, Any]] = None,
     now: Optional[datetime] = None,
+    session_open: Optional[float] = None,
+    opening_candle_high: Optional[float] = None,
+    opening_candle_low: Optional[float] = None,
 ) -> Dict[str, Any]:
     cfg = cfg or get_config()
     near_atr = float(cfg.get("convergence_atr") or 0.35)
@@ -700,6 +797,17 @@ def compute_trade_state_for_stock(
     atr = None
     if price is not None and atr_pct and atr_pct > 0:
         atr = price * atr_pct / 100.0
+
+    # Research-only ATR consumption (same ATR as 1.5× expiry span). No gating.
+    atr_consumed = compute_atr_consumed_metrics(
+        price=price,
+        atr=atr,
+        atr_pct=atr_pct,
+        session_open=session_open,
+        opening_candle_high=opening_candle_high,
+        opening_candle_low=opening_candle_low,
+        is_long=is_long,
+    )
 
     # Pullback / READY entry is always live EMA5 (never VWAP blend).
     pullback_level = ema5
@@ -906,6 +1014,20 @@ def compute_trade_state_for_stock(
             badges.append("DIR CONFLICT")
         gate_badges = badges
 
+    # Informational only: ATR consumed from open (no READY impact).
+    pct_open = atr_consumed.get("atr_consumed_pct_from_open")
+    if pct_open is not None and state in (
+        STATE_READY,
+        STATE_READY_RECHECK,
+        STATE_WAIT,
+        STATE_SCANNING,
+    ):
+        atr_chip = f"ATR {int(round(float(pct_open)))}%"
+        badges = list(gate_badges or [])
+        badges = [b for b in badges if not str(b).startswith("ATR ")]
+        badges.append(atr_chip)
+        gate_badges = badges
+
     sl_out = round(sl_price, 2) if sl_price is not None else None
 
     rr = session_rr(
@@ -1048,6 +1170,7 @@ def compute_trade_state_for_stock(
             "suppress_ready": bool(dir_conflict.get("suppress_ready")),
             "reason": dir_conflict.get("reason"),
         },
+        "atr_consumed": atr_consumed,
         "stopped_out_today": bool(stopped and stopped.get("blocked")),
     }
 
@@ -1126,13 +1249,22 @@ def enrich_stocks_trade_state(
         stopped_map = stopped_out_today(db, session_date, symbols)
 
         hi_lo: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
+        session_meta: Dict[str, Dict[str, Optional[float]]] = {}
         candle_cache: Dict[str, Any] = {}
         for sym in symbols[:25]:
-            hi_lo[sym.upper()] = _session_hi_lo(db, sym, session_date)
+            su = sym.upper()
             try:
-                candle_cache[sym.upper()] = _load_candles_for_symbol(db, sym) or []
+                candle_cache[su] = _load_candles_for_symbol(db, sym) or []
             except Exception:
-                candle_cache[sym.upper()] = []
+                candle_cache[su] = []
+            meta = session_day_levels_from_candles(candle_cache[su], session_date)
+            session_meta[su] = meta
+            hi_lo[su] = (meta.get("session_hi"), meta.get("session_lo"))
+            if hi_lo[su] == (None, None):
+                # Fallback when candle parse yields nothing.
+                hi_lo[su] = _session_hi_lo(db, sym, session_date)
+                fb = _session_day_levels(db, sym, session_date)
+                session_meta[su] = fb
 
         lot_cache: Dict[str, int] = {}
         consistency_rows: List[Dict[str, Any]] = []
@@ -1152,6 +1284,7 @@ def enrich_stocks_trade_state(
             if sym not in lot_cache:
                 lot_cache[sym], _ = _lot_for_symbol(db, sym)
             hi, lo = hi_lo.get(sym, (None, None))
+            smeta = session_meta.get(sym) or {}
             price = _f((levels_map.get(sym) or {}).get("price"))
             atr_pct = float(atr_pct_map.get(sym) or 0.0)
             atr = (price * atr_pct / 100.0) if price and atr_pct > 0 else None
@@ -1180,6 +1313,9 @@ def enrich_stocks_trade_state(
                 whipsaw_count=whip,
                 pullback_count=pb,
                 stopped=stopped_map.get(sym),
+                session_open=smeta.get("session_open"),
+                opening_candle_high=smeta.get("opening_candle_high"),
+                opening_candle_low=smeta.get("opening_candle_low"),
             )
             s.update(ts)
 
@@ -1298,6 +1434,17 @@ def enrich_stocks_trade_state(
                             "dir_conflict_suppress": (s.get("dir_conflict") or {}).get(
                                 "suppress_ready"
                             ),
+                            # Research: ATR consumed at READY signal time (no enforcement).
+                            "atr_consumed": s.get("atr_consumed"),
+                            "atr_consumed_pct_from_open": (s.get("atr_consumed") or {}).get(
+                                "atr_consumed_pct_from_open"
+                            ),
+                            "atr_consumed_pct_from_opening_range": (
+                                s.get("atr_consumed") or {}
+                            ).get("atr_consumed_pct_from_opening_range"),
+                            "confidence": s.get("confidence") or s.get("dashboard_kavach"),
+                            "trade_entry": s.get("trade_entry"),
+                            "trade_sl": s.get("trade_sl"),
                         },
                     }
                 )
