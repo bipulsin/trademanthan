@@ -1068,10 +1068,11 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
                 from backend.services.vwap_adx_promotion import promote_from_vwap_adx
 
                 vwap_promo = promote_from_vwap_adx(db, sd, now=now)
-                if vwap_promo.get("promoted"):
+                if vwap_promo.get("promoted") or vwap_promo.get("expired"):
                     logger.info(
-                        "daily_checklist: vwap_adx promotion applied promoted=%s slots=%s/%s",
+                        "daily_checklist: vwap_adx promo promoted=%s expired=%s slots=%s/%s",
                         [p.get("symbol") for p in (vwap_promo.get("promoted") or [])],
+                        [e.get("symbol") for e in (vwap_promo.get("expired") or [])],
                         vwap_promo.get("slots_used"),
                         vwap_promo.get("cap"),
                     )

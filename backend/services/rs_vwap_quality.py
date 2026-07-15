@@ -290,6 +290,52 @@ def consecutive_steep_adx_window(
     )
 
 
+def consecutive_slope_below(
+    candles: List[Dict[str, Any]],
+    *,
+    atr_daily_pct: float,
+    threshold: float,
+    n_bars: int = 3,
+    now: Optional[datetime] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """True when last ``n_bars`` closed 5m bars each have slope_score < threshold.
+
+    Used for VWAP+ADX untraded-slot expiry (softer than entry threshold 50).
+    """
+    cfg = cfg or get_config()
+    out: Dict[str, Any] = {
+        "below": False,
+        "slope_scores": [],
+        "bar_timestamps": [],
+    }
+    if not candles or n_bars < 1:
+        return out
+    candles = _sorted_candles(candles)
+    closed_idx = last_closed_bar_index(candles, now=now)
+    if closed_idx < 0 or closed_idx + 1 < n_bars:
+        return out
+    scores: List[float] = []
+    stamps: List[str] = []
+    for offset in range(n_bars - 1, -1, -1):
+        idx = closed_idx - offset
+        as_of = _parse_ts(candles[idx].get("timestamp"))
+        if as_of is None:
+            return out
+        sliced = candles[: idx + 1]
+        score = float(normalized_vwap_slope(sliced, atr_daily_pct, cfg))
+        scores.append(round(score, 2))
+        stamps.append(as_of.isoformat())
+        if score >= float(threshold):
+            out["slope_scores"] = scores
+            out["bar_timestamps"] = stamps
+            return out
+    out["below"] = True
+    out["slope_scores"] = scores
+    out["bar_timestamps"] = stamps
+    return out
+
+
 def vwap_slope_deterioration_bars(
     candles: List[Dict[str, Any]],
     *,
