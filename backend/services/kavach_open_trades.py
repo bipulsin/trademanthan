@@ -895,6 +895,35 @@ def build_take_trade_provenance(
     badges = ctx.get("gate_badges") or []
     if isinstance(badges, str):
         badges = [badges]
+
+    # Live regime snapshot at click (research — do not enforce).
+    regime_at_click: Dict[str, Any] = {}
+    try:
+        from backend.services.daily_checklist_trade_state import _recent_removals
+        from backend.services.daily_checklist_chop_gates import compute_market_regime
+        from backend.services.daily_checklist_zones import (
+            build_zone1_obs,
+            regime_research_snapshot,
+        )
+
+        mkt = compute_market_regime(session_date)
+        removals = _recent_removals(db, session_date)
+        zone1 = build_zone1_obs(rotation_day=None, removals=removals, locked_by=None)
+        regime_at_click = regime_research_snapshot(
+            market_regime=mkt.get("market_regime"),
+            market_regime_label=mkt.get("market_regime_label"),
+            imbalance=zone1.get("direction_imbalance"),
+            removals=removals,
+            direction=direction,
+        )
+    except Exception as exc:
+        logger.debug("take_trade regime snapshot skipped: %s", exc)
+        regime_at_click = {
+            "market_regime": ctx.get("market_regime"),
+            "removals_last_hour": ctx.get("removals_last_hour"),
+            "counter_regime": ctx.get("counter_regime"),
+        }
+
     return {
         "captured_at": _now().isoformat(),
         "in_morning_lock": in_morning_lock,
@@ -906,9 +935,14 @@ def build_take_trade_provenance(
         "trade_state": ctx.get("trade_state"),
         "downgrade_badges": list(badges),
         "zone_at_click": ctx.get("zone") or ("Zone 3 READY" if ctx.get("trade_state") in ("READY", "READY(RECHECK)") else "Zone 4"),
-        "market_regime": ctx.get("market_regime"),
+        "market_regime": regime_at_click.get("market_regime") or ctx.get("market_regime"),
         "confidence": ctx.get("confidence"),
         "rs_pct": ctx.get("rs_pct"),
+        "regime_at_click": regime_at_click,
+        "regime_unconfirmed": regime_at_click.get("regime_unconfirmed"),
+        "regime_lean": regime_at_click.get("regime_lean"),
+        "removals_last_hour": regime_at_click.get("removals_last_hour"),
+        "counter_regime": regime_at_click.get("counter_regime"),
     }
 
 

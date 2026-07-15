@@ -554,18 +554,7 @@
         }
         var gates = row.querySelector(".dc-trade-gates");
         if (gates) {
-            var badges = stock.gate_badges || [];
-            gates.innerHTML = badges.map(function (b) {
-                var cls = "dc-gate-badge";
-                var t = String(b);
-                if (t.indexOf("WHIPSAW") >= 0) cls += " dc-gate-badge--whip";
-                else if (t.indexOf("DIRECTION") >= 0 || t.indexOf("RE-ENTRY") >= 0) cls += " dc-gate-badge--flip";
-                else if (t.indexOf("1st") >= 0) cls += " dc-gate-badge--pb1";
-                else if (t.indexOf("2nd") >= 0) cls += " dc-gate-badge--pb2";
-                else if (t.indexOf("pullback") >= 0) cls += " dc-gate-badge--pb3";
-                else if (t.indexOf("CHOP") >= 0) cls += " dc-gate-badge--chop";
-                return '<span class="' + cls + '">' + t + "</span>";
-            }).join("");
+            gates.innerHTML = renderGateBadgesHtml(stock.gate_badges || []);
         }
         var pos = row.querySelector(".dc-trade-pos");
         if (pos) {
@@ -590,6 +579,29 @@
                 pos.textContent = "";
             }
         }
+    }
+
+    function gateBadgeClass(t) {
+        var cls = "dc-gate-badge";
+        t = String(t || "");
+        if (t.indexOf("WHIPSAW") >= 0) cls += " dc-gate-badge--whip";
+        else if (t.indexOf("COUNTER-REGIME") >= 0) cls += " dc-gate-badge--counter";
+        else if (t.indexOf("REGIME") >= 0) cls += " dc-gate-badge--regime";
+        else if (t.indexOf("CHURN") >= 0) cls += " dc-gate-badge--churn";
+        else if (t.indexOf("DIRECTION") >= 0 || t.indexOf("RE-ENTRY") >= 0) cls += " dc-gate-badge--flip";
+        else if (t.indexOf("1st") >= 0) cls += " dc-gate-badge--pb1";
+        else if (t.indexOf("2nd") >= 0) cls += " dc-gate-badge--pb2";
+        else if (t.indexOf("pullback") >= 0) cls += " dc-gate-badge--pb3";
+        else if (t.indexOf("CHOP") >= 0) cls += " dc-gate-badge--chop";
+        else if (t.indexOf("CAP WAIVED") >= 0) cls += " dc-gate-badge--waiver";
+        return cls;
+    }
+
+    function renderGateBadgesHtml(badges) {
+        return (badges || []).map(function (b) {
+            var t = String(b);
+            return '<span class="' + gateBadgeClass(t) + '">' + t + "</span>";
+        }).join("");
     }
 
     function gradeRank(stock) {
@@ -829,6 +841,16 @@
                 waivedEl.textContent = "";
             }
         }
+        var flagsEl = card.querySelector(".dc-ready-flags");
+        if (flagsEl) {
+            var rflags = (stock.regime_context && stock.regime_context.flags) || [];
+            var show = rflags.length ? rflags : (stock.gate_badges || []).filter(function (b) {
+                var t = String(b);
+                return t.indexOf("REGIME") >= 0 || t.indexOf("COUNTER") >= 0 || t.indexOf("CHURN") === 0;
+            });
+            flagsEl.innerHTML = renderGateBadgesHtml(show);
+            flagsEl.hidden = !show.length;
+        }
         var expired = stock.trade_state === "EXPIRED" || !!stock.trade_expiry_crossed;
         card.classList.toggle("dc-ready-card--expired", expired);
         var expLabel = card.querySelector(".dc-ready-expired-label");
@@ -903,6 +925,12 @@
             stEl.textContent = "CHART REVERSED";
         }
         row.querySelector(".dc-watch-reason").textContent = oneWordReason(stock);
+        var wflags = row.querySelector(".dc-watch-flags");
+        if (wflags) {
+            var rf = (stock.regime_context && stock.regime_context.flags) || [];
+            wflags.innerHTML = renderGateBadgesHtml(rf);
+            wflags.hidden = !rf.length;
+        }
         var grade = stock.confidence || stock.dashboard_kavach || "";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
         row.querySelector(".dc-watch-meta").textContent = [rs, grade].filter(Boolean).join(" · ");
@@ -1261,7 +1289,12 @@
                     decision_label: stock.decision,
                     gate_badges: stock.gate_badges || [],
                     zone: isReadyState(stock.trade_state) ? "Zone 3 READY" : "Zone 4",
-                    market_regime: (state.trade_state_obs || {}).market_regime
+                    market_regime: (state.trade_state_obs || {}).market_regime,
+                    regime_context: stock.regime_context || null,
+                    removals_last_hour: (stock.regime_context || {}).removals_last_hour
+                        != null ? (stock.regime_context || {}).removals_last_hour
+                        : (state.trade_state_obs || {}).removals_last_hour,
+                    counter_regime: !!(stock.regime_context || {}).counter_regime
                 }
             })
         }).then(function (res) {

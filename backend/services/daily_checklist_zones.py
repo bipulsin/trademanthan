@@ -19,6 +19,10 @@ IMBALANCE_LOOKBACK_MIN = int(os.getenv("RS_DIRECTION_IMBALANCE_LOOKBACK_MIN", "6
 STATE_READY = "READY"
 STATE_RECHECK = "READY(RECHECK)"
 STATE_WAIT = "WAIT FOR PULLBACK"
+STATE_SCANNING = "SCANNING"
+
+# Card visibility states that should carry regime/churn markers (no hard block).
+_REGIME_MARK_STATES = (STATE_READY, STATE_RECHECK, STATE_WAIT, STATE_SCANNING)
 
 
 def _parse_ist(val: Any) -> Optional[datetime]:
@@ -167,12 +171,118 @@ def build_zone1_obs(
     rot = rotation_chip(rotation_day)
     imb = direction_imbalance(removals, now=now)
     comp = compromised_lock_banner(locked_by)
+    counts = removal_counts_last_hour(removals, now=now)
     return {
         "rotation_chip": rot,
         "direction_imbalance": imb,
         "compromised_lock": comp,
+        "removals_last_hour": int(counts["BULL"] + counts["BEAR"]),
+        "removals_last_hour_bull": int(counts["BULL"]),
+        "removals_last_hour_bear": int(counts["BEAR"]),
         "session_window_text": "Entry 09:45–14:30 · Square-off 15:15",
     }
+
+
+def regime_research_snapshot(
+    *,
+    market_regime: Optional[str],
+    market_regime_label: Optional[str] = None,
+    imbalance: Optional[Dict[str, Any]] = None,
+    removals: Optional[List[Dict[str, Any]]] = None,
+    direction: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Compact regime fields for READY / Take Trade research logs (no enforcement)."""
+    counts = removal_counts_last_hour(removals or [], now=now)
+    total = int(counts["BULL"] + counts["BEAR"])
+    lean = None
+    if imbalance and imbalance.get("active"):
+        lean = (imbalance.get("unstable_direction") or "").upper() or None
+    reg = (market_regime or "").strip().upper()
+    label = (market_regime_label or "").strip().lower()
+    unconfirmed = reg in ("TRANSITION", "CHOP") or ("unconfirm" in label) or bool(lean)
+    side = None
+    if direction:
+        side = "BEAR" if str(direction).upper() == "SHORT" else "BULL"
+    counter = bool(lean and side and lean != side)
+    return {
+        "market_regime": reg or None,
+        "market_regime_label": market_regime_label,
+        "regime_unconfirmed": unconfirmed,
+        "regime_lean": lean,
+        "removals_last_hour": total,
+        "removals_last_hour_bull": int(counts["BULL"]),
+        "removals_last_hour_bear": int(counts["BEAR"]),
+        "counter_regime": counter,
+        "card_side": side,
+    }
+
+
+def annotate_regime_context(
+    stocks: List[Dict[str, Any]],
+    *,
+    market_regime: Optional[str],
+    market_regime_label: Optional[str] = None,
+    imbalance: Optional[Dict[str, Any]] = None,
+    removals: Optional[List[Dict[str, Any]]] = None,
+    now: Optional[datetime] = None,
+) -> None:
+    """Visibility-only markers on READY/WAIT cards — does not change trade_state.
+
+    - REGIME UNSTABLE: TRANSITION / CHOP / imbalance lean active
+    - COUNTER-REGIME: card side opposite the flagged lean (e.g. LONG during BEAR)
+    - CHURN n: removals in last hour ≥ imbalance threshold
+    """
+    snap = regime_research_snapshot(
+        market_regime=market_regime,
+        market_regime_label=market_regime_label,
+        imbalance=imbalance,
+        removals=removals,
+        now=now,
+    )
+    total = int(snap.get("removals_last_hour") or 0)
+    lean = snap.get("regime_lean")
+    unconfirmed = bool(snap.get("regime_unconfirmed"))
+    high_churn = total >= IMBALANCE_THRESHOLD
+
+    for s in stocks:
+        st = s.get("trade_state")
+        if st not in _REGIME_MARK_STATES:
+            # Still attach snapshot for logging consumers; no badges.
+            s["regime_context"] = {
+                **snap,
+                "counter_regime": False,
+                "flags": [],
+            }
+            continue
+
+        direction = (s.get("direction") or "LONG").upper()
+        side = "BEAR" if direction == "SHORT" else "BULL"
+        counter = bool(lean and lean != side)
+        flags: List[str] = []
+        if unconfirmed:
+            flags.append("REGIME UNSTABLE")
+        if counter:
+            flags.append("COUNTER-REGIME")
+        if high_churn:
+            flags.append(f"CHURN {total}")
+
+        s["regime_context"] = {
+            **snap,
+            "card_side": side,
+            "counter_regime": counter,
+            "flags": flags,
+        }
+        if not flags:
+            continue
+        badges = list(s.get("gate_badges") or [])
+        for tag in flags:
+            # Replace prior CHURN n badge if count changed.
+            if tag.startswith("CHURN "):
+                badges = [b for b in badges if not str(b).startswith("CHURN ")]
+            if tag not in badges:
+                badges.append(tag)
+        s["gate_badges"] = badges
 
 
 def morning_locked_symbols(db, session_date: str) -> Dict[str, Dict[str, Any]]:

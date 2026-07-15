@@ -966,6 +966,16 @@ def enrich_stocks_trade_state(
         promo = _promotion_meta(db, session_date, symbols)
         removals = _recent_removals(db, session_date)
         mkt = compute_market_regime(session_date)
+        from backend.services.daily_checklist_zones import (
+            build_zone1_obs,
+            regime_research_snapshot,
+        )
+
+        zone1_early = build_zone1_obs(
+            rotation_day=rotation_day,
+            removals=removals,
+            locked_by=locked_by,
+        )
         flips = direction_unstable_flags(
             db,
             session_date,
@@ -1096,6 +1106,13 @@ def enrich_stocks_trade_state(
             lock_mismatch = bool(is_ready_pre and not in_lock)
             # Log every pre-gate READY (incl. shadow near-misses) and any lock mismatch.
             if is_ready_pre or lock_mismatch or gate_applied:
+                regime_snap = regime_research_snapshot(
+                    market_regime=mkt.get("market_regime"),
+                    market_regime_label=mkt.get("market_regime_label"),
+                    imbalance=zone1_early.get("direction_imbalance"),
+                    removals=removals,
+                    direction=s.get("direction"),
+                )
                 consistency_rows.append(
                     {
                         "session_date": session_date,
@@ -1121,6 +1138,13 @@ def enrich_stocks_trade_state(
                             "signed_slope_atr": vq.get("signed_slope_atr"),
                             "promoted_at": str(qualify_since) if qualify_since else None,
                             "atr_pct": atr_pct,
+                            # Research: regime at READY signal (no enforcement).
+                            "regime": regime_snap.get("market_regime"),
+                            "regime_label": regime_snap.get("market_regime_label"),
+                            "regime_unconfirmed": regime_snap.get("regime_unconfirmed"),
+                            "regime_lean": regime_snap.get("regime_lean"),
+                            "removals_last_hour": regime_snap.get("removals_last_hour"),
+                            "counter_regime": regime_snap.get("counter_regime"),
                         },
                     }
                 )
@@ -1137,19 +1161,22 @@ def enrich_stocks_trade_state(
 
         churn_syms = [s["symbol"] for s in stocks if int(s.get("lock_cycles") or 0) > 1]
         from backend.services.daily_checklist_zones import (
+            annotate_regime_context,
             apply_zone_downgrades,
-            build_zone1_obs,
         )
 
-        zone1 = build_zone1_obs(
-            rotation_day=rotation_day,
-            removals=removals,
-            locked_by=locked_by,
-        )
         apply_zone_downgrades(
             stocks,
-            imbalance=zone1.get("direction_imbalance"),
-            compromised=zone1.get("compromised_lock"),
+            imbalance=zone1_early.get("direction_imbalance"),
+            compromised=zone1_early.get("compromised_lock"),
+        )
+        # Visibility only — never changes trade_state / Take Trade.
+        annotate_regime_context(
+            stocks,
+            market_regime=mkt.get("market_regime"),
+            market_regime_label=mkt.get("market_regime_label"),
+            imbalance=zone1_early.get("direction_imbalance"),
+            removals=removals,
         )
         return {
             "churn_warning": len(churn_syms) >= 3,
@@ -1159,7 +1186,7 @@ def enrich_stocks_trade_state(
             "ready_vwap_gate_enabled": vwap_gate_on,
             "ready_consistency_logged": len(consistency_rows),
             **mkt,
-            **zone1,
+            **zone1_early,
         }
     finally:
         db.close()

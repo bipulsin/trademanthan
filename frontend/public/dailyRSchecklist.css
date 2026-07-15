@@ -469,6 +469,29 @@ body[data-theme="dark"] .dc-exit-rule { color: #e2e8f0; opacity: 0.9; }
 .dc-gate-badge--pb3 { background: #ffedd5; color: #9a3412; }
 .dc-gate-badge--chop { background: #fef3c7; color: #92400e; }
 .dc-gate-badge--reentry { background: #fecaca; color: #7f1d1d; }
+.dc-gate-badge--regime { background: #e0f2fe; color: #075985; }
+.dc-gate-badge--counter { background: #fce7f3; color: #9d174d; }
+.dc-gate-badge--churn { background: #ffedd5; color: #9a3412; }
+.dc-gate-badge--waiver { background: #fef3c7; color: #92400e; }
+.dc-ready-flags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 0 0 6px;
+    min-height: 0;
+}
+.dc-ready-flags[hidden] { display: none !important; }
+.dc-watch-flags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    align-items: center;
+}
+.dc-watch-flags[hidden] { display: none !important; }
+.dc-watch-flags .dc-gate-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+}
 .dc-trade-pos--locked { color: #0369a1; }
 
 .dc-trade-churn-warn {
