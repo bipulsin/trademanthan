@@ -3,13 +3,13 @@
 Pairs consecutive 5m bars into 10m OHLCV aligned with TradingView session
 boundaries (first close 09:25 IST, then 09:35, 09:45, …).
 
-PARITY NOTE (residual vs Pine):
-- Source data are Upstox 5m candles aggregated to 10m; TV may use native 10m feed.
-- Session VWAP uses cumulative 5m H/L/C/V from today's open (not 10m bar VWAP).
-- EMA5/EMA9 are computed on 10m closes; Pine Kavach labels may show "EMA10" in UI
-  but the engine spec uses EMA5/EMA9 (same as kavach_engine.KavachInput).
-- Volume ratio uses summed 5m volume in the 10m bar vs EMA(20) of prior 10m volumes.
-- SuperTrend/MACD/ADX use standard periods on the 10m OHLCV series.
+PARITY vs TWCTO Kavach Pine v2.6 (``TWCTO_Kavach_v2.6``):
+- SuperTrend: ATR period 10, **multiplier 1.5** (not classic 3.0).
+- MACD: **6 / 13 / 5** (not classic 12/26/9).
+- Panel EMA vs VWAP / Trend votes use Pine ``emaLen`` default **9** (script name
+  ``ema5Raw``); READY entry price still uses true EMA5.
+- Panel Trend row = 2-of-3 majority of (MACD line vs signal, Supertrend, EMA vs VWAP).
+- Residual: Upstox 5m→10m vs TV native 10m feed; session VWAP from 5m H/L/C/V.
 """
 from __future__ import annotations
 
@@ -48,6 +48,14 @@ from backend.services.vajra.indicators import cumulative_vwap, ema_series
 
 IST = pytz.timezone("Asia/Kolkata")
 BAR_MINUTES_5M = 5
+
+# TWCTO Kavach Pine v2.6 Layer-1 defaults (chart panel parity).
+PINE_ST_PERIOD = 10
+PINE_ST_MULT = 1.5
+PINE_MACD_FAST = 6
+PINE_MACD_SLOW = 13
+PINE_MACD_SIGNAL = 5
+PINE_EMA_LEN = 9  # input "EMA Length"; script variable ema5Raw
 
 
 def aggregate_10m_bars(candles: List[Dict]) -> List[Dict[str, Any]]:
@@ -219,6 +227,9 @@ def metrics_from_10m_candles(
     ema9_s = ema_series(closes_10m, 9)
     ema5, ema9 = ema5_s[-1], ema9_s[-1]
     ema9_slope = ema9_s[-1] - ema9_s[-2] if len(ema9_s) >= 2 else 0.0
+    # Pine v2.6 panel EMA (ema5Raw) = EMA(emaLen) default 9 — used for Trend / EMA-VWAP votes.
+    panel_ema_s = ema_series(closes_10m, PINE_EMA_LEN)
+    panel_ema = panel_ema_s[-1]
 
     # Session VWAP at 10m bar close (5m cumulative through pair_end).
     t_highs = [_f(c.get("high")) for c in candles[first_today : pair_end + 1]]
@@ -228,9 +239,13 @@ def metrics_from_10m_candles(
     vwap_series = cumulative_vwap(t_highs, t_lows, t_closes, t_vols) if t_closes else [closed_price]
     vwap = vwap_series[-1]
 
-    macd, macd_signal, macd_hist = _macd_last(closes_10m)
+    macd, macd_signal, macd_hist = _macd_last(
+        closes_10m, PINE_MACD_FAST, PINE_MACD_SLOW, PINE_MACD_SIGNAL
+    )
     adx = adx_value(highs_10m, lows_10m, closes_10m, 14) or 0.0
-    _, st_curr_dir = _supertrend_dir_last_two(highs_10m, lows_10m, closes_10m)
+    _, st_curr_dir = _supertrend_dir_last_two(
+        highs_10m, lows_10m, closes_10m, period=PINE_ST_PERIOD, multiplier=PINE_ST_MULT
+    )
     st_curr = None if st_curr_dir is None else (st_curr_dir > 0)
 
     volume_ratio = _volume_ratio_10m(vols_10m)
@@ -239,11 +254,19 @@ def metrics_from_10m_candles(
 
     prev_idx = max(0, len(closes_10m) - 2)
     st_prev_dir, _ = _supertrend_dir_last_two(
-        highs_10m[: prev_idx + 1], lows_10m[: prev_idx + 1], closes_10m[: prev_idx + 1]
+        highs_10m[: prev_idx + 1],
+        lows_10m[: prev_idx + 1],
+        closes_10m[: prev_idx + 1],
+        period=PINE_ST_PERIOD,
+        multiplier=PINE_ST_MULT,
     )
     st_prev = None if st_prev_dir is None else (st_prev_dir > 0)
     macd_prev, sig_prev, _ = (
-        _macd_last(closes_10m[: prev_idx + 1]) if prev_idx >= 26 else (macd, macd_signal, 0.0)
+        _macd_last(
+            closes_10m[: prev_idx + 1], PINE_MACD_FAST, PINE_MACD_SLOW, PINE_MACD_SIGNAL
+        )
+        if prev_idx >= PINE_MACD_SLOW
+        else (macd, macd_signal, 0.0)
     )
     ema5_prev = ema5_s[prev_idx] if prev_idx < len(ema5_s) else ema5
     vwap_prev = vwap_series[-2] if len(vwap_series) >= 2 else vwap
@@ -298,6 +321,22 @@ def metrics_from_10m_candles(
 
     ema10 = ema10_10min(candles[: pair_end + 1])
 
+    # Pine dashboard rows: Trend (2-of-3), Supertrend, MACD (line vs signal).
+    ema_above = panel_ema > vwap if vwap else False
+    ema_below = panel_ema < vwap if vwap else False
+    st_bull = st_curr is True
+    st_bear = st_curr is False
+    macd_bull = macd > macd_signal
+    macd_bear = macd < macd_signal
+    trend_bull_votes = (1 if macd_bull else 0) + (1 if st_bull else 0) + (1 if ema_above else 0)
+    trend_bear_votes = (1 if macd_bear else 0) + (1 if st_bear else 0) + (1 if ema_below else 0)
+    if trend_bull_votes >= 2:
+        panel_trend = "Bullish"
+    elif trend_bear_votes >= 2:
+        panel_trend = "Bearish"
+    else:
+        panel_trend = "Mixed"
+
     return {
         "relative_strength": relative_strength,
         "trade_score": trade_score,
@@ -309,6 +348,7 @@ def metrics_from_10m_candles(
         "kavach_state": kav.state,
         "ema5": ema5,
         "ema10_10m": ema10,
+        "panel_ema": panel_ema,
         "vwap": vwap,
         "supertrend": (1.0 if st_curr else (-1.0 if st_curr is False else 0.0)),
         "macd": macd,
@@ -323,6 +363,13 @@ def metrics_from_10m_candles(
         "scan_time": now or datetime.now(IST),
         "include_forming": bool(include_forming),
         "forming": bool(last_bar.get("forming")),
+        "panel_trend": panel_trend,
+        "pine_params": {
+            "st_period": PINE_ST_PERIOD,
+            "st_mult": PINE_ST_MULT,
+            "macd": (PINE_MACD_FAST, PINE_MACD_SLOW, PINE_MACD_SIGNAL),
+            "ema_len": PINE_EMA_LEN,
+        },
     }
 
 

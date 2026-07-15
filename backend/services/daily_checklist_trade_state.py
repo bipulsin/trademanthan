@@ -233,7 +233,6 @@ def overlay_live_momentum_from_candles(
             _macd_label,
             _supertrend_label,
             _trading_state_label,
-            _trend_label,
         )
         from backend.services.kavach_10m import metrics_from_10m_candles
         from backend.services.relative_strength_scanner import RANKING_BEARISH, RANKING_BULLISH
@@ -249,8 +248,12 @@ def overlay_live_momentum_from_candles(
         )
         if not metrics:
             return prior
-        trend_lbl = _trend_label(_f(metrics.get("price")), _f(metrics.get("vwap")))
-        ema_lbl = _ema_vs_vwap_label(_f(metrics.get("ema5")), _f(metrics.get("vwap")))
+        # Pine v2.6: Trend = 2-of-3; EMA-VWAP uses panel EMA(9); ST×1.5; MACD 6/13/5.
+        trend_lbl = metrics.get("panel_trend")
+        ema_lbl = _ema_vs_vwap_label(
+            _f(metrics.get("panel_ema") if metrics.get("panel_ema") is not None else metrics.get("ema5")),
+            _f(metrics.get("vwap")),
+        )
         st_lbl = _supertrend_label(_f(metrics.get("supertrend")))
         macd_lbl = _macd_label(
             _f(metrics.get("macd")),

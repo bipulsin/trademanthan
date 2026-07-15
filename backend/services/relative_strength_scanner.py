@@ -144,13 +144,22 @@ def _current_and_prev_day_close(
     return current_price, previous_day_close, first_today
 
 
-def _macd_last(closes: List[float]) -> Tuple[float, float, float]:
-    """Return (macd_line, signal, histogram) at the last bar."""
-    fast = ema_series(closes, 12)
-    slow = ema_series(closes, 26)
-    line = [fast[i] - slow[i] for i in range(len(closes))]
-    signal = ema_series(line, 9)
-    return line[-1], signal[-1], line[-1] - signal[-1]
+def _macd_last(
+    closes: List[float],
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> Tuple[float, float, float]:
+    """Return (macd_line, signal, histogram) at the last bar.
+
+    Defaults are classic 12/26/9 (RS scanner). TWCTO Kavach Pine v2.6 uses 6/13/5
+    — pass those explicitly from ``kavach_10m`` for chart-panel parity.
+    """
+    fast_s = ema_series(closes, fast)
+    slow_s = ema_series(closes, slow)
+    line = [fast_s[i] - slow_s[i] for i in range(len(closes))]
+    sig = ema_series(line, signal)
+    return line[-1], sig[-1], line[-1] - sig[-1]
 
 
 def _candles_for_symbol(
