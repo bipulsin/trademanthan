@@ -191,6 +191,24 @@ def reconstruct(session_date: str, *, pace: float, dry_run: bool) -> Dict[str, A
         print(f"  BULL: {[b['symbol'] for b in bull]}", flush=True)
         print(f"  BEAR: {[b['symbol'] for b in bear]}", flush=True)
 
+        if dry_run:
+            summary.update(
+                {
+                    "ok": True,
+                    "dry_run": True,
+                    "lock_at": lock_at.isoformat(),
+                    "bull": [b["symbol"] for b in bull],
+                    "bear": [b["symbol"] for b in bear],
+                    "promote_ticks": sum(
+                        1
+                        for t in scans
+                        if t >= lock_at and (t.hour * 60 + t.minute) <= PROMOTION_CUTOFF_MIN
+                    ),
+                    "top10_symbols": len(_top10_symbols(db, session_date)),
+                }
+            )
+            return summary
+
         syms = _top10_symbols(db, session_date)
         print(f"prefetch candles for {len(syms)} Top-10-ever symbols…", flush=True)
         candle_cache = _prefetch_candles(db, syms, session_date, pace=pace)
@@ -200,24 +218,6 @@ def reconstruct(session_date: str, *, pace: float, dry_run: bool) -> Dict[str, A
         import backend.services.kavach_open_trades as ot
 
         ot.mark_open_trades_exit_on_lock_removal = _noop_trade_exit  # type: ignore[assignment]
-
-        if dry_run:
-            summary.update(
-                {
-                    "ok": True,
-                    "dry_run": True,
-                    "lock_at": lock_at.isoformat(),
-                    "bull": [b["symbol"] for b in bull],
-                    "bear": [b["symbol"] for b in bear],
-                    "candle_symbols": len(candle_cache),
-                    "promote_ticks": sum(
-                        1
-                        for t in scans
-                        if t >= lock_at and (t.hour * 60 + t.minute) <= PROMOTION_CUTOFF_MIN
-                    ),
-                }
-            )
-            return summary
 
         # Replace only this session's audit + lock tables.
         db.execute(
@@ -242,13 +242,7 @@ def reconstruct(session_date: str, *, pace: float, dry_run: bool) -> Dict[str, A
             for t in scans
             if t >= lock_at and (t.hour * 60 + t.minute) <= PROMOTION_CUTOFF_MIN
         ]
-        # Skip the morning lock scan itself for promote (state already seeded);
-        # still run promotes from the *next* scan onward.
         for i, tick in enumerate(promote_ticks):
-            if tick == lock_at and i == 0:
-                # First tick = morning lock moment; still run promote in case
-                # 2-scan already qualifies at that same stamp (rare).
-                pass
             out = promote_intraday_from_rs(db, session_date, now=tick)
             db.commit()
             if out.get("promoted") or out.get("removed") or out.get("updated"):
