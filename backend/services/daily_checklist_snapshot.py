@@ -645,13 +645,22 @@ def apply_lock_removals(
         if r1 is True:
             rule = "R1"
             detail = {"reason": "vwap_opposite_consecutive", "n_bars": 8}
-        elif _r2_rank_gone(db, session_date, sym, side, now=now):
-            rule = "R2"
-            detail = {
-                "reason": "rank_outside_band",
-                "band": REMOVAL_RANK_BAND,
-                "scans": REMOVAL_RANK_SCANS,
-            }
+        else:
+            # R2 is RS-rank based — skip for VWAP+ADX promotions (they are not Top-N).
+            skip_r2 = False
+            try:
+                from backend.services.vwap_adx_promotion import is_vwap_adx_lock
+
+                skip_r2 = is_vwap_adx_lock(db, session_date, sym)
+            except Exception:
+                skip_r2 = False
+            if not skip_r2 and _r2_rank_gone(db, session_date, sym, side, now=now):
+                rule = "R2"
+                detail = {
+                    "reason": "rank_outside_band",
+                    "band": REMOVAL_RANK_BAND,
+                    "scans": REMOVAL_RANK_SCANS,
+                }
 
         if not rule:
             continue

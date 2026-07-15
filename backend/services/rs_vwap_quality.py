@@ -170,6 +170,181 @@ def adverse_confirmed_vwap_close_since(
     }
 
 
+def _adx_14_at_forming(candles: List[Dict[str, Any]], as_of: datetime) -> Optional[float]:
+    """Kavach live ADX: 10m bars, length=14, include_forming — same as entry gate."""
+    from backend.services.kavach_10m import (
+        _10m_series_upto_live,
+        last_live_10m_pair_end_idx,
+    )
+    from backend.services.smart_futures_picker.indicators import adx_value
+
+    sliced = [c for c in _sorted_candles(candles) if (_parse_ts(c.get("timestamp")) or as_of) <= as_of]
+    if not sliced or len(sliced) < 40:
+        return None
+    pair_end = last_live_10m_pair_end_idx(sliced, now=as_of)
+    if pair_end < 0:
+        return None
+    bars_10m = _10m_series_upto_live(sliced, pair_end)
+    if len(bars_10m) < 5:
+        return None
+    highs = [float(b["high"]) for b in bars_10m]
+    lows = [float(b["low"]) for b in bars_10m]
+    closes = [float(b["close"]) for b in bars_10m]
+    return adx_value(highs, lows, closes, 14)
+
+
+def consecutive_steep_bars(
+    candles: List[Dict[str, Any]],
+    *,
+    atr_daily_pct: float,
+    n_bars: int = 3,
+    now: Optional[datetime] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+    require_adx_gt: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Last ``n_bars`` closed 5m bars: slope ≥50 in one consistent direction.
+
+    When ``require_adx_gt`` is set, each bar must also have Kavach ADX(14) above it.
+    """
+    cfg = cfg or get_config()
+    fail: Dict[str, Any] = {
+        "ok": False,
+        "direction": None,
+        "count": 0,
+        "slope_scores": [],
+        "adx_values": [],
+        "bar_timestamps": [],
+        "signed_slopes": [],
+    }
+    if not candles or len(candles) < 20 or n_bars < 1:
+        return fail
+    candles = _sorted_candles(candles)
+    closed_idx = last_closed_bar_index(candles, now=now)
+    if closed_idx < 0 or closed_idx + 1 < n_bars:
+        return fail
+
+    scores: List[float] = []
+    signed_list: List[float] = []
+    adxs: List[Optional[float]] = []
+    stamps: List[str] = []
+    direction: Optional[str] = None
+
+    for offset in range(n_bars - 1, -1, -1):
+        idx = closed_idx - offset
+        as_of = _parse_ts(candles[idx].get("timestamp"))
+        if as_of is None:
+            return fail
+        sliced = [c for c in candles[: idx + 1]]
+        score = float(normalized_vwap_slope(sliced, atr_daily_pct, cfg))
+        signed = float(signed_vwap_slope_atr(sliced, atr_daily_pct))
+        if score < THRESHOLD_VWAP_SLOPE or signed == 0:
+            return {**fail, "count": len(scores), "slope_scores": scores}
+        bar_dir = "SHORT" if signed < 0 else "LONG"
+        if direction is None:
+            direction = bar_dir
+        elif bar_dir != direction:
+            return {**fail, "count": len(scores), "slope_scores": scores}
+        adx_v: Optional[float] = None
+        if require_adx_gt is not None:
+            adx_v = _adx_14_at_forming(candles, as_of)
+            if adx_v is None or adx_v <= require_adx_gt:
+                return {
+                    **fail,
+                    "count": len(scores),
+                    "slope_scores": scores,
+                    "adx_values": adxs + [adx_v],
+                }
+        scores.append(round(score, 2))
+        signed_list.append(round(signed, 4))
+        adxs.append(round(adx_v, 2) if adx_v is not None else None)
+        stamps.append(as_of.isoformat())
+
+    return {
+        "ok": True,
+        "direction": direction,
+        "count": n_bars,
+        "slope_scores": scores,
+        "adx_values": adxs,
+        "bar_timestamps": stamps,
+        "signed_slopes": signed_list,
+    }
+
+
+def consecutive_steep_adx_window(
+    candles: List[Dict[str, Any]],
+    *,
+    atr_daily_pct: float,
+    n_bars: int = 3,
+    now: Optional[datetime] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+    adx_min: float = 20.0,
+) -> Dict[str, Any]:
+    """Promotion gate: N consecutive steep bars AND ADX > adx_min on each."""
+    return consecutive_steep_bars(
+        candles,
+        atr_daily_pct=atr_daily_pct,
+        n_bars=n_bars,
+        now=now,
+        cfg=cfg,
+        require_adx_gt=adx_min,
+    )
+
+
+def vwap_slope_deterioration_bars(
+    candles: List[Dict[str, Any]],
+    *,
+    side: str,
+    atr_daily_pct: float,
+    n_bars: int = 2,
+    now: Optional[datetime] = None,
+    cfg: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """True when last ``n_bars`` closed 5m bars each fail steep-in-direction.
+
+    Fail = slope_score < 50 OR signed slope against trade direction.
+    """
+    cfg = cfg or get_config()
+    out: Dict[str, Any] = {
+        "deteriorated": False,
+        "slope_scores": [],
+        "signed_slopes": [],
+        "bar_timestamps": [],
+    }
+    if not candles or n_bars < 1:
+        return out
+    candles = _sorted_candles(candles)
+    closed_idx = last_closed_bar_index(candles, now=now)
+    if closed_idx < 0 or closed_idx + 1 < n_bars:
+        return out
+    is_short = (side or "LONG").upper() in ("SHORT", "BEAR", "BEARISH")
+    scores: List[float] = []
+    signed_list: List[float] = []
+    stamps: List[str] = []
+    for offset in range(n_bars - 1, -1, -1):
+        idx = closed_idx - offset
+        as_of = _parse_ts(candles[idx].get("timestamp"))
+        if as_of is None:
+            return out
+        sliced = candles[: idx + 1]
+        score = float(normalized_vwap_slope(sliced, atr_daily_pct, cfg))
+        signed = float(signed_vwap_slope_atr(sliced, atr_daily_pct))
+        scores.append(round(score, 2))
+        signed_list.append(round(signed, 4))
+        stamps.append(as_of.isoformat() if as_of else "")
+        direction_ok = signed < 0 if is_short else signed > 0
+        steep_ok = score >= THRESHOLD_VWAP_SLOPE and direction_ok
+        if steep_ok:
+            out["slope_scores"] = scores
+            out["signed_slopes"] = signed_list
+            out["bar_timestamps"] = stamps
+            return out
+    out["deteriorated"] = True
+    out["slope_scores"] = scores
+    out["signed_slopes"] = signed_list
+    out["bar_timestamps"] = stamps
+    return out
+
+
 def score_vwap_quality(
     candles: List[Dict[str, Any]],
     *,

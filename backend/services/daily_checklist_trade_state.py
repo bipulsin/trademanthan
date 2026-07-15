@@ -1617,6 +1617,52 @@ def enrich_stocks_trade_state(
                         vwap_extension_pct=vwap_extension_pct(candles),
                     )
                 )
+
+            # VWAP+ badge + Trade Score persist bump (read-only UI / score nudge).
+            try:
+                from backend.services.rs_vwap_quality import consecutive_steep_bars
+                from backend.services.vwap_adx_promotion import (
+                    is_vwap_adx_lock,
+                    vwap_persist_score_bump,
+                )
+
+                persist = consecutive_steep_bars(
+                    candles,
+                    atr_daily_pct=atr_pct if atr_pct > 0 else 1.0,
+                    n_bars=3,
+                    cfg=cfg,
+                )
+                persist_n = int(persist.get("count") or 0) if persist.get("ok") else 0
+                s["vwap_steep_persist_bars"] = persist_n
+                adx_now = (
+                    _f(s.get("trade_adx"))
+                    or _f(s.get("adx"))
+                    or _f(s.get("adx_entry"))
+                    or _f(s.get("adx_935"))
+                )
+                vwap_plus = bool(
+                    (vq.get("steep_ok") and adx_now is not None and float(adx_now) > 20)
+                    or (in_lock and is_vwap_adx_lock(db, session_date, sym))
+                )
+                s["vwap_plus"] = vwap_plus
+                if vwap_plus:
+                    badges = list(s.get("gate_badges") or [])
+                    if "VWAP+" not in badges:
+                        badges.append("VWAP+")
+                    s["gate_badges"] = badges
+                if persist_n >= 3:
+                    bump = int(vwap_persist_score_bump())
+                    base = s.get("dashboard_score")
+                    try:
+                        base_i = int(float(base)) if base is not None else None
+                    except (TypeError, ValueError):
+                        base_i = None
+                    if base_i is not None:
+                        s["dashboard_score"] = min(100, base_i + bump)
+                        s["vwap_persist_score_bump"] = bump
+            except Exception as exc:
+                logger.debug("vwap+ enrich skipped %s: %s", sym, exc)
+
             would_block = is_ready_pre and not bool(vq.get("quality_pass"))
             gate_applied = False
             if is_ready_pre and vwap_gate_on and not vq.get("quality_pass"):

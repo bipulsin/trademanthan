@@ -177,8 +177,13 @@ def compute_trade_score(
     price: float,
     vwap: float,
     ranking_type: str,
+    vwap_steep_persist_bars: int = 0,
 ) -> int:
-    """Composite Trade Score (0–100) for the given ranking direction."""
+    """Composite Trade Score (0–100) for the given ranking direction.
+
+    Optional ``vwap_steep_persist_bars``: when ≥3 consecutive 5m bars hold
+    slope ≥50, apply a small additive bump (VWAP_PERSIST_SCORE_BUMP, default 5).
+    """
     total = (
         relative_strength_score(rs, ranking_type)
         + kavach_score(state)
@@ -186,4 +191,11 @@ def compute_trade_score(
         + adx_score(adx)
         + vwap_score(price, vwap, ranking_type)
     )
+    if int(vwap_steep_persist_bars or 0) >= 3:
+        try:
+            from backend.services.vwap_adx_promotion import vwap_persist_score_bump
+
+            total += int(vwap_persist_score_bump())
+        except Exception:
+            total += 5
     return min(100, total)

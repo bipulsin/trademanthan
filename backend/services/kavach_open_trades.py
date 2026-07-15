@@ -38,6 +38,7 @@ EXIT_REASONS = (
     "EMA10 reverse close (rule)",
     "EMA5 reverse close (profit protection)",
     "Risk cap exceeded",
+    "VWAP slope deterioration",
     "Lock removed via R1",
     "Lock removed via R2",
     "Discretionary early exit",
@@ -441,6 +442,7 @@ def canonical_exit_reason(raw: str) -> str:
         "EMA10 reverse close": "EMA10 reverse close (rule)",
         "EMA5 reverse close after profit protection": "EMA5 reverse close (profit protection)",
         "Risk cap exceeded before 1:2": "Risk cap exceeded",
+        "VWAP slope deterioration (2 bars)": "VWAP slope deterioration",
     }
     if raw in mapped:
         return mapped[raw]
@@ -449,6 +451,8 @@ def canonical_exit_reason(raw: str) -> str:
         return "Lock removed via R1"
     if u.startswith("LOCK REMOVED VIA R2"):
         return "Lock removed via R2"
+    if u.startswith("VWAP SLOPE DETERIORATION"):
+        return "VWAP slope deterioration"
     return raw
 
 _ENSURED = False
@@ -617,6 +621,10 @@ def ensure_tables() -> None:
             )
         )
     _ENSURED = True
+    try:
+        ensure_vwap_slope_exit_log()
+    except Exception:
+        pass
 
 
 def _now() -> datetime:
@@ -956,6 +964,27 @@ def build_take_trade_provenance(
     except Exception as exc:
         logger.debug("take_trade ATR consumed snapshot skipped: %s", exc)
 
+    lock_entry_rule = None
+    try:
+        from backend.services.vwap_adx_promotion import latest_lock_entry_rule
+
+        lock_entry_rule = latest_lock_entry_rule(db, session_date, sym)
+    except Exception:
+        lock_entry_rule = None
+
+    vq = ctx.get("vwap_quality") if isinstance(ctx.get("vwap_quality"), dict) else {}
+    adx_click = _f(ctx.get("trade_adx")) or _f(ctx.get("adx"))
+    vwap_slope_qualified = bool(
+        lock_entry_rule == "vwap_adx_promotion"
+        or ctx.get("vwap_plus")
+        or "VWAP+" in [str(b) for b in badges]
+        or (
+            vq.get("steep_ok")
+            and adx_click is not None
+            and float(adx_click) > 20
+        )
+    )
+
     return {
         "captured_at": _now().isoformat(),
         "in_morning_lock": in_morning_lock,
@@ -976,7 +1005,99 @@ def build_take_trade_provenance(
         "removals_last_hour": regime_at_click.get("removals_last_hour"),
         "counter_regime": regime_at_click.get("counter_regime"),
         "atr_consumed_at_click": atr_at_click,
+        "vwap_slope_qualified": vwap_slope_qualified,
+        "lock_entry_rule": lock_entry_rule,
     }
+
+
+def _trade_is_vwap_slope_qualified(t: Dict[str, Any]) -> bool:
+    prov = t.get("provenance")
+    if not isinstance(prov, dict):
+        snap = t.get("state_context_snapshot")
+        if isinstance(snap, dict):
+            prov = snap.get("provenance") if isinstance(snap.get("provenance"), dict) else {}
+        else:
+            prov = {}
+    if not isinstance(prov, dict):
+        return False
+    if prov.get("vwap_slope_qualified"):
+        return True
+    if prov.get("lock_entry_rule") == "vwap_adx_promotion":
+        return True
+    badges = prov.get("downgrade_badges") or []
+    return "VWAP+" in [str(b) for b in badges]
+
+
+def ensure_vwap_slope_exit_log() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS kavach_vwap_slope_exit_log (
+                    id SERIAL PRIMARY KEY,
+                    trade_id VARCHAR(36),
+                    symbol VARCHAR(32) NOT NULL,
+                    session_date DATE NOT NULL,
+                    direction VARCHAR(8),
+                    slope_scores JSONB,
+                    signed_slopes JSONB,
+                    bar_timestamps JSONB,
+                    exit_trigger_reason TEXT,
+                    logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_kavach_vwap_slope_exit_session
+                ON kavach_vwap_slope_exit_log (session_date, symbol)
+                """
+            )
+        )
+
+
+def log_vwap_slope_exit(
+    db,
+    *,
+    trade_id: str,
+    symbol: str,
+    session_date: str,
+    direction: str,
+    slope_scores: Any,
+    signed_slopes: Any,
+    bar_timestamps: Any,
+    exit_trigger_reason: str,
+) -> None:
+    ensure_vwap_slope_exit_log()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO kavach_vwap_slope_exit_log (
+                    trade_id, symbol, session_date, direction,
+                    slope_scores, signed_slopes, bar_timestamps, exit_trigger_reason
+                ) VALUES (
+                    :tid, :sym, CAST(:d AS date), :dir,
+                    CAST(:scores AS jsonb), CAST(:signed AS jsonb),
+                    CAST(:bars AS jsonb), :reason
+                )
+                """
+            ),
+            {
+                "tid": trade_id,
+                "sym": (symbol or "").upper(),
+                "d": session_date,
+                "dir": (direction or "LONG").upper(),
+                "scores": json.dumps(slope_scores or []),
+                "signed": json.dumps(signed_slopes or []),
+                "bars": json.dumps(bar_timestamps or []),
+                "reason": exit_trigger_reason,
+            },
+        )
+    except Exception as exc:
+        logger.warning("vwap_slope_exit_log insert failed %s: %s", symbol, exc)
 
 
 def take_trade(
@@ -1787,6 +1908,58 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
             peak = max(peak, rr)
 
             if state != STATE_EXIT_NOW and not lock_exit:
+                # VWAP-slope deterioration EXIT NOW (VWAP-qualified trades only).
+                if (
+                    new_state != STATE_EXIT_NOW
+                    and state in (STATE_TRAILING, STATE_PROFIT_LOCKED, STATE_PLAN_EXIT)
+                    and _trade_is_vwap_slope_qualified(t)
+                ):
+                    try:
+                        from backend.services.daily_checklist_snapshot import (
+                            _load_candles_for_symbol,
+                        )
+                        from backend.services.rs_vwap_quality import (
+                            vwap_slope_deterioration_bars,
+                        )
+
+                        candles = _load_candles_for_symbol(db, sym) or []
+                        atr_pct = 1.0
+                        try:
+                            from backend.services.daily_checklist_trade_state import (
+                                _load_atr_map,
+                            )
+
+                            atr_pct = float((_load_atr_map(db, [sym]) or {}).get(sym) or 1.0)
+                        except Exception:
+                            atr_pct = 1.0
+                        det = vwap_slope_deterioration_bars(
+                            candles,
+                            side=t.get("direction") or "LONG",
+                            atr_daily_pct=atr_pct if atr_pct > 0 else 1.0,
+                            n_bars=2,
+                        )
+                        if det.get("deteriorated"):
+                            new_state = STATE_EXIT_NOW
+                            trigger_reason = (
+                                "VWAP slope deterioration (2 bars) | "
+                                f"slopes={det.get('slope_scores')}"
+                            )
+                            trigger_px = close
+                            force_new_alarm = True
+                            log_vwap_slope_exit(
+                                db,
+                                trade_id=str(tid),
+                                symbol=sym,
+                                session_date=session_date,
+                                direction=t.get("direction") or "LONG",
+                                slope_scores=det.get("slope_scores"),
+                                signed_slopes=det.get("signed_slopes"),
+                                bar_timestamps=det.get("bar_timestamps"),
+                                exit_trigger_reason=trigger_reason,
+                            )
+                    except Exception as exc:
+                        logger.debug("vwap slope exit check skipped %s: %s", sym, exc)
+
                 if state == STATE_PLAN_EXIT:
                     new_sl = ema10 if ema10 is not None else new_sl
                     if ema10 is not None:

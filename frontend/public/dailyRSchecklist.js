@@ -596,6 +596,7 @@
         else if (t.indexOf("pullback") >= 0) cls += " dc-gate-badge--pb3";
         else if (t.indexOf("CHOP") >= 0) cls += " dc-gate-badge--chop";
         else if (t.indexOf("CAP WAIVED") >= 0) cls += " dc-gate-badge--waiver";
+        else if (t.indexOf("VWAP+") === 0) cls += " dc-gate-badge--vwapplus";
         return cls;
     }
 
@@ -913,6 +914,7 @@
                     || t.indexOf("CHURN") === 0
                     || t.indexOf("DIR CONFLICT") >= 0
                     || t.indexOf("ATR ") === 0
+                    || t.indexOf("VWAP+") === 0
                 ) {
                     if (show.indexOf(t) < 0) show.push(t);
                 }
@@ -946,7 +948,12 @@
             var wshow = rf.length ? rf.slice() : [];
             (stock.gate_badges || []).forEach(function (b) {
                 var t = String(b);
-                if (t.indexOf("DIR CONFLICT") >= 0 && wshow.indexOf(t) < 0) wshow.push(t);
+                if (
+                    (t.indexOf("DIR CONFLICT") >= 0 || t.indexOf("VWAP+") === 0)
+                    && wshow.indexOf(t) < 0
+                ) {
+                    wshow.push(t);
+                }
             });
             wflags.innerHTML = renderGateBadgesHtml(wshow);
             wflags.hidden = !wshow.length;
@@ -1330,7 +1337,11 @@
                     counter_regime: !!(stock.regime_context || {}).counter_regime,
                     atr_consumed: stock.atr_consumed || null,
                     entry_price: stock.trade_entry,
-                    live_price: stock.trade_entry
+                    live_price: stock.trade_entry,
+                    vwap_plus: !!stock.vwap_plus,
+                    vwap_quality: stock.vwap_quality || null,
+                    trade_adx: stock.trade_adx,
+                    adx: stock.trade_adx || stock.adx_entry
                 }
             })
         }).then(function (res) {

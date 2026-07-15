@@ -486,6 +486,7 @@ body[data-theme="dark"] .dc-exit-rule { color: #e2e8f0; opacity: 0.9; }
 .dc-gate-badge--atr { background: #e2e8f0; color: #334155; }
 .dc-gate-badge--dirconflict { background: #fee2e2; color: #991b1b; font-weight: 800; }
 .dc-gate-badge--waiver { background: #fef3c7; color: #92400e; }
+.dc-gate-badge--vwapplus { background: #ff6a00; color: #000; font-weight: 800; }
 
 /* Dark theme: high-contrast chips (regime / churn / ATR / counter) */
 body[data-theme="dark"] .dc-gate-badge {

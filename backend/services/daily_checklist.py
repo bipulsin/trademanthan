@@ -1064,6 +1064,19 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
                     )
             except Exception as exc:
                 logger.warning("daily_checklist: intraday promotion failed: %s", exc)
+            try:
+                from backend.services.vwap_adx_promotion import promote_from_vwap_adx
+
+                vwap_promo = promote_from_vwap_adx(db, sd, now=now)
+                if vwap_promo.get("promoted"):
+                    logger.info(
+                        "daily_checklist: vwap_adx promotion applied promoted=%s slots=%s/%s",
+                        [p.get("symbol") for p in (vwap_promo.get("promoted") or [])],
+                        vwap_promo.get("slots_used"),
+                        vwap_promo.get("cap"),
+                    )
+            except Exception as exc:
+                logger.warning("daily_checklist: vwap_adx promotion failed: %s", exc)
             locked_syms = set(get_locked_symbols(db, sd))
         else:
             logger.debug("daily_checklist: pre-09:25 lock — skip persist for %s", sd)
