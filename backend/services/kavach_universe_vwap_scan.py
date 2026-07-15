@@ -384,10 +384,11 @@ def backfill_universe_vwap_scan(
     """
     import time as time_mod
 
+    from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
     ensure_universe_vwap_scan()
-    upstox = UpstoxService()
+    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     summary: Dict[str, Any] = {"ok": True, "days": {}, "source": "backfill"}
 
     db = SessionLocal()
