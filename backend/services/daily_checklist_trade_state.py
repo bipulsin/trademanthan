@@ -21,6 +21,9 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - Entry must be live EMA5 (±ENTRY_EMA5_TOL_PCT); no VWAP-blend limit.
   - Missing SL / Risk → not READY; Take Trade disabled.
   - Risk > ₹3k with R:R < 1:2 → BLOCKED (hard). R:R ≥ 1:2 → cap waived label.
+  - Live Trend/Supertrend/MACD ≥2-of-3 oppose lock direction → WAIT (DIR CONFLICT).
+    Root cause: sticky daily_snapshot direction (no swap after f11e1b7) vs live
+    10m Kavach fields; READY historically ignored that disagreement.
 """
 from __future__ import annotations
 
@@ -155,6 +158,106 @@ def take_trade_structurally_ok(
 ) -> bool:
     """Take Trade needs a computable entry, stop, and INR risk."""
     return entry is not None and sl is not None and risk_inr is not None
+
+
+def live_momentum_sides(
+    *,
+    ema_vs_vwap: Optional[str] = None,
+    supertrend: Optional[str] = None,
+    macd: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    """Map checklist live labels → BULL / BEAR / None (neutral/unknown).
+
+    Same three fields shown on the TradingView Kavach panel (Trend≈EMA5 vs VWAP,
+    Supertrend, MACD). Crossing / At VWAP count as neutral, not a vote.
+    """
+    ema = (ema_vs_vwap or "").strip().lower()
+    st = (supertrend or "").strip().lower()
+    md = (macd or "").strip().lower()
+
+    ema_side = None
+    if ema == "above":
+        ema_side = "BULL"
+    elif ema == "below":
+        ema_side = "BEAR"
+
+    st_side = None
+    if st == "bullish":
+        st_side = "BULL"
+    elif st == "bearish":
+        st_side = "BEAR"
+
+    macd_side = None
+    if md == "bullish":
+        macd_side = "BULL"
+    elif md == "bearish":
+        macd_side = "BEAR"
+    # "crossing" → neutral
+
+    return {"ema_vs_vwap": ema_side, "supertrend": st_side, "macd": macd_side}
+
+
+def direction_live_conflict(
+    *,
+    direction: str,
+    ema_vs_vwap: Optional[str] = None,
+    supertrend: Optional[str] = None,
+    macd: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compare sticky checklist lock direction vs live Trend/ST/MACD.
+
+    Returns conflict count (0–3), opposing field names, and live lean.
+    ≥2 opposing votes → suppress READY (caller). Does not flip lock direction.
+    """
+    is_long = (direction or "LONG").upper() != "SHORT"
+    expect = "BULL" if is_long else "BEAR"
+    sides = live_momentum_sides(
+        ema_vs_vwap=ema_vs_vwap, supertrend=supertrend, macd=macd
+    )
+    opposing: List[str] = []
+    agreeing: List[str] = []
+    for name, side in sides.items():
+        if side is None:
+            continue
+        if side != expect:
+            opposing.append(name)
+        else:
+            agreeing.append(name)
+
+    bull_votes = sum(1 for s in sides.values() if s == "BULL")
+    bear_votes = sum(1 for s in sides.values() if s == "BEAR")
+    live_lean = None
+    if bull_votes >= 2 and bull_votes > bear_votes:
+        live_lean = "Bullish"
+    elif bear_votes >= 2 and bear_votes > bull_votes:
+        live_lean = "Bearish"
+
+    n = len(opposing)
+    checklist_dir = "LONG" if is_long else "SHORT"
+    reason = None
+    if n >= 2:
+        fields = "+".join(
+            {
+                "ema_vs_vwap": "Trend",
+                "supertrend": "Supertrend",
+                "macd": "MACD",
+            }.get(f, f)
+            for f in opposing
+        )
+        reason = (
+            f"direction conflict: checklist {checklist_dir} vs live "
+            f"{live_lean or 'opposing'} {fields}"
+        )
+    return {
+        "conflict_count": n,
+        "opposing_fields": opposing,
+        "agreeing_fields": agreeing,
+        "live_lean": live_lean,
+        "checklist_direction": checklist_dir,
+        "suppress_ready": n >= 2,
+        "reason": reason,
+        "sides": sides,
+    }
 
 
 def ensure_ready_consistency_log() -> None:
@@ -701,6 +804,26 @@ def compute_trade_state_for_stock(
         blocked_reason = "WAIT · SL/Risk not computed — Take Trade disabled"
         display_risk = risk_inr_ready if risk_inr_ready is not None else risk_inr_pb
 
+    # Sticky lock direction vs live Trend/Supertrend/MACD (Kavach panel fields).
+    # ≥2 of 3 opposing → cannot be READY (post-f11e1b7 locks no longer flip side).
+    dir_conflict = direction_live_conflict(
+        direction=direction,
+        ema_vs_vwap=stock.get("ema_vs_vwap") or levels.get("ema_vs_vwap"),
+        supertrend=stock.get("supertrend") or levels.get("supertrend"),
+        macd=stock.get("macd") or levels.get("macd"),
+    )
+    if state in (STATE_READY, STATE_READY_RECHECK) and dir_conflict.get("suppress_ready"):
+        state = STATE_WAIT
+        blocked_reason = "WAIT · " + (
+            dir_conflict.get("reason")
+            or "direction conflict vs live Trend/Supertrend/MACD"
+        )
+        logger.warning(
+            "DIR CONFLICT suppress READY %s: %s",
+            stock.get("symbol"),
+            blocked_reason,
+        )
+
     # Stale / gapped entry: level sits outside today's traded range → EXPIRED
     # (same bucket as >1.5 ATR pullback expiry). Re-checked every refresh.
     if state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT) and entry_outside_session_range(
@@ -770,6 +893,17 @@ def compute_trade_state_for_stock(
         badges = list(gate_badges or [])
         if "PRE-09:45" not in badges:
             badges.append("PRE-09:45")
+        gate_badges = badges
+
+    # Visibility: DIR CONFLICT badge whenever live momentum opposes lock (≥1 field),
+    # including WAIT after ≥2 suppress and soft 1-of-3 on READY.
+    if (
+        int(dir_conflict.get("conflict_count") or 0) >= 1
+        and state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT, STATE_SCANNING)
+    ):
+        badges = list(gate_badges or [])
+        if "DIR CONFLICT" not in badges:
+            badges.append("DIR CONFLICT")
         gate_badges = badges
 
     sl_out = round(sl_price, 2) if sl_price is not None else None
@@ -907,6 +1041,13 @@ def compute_trade_state_for_stock(
         "pullback_label": pb_label,
         "direction_unstable": bool(direction_unstable),
         "gate_badges": gate_badges,
+        "dir_conflict": {
+            "conflict_count": int(dir_conflict.get("conflict_count") or 0),
+            "opposing_fields": list(dir_conflict.get("opposing_fields") or []),
+            "live_lean": dir_conflict.get("live_lean"),
+            "suppress_ready": bool(dir_conflict.get("suppress_ready")),
+            "reason": dir_conflict.get("reason"),
+        },
         "stopped_out_today": bool(stopped and stopped.get("blocked")),
     }
 
@@ -1145,6 +1286,18 @@ def enrich_stocks_trade_state(
                             "regime_lean": regime_snap.get("regime_lean"),
                             "removals_last_hour": regime_snap.get("removals_last_hour"),
                             "counter_regime": regime_snap.get("counter_regime"),
+                            "dir_conflict_count": (s.get("dir_conflict") or {}).get(
+                                "conflict_count"
+                            ),
+                            "dir_conflict_live_lean": (s.get("dir_conflict") or {}).get(
+                                "live_lean"
+                            ),
+                            "dir_conflict_reason": (s.get("dir_conflict") or {}).get(
+                                "reason"
+                            ),
+                            "dir_conflict_suppress": (s.get("dir_conflict") or {}).get(
+                                "suppress_ready"
+                            ),
                         },
                     }
                 )

@@ -11,6 +11,7 @@ from backend.services.daily_checklist_trade_state import (
     STATE_SCANNING,
     STATE_WAIT,
     compute_trade_state_for_stock,
+    direction_live_conflict,
     entry_off_live_ema5,
     entry_outside_session_range,
     sort_stocks_by_trade_state,
@@ -254,3 +255,127 @@ def test_ready_ema5_anchored_within_cap():
     assert out["trade_risk_inr"] == 100
     assert out["trade_take_enabled"] is True
     assert out["trade_risk_cap_waived"] is False
+
+
+def test_direction_live_conflict_helper():
+    # HCLTECH-style: SHORT lock vs live bullish Trend+ST+MACD
+    c = direction_live_conflict(
+        direction="SHORT",
+        ema_vs_vwap="Above",
+        supertrend="Bullish",
+        macd="Bullish",
+    )
+    assert c["conflict_count"] == 3
+    assert c["suppress_ready"] is True
+    assert c["live_lean"] == "Bullish"
+    assert "checklist SHORT" in (c["reason"] or "")
+
+    # MANKIND-style: LONG lock vs live bearish
+    c2 = direction_live_conflict(
+        direction="LONG",
+        ema_vs_vwap="Below",
+        supertrend="Bearish",
+        macd="Bearish",
+    )
+    assert c2["conflict_count"] == 3
+    assert c2["suppress_ready"] is True
+    assert c2["live_lean"] == "Bearish"
+
+    # Clean LONG aligned
+    c3 = direction_live_conflict(
+        direction="LONG",
+        ema_vs_vwap="Above",
+        supertrend="Bullish",
+        macd="Bullish",
+    )
+    assert c3["conflict_count"] == 0
+    assert c3["suppress_ready"] is False
+
+
+def test_hcltech_style_short_vs_live_bullish_suppresses_ready():
+    out = _compute(
+        stock={
+            "symbol": "HCLTECH",
+            "direction": "SHORT",
+            "confidence": "A",
+            "ema_vs_vwap": "Above",
+            "supertrend": "Bullish",
+            "macd": "Bullish",
+        },
+        levels={
+            "price": 1148.0,
+            "ema5": 1147.91,
+            "ema10": 1155.0,
+            "vwap": 1146.0,
+            "adx": 28.0,
+            "confidence_grade": "A",
+            "market_regime": "TREND",
+        },
+        session_hi=1160.0,
+        session_lo=1140.0,
+    )
+    assert out["trade_state"] == STATE_WAIT
+    assert out["trade_take_enabled"] is False
+    assert "DIR CONFLICT" in (out["gate_badges"] or [])
+    assert out["dir_conflict"]["suppress_ready"] is True
+    assert "direction conflict" in (out["trade_state_reason"] or "")
+
+
+def test_mankind_style_long_vs_live_bearish_suppresses_ready():
+    out = _compute(
+        stock={
+            "symbol": "MANKIND",
+            "direction": "LONG",
+            "confidence": "A",
+            "ema_vs_vwap": "Below",
+            "supertrend": "Bearish",
+            "macd": "Bearish",
+        },
+        levels={
+            "price": 2615.5,
+            "ema5": 2624.77,
+            "ema10": 2630.0,
+            "vwap": 2620.0,
+            "adx": 28.0,
+            "confidence_grade": "A",
+            "market_regime": "TREND",
+        },
+        atr_pct=2.0,
+        session_hi=2650.0,
+        session_lo=2600.0,
+    )
+    # price near ema5 → would have been READY without conflict gate
+    assert out["trade_state"] == STATE_WAIT
+    assert "DIR CONFLICT" in (out["gate_badges"] or [])
+    assert out["dir_conflict"]["live_lean"] == "Bearish"
+    assert out["trade_take_enabled"] is False
+
+
+def test_aligned_live_momentum_still_ready():
+    out = _compute(
+        stock={
+            "ema_vs_vwap": "Above",
+            "supertrend": "Bullish",
+            "macd": "Bullish",
+        }
+    )
+    assert out["trade_state"] == STATE_READY
+    assert out["trade_take_enabled"] is True
+    assert "DIR CONFLICT" not in (out["gate_badges"] or [])
+    assert out["dir_conflict"]["conflict_count"] == 0
+
+
+def test_one_of_three_conflict_flags_but_stays_ready():
+    """Soft visibility: single opposing field badges but does not suppress READY."""
+    out = _compute(
+        stock={
+            "ema_vs_vwap": "Above",
+            "supertrend": "Bullish",
+            "macd": "Bearish",  # 1 opposing
+        }
+    )
+    assert out["trade_state"] == STATE_READY
+    assert out["dir_conflict"]["conflict_count"] == 1
+    assert out["dir_conflict"]["suppress_ready"] is False
+    assert "DIR CONFLICT" in (out["gate_badges"] or [])
+    assert out["trade_take_enabled"] is True

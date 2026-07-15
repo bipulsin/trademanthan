@@ -585,6 +585,7 @@
         var cls = "dc-gate-badge";
         t = String(t || "");
         if (t.indexOf("WHIPSAW") >= 0) cls += " dc-gate-badge--whip";
+        else if (t.indexOf("DIR CONFLICT") >= 0) cls += " dc-gate-badge--dirconflict";
         else if (t.indexOf("COUNTER-REGIME") >= 0) cls += " dc-gate-badge--counter";
         else if (t.indexOf("REGIME") >= 0) cls += " dc-gate-badge--regime";
         else if (t.indexOf("CHURN") >= 0) cls += " dc-gate-badge--churn";
@@ -792,10 +793,12 @@
         if (r.indexOf("extend") >= 0) return "extended";
         if (r.indexOf("risk") >= 0) return "risk high";
         if (r.indexOf("sl") >= 0 || stock.stopped_out_today) return "SL earlier today";
+        if (r.indexOf("direction conflict") >= 0 || r.indexOf("dir conflict") >= 0) return "dir conflict";
         if (r.indexOf("unstable") >= 0 || stock.direction_unstable) return "direction unstable";
         if (r.indexOf("manual") >= 0 || stock.zone_downgrade === "compromised_lock") return "caution";
         if (stock.trade_state === "WAIT FOR PULLBACK") return "wait pullback";
         if (stock.trade_state === "SCANNING") return "scanning";
+        if (stock.gate_badges && stock.gate_badges.indexOf("DIR CONFLICT") >= 0) return "dir conflict";
         if (stock.trade_state === "BLOCKED") return "blocked";
         if (stock.trade_state === "EXPIRED") return "expired";
         return (stock.trade_state_reason || "").split(/[·—-]/)[0].trim().slice(0, 24) || "";
@@ -843,10 +846,17 @@
         }
         var flagsEl = card.querySelector(".dc-ready-flags");
         if (flagsEl) {
-            var rflags = (stock.regime_context && stock.regime_context.flags) || [];
-            var show = rflags.length ? rflags : (stock.gate_badges || []).filter(function (b) {
+            var show = rflags.length ? rflags.slice() : [];
+            (stock.gate_badges || []).forEach(function (b) {
                 var t = String(b);
-                return t.indexOf("REGIME") >= 0 || t.indexOf("COUNTER") >= 0 || t.indexOf("CHURN") === 0;
+                if (
+                    t.indexOf("REGIME") >= 0
+                    || t.indexOf("COUNTER") >= 0
+                    || t.indexOf("CHURN") === 0
+                    || t.indexOf("DIR CONFLICT") >= 0
+                ) {
+                    if (show.indexOf(t) < 0) show.push(t);
+                }
             });
             flagsEl.innerHTML = renderGateBadgesHtml(show);
             flagsEl.hidden = !show.length;

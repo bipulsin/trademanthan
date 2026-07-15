@@ -472,6 +472,7 @@ body[data-theme="dark"] .dc-exit-rule { color: #e2e8f0; opacity: 0.9; }
 .dc-gate-badge--regime { background: #e0f2fe; color: #075985; }
 .dc-gate-badge--counter { background: #fce7f3; color: #9d174d; }
 .dc-gate-badge--churn { background: #ffedd5; color: #9a3412; }
+.dc-gate-badge--dirconflict { background: #fee2e2; color: #991b1b; font-weight: 800; }
 .dc-gate-badge--waiver { background: #fef3c7; color: #92400e; }
 .dc-ready-flags {
     display: flex;
