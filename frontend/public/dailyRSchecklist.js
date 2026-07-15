@@ -845,24 +845,7 @@
                 waivedEl.textContent = "";
             }
         }
-        var flagsEl = card.querySelector(".dc-ready-flags");
-        if (flagsEl) {
-            var show = rflags.length ? rflags.slice() : [];
-            (stock.gate_badges || []).forEach(function (b) {
-                var t = String(b);
-                if (
-                    t.indexOf("REGIME") >= 0
-                    || t.indexOf("COUNTER") >= 0
-                    || t.indexOf("CHURN") === 0
-                    || t.indexOf("DIR CONFLICT") >= 0
-                    || t.indexOf("ATR ") === 0
-                ) {
-                    if (show.indexOf(t) < 0) show.push(t);
-                }
-            });
-            flagsEl.innerHTML = renderGateBadgesHtml(show);
-            flagsEl.hidden = !show.length;
-        }
+        // Take Trade enablement must run even if badge rendering throws.
         var expired = stock.trade_state === "EXPIRED" || !!stock.trade_expiry_crossed;
         card.classList.toggle("dc-ready-card--expired", expired);
         var expLabel = card.querySelector(".dc-ready-expired-label");
@@ -895,7 +878,7 @@
             card.classList.remove("dc-ready-card--missed");
             missedEl.hidden = true;
             takeBtn.disabled = !(
-                stock.trade_take_enabled !== false
+                stock.trade_take_enabled === true
                 && !stock.trade_taken
                 && !stock.stopped_out_today
                 && !stock.trade_exited
@@ -917,6 +900,26 @@
             takeTrade(sym);
         };
         card.onclick = function () { openModal(sym); };
+
+        var flagsEl = card.querySelector(".dc-ready-flags");
+        if (flagsEl) {
+            var rflags = (stock.regime_context && stock.regime_context.flags) || [];
+            var show = rflags.length ? rflags.slice() : [];
+            (stock.gate_badges || []).forEach(function (b) {
+                var t = String(b);
+                if (
+                    t.indexOf("REGIME") >= 0
+                    || t.indexOf("COUNTER") >= 0
+                    || t.indexOf("CHURN") === 0
+                    || t.indexOf("DIR CONFLICT") >= 0
+                    || t.indexOf("ATR ") === 0
+                ) {
+                    if (show.indexOf(t) < 0) show.push(t);
+                }
+            });
+            flagsEl.innerHTML = renderGateBadgesHtml(show);
+            flagsEl.hidden = !show.length;
+        }
     }
 
     function patchWatchRow(row, stock) {
@@ -940,8 +943,13 @@
         var wflags = row.querySelector(".dc-watch-flags");
         if (wflags) {
             var rf = (stock.regime_context && stock.regime_context.flags) || [];
-            wflags.innerHTML = renderGateBadgesHtml(rf);
-            wflags.hidden = !rf.length;
+            var wshow = rf.length ? rf.slice() : [];
+            (stock.gate_badges || []).forEach(function (b) {
+                var t = String(b);
+                if (t.indexOf("DIR CONFLICT") >= 0 && wshow.indexOf(t) < 0) wshow.push(t);
+            });
+            wflags.innerHTML = renderGateBadgesHtml(wshow);
+            wflags.hidden = !wshow.length;
         }
         var grade = stock.confidence || stock.dashboard_kavach || "";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";

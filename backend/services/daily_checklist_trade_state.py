@@ -199,6 +199,66 @@ def live_momentum_sides(
     return {"ema_vs_vwap": ema_side, "supertrend": st_side, "macd": macd_side}
 
 
+def overlay_live_momentum_from_candles(
+    stock: Dict[str, Any],
+    candles: Optional[List[Any]],
+    *,
+    nifty_pct: float = 0.0,
+) -> Dict[str, Optional[str]]:
+    """Refresh Trend/ST/MACD labels from closed 10m candles (every enrich poll).
+
+    Checklist DB rows can lag the live recompute path; conflict checks must not
+    depend on sticky morning labels. Mutates stock in place when metrics resolve.
+    Returns the labels used (overlay or prior).
+    """
+    prior = {
+        "ema_vs_vwap": stock.get("ema_vs_vwap"),
+        "supertrend": stock.get("supertrend"),
+        "macd": stock.get("macd"),
+    }
+    if not candles:
+        return prior
+    try:
+        from backend.services.daily_checklist import (
+            _ema_vs_vwap_label,
+            _macd_label,
+            _supertrend_label,
+        )
+        from backend.services.kavach_10m import metrics_from_10m_candles
+        from backend.services.relative_strength_scanner import RANKING_BEARISH, RANKING_BULLISH
+
+        direction = (stock.get("direction") or "LONG").upper()
+        ranking = RANKING_BEARISH if direction == "SHORT" else RANKING_BULLISH
+        metrics = metrics_from_10m_candles(
+            candles, ranking_type=ranking, nifty_pct=float(nifty_pct or 0.0)
+        )
+        if not metrics:
+            return prior
+        ema_lbl = _ema_vs_vwap_label(_f(metrics.get("ema5")), _f(metrics.get("vwap")))
+        st_lbl = _supertrend_label(_f(metrics.get("supertrend")))
+        macd_lbl = _macd_label(
+            _f(metrics.get("macd")),
+            _f(metrics.get("macd_signal")),
+            _f(metrics.get("macd_histogram")),
+        )
+        if ema_lbl is not None:
+            stock["ema_vs_vwap"] = ema_lbl
+        if st_lbl is not None:
+            stock["supertrend"] = st_lbl
+        if macd_lbl is not None:
+            stock["macd"] = macd_lbl
+        if metrics.get("kavach_state"):
+            stock["dashboard_kavach_live"] = metrics.get("kavach_state")
+        return {
+            "ema_vs_vwap": stock.get("ema_vs_vwap"),
+            "supertrend": stock.get("supertrend"),
+            "macd": stock.get("macd"),
+        }
+    except Exception as exc:
+        logger.debug("live momentum overlay skipped for %s: %s", stock.get("symbol"), exc)
+        return prior
+
+
 def direction_live_conflict(
     *,
     direction: str,
@@ -927,9 +987,24 @@ def compute_trade_state_for_stock(
             or "direction conflict vs live Trend/Supertrend/MACD"
         )
         logger.warning(
-            "DIR CONFLICT suppress READY %s: %s",
+            "DIR CONFLICT suppress READY %s: %s (sides=%s labels ema=%s st=%s macd=%s)",
             stock.get("symbol"),
             blocked_reason,
+            dir_conflict.get("sides"),
+            stock.get("ema_vs_vwap") or levels.get("ema_vs_vwap"),
+            stock.get("supertrend") or levels.get("supertrend"),
+            stock.get("macd") or levels.get("macd"),
+        )
+    elif int(dir_conflict.get("conflict_count") or 0) >= 1:
+        logger.info(
+            "DIR CONFLICT flag %s count=%s opposing=%s labels ema=%s st=%s macd=%s state=%s",
+            stock.get("symbol"),
+            dir_conflict.get("conflict_count"),
+            dir_conflict.get("opposing_fields"),
+            stock.get("ema_vs_vwap") or levels.get("ema_vs_vwap"),
+            stock.get("supertrend") or levels.get("supertrend"),
+            stock.get("macd") or levels.get("macd"),
+            state,
         )
 
     # Stale / gapped entry: level sits outside today's traded range → EXPIRED
@@ -1277,6 +1352,14 @@ def enrich_stocks_trade_state(
         lock_map = morning_locked_symbols(db, session_date)
         vwap_gate_on = ready_vwap_quality_gate_enabled()
 
+        nifty_pct = 0.0
+        try:
+            from backend.services.daily_checklist_live import _latest_nifty_pct
+
+            nifty_pct = float(_latest_nifty_pct(db) or 0.0)
+        except Exception:
+            nifty_pct = 0.0
+
         for s in stocks:
             sym = (s.get("symbol") or "").upper()
             if not sym:
@@ -1290,6 +1373,9 @@ def enrich_stocks_trade_state(
             atr = (price * atr_pct / 100.0) if price and atr_pct > 0 else None
             is_long = (s.get("direction") or "LONG").upper() != "SHORT"
             candles = candle_cache.get(sym) or []
+            # Every poll: refresh Trend/ST/MACD from the same 10m candle path as
+            # live Kavach so DIR CONFLICT is not stuck on sticky checklist labels.
+            overlay_live_momentum_from_candles(s, candles, nifty_pct=nifty_pct)
             whip = count_whipsaw_reversals(
                 candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
             ) if candles else 0

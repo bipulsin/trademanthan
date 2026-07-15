@@ -386,6 +386,21 @@ def test_one_of_three_conflict_flags_but_stays_ready():
     assert out["trade_take_enabled"] is True
 
 
+def test_overlay_live_momentum_empty_candles_keeps_prior():
+    from backend.services.daily_checklist_trade_state import overlay_live_momentum_from_candles
+
+    stock = {
+        "symbol": "IEX",
+        "direction": "LONG",
+        "ema_vs_vwap": "Above",
+        "supertrend": "Bullish",
+        "macd": "Bearish",
+    }
+    out = overlay_live_momentum_from_candles(stock, [], nifty_pct=0.0)
+    assert out["ema_vs_vwap"] == "Above"
+    assert stock["macd"] == "Bearish"
+
+
 def test_atr_consumed_metrics_from_open_and_opening_range():
     # daily ATR = 20; open 100 → price 114 = 70% from open
     m = compute_atr_consumed_metrics(
