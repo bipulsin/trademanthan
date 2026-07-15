@@ -99,3 +99,19 @@ Schema logs slope / `steep_ok` only. Propose shadow-only `vwap_extension_pct = (
 - Columns include `in_lock_at_time`, `source` (`live`|`backfill`), `vwap_extension_pct`
 - Backfill script: `scripts/backfill_universe_vwap_scan.py` via Upstox historical 5m (`range_end_date`) for 13/14/15-Jul
 - `shadow.html` → **Export for Analysis** bundles consistency + universe scan + raw log + R1/R2 + snapshot
+
+### 13-Jul lock reconstruction (2026-07-15 evening)
+
+**Gap:** Live morning lock was delayed to **14:45** (checklist crash), so audit had only 10 `morning_lock` entries and `in_lock_at_time` was False almost all day → “455/455 steep outside lock” was unusable.
+
+**Fix:** `scripts/reconstruct_lock_timeline_20260713.py` replays `lock_morning_snapshot` + `promote_intraday_from_rs` over stored `relative_strength_snapshot` scans (09:26–14:30) with Upstox historical 5m for R1. Replaced 13-Jul audit/snapshot only; recomputed `in_lock_at_time` on universe VWAP scan.
+
+| Metric (13-Jul) | Before | After |
+|-----------------|--------|-------|
+| Audit rows / timestamps | 10 / 1 | **145 / 49** |
+| Entry / remove | 10 / 0 | **77 / 68** (incl. R1+R2) |
+| Morning lock time | 14:45 (bogus) | **09:26** (true Top-5) |
+| `steep_ok` outside lock | 455 / 455 | **373 / 455** (62 symbols) |
+| `in_lock_at_time=true` rows | ~0 usable | **725** |
+
+14-Jul / 15-Jul untouched. Re-export 13-Jul via **Export for Analysis**.
