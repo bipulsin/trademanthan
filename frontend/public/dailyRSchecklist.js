@@ -1233,6 +1233,15 @@
     var defaultDocTitle = document.title;
     var pendingAlarmTradeId = null;
     var exitAudio = null;
+    // Persist Confirm Exit UI across applyState / LTP polls (tradeId → draft).
+    var openExitDrafts = {};
+    try {
+        openExitDrafts = JSON.parse(sessionStorage.getItem("dc_ot_exit_drafts") || "{}") || {};
+    } catch (e) { openExitDrafts = {}; }
+
+    function persistExitDrafts() {
+        try { sessionStorage.setItem("dc_ot_exit_drafts", JSON.stringify(openExitDrafts)); } catch (e) {}
+    }
 
     function alarmPlayedKey(trade) {
         return "dc_alarm_" + trade.id + "_" + (trade.alarm_fired_at || "");
@@ -1344,14 +1353,25 @@
         var stack = $("dcOpenTradesStack");
         var empty = $("dcOpenTradesEmpty");
         if (!stack || !empty) return;
+        captureOpenExitDraftsFromDom();
         var panel = (state && state.open_trades_panel) || {};
         var trades = panel.open_trades || [];
         updateExitTabTitle(panel);
         empty.hidden = trades.length > 0;
         stack.innerHTML = "";
+        var openIds = {};
         trades.forEach(function (t) {
+            openIds[t.id] = true;
             stack.appendChild(buildOpenTradeCard(t));
             if (t.state === "EXIT_NOW" || t.state === "PLAN_EXIT") playExitAlarm(t);
+        });
+        Object.keys(openExitDrafts).forEach(function (id) {
+            if (!openIds[id]) delete openExitDrafts[id];
+        });
+        persistExitDrafts();
+        // Re-open Confirm Exit for any trade the user had expanded (survives refresh).
+        trades.forEach(function (t) {
+            if (openExitDrafts[t.id]) showExitForm(t);
         });
     }
 
@@ -1490,37 +1510,100 @@
         }).then(function (s) { if (s) applyState(s); });
     }
 
+    function captureOpenExitDraftsFromDom() {
+        document.querySelectorAll(".dc-ot-card").forEach(function (card) {
+            var id = card.dataset.tradeId;
+            var form = card._exitForm;
+            if (!id || !form || form.hidden) return;
+            var px = form.querySelector('input[type="number"]');
+            var reason = form.querySelector("select");
+            var note = form.querySelector('input[type="text"]');
+            if (!px) return;
+            openExitDrafts[id] = {
+                price: px.value,
+                reason: reason ? reason.value : "",
+                note: note ? note.value : ""
+            };
+        });
+        persistExitDrafts();
+    }
+
+    function pickDefaultExitReason(t) {
+        var trigger = String(t.exit_trigger_reason || t.action_hint || "");
+        var i;
+        for (i = 0; i < EXIT_REASONS.length; i++) {
+            var r = EXIT_REASONS[i];
+            if (trigger.indexOf("EMA10") >= 0 && r.indexOf("EMA10") >= 0) return r;
+            if (trigger.indexOf("EMA5") >= 0 && r.indexOf("EMA5") >= 0) return r;
+            if (trigger.indexOf("Risk") >= 0 && r.indexOf("Risk") >= 0) return r;
+            if (trigger.indexOf("Lock removed via R1") >= 0 && r === "Lock removed via R1") return r;
+            if (trigger.indexOf("Lock removed via R2") >= 0 && r === "Lock removed via R2") return r;
+        }
+        if (t.state === "EXIT_NOW" && trigger) {
+            for (i = 0; i < EXIT_REASONS.length; i++) {
+                if (EXIT_REASONS[i].indexOf(trigger.split(" ")[0]) === 0) return EXIT_REASONS[i];
+            }
+        }
+        return EXIT_REASONS[0];
+    }
+
+    function defaultExitDraft(t) {
+        return {
+            price: t.live_price != null ? Number(t.live_price).toFixed(2) : "",
+            reason: pickDefaultExitReason(t),
+            note: ""
+        };
+    }
+
     function beginExit(t) {
+        if (!openExitDrafts[t.id]) {
+            openExitDrafts[t.id] = defaultExitDraft(t);
+            persistExitDrafts();
+        }
+        showExitForm(t);
+    }
+
+    function showExitForm(t) {
         var card = document.querySelector('.dc-ot-card[data-trade-id="' + t.id + '"]');
         if (!card || !card._exitForm) return;
         var form = card._exitForm;
+        var draft = openExitDrafts[t.id] || defaultExitDraft(t);
+        openExitDrafts[t.id] = draft;
         form.hidden = false;
         form.innerHTML = "";
         var px = document.createElement("input");
         px.type = "number"; px.step = "0.01"; px.className = "dc-ot-edit";
-        px.value = t.live_price != null ? Number(t.live_price).toFixed(2) : "";
+        px.value = draft.price != null ? draft.price : "";
         px.placeholder = "Exit price";
         var reason = document.createElement("select");
         reason.className = "dc-ot-edit";
         EXIT_REASONS.forEach(function (r) {
             var o = document.createElement("option");
             o.value = r; o.textContent = r;
-            if (t.exit_trigger_reason && r.indexOf((t.exit_trigger_reason || "").split(" ")[0]) === 0) o.selected = true;
-            if (t.state === "EXIT_NOW" && t.exit_trigger_reason) {
-                if (t.exit_trigger_reason.indexOf("EMA10") >= 0 && r.indexOf("EMA10") >= 0) o.selected = true;
-                if (t.exit_trigger_reason.indexOf("EMA5") >= 0 && r.indexOf("EMA5") >= 0) o.selected = true;
-                if (t.exit_trigger_reason.indexOf("Risk") >= 0 && r.indexOf("Risk") >= 0) o.selected = true;
-                if (t.exit_trigger_reason.indexOf("Lock removed via R1") >= 0 && r === "Lock removed via R1") o.selected = true;
-                if (t.exit_trigger_reason.indexOf("Lock removed via R2") >= 0 && r === "Lock removed via R2") o.selected = true;
-            }
+            if (r === draft.reason) o.selected = true;
             reason.appendChild(o);
         });
         var note = document.createElement("input");
         note.type = "text"; note.className = "dc-ot-edit dc-ot-edit--note";
         note.placeholder = "Optional note";
+        note.value = draft.note || "";
+        function syncDraft() {
+            openExitDrafts[t.id] = {
+                price: px.value,
+                reason: reason.value,
+                note: note.value
+            };
+            persistExitDrafts();
+        }
+        px.addEventListener("input", syncDraft);
+        px.addEventListener("change", syncDraft);
+        reason.addEventListener("change", syncDraft);
+        note.addEventListener("input", syncDraft);
+        note.addEventListener("change", syncDraft);
         var conf = el("button", "dc-btn dc-btn--danger", "Confirm EXIT");
         conf.type = "button";
         conf.addEventListener("click", function () {
+            syncDraft();
             api("/open-trades/" + t.id + "/exit", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1531,13 +1614,20 @@
                 })
             }).then(function (res) {
                 if (!res.ok) { toast(res.error || "Exit failed"); return; }
+                delete openExitDrafts[t.id];
+                persistExitDrafts();
                 toast(t.symbol + " exited · " + fmtInr(res.trade && res.trade.realized_pnl_inr));
                 return api("/data");
             }).then(function (s) { if (s) applyState(s); });
         });
         var cancel = el("button", "dc-btn", "Back");
         cancel.type = "button";
-        cancel.addEventListener("click", function () { form.hidden = true; });
+        cancel.addEventListener("click", function () {
+            delete openExitDrafts[t.id];
+            persistExitDrafts();
+            form.hidden = true;
+            form.innerHTML = "";
+        });
         form.appendChild(el("span", "dc-ot-exit-label", "Confirm exit"));
         form.appendChild(px);
         form.appendChild(reason);
