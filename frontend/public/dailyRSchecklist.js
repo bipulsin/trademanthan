@@ -40,6 +40,7 @@
         "READY": 0,
         "READY(RECHECK)": 1,
         "WAIT FOR PULLBACK": 2,
+        "SCANNING": 2,
         "EXPIRED": 3,
         "BLOCKED": 4
     };
@@ -421,6 +422,12 @@
             } else if (stock.stopped_out_today || stock.trade_exited || stock.trade_state === "BLOCKED") {
                 takeBtn.disabled = true;
                 takeBtn.title = stock.trade_state_reason || "Blocked — no re-entry today";
+            } else if (stock.trade_take_enabled === false || stock.trade_state === "SCANNING") {
+                takeBtn.disabled = true;
+                takeBtn.title = stock.trade_state_reason || "Take Trade from 09:45 IST";
+            } else if (!isReadyState(stock.trade_state)) {
+                takeBtn.disabled = true;
+                takeBtn.title = stock.trade_state_reason || "Not READY";
             } else {
                 takeBtn.disabled = false;
                 takeBtn.title = "Mark trade taken";
@@ -481,6 +488,7 @@
         if (st === "READY") return "dc-tstate--ready";
         if (st === "READY(RECHECK)") return "dc-tstate--recheck";
         if (st === "WAIT FOR PULLBACK") return "dc-tstate--wait";
+        if (st === "SCANNING") return "dc-tstate--scanning";
         if (st === "EXPIRED") return "dc-tstate--expired";
         if (st === "BLOCKED") return "dc-tstate--blocked";
         if (st === "CHART REVERSED") return "dc-tstate--reversed";
@@ -775,6 +783,7 @@
         if (r.indexOf("unstable") >= 0 || stock.direction_unstable) return "direction unstable";
         if (r.indexOf("manual") >= 0 || stock.zone_downgrade === "compromised_lock") return "caution";
         if (stock.trade_state === "WAIT FOR PULLBACK") return "wait pullback";
+        if (stock.trade_state === "SCANNING") return "scanning";
         if (stock.trade_state === "BLOCKED") return "blocked";
         if (stock.trade_state === "EXPIRED") return "expired";
         return (stock.trade_state_reason || "").split(/[·—-]/)[0].trim().slice(0, 24) || "";
@@ -838,7 +847,12 @@
         } else {
             card.classList.remove("dc-ready-card--missed");
             missedEl.hidden = true;
-            takeBtn.disabled = !!(stock.trade_taken || stock.stopped_out_today || stock.trade_exited);
+            takeBtn.disabled = !(
+                stock.trade_take_enabled !== false
+                && !stock.trade_taken
+                && !stock.stopped_out_today
+                && !stock.trade_exited
+            );
             var rem = win ? win.remaining : secsToNextTenMin();
             var mm = Math.floor(rem / 60);
             var ss = rem % 60;

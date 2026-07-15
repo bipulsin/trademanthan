@@ -932,6 +932,11 @@ def take_trade(
 
     db = SessionLocal()
     try:
+        from backend.services.daily_checklist_trade_state import before_entry_window_ist
+
+        if before_entry_window_ist():
+            raise ValueError("Take Trade disabled before 09:45 IST — waiting for 3 clean 10m bars")
+
         existing = db.execute(
             text(
                 """

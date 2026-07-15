@@ -555,6 +555,7 @@ body[data-theme="dark"] .dc-removal-chip--r2 {
     white-space: nowrap;
 }
 .dc-tstate--ready { color: #15803d; }
+.dc-tstate--scanning { color: #0369a1; }
 .dc-tstate--recheck { color: #d97706; }
 .dc-tstate--wait { color: #64748b; }
 .dc-tstate--expired { color: #94a3b8; text-decoration: line-through; }

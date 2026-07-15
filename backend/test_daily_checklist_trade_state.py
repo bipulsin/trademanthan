@@ -1,19 +1,29 @@
 """Unit tests for checklist trade-state columns (READY / WAIT / EXPIRED / BLOCKED)."""
+from datetime import datetime
+
+import pytz
+
 from backend.services.daily_checklist_trade_state import (
     STATE_BLOCKED,
     STATE_EXPIRED,
     STATE_READY,
     STATE_READY_RECHECK,
+    STATE_SCANNING,
     STATE_WAIT,
     compute_trade_state_for_stock,
+    entry_outside_session_range,
     sort_stocks_by_trade_state,
 )
 
 CFG = {"convergence_atr": 0.35, "expiry_atr": 1.5}
+IST = pytz.timezone("Asia/Kolkata")
+# Pin after 09:45 so READY tests are not forced into SCANNING.
+AFTER_ENTRY = IST.localize(datetime(2026, 7, 15, 10, 0))
+BEFORE_ENTRY = IST.localize(datetime(2026, 7, 15, 9, 33))
 
 
 def _compute(levels=None, stock=None, atr_pct=2.0, lot=50, session_hi=106.0, session_lo=94.0,
-             open_pos=None, promo=None):
+             open_pos=None, promo=None, now=None):
     base_stock = {"symbol": "TEST", "direction": "LONG", "confidence": "B"}
     if stock:
         base_stock.update(stock)
@@ -39,6 +49,7 @@ def _compute(levels=None, stock=None, atr_pct=2.0, lot=50, session_hi=106.0, ses
         open_pos=open_pos,
         promo=promo,
         cfg=CFG,
+        now=now or AFTER_ENTRY,
     )
 
 
@@ -158,3 +169,50 @@ def test_position_book_now_beyond_ema10():
     )
     assert out["position"]["trail_state"] == "BOOK-NOW"
     assert out["position"]["trail_reason"] == "EMA10 close"
+
+
+def test_entry_outside_session_range_helper():
+    assert entry_outside_session_range(
+        is_long=True, entry=7175.0, session_hi=7300.0, session_lo=7229.0
+    )
+    assert not entry_outside_session_range(
+        is_long=True, entry=7250.0, session_hi=7300.0, session_lo=7229.0
+    )
+    assert entry_outside_session_range(
+        is_long=False, entry=120.0, session_hi=115.0, session_lo=110.0
+    )
+
+
+def test_divislab_style_stale_entry_expired():
+    """LONG READY with entry below today's low → EXPIRED (untouchable)."""
+    out = _compute(
+        levels={"price": 7250.0, "ema5": 7175.0, "ema10": 7160.0, "vwap": 7200.0, "adx": 28.0},
+        session_hi=7300.0,
+        session_lo=7229.0,
+        atr_pct=1.0,  # near EMA5: |7250-7175|/(7250*0.01)=10.3 ATR → WAIT/EXPIRED by distance
+    )
+    # Force near-EMA5 READY path: price near ema5 but session_lo still above entry
+    out = _compute(
+        levels={"price": 7176.0, "ema5": 7175.98, "ema10": 7160.0, "vwap": 7200.0, "adx": 28.0},
+        session_hi=7300.0,
+        session_lo=7229.0,
+        atr_pct=2.0,
+    )
+    assert out["trade_state"] == STATE_EXPIRED
+    assert "below today's low" in (out["trade_state_reason"] or "")
+    assert out["trade_take_enabled"] is False
+
+
+def test_no_ready_before_0945_scanning():
+    out = _compute(now=BEFORE_ENTRY)
+    assert out["trade_state"] == STATE_SCANNING
+    assert "09:45" in (out["trade_state_reason"] or "")
+    assert out["trade_take_enabled"] is False
+    assert out["trade_entry_window_open"] is False
+
+
+def test_ready_after_0945_take_enabled():
+    out = _compute(now=AFTER_ENTRY)
+    assert out["trade_state"] == STATE_READY
+    assert out["trade_take_enabled"] is True
+    assert out["trade_entry_window_open"] is True

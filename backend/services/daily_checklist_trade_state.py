@@ -7,13 +7,17 @@ Uses existing thresholds only:
   - ADX ready ≥ 25, recheck 20–25, blocked < 20
   - Confidence ≥ B; regime TREND or TRANSITION
 
-READY NOW note (2026-07-14):
+READY NOW note (2026-07-14 / 2026-07-15):
   ``compute_trade_state_for_stock`` historically set READY from live levels /
   ADX / proximity alone — it did **not** check ``daily_snapshot`` lock
   membership. Display list is filtered to locked symbols in ``get_state``, but
   that is a separate source of truth from the badge math. Consistency is logged
   every refresh; VWAP-quality weighting of READY is behind
   ``READY_VWAP_QUALITY_GATE`` (default off / shadow).
+
+  2026-07-15 gates:
+  - No READY / Take Trade before 09:45 IST (SCANNING until then).
+  - Entry outside today's session high/low → EXPIRED (stale/gap).
 """
 from __future__ import annotations
 
@@ -42,10 +46,55 @@ RR_LOW = 2.0
 STATE_READY = "READY"
 STATE_READY_RECHECK = "READY(RECHECK)"
 STATE_WAIT = "WAIT FOR PULLBACK"
+STATE_SCANNING = "SCANNING"
 STATE_EXPIRED = "EXPIRED"
 STATE_BLOCKED = "BLOCKED"
 
+# Hard entry window (IST): READY NOW / Take Trade only from 09:45.
+ENTRY_START_MIN = 9 * 60 + 45
+ENTRY_END_MIN = 14 * 60 + 30
+
 _READY_LOG_ENSURED = False
+
+
+def entry_window_open_ist(now: Optional[datetime] = None) -> bool:
+    """True when READY NOW / Take Trade are allowed (09:45–14:30 IST)."""
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+    m = now.hour * 60 + now.minute
+    return ENTRY_START_MIN <= m <= ENTRY_END_MIN
+
+
+def before_entry_window_ist(now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+    return (now.hour * 60 + now.minute) < ENTRY_START_MIN
+
+
+def entry_outside_session_range(
+    *,
+    is_long: bool,
+    entry: Optional[float],
+    session_hi: Optional[float],
+    session_lo: Optional[float],
+) -> bool:
+    """True when limit entry is outside today's traded range (untouchable / stale).
+
+    LONG: entry below today's low · SHORT: entry above today's high.
+    """
+    if entry is None:
+        return False
+    if is_long and session_lo is not None and entry < session_lo:
+        return True
+    if (not is_long) and session_hi is not None and entry > session_hi:
+        return True
+    return False
 
 
 def ensure_ready_consistency_log() -> None:
@@ -153,6 +202,7 @@ _STATE_SORT = {
     STATE_READY: 0,
     STATE_READY_RECHECK: 1,
     STATE_WAIT: 2,
+    STATE_SCANNING: 2,
     STATE_EXPIRED: 3,
     STATE_BLOCKED: 4,
 }
@@ -464,10 +514,12 @@ def compute_trade_state_for_stock(
     whipsaw_count: int = 0,
     pullback_count: int = 0,
     stopped: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     cfg = cfg or get_config()
     near_atr = float(cfg.get("convergence_atr") or 0.35)
     expiry_atr = float(cfg.get("expiry_atr") or 1.5)
+    clock = now or datetime.now(IST)
 
     direction = (stock.get("direction") or "LONG").upper()
     is_long = direction != "SHORT"
@@ -567,6 +619,31 @@ def compute_trade_state_for_stock(
         entry_price = round(pullback_level, 2) if pullback_level is not None else None
         display_risk = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
 
+    # Stale / gapped entry: level sits outside today's traded range → EXPIRED
+    # (same bucket as >1.5 ATR pullback expiry). Re-checked every refresh.
+    if state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT) and entry_outside_session_range(
+        is_long=is_long,
+        entry=entry_price if entry_price is not None else (
+            round(entry_ready, 2) if entry_ready is not None else None
+        ),
+        session_hi=session_hi,
+        session_lo=session_lo,
+    ):
+        state = STATE_EXPIRED
+        check_entry = entry_price if entry_price is not None else (
+            round(entry_ready, 2) if entry_ready is not None else None
+        )
+        entry_price = check_entry
+        display_risk = risk_inr_ready if risk_inr_ready is not None else risk_inr_pb
+        if is_long:
+            blocked_reason = (
+                f"EXPIRED · entry {check_entry} below today's low {session_lo}"
+            )
+        else:
+            blocked_reason = (
+                f"EXPIRED · entry {check_entry} above today's high {session_hi}"
+            )
+
     # Chop / whipsaw / flip / re-entry / pullback gates
     from backend.services.daily_checklist_chop_gates import apply_state_downgrades
 
@@ -590,6 +667,28 @@ def compute_trade_state_for_stock(
         elif state == STATE_WAIT and entry_price is None and pullback_level is not None:
             entry_price = round(pullback_level, 2)
             display_risk = risk_inr_pb if risk_inr_pb is not None else risk_inr_ready
+
+    # Re-check range after gate mutations (entry may have been reset to pullback).
+    if state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT) and entry_outside_session_range(
+        is_long=is_long,
+        entry=entry_price,
+        session_hi=session_hi,
+        session_lo=session_lo,
+    ):
+        state = STATE_EXPIRED
+        if is_long:
+            blocked_reason = f"EXPIRED · entry {entry_price} below today's low {session_lo}"
+        else:
+            blocked_reason = f"EXPIRED · entry {entry_price} above today's high {session_hi}"
+
+    # Hard gate: no READY NOW before 09:45 IST (need 3 clean 10m closes from 09:15).
+    if before_entry_window_ist(clock) and state in (STATE_READY, STATE_READY_RECHECK):
+        state = STATE_SCANNING
+        blocked_reason = "SCANNING · before 09:45 — waiting for 3 clean 10m bars"
+        badges = list(gate_badges or [])
+        if "PRE-09:45" not in badges:
+            badges.append("PRE-09:45")
+        gate_badges = badges
 
     sl_out = round(sl_price, 2) if sl_price is not None else None
 
@@ -682,6 +781,10 @@ def compute_trade_state_for_stock(
         "trade_adx": round(adx, 1) if adx is not None else None,
         "trade_lot": lot,
         "trade_levels_source": levels.get("source"),
+        "trade_entry_window_open": entry_window_open_ist(clock),
+        "trade_take_enabled": bool(
+            state in (STATE_READY, STATE_READY_RECHECK) and entry_window_open_ist(clock)
+        ),
         "promoted_at": (promo or {}).get("promoted_at"),
         "lock_cycles": int((promo or {}).get("cycles") or 0),
         "position": trail,
@@ -849,6 +952,25 @@ def enrich_stocks_trade_state(
                 s["trade_state_reason"] = reason
                 s["zone_downgrade"] = "vwap_quality"
                 gate_applied = True
+
+            # Final 09:45 gate after VWAP (never unlock READY early).
+            if before_entry_window_ist() and s.get("trade_state") in (
+                STATE_READY,
+                STATE_READY_RECHECK,
+            ):
+                s["trade_state"] = STATE_SCANNING
+                s["trade_state_reason"] = "SCANNING · before 09:45 — waiting for 3 clean 10m bars"
+                badges = list(s.get("gate_badges") or [])
+                if "PRE-09:45" not in badges:
+                    badges.append("PRE-09:45")
+                s["gate_badges"] = badges
+                s["trade_take_enabled"] = False
+            else:
+                s["trade_take_enabled"] = bool(
+                    s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK)
+                    and entry_window_open_ist()
+                )
+            s["trade_entry_window_open"] = entry_window_open_ist()
 
             rendered = s.get("trade_state")
             lock_mismatch = bool(is_ready_pre and not in_lock)
