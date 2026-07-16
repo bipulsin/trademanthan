@@ -298,18 +298,27 @@ def main() -> int:
             continue
         atr_pct = float(atr_map.get(sym) or 1.0)
         try:
+            # Avoid range_end_date — some FO keys omit the end session day.
             raw = upstox.get_historical_candles_by_instrument_key(
                 ikey,
                 interval=CANDLE_INTERVAL,
-                days_back=max(CANDLE_DAYS_BACK, 5),
-                range_end_date=r.d,
+                days_back=max(CANDLE_DAYS_BACK, 10),
             )
         except Exception as exc:
             print(f"  fetch fail {sym} {d}: {exc}", flush=True)
             continue
-        if not raw or len(raw) < MIN_BARS:
+        from backend.services.relative_strength_scanner import _parse_ist_date
+
+        candles = [
+            c
+            for c in _sorted_candles(raw or [])
+            if (_parse_ist_date(c.get("timestamp")) or "") <= d
+        ]
+        if len(candles) < MIN_BARS:
             continue
-        candles = _sorted_candles(raw)
+        if not any(_parse_ist_date(c.get("timestamp")) == d for c in candles):
+            print(f"  skip {sym} {d}: no session bars", flush=True)
+            continue
         # price for atr abs
         last = float(candles[-1].get("close") or 0) or 1.0
         atr = last * atr_pct / 100.0

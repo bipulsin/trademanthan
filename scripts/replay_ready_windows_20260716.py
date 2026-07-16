@@ -202,6 +202,7 @@ def main() -> int:
         CANDLE_DAYS_BACK,
         CANDLE_INTERVAL,
         MIN_BARS,
+        _parse_ist_date,
         _sorted_candles,
     )
     from backend.services.rs_conviction_candles import load_instrument_atr_maps
@@ -242,18 +243,27 @@ def main() -> int:
             if not ikey:
                 continue
             try:
+                # Avoid range_end_date: for some FO keys Upstox omits the end
+                # session day entirely (seen on UPL/MCX 2026-07-16).
                 raw = upstox.get_historical_candles_by_instrument_key(
                     ikey,
                     interval=CANDLE_INTERVAL,
-                    days_back=max(CANDLE_DAYS_BACK, 5),
-                    range_end_date=d,
+                    days_back=max(CANDLE_DAYS_BACK, 10),
                 )
             except Exception as exc:
                 print(f"# fetch_fail {sym}: {exc}", flush=True)
                 continue
-            if not raw or len(raw) < MIN_BARS:
+            candles = [
+                c
+                for c in _sorted_candles(raw or [])
+                if (_parse_ist_date(c.get("timestamp")) or "") <= SESSION
+            ]
+            if len(candles) < MIN_BARS:
                 continue
-            candle_cache[sym] = _sorted_candles(raw)
+            if not any(_parse_ist_date(c.get("timestamp")) == SESSION for c in candles):
+                print(f"# skip {sym}: no bars for {SESSION}", flush=True)
+                continue
+            candle_cache[sym] = candles
             lot_cache[sym], _ = _lot_for_symbol(db, sym)
             print(f"# loaded {sym} bars={len(candle_cache[sym])} lot={lot_cache[sym]}", flush=True)
     finally:
