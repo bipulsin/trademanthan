@@ -140,41 +140,70 @@ def compute_confidence_grade(
 
     Grades: A+, A, B, C, D. Display C* when transition floor applied.
     """
+    explained = explain_confidence_grade(score, volume_label, purity_pct, regime)
+    return explained["grade"], bool(explained["transition_floor"])
+
+
+def explain_confidence_grade(
+    score: float,
+    volume_label: VolumeLabel,
+    purity_pct: float,
+    regime: str = REGIME_TREND,
+) -> dict:
+    """Same banding as ``compute_confidence_grade`` plus which rule fired (shadow)."""
     s = int(round(score))
     vol = volume_label
     pure = _purity_proven(purity_pct)
     transition_floor = False
+    rule = "else_D"
 
     if s < 65:
         grade = "D"
+        rule = "score_lt_65"
     elif vol == "Low" and not pure:
         grade = "D"
+        rule = "low_vol_not_pure"
     elif vol == "High" and pure and s >= 95:
         grade = "A+"
+        rule = "high_pure_score_ge_95"
     elif vol == "High" and pure and s >= 85:
         grade = "A"
+        rule = "high_pure_score_ge_85"
     elif vol == "High" and pure and s >= 75:
         grade = "B"
+        rule = "high_pure_score_ge_75"
     elif vol == "Average" and pure and s >= 85:
         grade = "B"
+        rule = "avg_pure_score_ge_85"
     elif vol == "High" and not pure and s >= 85:
         grade = "C"
+        rule = "high_not_pure_score_ge_85"
     elif vol == "Average" and pure and s >= 75:
         grade = "C"
+        rule = "avg_pure_score_ge_75"
     elif vol == "Low" and pure and s >= 85:
         grade = "C"
+        rule = "low_pure_score_ge_85"
     else:
         grade = "D"
+        rule = "else_D"
 
-    if (
-        grade == "D"
-        and regime == REGIME_TRANSITION
-        and s >= 75
-    ):
+    if grade == "D" and regime == REGIME_TRANSITION and s >= 75:
         grade = "C"
         transition_floor = True
+        rule = "transition_floor_to_C"
 
-    return grade, transition_floor
+    return {
+        "grade": grade,
+        "display_grade": format_confidence_display(grade, transition_floor),
+        "transition_floor": transition_floor,
+        "banding_rule": rule,
+        "score_int": s,
+        "volume_label": vol,
+        "purity_pct": float(purity_pct) if purity_pct is not None else None,
+        "purity_proven": pure,
+        "regime": regime,
+    }
 
 
 def format_confidence_display(grade: str, transition_floor: bool) -> str:

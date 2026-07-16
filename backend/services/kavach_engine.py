@@ -168,6 +168,56 @@ def vwap_score(price: float, vwap: float, ranking_type: str) -> int:
     return 5 if price < vwap else 0
 
 
+def trade_score_breakdown(
+    *,
+    rs: float,
+    state: str,
+    volume_ratio: float,
+    adx: float,
+    price: float,
+    vwap: float,
+    ranking_type: str,
+    vwap_steep_persist_bars: int = 0,
+) -> dict:
+    """Per-component Trade Score contributions (shadow / audit). Live formula unchanged."""
+    rs_pts = int(relative_strength_score(rs, ranking_type))
+    kav_pts = int(kavach_score(state))
+    vol_pts = int(volume_ratio_score(volume_ratio))
+    adx_pts = int(adx_score(adx))
+    vwap_pts = int(vwap_score(price, vwap, ranking_type))
+    persist_pts = 0
+    if int(vwap_steep_persist_bars or 0) >= 3:
+        try:
+            from backend.services.vwap_adx_promotion import vwap_persist_score_bump
+
+            persist_pts = int(vwap_persist_score_bump())
+        except Exception:
+            persist_pts = 5
+    raw = rs_pts + kav_pts + vol_pts + adx_pts + vwap_pts + persist_pts
+    total = min(100, raw)
+    return {
+        "rs_pts": rs_pts,
+        "rs_max": 40,
+        "kavach_pts": kav_pts,
+        "kavach_max": 30,
+        "kavach_state": state,
+        "volume_pts": vol_pts,
+        "volume_max": 15,
+        "volume_ratio": float(volume_ratio) if volume_ratio is not None else None,
+        "adx_pts": adx_pts,
+        "adx_max": 10,
+        "adx": float(adx) if adx is not None else None,
+        "vwap_side_pts": vwap_pts,
+        "vwap_side_max": 5,
+        "vwap_persist_pts": persist_pts,
+        "vwap_steep_persist_bars": int(vwap_steep_persist_bars or 0),
+        "raw_total": raw,
+        "trade_score": total,
+        "relative_strength": float(rs) if rs is not None else None,
+        "ranking_type": ranking_type,
+    }
+
+
 def compute_trade_score(
     *,
     rs: float,
@@ -184,18 +234,15 @@ def compute_trade_score(
     Optional ``vwap_steep_persist_bars``: when ≥3 consecutive 5m bars hold
     slope ≥50, apply a small additive bump (VWAP_PERSIST_SCORE_BUMP, default 5).
     """
-    total = (
-        relative_strength_score(rs, ranking_type)
-        + kavach_score(state)
-        + volume_ratio_score(volume_ratio)
-        + adx_score(adx)
-        + vwap_score(price, vwap, ranking_type)
+    return int(
+        trade_score_breakdown(
+            rs=rs,
+            state=state,
+            volume_ratio=volume_ratio,
+            adx=adx,
+            price=price,
+            vwap=vwap,
+            ranking_type=ranking_type,
+            vwap_steep_persist_bars=vwap_steep_persist_bars,
+        )["trade_score"]
     )
-    if int(vwap_steep_persist_bars or 0) >= 3:
-        try:
-            from backend.services.vwap_adx_promotion import vwap_persist_score_bump
-
-            total += int(vwap_persist_score_bump())
-        except Exception:
-            total += 5
-    return min(100, total)

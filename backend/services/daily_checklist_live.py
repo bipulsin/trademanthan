@@ -111,6 +111,26 @@ def recompute_locked_symbol(
             prune_old_audit_rows(db)
         except Exception as exc:
             logger.debug("live kavach audit persist skipped: %s", exc)
+        # Shadow: Confidence component breakdown + Structural Alignment Score
+        try:
+            from backend.services.kavach_confidence_audit import (
+                log_confidence_and_structural,
+            )
+            from backend.services.kavach_universe_vwap_scan import _atr_map
+
+            atr_pct = float((_atr_map(db, [sym]) or {}).get(sym) or 1.0)
+            log_confidence_and_structural(
+                db,
+                session_date=sd,
+                symbol=sym,
+                direction=direction,
+                metrics=metrics,
+                candles=candles,
+                atr_pct=atr_pct,
+                source="live",
+            )
+        except Exception as exc:
+            logger.debug("confidence/structural shadow log skipped %s: %s", sym, exc)
 
     # metrics already includes scan_time; override so checklist uses bar_evaluated_at.
     row = SimpleNamespace(**{**metrics, "symbol": sym, "scan_time": metrics["bar_evaluated_at"]})
