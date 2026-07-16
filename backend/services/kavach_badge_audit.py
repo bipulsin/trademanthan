@@ -299,7 +299,7 @@ def build_badge_audit_payload(
             "is separate (rs_lock_membership_audit) and is NOT the Whipsawed badge."
         ),
         "whipsaw_vs_lock_churn": (
-            "WHIPSAW/Whipsawed is price EMA5 touch→reverse-close count. "
+            "WHIPSAW/Whipsawed is VWAP lock-side close→opposite-side reverse count. "
             "Lock membership churn is not used for that badge."
         ),
     }
@@ -313,8 +313,8 @@ def build_badge_audit_payload(
         "whipsaw_count": whip_count,
         "whipsaw_threshold": WHIPSAW_REVERSALS,
         "whipsaw_basis": (
-            "price: EMA5 proximity touch on confirmed 10m bar, then close against "
-            "lock direction within next 1–2 confirmed 10m bars "
+            "price: session VWAP — confirmed 10m close on lock side of VWAP, then "
+            "close on the opposite side within next 1–2 confirmed 10m bars "
             f"(threshold ≥{WHIPSAW_REVERSALS}). NOT lock-list membership churn."
         ),
         "whipsaw_events": whip_events,

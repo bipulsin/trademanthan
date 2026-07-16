@@ -103,7 +103,7 @@ def _session_day_bars_10m(candles: List[Dict], session_date: str) -> List[Dict[s
     return out
 
 
-def list_whipsaw_reversal_events(
+def list_whipsaw_reversal_events_ema5(
     candles: List[Dict],
     *,
     session_date: str,
@@ -111,11 +111,7 @@ def list_whipsaw_reversal_events(
     near_atr: float,
     atr: Optional[float],
 ) -> List[Dict[str, Any]]:
-    """Price-based whipsaw events (not lock-membership churn).
-
-    Each event: EMA5 touch on a confirmed session 10m bar, then a close against
-    lock direction within the next 1–2 confirmed 10m bars.
-    """
+    """Legacy EMA5 touch→reverse events (research / backtest comparison only)."""
     from backend.services.vajra.indicators import ema_series
 
     bars = _session_day_bars_10m(candles, session_date)
@@ -172,6 +168,77 @@ def list_whipsaw_reversal_events(
     return events
 
 
+def list_whipsaw_reversal_events(
+    candles: List[Dict],
+    *,
+    session_date: str,
+    is_long: bool,
+    near_atr: float = 0.35,
+    atr: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """VWAP-based whipsaw events (not lock-membership churn).
+
+    Each event: confirmed session 10m bar closes on the lock side of session VWAP
+    (LONG: close > VWAP; SHORT: close < VWAP), then a close on the opposite side
+    within the next 1–2 confirmed 10m bars. ``near_atr``/``atr`` retained for
+    call-site compatibility; unused for the VWAP definition.
+    """
+    from backend.services.vajra.indicators import cumulative_vwap
+
+    _ = (near_atr, atr)  # call-site compat; VWAP crossings ignore EMA5 proximity
+    bars = _session_day_bars_10m(candles, session_date)
+    if len(bars) < 3:
+        return []
+    closes = [float(b["close"]) for b in bars]
+    highs = [float(b["high"]) for b in bars]
+    lows = [float(b["low"]) for b in bars]
+    volumes = [float(b.get("volume") or 0.0) for b in bars]
+    vwaps = cumulative_vwap(highs, lows, closes, volumes)
+    if len(vwaps) < len(closes):
+        return []
+
+    def _on_lock_side(close: float, vwap: float) -> bool:
+        return (close > vwap) if is_long else (close < vwap)
+
+    def _against_lock(close: float, vwap: float) -> bool:
+        return (close < vwap) if is_long else (close > vwap)
+
+    events: List[Dict[str, Any]] = []
+    i = 0
+    while i < len(bars) - 1:
+        if not _on_lock_side(closes[i], vwaps[i]):
+            i += 1
+            continue
+        reverse_j = None
+        for j in (i + 1, i + 2):
+            if j >= len(bars):
+                break
+            if _against_lock(closes[j], vwaps[j]):
+                reverse_j = j
+                break
+        if reverse_j is not None:
+            touch_ts = bars[i].get("timestamp") or bars[i].get("bar_end")
+            rev_ts = bars[reverse_j].get("timestamp") or bars[reverse_j].get("bar_end")
+            events.append(
+                {
+                    "touch_bar_idx": i,
+                    "reverse_bar_idx": reverse_j,
+                    "touch_ts": str(touch_ts) if touch_ts is not None else None,
+                    "reverse_ts": str(rev_ts) if rev_ts is not None else None,
+                    "touch_close": closes[i],
+                    "touch_vwap": float(vwaps[i]),
+                    "reverse_close": closes[reverse_j],
+                    "reverse_vwap": float(vwaps[reverse_j]),
+                    "lock_side": "LONG" if is_long else "SHORT",
+                    "basis": "vwap_lock_side_then_close_against_within_1_2_bars",
+                }
+            )
+            i = reverse_j + 1
+        else:
+            i += 1
+    return events
+
+
 def count_whipsaw_reversals(
     candles: List[Dict],
     *,
@@ -180,7 +247,7 @@ def count_whipsaw_reversals(
     near_atr: float,
     atr: Optional[float],
 ) -> int:
-    """EMA5 touch then close against lock direction within next 1–2 confirmed 10m bars."""
+    """VWAP lock-side close then reverse within next 1–2 confirmed 10m bars."""
     return len(
         list_whipsaw_reversal_events(
             candles,
