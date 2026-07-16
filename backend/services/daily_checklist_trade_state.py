@@ -1294,11 +1294,15 @@ def compute_trade_state_for_stock(
             badges.append("PRE-09:45")
         gate_badges = badges
 
-    # Visibility: DIR CONFLICT badge whenever live momentum opposes lock (≥1 field),
-    # including WAIT after suppress and soft 1-of-3 on READY — plus HOLD/WATCH.
+    # Visibility: DIR CONFLICT badge when ≥2 of Trend/ST/MACD oppose lock
+    # (aligned with READY suppress), or when Kavach/HOLD-WATCH suppress fires.
+    momentum_oppose = sum(
+        1
+        for f in (dir_conflict.get("opposing_fields") or [])
+        if f in ("trend", "ema_vs_vwap", "supertrend", "macd")
+    )
     if (
-        int(dir_conflict.get("conflict_count") or 0) >= 1
-        or dir_conflict.get("suppress_ready")
+        momentum_oppose >= 2 or dir_conflict.get("suppress_ready")
     ) and state in (STATE_READY, STATE_READY_RECHECK, STATE_WAIT, STATE_SCANNING):
         badges = list(gate_badges or [])
         if "DIR CONFLICT" not in badges:

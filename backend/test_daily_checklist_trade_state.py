@@ -403,8 +403,8 @@ def test_aligned_live_momentum_still_ready():
     assert out["dir_conflict"]["conflict_count"] == 0
 
 
-def test_one_of_three_conflict_flags_but_stays_ready():
-    """Soft visibility: single opposing field badges but does not suppress READY."""
+def test_one_of_three_conflict_no_badge_stays_ready():
+    """Single opposing field: no DIR CONFLICT badge; READY stays (suppress needs ≥2)."""
     out = _compute(
         stock={
             "trend": "Bullish",
@@ -417,7 +417,7 @@ def test_one_of_three_conflict_flags_but_stays_ready():
     assert out["trade_state"] == STATE_READY
     assert out["dir_conflict"]["conflict_count"] == 1
     assert out["dir_conflict"]["suppress_ready"] is False
-    assert "DIR CONFLICT" in (out["gate_badges"] or [])
+    assert "DIR CONFLICT" not in (out["gate_badges"] or [])
     assert out["trade_take_enabled"] is True
 
 
