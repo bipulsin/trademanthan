@@ -224,6 +224,17 @@ def apply_warning_stack_downgrades(stocks: List[Dict[str, Any]]) -> int:
             "pullback_count": pb,
             "action": "WAIT",
         }
+        s["trade_take_disable_reason"] = trade_take_disable_reason(
+            trade_state=STATE_WAIT,
+            trade_take_enabled=False,
+            trade_state_reason=reason,
+            trade_entry_window_open=s.get("trade_entry_window_open"),
+            entry=s.get("trade_entry"),
+            sl=s.get("trade_sl"),
+            risk_inr=s.get("trade_risk_inr"),
+            rr=s.get("trade_rr"),
+            zone_downgrade="warning_stack",
+        )
         n += 1
         logger.info(
             "WARNING STACK suppress READY %s: flags=%s pullback=%s",
@@ -242,6 +253,64 @@ def take_trade_structurally_ok(
 ) -> bool:
     """Take Trade needs a computable entry, stop, and INR risk."""
     return entry is not None and sl is not None and risk_inr is not None
+
+
+def trade_take_disable_reason(
+    *,
+    trade_state: Optional[str],
+    trade_take_enabled: bool,
+    trade_state_reason: Optional[str] = None,
+    trade_entry_window_open: Optional[bool] = None,
+    entry: Optional[float] = None,
+    sl: Optional[float] = None,
+    risk_inr: Optional[float] = None,
+    rr: Optional[float] = None,
+    zone_downgrade: Optional[str] = None,
+    trade_taken: bool = False,
+    stopped_out_today: bool = False,
+    trade_exited: bool = False,
+    trade_expiry_crossed: bool = False,
+) -> Optional[str]:
+    """Short UI title when Take Trade is disabled; None when enabled."""
+    if trade_take_enabled:
+        return None
+    if trade_taken:
+        return "Position already open in Open Trades"
+    if stopped_out_today:
+        return "Blocked — no re-entry today"
+    if trade_exited:
+        return "Already exited today"
+    st = (trade_state or "").strip()
+    reason = (trade_state_reason or "").strip()
+    if st == STATE_EXPIRED or trade_expiry_crossed:
+        if reason:
+            return reason if reason.upper().startswith("EXPIRED") else f"EXPIRED — {reason}"
+        return "EXPIRED — pullback missed"
+    if st == STATE_BLOCKED:
+        return reason or "Blocked"
+    if st == STATE_SCANNING or before_entry_window_ist():
+        return reason or "Take Trade from 09:45 IST"
+    if trade_entry_window_open is False or (
+        trade_entry_window_open is None and not entry_window_open_ist()
+    ):
+        return "Entry window closed (after 14:30 IST)"
+    if zone_downgrade == "warning_stack" or "warning stack" in reason.lower():
+        # Strip leading WAIT · for a cleaner button title.
+        cleaned = reason
+        for prefix in ("WAIT · ", "WAIT — ", "WAIT - "):
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix) :]
+                break
+        return cleaned or "Warning stack — Take Trade disabled"
+    if not take_trade_structurally_ok(entry=entry, sl=sl, risk_inr=risk_inr):
+        return "SL/Risk not computed — Take Trade disabled"
+    if rr_below_minimum(rr):
+        return reason or "R:R below minimum — Take Trade disabled"
+    if risk_cap_blocks_ready(risk_inr, rr):
+        return reason or f"Risk over ₹{int(MAX_INR_RISK)} — Take Trade disabled"
+    if st not in (STATE_READY, STATE_READY_RECHECK):
+        return reason or "Not READY"
+    return reason or "Take Trade disabled"
 
 
 def live_momentum_sides(
@@ -1354,9 +1423,10 @@ def compute_trade_state_for_stock(
     risk_over = bool(display_risk is not None and display_risk > MAX_INR_RISK)
     # Visual flag when over cap without an explicit R:R waiver.
     risk_cap_flag = bool(risk_over and not risk_cap_waived)
+    window_open = entry_window_open_ist(clock)
     take_ok = bool(
         state in (STATE_READY, STATE_READY_RECHECK)
-        and entry_window_open_ist(clock)
+        and window_open
         and take_trade_structurally_ok(entry=entry_price, sl=sl_out, risk_inr=display_risk)
         and not risk_cap_blocks_ready(display_risk, rr)
         and not rr_below_minimum(rr)
@@ -1364,6 +1434,17 @@ def compute_trade_state_for_stock(
     waiver_label = None
     if risk_cap_waived and rr is not None:
         waiver_label = f"cap waived — R:R 1:{rr}"
+    disable_reason = trade_take_disable_reason(
+        trade_state=state,
+        trade_take_enabled=take_ok,
+        trade_state_reason=blocked_reason,
+        trade_entry_window_open=window_open,
+        entry=entry_price,
+        sl=sl_out,
+        risk_inr=display_risk,
+        rr=rr,
+        trade_expiry_crossed=bool(state == STATE_EXPIRED or expired_move),
+    )
 
     return {
         "trade_state": state,
@@ -1385,8 +1466,9 @@ def compute_trade_state_for_stock(
         "trade_adx": round(adx, 1) if adx is not None else None,
         "trade_lot": lot,
         "trade_levels_source": levels.get("source"),
-        "trade_entry_window_open": entry_window_open_ist(clock),
+        "trade_entry_window_open": window_open,
         "trade_take_enabled": take_ok,
+        "trade_take_disable_reason": disable_reason,
         "promoted_at": (promo or {}).get("promoted_at"),
         "lock_cycles": int((promo or {}).get("cycles") or 0),
         "position": trail,
@@ -1705,9 +1787,8 @@ def enrich_stocks_trade_state(
                 )
             s["trade_entry_window_open"] = entry_window_open_ist()
 
-            rendered = s.get("trade_state")
             lock_mismatch = bool(is_ready_pre and not in_lock)
-            # Log every pre-gate READY (incl. shadow near-misses) and any lock mismatch.
+            # Defer write until after warning-stack so rendered_state matches UI.
             if is_ready_pre or lock_mismatch or gate_applied:
                 regime_snap = regime_research_snapshot(
                     market_regime=mkt.get("market_regime"),
@@ -1721,8 +1802,9 @@ def enrich_stocks_trade_state(
                         "session_date": session_date,
                         "symbol": sym,
                         "direction": s.get("direction"),
-                        "rendered_state": rendered,
+                        "rendered_state": s.get("trade_state"),  # updated post-stack below
                         "pre_gate_state": pre_gate,
+                        "pre_stack_state": s.get("trade_state"),
                         "in_lock": in_lock,
                         "lock_rank": s.get("lock_rank"),
                         "lock_direction": s.get("lock_direction"),
@@ -1782,9 +1864,6 @@ def enrich_stocks_trade_state(
                         in_lock,
                     )
 
-        if consistency_rows:
-            log_ready_consistency(db, consistency_rows)
-
         # Lock members missing from the stocks loop (edge case) still get a raw row.
         logged_raw = {(r.get("symbol") or "").upper() for r in vwap_raw_rows}
 
@@ -1836,6 +1915,24 @@ def enrich_stocks_trade_state(
         )
         # After regime badges exist: stack of warnings / 2nd+ pullback combo → WAIT.
         stack_n = apply_warning_stack_downgrades(stocks)
+
+        # Finalize consistency log with post-stack UI state + take-enablement.
+        stock_by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
+        for row in consistency_rows:
+            sym_u = (row.get("symbol") or "").upper()
+            s_final = stock_by_sym.get(sym_u) or {}
+            row["rendered_state"] = s_final.get("trade_state") or row.get("pre_stack_state")
+            inp = row.setdefault("inputs", {})
+            inp["pre_stack_state"] = row.get("pre_stack_state")
+            inp["post_stack_state"] = s_final.get("trade_state")
+            inp["trade_take_enabled"] = bool(s_final.get("trade_take_enabled"))
+            inp["trade_take_disable_reason"] = s_final.get("trade_take_disable_reason")
+            inp["trade_state_reason"] = s_final.get("trade_state_reason")
+            inp["zone_downgrade"] = s_final.get("zone_downgrade")
+            inp["trade_entry_window_open"] = s_final.get("trade_entry_window_open")
+        if consistency_rows:
+            log_ready_consistency(db, consistency_rows)
+
         # Shadow: Whipsawed / DIR CONFLICT / REGIME / CHURN input audit (no live change).
         badge_logged = 0
         try:

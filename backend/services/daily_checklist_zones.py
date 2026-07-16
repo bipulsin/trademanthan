@@ -144,12 +144,14 @@ def apply_zone_downgrades(
         if unstable_side and side == unstable_side:
             s["trade_state"] = STATE_WAIT
             s["trade_state_reason"] = f"{unstable_side} direction unstable"
+            s["trade_take_enabled"] = False
             badges = list(s.get("gate_badges") or [])
             tag = "DIRECTION UNSTABLE"
             if tag not in badges:
                 badges.append(tag)
             s["gate_badges"] = badges
             s["zone_downgrade"] = "direction_imbalance"
+            s["trade_take_disable_reason"] = s["trade_state_reason"]
             continue
 
         # Compromised morning lock: only morning-lock (non-promoted) names
@@ -158,7 +160,9 @@ def apply_zone_downgrades(
             if not promo_at:
                 s["trade_state"] = STATE_WAIT
                 s["trade_state_reason"] = "Morning lock manually recovered — extra caution"
+                s["trade_take_enabled"] = False
                 s["zone_downgrade"] = "compromised_lock"
+                s["trade_take_disable_reason"] = s["trade_state_reason"]
 
 
 def build_zone1_obs(

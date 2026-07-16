@@ -186,13 +186,36 @@
                         <span class="dc-locked-at" id="dcLockedAt"></span>
                     </div>
 
-                    <!-- Zone 3 — READY NOW -->
+                    <!-- Zone 3 — READY NOW (actionable only; entry window 09:45–14:30) -->
                     <section class="dc-zone3" id="dcZone3" aria-label="Ready now">
                         <h3 class="dc-zone-title"><i class="fas fa-bolt"></i> READY NOW</h3>
+                        <p class="dc-zone3-window-note" id="dcZone3WindowNote" hidden></p>
                         <div class="dc-zone3-empty" id="dcZone3Empty">
                             No READY setups right now. Rechecks at :05, :15, :25, :35, :45, :55 past every hour.
                         </div>
                         <div class="dc-zone3-grid" id="dcZone3Grid"></div>
+                    </section>
+
+                    <!-- Past entry window / session-closed READY (not actionable) -->
+                    <section class="dc-zone3-past" id="dcZone3Past" hidden aria-label="Past entry window">
+                        <button type="button" class="dc-zone-collapse-toggle" id="dcZone3PastToggle" aria-expanded="false">
+                            <i class="fas fa-chevron-right dc-zone-collapse-chevron"></i>
+                            After entry window (<span id="dcZone3PastCount">0</span>) — Take Trade closed
+                        </button>
+                        <div class="dc-zone3-past-body" id="dcZone3PastBody" hidden>
+                            <div class="dc-zone3-grid" id="dcZone3PastGrid"></div>
+                        </div>
+                    </section>
+
+                    <!-- Expired setups (never under READY NOW) -->
+                    <section class="dc-zone-expired" id="dcZoneExpired" hidden aria-label="Expired setups">
+                        <button type="button" class="dc-zone-collapse-toggle" id="dcZoneExpiredToggle" aria-expanded="false">
+                            <i class="fas fa-chevron-right dc-zone-collapse-chevron"></i>
+                            Expired (<span id="dcZoneExpiredCount">0</span>) — not actionable
+                        </button>
+                        <div class="dc-zone-expired-body" id="dcZoneExpiredBody" hidden>
+                            <div class="dc-zone3-grid" id="dcZoneExpiredGrid"></div>
+                        </div>
                     </section>
 
                     <!-- Zone 4 — Watching (compact) -->

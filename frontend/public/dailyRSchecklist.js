@@ -418,16 +418,16 @@
             takeBtn.className = "dc-take-trade " + (isBull ? "dc-take-trade--long" : "dc-take-trade--short");
             if (stock.trade_taken) {
                 takeBtn.disabled = true;
-                takeBtn.title = "Position already open in Open Trades panel";
+                takeBtn.title = takeDisableTitle(stock, "Position already open in Open Trades panel");
             } else if (stock.stopped_out_today || stock.trade_exited || stock.trade_state === "BLOCKED") {
                 takeBtn.disabled = true;
-                takeBtn.title = stock.trade_state_reason || "Blocked — no re-entry today";
+                takeBtn.title = takeDisableTitle(stock, "Blocked — no re-entry today");
             } else if (stock.trade_take_enabled === false || stock.trade_state === "SCANNING") {
                 takeBtn.disabled = true;
-                takeBtn.title = stock.trade_state_reason || "Take Trade from 09:45 IST";
+                takeBtn.title = takeDisableTitle(stock, "Take Trade from 09:45 IST");
             } else if (!isReadyState(stock.trade_state)) {
                 takeBtn.disabled = true;
-                takeBtn.title = stock.trade_state_reason || "Not READY";
+                takeBtn.title = takeDisableTitle(stock, "Not READY");
             } else {
                 takeBtn.disabled = false;
                 takeBtn.title = "Mark trade taken";
@@ -726,8 +726,31 @@
         return st === "READY" || st === "READY(RECHECK)";
     }
 
+    /** True READY only — EXPIRED has its own collapsed section. */
     function isZone3Card(st) {
-        return isReadyState(st) || st === "EXPIRED";
+        return isReadyState(st);
+    }
+
+    function isExpiredCard(st) {
+        return st === "EXPIRED";
+    }
+
+    /** Entry window 09:45–14:30 IST (matches backend ENTRY_START/END). */
+    function entryWindowOpenIST() {
+        var m = nowIST().minutes;
+        return m >= (9 * 60 + 45) && m <= (14 * 60 + 30);
+    }
+
+    /** After square-off 15:15 IST — no live READY NOW activity. */
+    function afterSquareOffIST() {
+        return nowIST().minutes >= (15 * 60 + 15);
+    }
+
+    function takeDisableTitle(stock, fallback) {
+        return stock.trade_take_disable_reason
+            || stock.trade_state_reason
+            || fallback
+            || "Take Trade disabled";
     }
 
     function nextTenMinBoundaryFromSecs(secs) {
@@ -865,6 +888,14 @@
             card.classList.remove("dc-ready-card--missed");
             if (missedEl) missedEl.hidden = true;
             takeBtn.disabled = true;
+            takeBtn.title = takeDisableTitle(stock, "EXPIRED — pullback missed");
+            if (expLabel && stock.trade_state_reason) {
+                expLabel.textContent = stock.trade_state_reason.indexOf("EXPIRED") === 0
+                    ? stock.trade_state_reason
+                    : ("EXPIRED — " + stock.trade_state_reason);
+            } else if (expLabel) {
+                expLabel.textContent = "EXPIRED — pullback missed";
+            }
             timer.textContent = "";
             if (recheck) recheck.hidden = true;
         } else if (win && win.missed) {
@@ -874,16 +905,21 @@
             missedEl.textContent = "MISSED WINDOW · re-evaluating at " +
                 ("0" + b.hour).slice(-2) + ":" + ("0" + b.minute).slice(-2);
             takeBtn.disabled = true;
+            takeBtn.title = takeDisableTitle(stock, "10m entry window missed — re-evaluating");
             timer.textContent = "";
         } else {
             card.classList.remove("dc-ready-card--missed");
             missedEl.hidden = true;
-            takeBtn.disabled = !(
+            var canTake = (
                 stock.trade_take_enabled === true
                 && !stock.trade_taken
                 && !stock.stopped_out_today
                 && !stock.trade_exited
             );
+            takeBtn.disabled = !canTake;
+            takeBtn.title = canTake
+                ? "Mark trade taken"
+                : takeDisableTitle(stock, "Take Trade disabled");
             var rem = win ? win.remaining : secsToNextTenMin();
             var mm = Math.floor(rem / 60);
             var ss = rem % 60;
@@ -964,28 +1000,97 @@
         row.onclick = function () { openModal(stock.symbol); };
     }
 
-    function renderZones(stocks, preview) {
-        var ready = sortStocks(stocks.filter(function (s) { return isZone3Card(s.trade_state); }));
-        var watching = sortStocks(stocks.filter(function (s) { return !isZone3Card(s.trade_state); }));
-        var z3 = $("dcZone3Grid");
-        var z3empty = $("dcZone3Empty");
-        var z4 = $("dcZone4List");
-        if (!z3 || !z4) return;
-
-        var readySyms = {};
-        ready.forEach(function (stock) {
-            readySyms[stock.symbol] = true;
-            var card = z3.querySelector('.dc-ready-card[data-symbol="' + stock.symbol + '"]');
+    function _syncReadyGrid(gridEl, stocks) {
+        if (!gridEl) return;
+        var syms = {};
+        stocks.forEach(function (stock) {
+            syms[stock.symbol] = true;
+            var card = gridEl.querySelector('.dc-ready-card[data-symbol="' + stock.symbol + '"]');
             if (!card) {
                 card = $("dcReadyTpl").content.firstElementChild.cloneNode(true);
-                z3.appendChild(card);
+                gridEl.appendChild(card);
             }
             patchReadyCard(card, stock);
         });
-        Array.prototype.slice.call(z3.querySelectorAll(".dc-ready-card")).forEach(function (ch) {
-            if (!readySyms[ch.dataset.symbol]) z3.removeChild(ch);
+        Array.prototype.slice.call(gridEl.querySelectorAll(".dc-ready-card")).forEach(function (ch) {
+            if (!syms[ch.dataset.symbol]) gridEl.removeChild(ch);
         });
-        if (z3empty) z3empty.hidden = ready.length > 0;
+    }
+
+    function _wireCollapse(toggleId, bodyId) {
+        var tog = $(toggleId);
+        var body = $(bodyId);
+        if (!tog || !body || tog._dcWired) return;
+        tog._dcWired = true;
+        tog.onclick = function () {
+            var open = tog.getAttribute("aria-expanded") === "true";
+            tog.setAttribute("aria-expanded", open ? "false" : "true");
+            body.hidden = open;
+        };
+    }
+
+    function renderZones(stocks, preview) {
+        var windowOpen = entryWindowOpenIST();
+        var afterClose = afterSquareOffIST();
+        var readyAll = sortStocks(stocks.filter(function (s) { return isReadyState(s.trade_state); }));
+        // After 14:30 / 15:15: do not present READY under the live READY NOW heading.
+        var readyLive = (!windowOpen || afterClose) ? [] : readyAll;
+        var readyPast = (windowOpen && !afterClose) ? [] : readyAll;
+        var expired = sortStocks(stocks.filter(function (s) { return isExpiredCard(s.trade_state); }));
+        var watching = sortStocks(stocks.filter(function (s) {
+            return !isReadyState(s.trade_state) && !isExpiredCard(s.trade_state);
+        }));
+
+        var z3 = $("dcZone3Grid");
+        var z3empty = $("dcZone3Empty");
+        var z3note = $("dcZone3WindowNote");
+        var z4 = $("dcZone4List");
+        if (!z3 || !z4) return;
+
+        if (z3note) {
+            if (afterClose) {
+                z3note.hidden = false;
+                z3note.textContent = "Session closed (square-off 15:15) — no live READY NOW entries.";
+            } else if (!windowOpen) {
+                z3note.hidden = false;
+                z3note.textContent = "Entry window closed (14:30 IST) — Take Trade disabled. Prior READY cards are listed below if still on the list.";
+            } else {
+                z3note.hidden = true;
+                z3note.textContent = "";
+            }
+        }
+
+        _syncReadyGrid(z3, readyLive);
+        if (z3empty) {
+            z3empty.hidden = readyLive.length > 0;
+            if (afterClose) {
+                z3empty.textContent = "Session closed. Rechecks resume next trading day.";
+            } else if (!windowOpen) {
+                z3empty.textContent = "Entry window closed (14:30). No actionable READY NOW setups.";
+            } else {
+                z3empty.textContent = "No READY setups right now. Rechecks at :05, :15, :25, :35, :45, :55 past every hour.";
+            }
+        }
+
+        var pastSec = $("dcZone3Past");
+        var pastCount = $("dcZone3PastCount");
+        var pastGrid = $("dcZone3PastGrid");
+        if (pastSec) {
+            pastSec.hidden = readyPast.length === 0;
+            if (pastCount) pastCount.textContent = String(readyPast.length);
+            _syncReadyGrid(pastGrid, readyPast);
+            _wireCollapse("dcZone3PastToggle", "dcZone3PastBody");
+        }
+
+        var expSec = $("dcZoneExpired");
+        var expCount = $("dcZoneExpiredCount");
+        var expGrid = $("dcZoneExpiredGrid");
+        if (expSec) {
+            expSec.hidden = expired.length === 0;
+            if (expCount) expCount.textContent = String(expired.length);
+            _syncReadyGrid(expGrid, expired);
+            _wireCollapse("dcZoneExpiredToggle", "dcZoneExpiredBody");
+        }
 
         var watchSyms = {};
         watching.forEach(function (stock) {
