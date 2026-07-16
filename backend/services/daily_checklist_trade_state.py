@@ -1836,6 +1836,24 @@ def enrich_stocks_trade_state(
         )
         # After regime badges exist: stack of warnings / 2nd+ pullback combo → WAIT.
         stack_n = apply_warning_stack_downgrades(stocks)
+        # Shadow: Whipsawed / DIR CONFLICT / REGIME / CHURN input audit (no live change).
+        badge_logged = 0
+        try:
+            from backend.services.kavach_badge_audit import log_badge_inputs_for_stocks
+
+            badge_logged = log_badge_inputs_for_stocks(
+                db,
+                session_date=session_date,
+                stocks=stocks,
+                candle_cache=candle_cache,
+                atr_pct_map=atr_pct_map,
+                near_atr=near_atr,
+                source="live",
+            )
+            if badge_logged:
+                db.commit()
+        except Exception as exc:
+            logger.debug("badge input audit skipped: %s", exc)
         return {
             "churn_warning": len(churn_syms) >= 3,
             "churn_symbols": churn_syms,
@@ -1845,6 +1863,7 @@ def enrich_stocks_trade_state(
             "ready_consistency_logged": len(consistency_rows),
             "vwap_raw_logged": vwap_raw_n,
             "warning_stack_downgraded": stack_n,
+            "badge_input_logged": badge_logged,
             **mkt,
             **zone1_early,
         }

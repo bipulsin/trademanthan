@@ -103,6 +103,75 @@ def _session_day_bars_10m(candles: List[Dict], session_date: str) -> List[Dict[s
     return out
 
 
+def list_whipsaw_reversal_events(
+    candles: List[Dict],
+    *,
+    session_date: str,
+    is_long: bool,
+    near_atr: float,
+    atr: Optional[float],
+) -> List[Dict[str, Any]]:
+    """Price-based whipsaw events (not lock-membership churn).
+
+    Each event: EMA5 touch on a confirmed session 10m bar, then a close against
+    lock direction within the next 1–2 confirmed 10m bars.
+    """
+    from backend.services.vajra.indicators import ema_series
+
+    bars = _session_day_bars_10m(candles, session_date)
+    if len(bars) < 3 or not atr or atr <= 0:
+        return []
+    closes = [float(b["close"]) for b in bars]
+    highs = [float(b["high"]) for b in bars]
+    lows = [float(b["low"]) for b in bars]
+    ema5_s = ema_series(closes, 5)
+    if len(ema5_s) < len(closes):
+        return []
+    events: List[Dict[str, Any]] = []
+    i = 4  # need EMA5 warm-up
+    while i < len(bars) - 1:
+        e5 = ema5_s[i]
+        touched = (lows[i] <= e5 + near_atr * atr) and (highs[i] >= e5 - near_atr * atr)
+        if not touched:
+            i += 1
+            continue
+        reversed_ok = False
+        reverse_j = None
+        for j in (i + 1, i + 2):
+            if j >= len(bars):
+                break
+            c = closes[j]
+            if is_long and c < ema5_s[j]:
+                reversed_ok = True
+                reverse_j = j
+                break
+            if (not is_long) and c > ema5_s[j]:
+                reversed_ok = True
+                reverse_j = j
+                break
+        if reversed_ok and reverse_j is not None:
+            touch_ts = bars[i].get("timestamp") or bars[i].get("bar_end")
+            rev_ts = bars[reverse_j].get("timestamp") or bars[reverse_j].get("bar_end")
+            events.append(
+                {
+                    "touch_bar_idx": i,
+                    "reverse_bar_idx": reverse_j,
+                    "touch_ts": str(touch_ts) if touch_ts is not None else None,
+                    "reverse_ts": str(rev_ts) if rev_ts is not None else None,
+                    "touch_close": closes[i],
+                    "touch_ema5": float(e5),
+                    "reverse_close": closes[reverse_j],
+                    "reverse_ema5": float(ema5_s[reverse_j]),
+                    "lock_side": "LONG" if is_long else "SHORT",
+                    "basis": "ema5_touch_then_close_against_lock_within_1_2_bars",
+                }
+            )
+            i = reverse_j + 1
+        else:
+            i += 1
+    return events
+
+
 def count_whipsaw_reversals(
     candles: List[Dict],
     *,
@@ -112,43 +181,15 @@ def count_whipsaw_reversals(
     atr: Optional[float],
 ) -> int:
     """EMA5 touch then close against lock direction within next 1–2 confirmed 10m bars."""
-    from backend.services.vajra.indicators import ema_series
-
-    bars = _session_day_bars_10m(candles, session_date)
-    if len(bars) < 3 or not atr or atr <= 0:
-        return 0
-    closes = [float(b["close"]) for b in bars]
-    highs = [float(b["high"]) for b in bars]
-    lows = [float(b["low"]) for b in bars]
-    ema5_s = ema_series(closes, 5)
-    if len(ema5_s) < len(closes):
-        return 0
-    count = 0
-    i = 4  # need EMA5 warm-up
-    while i < len(bars) - 1:
-        e5 = ema5_s[i]
-        touched = (lows[i] <= e5 + near_atr * atr) and (highs[i] >= e5 - near_atr * atr)
-        if not touched:
-            i += 1
-            continue
-        # next 1–2 closes against direction
-        reversed_ok = False
-        for j in (i + 1, i + 2):
-            if j >= len(bars):
-                break
-            c = closes[j]
-            if is_long and c < ema5_s[j]:
-                reversed_ok = True
-                break
-            if (not is_long) and c > ema5_s[j]:
-                reversed_ok = True
-                break
-        if reversed_ok:
-            count += 1
-            i = j + 1  # skip past this reverse sequence
-        else:
-            i += 1
-    return count
+    return len(
+        list_whipsaw_reversal_events(
+            candles,
+            session_date=session_date,
+            is_long=is_long,
+            near_atr=near_atr,
+            atr=atr,
+        )
+    )
 
 
 def count_pullback_attempts(
