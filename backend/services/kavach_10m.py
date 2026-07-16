@@ -1,7 +1,8 @@
 """10-minute Kavach evaluation — chart parity for locked-symbol live recompute.
 
 Pairs consecutive 5m bars into 10m OHLCV aligned with TradingView session
-boundaries (first close 09:25 IST, then 09:35, 09:45, …).
+boundaries (first close 09:25 IST, then 09:35, 09:45, …). Pairing always
+resets at each session date so 09:15+09:20 form the first 10m bar.
 
 PARITY vs TWCTO Kavach Pine v2.6 (``TWCTO_Kavach_v2.6``):
 - SuperTrend: ATR period 10, **multiplier 1.5** (not classic 3.0).
@@ -59,29 +60,45 @@ PINE_EMA_LEN = 9  # input "EMA Length"; script variable ema5Raw
 
 
 def aggregate_10m_bars(candles: List[Dict]) -> List[Dict[str, Any]]:
-    """Pair same-day 5m bars → 10m OHLCV (close = 2nd bar close)."""
+    """Pair same-day 5m bars → 10m OHLCV (close = 2nd bar close).
+
+    Pairing resets at each session date boundary so the first 10m bar of a
+    session is always that session's 09:15+09:20, regardless of the global
+    index of 09:15 in the multi-day fetch buffer. (NSE has 75 five-minute bars
+    per day — an odd count — so global-index pairing misaligned every other
+    prior-day count and dropped 09:15.)
+    """
     candles = _sorted_candles(candles)
     out: List[Dict[str, Any]] = []
-    for i in range(1, len(candles), 2):
-        b0, b1 = candles[i - 1], candles[i]
-        d0 = _parse_ist_date(b0.get("timestamp"))
-        d1 = _parse_ist_date(b1.get("timestamp"))
-        if d0 != d1:
-            continue
-        end_ts = _parse_ist(b1.get("timestamp"))
-        bar_end = end_ts + timedelta(minutes=BAR_MINUTES_5M) if end_ts else None
-        out.append(
-            {
-                "open": _f(b0.get("open") or b0.get("close")),
-                "high": max(_f(b0.get("high")), _f(b1.get("high"))),
-                "low": min(_f(b0.get("low")), _f(b1.get("low"))),
-                "close": _f(b1.get("close")),
-                "volume": _f(b0.get("volume")) + _f(b1.get("volume")),
-                "end_5m_idx": i,
-                "timestamp": b1.get("timestamp"),
-                "bar_end": bar_end,
-            }
-        )
+    n = len(candles)
+    i = 0
+    while i < n:
+        session_date = _parse_ist_date(candles[i].get("timestamp"))
+        j = i + 1
+        while j < n and _parse_ist_date(candles[j].get("timestamp")) == session_date:
+            j += 1
+        # Pair within [i, j) only — never across the session boundary.
+        rel = 0
+        while i + rel + 1 < j:
+            g0 = i + rel
+            g1 = i + rel + 1
+            b0, b1 = candles[g0], candles[g1]
+            end_ts = _parse_ist(b1.get("timestamp"))
+            bar_end = end_ts + timedelta(minutes=BAR_MINUTES_5M) if end_ts else None
+            out.append(
+                {
+                    "open": _f(b0.get("open") or b0.get("close")),
+                    "high": max(_f(b0.get("high")), _f(b1.get("high"))),
+                    "low": min(_f(b0.get("low")), _f(b1.get("low"))),
+                    "close": _f(b1.get("close")),
+                    "volume": _f(b0.get("volume")) + _f(b1.get("volume")),
+                    "end_5m_idx": g1,
+                    "timestamp": b1.get("timestamp"),
+                    "bar_end": bar_end,
+                }
+            )
+            rel += 2
+        i = j
     return out
 
 
