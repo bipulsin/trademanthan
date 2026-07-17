@@ -147,10 +147,41 @@ def main() -> None:
     both = block_check2_syms & block_check3_syms
     c2_only = block_check2_syms - block_check3_syms
     c3_only = block_check3_syms - block_check2_syms
-    print("Block breakout (unique symbols ever blocked that day):")
+    print("Block breakout Option A (unique symbols ever blocked that day):")
     print(f"  check2 AND check3: {len(both)}  {sorted(both)}")
     print(f"  check2 only:       {len(c2_only)}  {sorted(c2_only)}")
     print(f"  check3 only:       {len(c3_only)}  {sorted(c3_only)}")
+    print()
+
+    # Threshold sensitivity A vs B vs C
+    b_stricter = set()
+    c_stricter = set()
+    a_block_syms = set()
+    b_block_syms = set()
+    c_block_syms = set()
+    for r in rows:
+        sh = _shadow(r.inputs)
+        sens = sh.get("threshold_sensitivity") or {}
+        if not sens:
+            continue
+        sym = str(r.symbol).upper()
+        if (sens.get("A") or {}).get("would_block"):
+            a_block_syms.add(sym)
+        if (sens.get("B") or {}).get("would_block"):
+            b_block_syms.add(sym)
+        if (sens.get("C") or {}).get("would_block"):
+            c_block_syms.add(sym)
+        if sens.get("B_stricter_than_A"):
+            b_stricter.add(sym)
+        if sens.get("C_stricter_than_A"):
+            c_stricter.add(sym)
+
+    print("Threshold sensitivity (symbols ever differing vs Option A):")
+    print(f"  A would_block: {sorted(a_block_syms)}")
+    print(f"  B would_block: {sorted(b_block_syms)}")
+    print(f"  C would_block: {sorted(c_block_syms)}")
+    print(f"  B stricter than A: {sorted(b_stricter)}")
+    print(f"  C stricter than A: {sorted(c_stricter)}")
     print()
 
     if check3_only_events:

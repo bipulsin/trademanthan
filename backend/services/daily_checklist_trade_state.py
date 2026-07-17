@@ -1958,6 +1958,7 @@ def enrich_stocks_trade_state(
                     pre_gate_state=row.get("pre_gate_state"),
                     rendered_state=row.get("rendered_state"),
                     nifty_pct=nifty_pct,
+                    atr_pct=float(atr_pct_map.get(sym_u) or 0.0),
                 )
                 inp["dwell_entry_shadow"] = shadow
                 s_final["dwell_entry_shadow"] = shadow
