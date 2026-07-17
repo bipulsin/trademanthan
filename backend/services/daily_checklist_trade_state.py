@@ -15,6 +15,10 @@ READY NOW note (2026-07-14 / 2026-07-15):
   every refresh; VWAP-quality weighting of READY is behind
   ``READY_VWAP_QUALITY_GATE`` (default off / shadow).
 
+  2026-07-17: 10-min READY dwell + entry distance guard are shadow-logged in
+  ``inputs.dwell_entry_shadow`` (see ``ready_dwell_entry_shadow``). Live flip
+  stays behind ``READY_DWELL_ENTRY_LIVE`` (default off) until session sign-off.
+
   2026-07-15 gates:
   - No READY / Take Trade before 09:45 IST (SCANNING until then).
   - Entry outside today's session high/low → EXPIRED (stale/gap).
@@ -396,6 +400,11 @@ def overlay_live_momentum_from_candles(
         )
         if not metrics:
             return prior
+        # Stash live 10m EMA path for entry/distance shadow (same forming bars).
+        stock["live_candle_ema5"] = _f(metrics.get("ema5"))
+        stock["live_candle_ema10"] = _f(metrics.get("ema10_10m"))
+        stock["live_candle_price"] = _f(metrics.get("price"))
+        stock["live_candle_bar_at"] = str(metrics.get("bar_evaluated_at") or "")
         # Pine v2.6: Trend = 2-of-3; EMA-VWAP uses panel EMA(9); ST×1.5; MACD 6/13/5.
         trend_lbl = metrics.get("panel_trend")
         ema_lbl = _ema_vs_vwap_label(
@@ -1921,6 +1930,9 @@ def enrich_stocks_trade_state(
         stack_n = apply_warning_stack_downgrades(stocks)
 
         # Finalize consistency log with post-stack UI state + take-enablement.
+        # Shadow: 10-min dwell + entry distance guard (no live flip).
+        from backend.services.ready_dwell_entry_shadow import build_dwell_entry_shadow
+
         stock_by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
         for row in consistency_rows:
             sym_u = (row.get("symbol") or "").upper()
@@ -1934,6 +1946,23 @@ def enrich_stocks_trade_state(
             inp["trade_state_reason"] = s_final.get("trade_state_reason")
             inp["zone_downgrade"] = s_final.get("zone_downgrade")
             inp["trade_entry_window_open"] = s_final.get("trade_entry_window_open")
+            try:
+                shadow = build_dwell_entry_shadow(
+                    s_final,
+                    db=db,
+                    session_date=session_date,
+                    candles=candle_cache.get(sym_u) or [],
+                    lot=int(lot_cache.get(sym_u) or 1),
+                    in_lock=bool(s_final.get("in_lock")),
+                    audit_levels=levels_map.get(sym_u) or {},
+                    pre_gate_state=row.get("pre_gate_state"),
+                    rendered_state=row.get("rendered_state"),
+                    nifty_pct=nifty_pct,
+                )
+                inp["dwell_entry_shadow"] = shadow
+                s_final["dwell_entry_shadow"] = shadow
+            except Exception as exc:
+                logger.debug("dwell/entry shadow skipped %s: %s", sym_u, exc)
         if consistency_rows:
             log_ready_consistency(db, consistency_rows)
 
