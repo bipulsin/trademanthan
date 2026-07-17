@@ -83,14 +83,43 @@ Outcome: stay on B, move to A, or allow threshold to differ by contract month.
 | Metric | Value |
 |---|---|
 | Consistency rows | 414 |
-| READY→non-READY transitions (poll-level) | 275 |
-| Of which `zone_downgrade=warning_stack` | **218** |
-| Transitions with spell-age &lt; 5 min (poll-level) | 44 / 275 |
-| Post-shadow deploy: distance would-block rows | 15 |
+| Lock removals (day) | **133** |
+| Peak removals/hour (IST) | **33** (11:00 hour) — **ATYPICAL high-churn** (≥7/h elevated; ≥20/h atypical) |
+| Rendered READY spells | 30 |
+| Spells &lt; 5 min | **18 / 30 (60%)** |
+| Median spell (min) | **3.09** |
+| Soft-kill polls (`warning_stack`) | **218** across 20 symbols |
+| Shadow distance would-block rows | 15 |
 | Soft dwell would-extend rows | warning_stack 16 + direction_imbalance 9 |
 | READY samples with live price + entry; \|LTP−entry\| &gt; 5 | 1 / 15 (afternoon shadow window only) |
 
-Use Monday+ live sessions for clean before/after spell dwell; 17-Jul afternoon is partial instrumentation.
+**Do not** read Monday vs 17-Jul alone as “improvement vs a normal day.”
+
+### Fairer normal-flow comparator (2026-07-15)
+
+Best recent session with consistency logs + quieter lock churn:
+
+| Metric | 2026-07-15 |
+|---|---|
+| Lock removals (day) | 64 |
+| Peak removals/hour | **13** (elevated vs &lt;7, but not atypical) |
+| Rendered READY spells | 26 |
+| Spells &lt; 5 min | **3 / 26 (11.5%)** |
+| Median spell (min) | **38.37** |
+| Soft-kill polls (`warning_stack`) | 0 (pre–dwell instrumentation / different stack logging era) |
+
+2026-07-14 had even quieter removals (peak **10**/h) but **no** consistency-log rows — not usable for READY transition compare.
+
+### Monday report command
+
+```bash
+docker compose exec -T app python3 scripts/analyze_ready_dwell_entry_shadow.py \
+  --date 2026-07-20 \
+  --baseline 2026-07-17 \
+  --normal 2026-07-15
+```
+
+Report must show: (1) same-metric table vs 17-Jul baseline, (2) atypical high-churn flag on 17-Jul, (3) same-metric table vs 15-Jul normal-flow.
 
 ---
 
