@@ -80,6 +80,28 @@ else
     echo "  or REBUILD=1 ./scripts/trigger-paperclip-deploy.sh" >&2
     exit 1
   fi
+  echo "[deploy] sanity-checking pulled app image (core modules present)..."
+  if ! docker compose run --rm --no-deps --entrypoint python3 app -c '
+from pathlib import Path
+import importlib, sys
+required = [
+  "backend/main.py",
+  "backend/services/kavach_10m.py",
+  "backend/services/kavach_engine.py",
+  "backend/services/daily_checklist_trade_state.py",
+  "backend/services/daily_checklist_chop_gates.py",
+]
+missing = [p for p in required if not Path(p).is_file()]
+if missing:
+  print("MISSING:", missing, file=sys.stderr); sys.exit(1)
+for m in ("backend.services.kavach_10m", "backend.services.kavach_engine"):
+  importlib.import_module(m)
+print("pulled app image sanity OK")
+'; then
+    echo "[deploy] GHCR app image failed sanity check — refusing to recreate." >&2
+    echo "  Prefer: wait for twcto_docker CI, or REBUILD=1 ./scripts/trigger-paperclip-deploy.sh" >&2
+    exit 1
+  fi
 fi
 
 echo "[deploy] recreating app + nginx..."

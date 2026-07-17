@@ -118,6 +118,24 @@ jobs:
           else
             echo "[gha] pulling app + nginx from GHCR..."
             docker compose pull app nginx
+            echo "[gha] sanity-checking pulled app image..."
+            docker compose run --rm --no-deps --entrypoint python3 app -c '
+from pathlib import Path
+import importlib, sys
+required = [
+  "backend/main.py",
+  "backend/services/kavach_10m.py",
+  "backend/services/kavach_engine.py",
+  "backend/services/daily_checklist_trade_state.py",
+  "backend/services/daily_checklist_chop_gates.py",
+]
+missing = [p for p in required if not Path(p).is_file()]
+if missing:
+  print("MISSING:", missing, file=sys.stderr); sys.exit(1)
+for m in ("backend.services.kavach_10m", "backend.services.kavach_engine"):
+  importlib.import_module(m)
+print("pulled app image sanity OK")
+'
           fi
           docker compose up -d --force-recreate app nginx
           for _ in $(seq 1 40); do
