@@ -1,14 +1,10 @@
 """READY dwell (10m) + entry distance guard.
 
-Live flip (dwell + Option A distance) stays behind ``READY_DWELL_ENTRY_LIVE``
-(default off) until one-session shadow report + explicit go-ahead.
-
-Bug fix (not a new signal): after go-live, Option A gates cards; Options B/C
-remain shadow-only forever as threshold-sensitivity instrumentation.
-
-Option A (live when flipped): max(0.3% * price, 300 / lot)
-Option B (shadow):            max(0.3% * price, 500 / lot)
-Option C (shadow):            max(0.3% * price, 0.25 * ATR)
+Live flip: ``READY_DWELL_ENTRY_LIVE=1`` applies dwell + distance guard.
+Live threshold: ``READY_DWELL_ENTRY_OPTION`` (default **B**):
+  B → max(0.3% * price, 500 / lot)   ← live decision
+  A → max(0.3% * price, 300 / lot)   ← shadow only
+  C → max(0.3% * price, 0.25 * ATR) ← shadow only
 
 Checks (both kept on every option):
   1. entry at/beyond EMA10 (side-aware)
@@ -37,8 +33,10 @@ MIN_INR_RISK_FLOOR_B = 500.0
 OPTION_C_ATR_MULT = 0.25
 READY_DWELL_MINUTES = 10
 ENTRY_EMA5_WARN_PCT = 0.5  # same band as ENTRY_EMA5_TOL_PCT; WARN only
-# Back-compat alias used by tests / callers.
+# Back-compat alias.
 MIN_INR_RISK_FLOOR = MIN_INR_RISK_FLOOR_A
+# Live decision default = Option B (owner go-live 2026-07-18).
+DEFAULT_LIVE_OPTION = "B"
 
 _STATE_ENSURED = False
 
@@ -52,12 +50,18 @@ SOFT_ZONE_DOWNGRADES = frozenset(
 
 
 def ready_dwell_entry_live_enabled() -> bool:
-    """Live flip of dwell + distance guard. Default OFF until shadow sign-off."""
+    """Live flip of dwell + distance guard. Default OFF until explicit go-live."""
     return os.environ.get("READY_DWELL_ENTRY_LIVE", "0").strip().lower() in (
         "1",
         "true",
         "yes",
     )
+
+
+def live_distance_option() -> str:
+    """Active live threshold letter. Default B (500/lot)."""
+    raw = os.environ.get("READY_DWELL_ENTRY_OPTION", DEFAULT_LIVE_OPTION).strip().upper()
+    return raw if raw in ("A", "B", "C") else DEFAULT_LIVE_OPTION
 
 
 def min_gap_pts(
@@ -510,7 +514,8 @@ def build_dwell_entry_shadow(
     if ref_px is not None and atr_pct and float(atr_pct) > 0:
         atr_pts = float(ref_px) * float(atr_pct) / 100.0
 
-    # Option A is the decision path (shadow now; live after go-ahead).
+    # Decision path = live option (default B); A/C always in sensitivity.
+    decision_opt = live_distance_option()
     dist = evaluate_entry_distance_guard(
         is_long=is_long,
         entry=shadow_entry,
@@ -518,7 +523,7 @@ def build_dwell_entry_shadow(
         ema10=live_ema10,
         price=ref_px,
         lot=lot,
-        option="A",
+        option=decision_opt,
         atr_pts=atr_pts,
     )
     sensitivity = evaluate_threshold_sensitivity(
@@ -629,9 +634,9 @@ def build_dwell_entry_shadow(
         dwell_remaining_sec = max(0, READY_DWELL_MINUTES * 60 - dwell_elapsed_sec)
 
     payload: Dict[str, Any] = {
-        "shadow_mode": True,
+        "shadow_mode": not ready_dwell_entry_live_enabled(),
         "live_flip_enabled": ready_dwell_entry_live_enabled(),
-        "live_threshold": "A",
+        "live_threshold": decision_opt,
         "formula_A": "max(0.003*price, 300/lot)",
         "formula_B": "max(0.003*price, 500/lot)",
         "formula_C": "max(0.003*price, 0.25*ATR)",
@@ -704,3 +709,270 @@ def _as_ist(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return IST.localize(dt)
     return dt.astimezone(IST)
+
+
+def levels_with_live_candle_emas(
+    stock: Dict[str, Any],
+    audit_levels: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Prefer live 10m forming EMA5/EMA10 over lagging audit when live flip is on."""
+    levels = dict(audit_levels or {})
+    if not ready_dwell_entry_live_enabled():
+        return levels
+    e5 = _f(stock.get("live_candle_ema5"))
+    e10 = _f(stock.get("live_candle_ema10"))
+    px = _f(stock.get("live_candle_price"))
+    if e5 is not None:
+        levels["ema5"] = e5
+        levels["source"] = "live_10m_forming"
+    if e10 is not None:
+        levels["ema10"] = e10
+        levels["source"] = "live_10m_forming"
+    if px is not None:
+        levels["price"] = px
+    if stock.get("live_candle_bar_at"):
+        levels["bar_evaluated_at"] = stock.get("live_candle_bar_at")
+    return levels
+
+
+def apply_ready_dwell_entry_live(
+    stocks: List[Dict[str, Any]],
+    *,
+    db,
+    session_date: str,
+    candle_cache: Dict[str, Any],
+    lot_cache: Dict[str, int],
+    atr_pct_map: Dict[str, float],
+    nifty_pct: float = 0.0,
+    now: Optional[datetime] = None,
+) -> Dict[str, int]:
+    """Apply dwell + Option-B distance guard when ``READY_DWELL_ENTRY_LIVE=1``.
+
+    Soft warning_stack / imbalance: keep ``trade_state`` READY inside the 10-min
+    floor (``card_visible=True``) but disable Take Trade. Hard invalidation and
+    distance failures clear dwell and hide the card.
+    """
+    from backend.services.daily_checklist_trade_state import (
+        STATE_READY,
+        STATE_READY_RECHECK,
+        STATE_WAIT,
+        entry_window_open_ist,
+        risk_cap_blocks_ready,
+        rr_below_minimum,
+        take_trade_structurally_ok,
+        trade_take_disable_reason,
+    )
+
+    stats = {
+        "live_applied": 0,
+        "entry_overridden": 0,
+        "distance_blocked": 0,
+        "dwell_soft_kept": 0,
+        "dwell_started": 0,
+        "warn_entry_drift": 0,
+    }
+    if not ready_dwell_entry_live_enabled():
+        return stats
+
+    opt = live_distance_option()
+    clock = now or datetime.now(IST)
+    if clock.tzinfo is None:
+        clock = IST.localize(clock)
+    else:
+        clock = clock.astimezone(IST)
+
+    for s in stocks:
+        sym = (s.get("symbol") or "").upper()
+        if not sym:
+            continue
+        stats["live_applied"] += 1
+
+        live_e5 = _f(s.get("live_candle_ema5"))
+        live_e10 = _f(s.get("live_candle_ema10"))
+        live_px = _f(s.get("live_candle_price"))
+        lot = max(int(lot_cache.get(sym) or s.get("trade_lot") or 1), 1)
+
+        if live_e5 is not None:
+            s["trade_entry"] = round(float(live_e5), 2)
+            stats["entry_overridden"] += 1
+        if live_e10 is not None:
+            s["trade_sl"] = round(float(live_e10), 2)
+        if s.get("trade_entry") is not None and s.get("trade_sl") is not None:
+            risk_pts = abs(float(s["trade_entry"]) - float(s["trade_sl"]))
+            s["trade_risk_inr"] = int(round(risk_pts * lot, 0))
+
+        direction = (s.get("direction") or "LONG").upper()
+        is_long = direction != "SHORT"
+        atr_pct = float(atr_pct_map.get(sym) or 0.0)
+        ref = live_px if live_px is not None else _f(s.get("trade_entry"))
+        atr_pts = (float(ref) * atr_pct / 100.0) if ref is not None and atr_pct > 0 else None
+
+        dist = evaluate_entry_distance_guard(
+            is_long=is_long,
+            entry=_f(s.get("trade_entry")),
+            ema5=live_e5,
+            ema10=live_e10,
+            price=ref,
+            lot=lot,
+            option=opt,
+            atr_pts=atr_pts,
+        )
+        s["entry_distance_guard"] = dist
+        s["dwell_live_option"] = opt
+
+        if dist.get("warn_entry_off_ema5"):
+            badges = list(s.get("gate_badges") or [])
+            if "ENTRY DRIFT" not in badges:
+                badges.append("ENTRY DRIFT")
+            s["gate_badges"] = badges
+            stats["warn_entry_drift"] += 1
+
+        pre_stack = s.get("_pre_stack_state") or s.get("trade_state")
+        was_ready = pre_stack in (STATE_READY, STATE_READY_RECHECK)
+        soft = soft_hide_reason(s)
+        in_lock = bool(s.get("in_lock"))
+        hard_reason, hard_detail = hard_invalidate_reason(
+            s,
+            in_lock=in_lock,
+            candles=candle_cache.get(sym) or [],
+            is_long=is_long,
+            nifty_pct=nifty_pct,
+        )
+        prev_since = _load_shadow_since(db, session_date, sym)
+
+        def _persist(since: Optional[datetime], outcome: str, blocked: bool) -> None:
+            _upsert_shadow_state(
+                db,
+                session_date=session_date,
+                symbol=sym,
+                shadow_ready_since=since,
+                last_outcome=outcome,
+                distance_blocked=blocked,
+                check3_only=bool(dist.get("check3_only")),
+                inputs={
+                    "live": True,
+                    "option": opt,
+                    "distance": dist,
+                    "soft": soft,
+                    "hard_reason": hard_reason,
+                    "hard_detail": hard_detail,
+                    "trade_state": s.get("trade_state"),
+                    "card_visible": s.get("card_visible"),
+                    "trade_take_enabled": s.get("trade_take_enabled"),
+                },
+            )
+
+        # Distance failure: never READY, no dwell guarantee.
+        if dist.get("would_block") and (
+            s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK) or was_ready
+        ):
+            if dist.get("check1_beyond_ema10"):
+                reason = "WAIT · entry at/beyond EMA10"
+            elif dist.get("check3_only"):
+                reason = "WAIT · EMA5–EMA10 gap too thin for valid stop"
+            else:
+                reason = "WAIT · entry too close to exit zone"
+            s["trade_state"] = STATE_WAIT
+            s["trade_state_reason"] = reason
+            s["trade_take_enabled"] = False
+            s["card_visible"] = False
+            s["zone_downgrade"] = "entry_distance"
+            s["ready_visible_since"] = None
+            s["trade_take_disable_reason"] = trade_take_disable_reason(
+                trade_state=STATE_WAIT,
+                trade_take_enabled=False,
+                trade_state_reason=reason,
+                trade_entry_window_open=s.get("trade_entry_window_open"),
+                entry=s.get("trade_entry"),
+                sl=s.get("trade_sl"),
+                risk_inr=s.get("trade_risk_inr"),
+                rr=s.get("trade_rr"),
+                zone_downgrade="entry_distance",
+            )
+            _persist(None, "live_block_distance", True)
+            stats["distance_blocked"] += 1
+            continue
+
+        if hard_reason:
+            s["card_visible"] = s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK)
+            s["ready_visible_since"] = None
+            _persist(None, f"live_end_hard:{hard_reason}", False)
+            continue
+
+        # Soft hide after warning_stack/imbalance: hold READY card inside 10-min floor.
+        if (
+            was_ready
+            and soft
+            and s.get("trade_state") == STATE_WAIT
+            and s.get("zone_downgrade") in (
+                "warning_stack",
+                "vwap_quality",
+                "direction_imbalance",
+            )
+        ):
+            since = prev_since or clock
+            elapsed = (clock - _as_ist(since)).total_seconds()
+            if elapsed < READY_DWELL_MINUTES * 60:
+                s["trade_state"] = pre_stack
+                s["trade_take_enabled"] = False
+                s["card_visible"] = True
+                s["dwell_soft_hold"] = True
+                s["ready_visible_since"] = _as_ist(since).isoformat()
+                s["trade_state_reason"] = (
+                    f"READY · dwell hold ({soft}) — Take Trade disabled"
+                )
+                s["trade_take_disable_reason"] = trade_take_disable_reason(
+                    trade_state=pre_stack,
+                    trade_take_enabled=False,
+                    trade_state_reason=s["trade_state_reason"],
+                    trade_entry_window_open=s.get("trade_entry_window_open"),
+                    entry=s.get("trade_entry"),
+                    sl=s.get("trade_sl"),
+                    risk_inr=s.get("trade_risk_inr"),
+                    rr=s.get("trade_rr"),
+                    zone_downgrade=s.get("zone_downgrade"),
+                )
+                _persist(_as_ist(since), f"live_dwell_soft:{soft}", False)
+                stats["dwell_soft_kept"] += 1
+                continue
+            s["card_visible"] = False
+            s["ready_visible_since"] = None
+            _persist(None, f"live_dwell_floor_elapsed:{soft}", False)
+            continue
+
+        if s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK):
+            since = prev_since or clock
+            since = _as_ist(since)
+            s["card_visible"] = True
+            s["ready_visible_since"] = since.isoformat()
+            s["trade_take_enabled"] = bool(
+                entry_window_open_ist()
+                and take_trade_structurally_ok(
+                    entry=s.get("trade_entry"),
+                    sl=s.get("trade_sl"),
+                    risk_inr=s.get("trade_risk_inr"),
+                )
+                and not risk_cap_blocks_ready(s.get("trade_risk_inr"), s.get("trade_rr"))
+                and not rr_below_minimum(s.get("trade_rr"))
+            )
+            s["trade_take_disable_reason"] = trade_take_disable_reason(
+                trade_state=s.get("trade_state"),
+                trade_take_enabled=bool(s.get("trade_take_enabled")),
+                trade_state_reason=s.get("trade_state_reason"),
+                trade_entry_window_open=s.get("trade_entry_window_open"),
+                entry=s.get("trade_entry"),
+                sl=s.get("trade_sl"),
+                risk_inr=s.get("trade_risk_inr"),
+                rr=s.get("trade_rr"),
+                zone_downgrade=s.get("zone_downgrade"),
+            )
+            _persist(since, "live_dwell_active", False)
+            if prev_since is None:
+                stats["dwell_started"] += 1
+            continue
+
+        s["card_visible"] = False
+        if prev_since is not None and not soft:
+            _persist(None, "live_end_natural", False)
+
+    return stats

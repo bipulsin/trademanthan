@@ -134,3 +134,17 @@ def test_threshold_sensitivity_b_stricter_on_cheap():
     assert sens["B"]["would_block"] is True
     assert sens["B_stricter_than_A"] is True
     assert sens["C"]["would_block"] is False
+
+
+def test_live_option_default_b(monkeypatch):
+    monkeypatch.delenv("READY_DWELL_ENTRY_OPTION", raising=False)
+    from backend.services.ready_dwell_entry_shadow import live_distance_option
+
+    assert live_distance_option() == "B"
+
+
+def test_live_option_env_override(monkeypatch):
+    monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "A")
+    from backend.services.ready_dwell_entry_shadow import live_distance_option
+
+    assert live_distance_option() == "A"

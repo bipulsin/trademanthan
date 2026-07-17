@@ -16,8 +16,9 @@ READY NOW note (2026-07-14 / 2026-07-15):
   ``READY_VWAP_QUALITY_GATE`` (default off / shadow).
 
   2026-07-17: 10-min READY dwell + entry distance guard are shadow-logged in
-  ``inputs.dwell_entry_shadow`` (see ``ready_dwell_entry_shadow``). Live flip
-  stays behind ``READY_DWELL_ENTRY_LIVE`` (default off) until session sign-off.
+  ``inputs.dwell_entry_shadow`` (see ``ready_dwell_entry_shadow``).
+  2026-07-18 go-live: ``READY_DWELL_ENTRY_LIVE=1`` with Option B
+  (``max(0.3%·price, 500/lot)``); Options A/C remain shadow sensitivity.
 
   2026-07-15 gates:
   - No READY / Take Trade before 09:45 IST (SCANNING until then).
@@ -1657,9 +1658,11 @@ def enrich_stocks_trade_state(
                 candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
             ) if candles else 0
             flip = flips.get(sym) or {}
+            from backend.services.ready_dwell_entry_shadow import levels_with_live_candle_emas
+
             ts = compute_trade_state_for_stock(
                 s,
-                levels=levels_map.get(sym) or {},
+                levels=levels_with_live_candle_emas(s, levels_map.get(sym) or {}),
                 atr_pct=atr_pct,
                 lot=lot_cache[sym],
                 session_hi=hi,
@@ -1913,6 +1916,10 @@ def enrich_stocks_trade_state(
             apply_zone_downgrades,
         )
 
+        # Capture READY before Zone-1 / warning-stack soft hides (for dwell restore).
+        for s in stocks:
+            s["_pre_stack_state"] = s.get("trade_state")
+
         apply_zone_downgrades(
             stocks,
             imbalance=zone1_early.get("direction_imbalance"),
@@ -1929,8 +1936,26 @@ def enrich_stocks_trade_state(
         # After regime badges exist: stack of warnings / 2nd+ pullback combo → WAIT.
         stack_n = apply_warning_stack_downgrades(stocks)
 
+        # Live dwell + Option B distance (no-op when READY_DWELL_ENTRY_LIVE off).
+        dwell_live_stats: Dict[str, int] = {}
+        try:
+            from backend.services.ready_dwell_entry_shadow import apply_ready_dwell_entry_live
+
+            dwell_live_stats = apply_ready_dwell_entry_live(
+                stocks,
+                db=db,
+                session_date=session_date,
+                candle_cache=candle_cache,
+                lot_cache=lot_cache,
+                atr_pct_map=atr_pct_map,
+                nifty_pct=nifty_pct,
+            )
+        except Exception as exc:
+            logger.debug("ready dwell/entry live apply skipped: %s", exc)
+            dwell_live_stats = {}
+
         # Finalize consistency log with post-stack UI state + take-enablement.
-        # Shadow: 10-min dwell + entry distance guard (no live flip).
+        # Shadow / live: 10-min dwell + entry distance (A/B/C sensitivity always).
         from backend.services.ready_dwell_entry_shadow import build_dwell_entry_shadow
 
         stock_by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
@@ -1946,6 +1971,9 @@ def enrich_stocks_trade_state(
             inp["trade_state_reason"] = s_final.get("trade_state_reason")
             inp["zone_downgrade"] = s_final.get("zone_downgrade")
             inp["trade_entry_window_open"] = s_final.get("trade_entry_window_open")
+            inp["card_visible"] = s_final.get("card_visible")
+            inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
+            inp["ready_visible_since"] = s_final.get("ready_visible_since")
             try:
                 shadow = build_dwell_entry_shadow(
                     s_final,
@@ -1995,6 +2023,7 @@ def enrich_stocks_trade_state(
             "vwap_raw_logged": vwap_raw_n,
             "warning_stack_downgraded": stack_n,
             "badge_input_logged": badge_logged,
+            "dwell_entry_live": dwell_live_stats,
             **mkt,
             **zone1_early,
         }
