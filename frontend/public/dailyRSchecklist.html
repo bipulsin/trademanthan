@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=36">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=37">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -259,8 +259,9 @@
     <template id="dcReadyTpl">
         <div class="dc-ready-card" data-symbol="">
             <div class="dc-ready-top">
-                <span class="dc-ready-symbol"></span>
+                <span class="dc-ready-symbol dc-symbol-link"></span>
                 <span class="dc-ready-dir"></span>
+                <button type="button" class="dc-ready-gates" title="Open gate checklist">Gates</button>
                 <button type="button" class="dc-ready-take">Take Trade</button>
             </div>
             <div class="dc-ready-entry-hero">
@@ -286,12 +287,13 @@
     <!-- Zone 4 Watching compact row -->
     <template id="dcWatchTpl">
         <div class="dc-watch-row" data-symbol="" role="button" tabindex="0">
-            <span class="dc-watch-sym"></span>
+            <span class="dc-watch-sym dc-symbol-link"></span>
             <span class="dc-watch-dir"></span>
             <span class="dc-watch-state"></span>
             <span class="dc-watch-reason"></span>
             <span class="dc-watch-flags"></span>
             <span class="dc-watch-meta"></span>
+            <button type="button" class="dc-watch-gates" title="Open gate checklist">Gates</button>
         </div>
     </template>
 
@@ -303,7 +305,10 @@
                     <button type="button" class="dc-take-trade" title="Mark trade taken" aria-label="Take trade">
                         <i class="fas fa-play"></i>
                     </button>
-                    <span class="dc-symbol"></span>
+                    <button type="button" class="dc-gates-btn" title="Open gate checklist" aria-label="Gate checklist">
+                        <i class="fas fa-clipboard-check"></i>
+                    </button>
+                    <span class="dc-symbol dc-symbol-link"></span>
                     <span class="dc-persist" title="Persistence since lock"></span>
                     <span class="dc-rs"></span>
                     <span class="dc-conf"></span>
@@ -343,6 +348,6 @@
     </template>
 
     <script src="left-menu.js?v=3.24"></script>
-    <script src="dailyRSchecklist.js?v=36"></script>
+    <script src="dailyRSchecklist.js?v=37"></script>
 </body>
 </html>

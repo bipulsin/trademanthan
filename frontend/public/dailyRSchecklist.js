@@ -45,8 +45,144 @@
         "BLOCKED": 4
     };
     var GRADE_ORDER = { "A+": 0, "A": 1, "B": 2, "C": 3, "D": 4 };
+    var _chartEngineLoadPromise = null;
 
     function $(id) { return document.getElementById(id); }
+
+    function ensureChartEngine() {
+        if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
+        if (_chartEngineLoadPromise) return _chartEngineLoadPromise;
+        _chartEngineLoadPromise = new Promise(function (resolve, reject) {
+            var s = document.createElement("script");
+            s.src = "security-chart/security-chart-engine.js?v=10";
+            s.async = true;
+            s.onload = function () {
+                if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+                else reject(new Error("Chart module failed to initialize"));
+            };
+            s.onerror = function () { reject(new Error("Chart module failed to load")); };
+            document.head.appendChild(s);
+        });
+        return _chartEngineLoadPromise;
+    }
+
+    function _metric(key, label, value) {
+        if (value == null || value === "") return null;
+        return { key: key, label: label, value: value };
+    }
+
+    function buildKavachScreener(stock, extra) {
+        stock = stock || {};
+        extra = extra || {};
+        var direction = String(extra.direction || stock.direction || "LONG").toUpperCase();
+        var kavach =
+            stock.dashboard_kavach_live ||
+            stock.trading_state ||
+            stock.kavach_state ||
+            extra.kavach_state ||
+            extra.live_kavach ||
+            null;
+        var grade =
+            stock.confidence ||
+            stock.dashboard_kavach ||
+            extra.confidence_grade ||
+            extra.live_grade ||
+            null;
+        var score =
+            stock.dashboard_score != null
+                ? stock.dashboard_score
+                : (stock.kavach_score_entry != null
+                    ? stock.kavach_score_entry
+                    : (extra.trade_score != null ? extra.trade_score : null));
+        var tradeState = stock.trade_state || stock.section || extra.trade_state || null;
+        var decision = stock.decision || null;
+        var badges = (stock.gate_badges || []).slice(0, 6).join(" · ") || null;
+        var insightParts = [];
+        if (kavach) insightParts.push(String(kavach));
+        if (grade) insightParts.push("Grade " + grade);
+        if (tradeState) insightParts.push(String(tradeState));
+        if (direction) insightParts.push(direction);
+
+        function pack(title, items) {
+            var metrics = items.filter(Boolean);
+            return metrics.length ? { title: title, metrics: metrics } : null;
+        }
+        var sections = [
+            pack("KAVACH", [
+                _metric("kavach_state", "Kavach State", kavach),
+                _metric("confidence", "Confidence", grade),
+                _metric("score", "Score", score),
+                _metric("lifecycle", "Trade State", tradeState),
+                _metric("decision", "Decision", decision),
+            ]),
+            pack("MARKET STRUCTURE", [
+                _metric("emaState", "EMA5 vs VWAP", stock.ema_vs_vwap || extra.ema_vs_vwap),
+                _metric("vwapState", "Supertrend", stock.supertrend),
+                _metric("momentum", "MACD", stock.macd),
+                _metric("trend", "ADX @ Entry", stock.adx_entry != null ? stock.adx_entry : stock.adx_935),
+                _metric("di", "DI+ vs DI-", stock.di_alignment),
+                _metric("volume", "Volume", stock.volume),
+            ]),
+            pack("SETUP", [
+                _metric("pullback", "Pullback", stock.pullback_label),
+                _metric("rs", "RS %", stock.rs_pct != null
+                    ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%")
+                    : null),
+                _metric("entry", "Entry", stock.trade_entry != null ? stock.trade_entry : extra.entry_price),
+                _metric("stopLoss", "SL", stock.trade_sl != null ? stock.trade_sl : extra.display_sl),
+                _metric("rr", "R:R", stock.trade_rr_label || (extra.achieved_rr != null ? extra.achieved_rr + ":1" : null)),
+                _metric("armed", "Take enabled", stock.trade_take_enabled === true
+                    ? "Yes"
+                    : (stock.trade_take_enabled === false ? "No" : null)),
+            ]),
+            pack("CONTEXT", [
+                _metric("gates", "Gate badges", badges),
+                _metric("maturity", "Maturity", stock.maturity_tag),
+                _metric("momentum_fw", "FW momentum", extra.momentum),
+                _metric("stop_pct", "Stop %", extra.stop_pct),
+                _metric("action", "Action hint", extra.action_hint),
+            ]),
+        ].filter(Boolean);
+
+        return {
+            direction: direction,
+            insight: insightParts.join(" · "),
+            sections: sections,
+        };
+    }
+
+    function openSymbolChart(symbol, opts) {
+        opts = opts || {};
+        var sym = String(symbol || "").trim().toUpperCase();
+        if (!sym) return;
+        var stock = opts.stock || currentStock(sym) || {};
+        var direction = String(opts.direction || stock.direction || "LONG").toUpperCase();
+        var ik = String(opts.instrumentKey || opts.instrument_key || stock.instrument_key || "").trim();
+        var screenerData = buildKavachScreener(stock, opts.extra || opts);
+        ensureChartEngine()
+            .then(function (eng) {
+                if (!eng || typeof eng.openSecurityChart !== "function") {
+                    throw new Error("Chart module unavailable");
+                }
+                return eng.openSecurityChart({
+                    symbol: sym,
+                    instrumentType: "FUT",
+                    instrumentKey: ik,
+                    displaySymbol: opts.displaySymbol || stock.future_symbol || sym,
+                    exchange: "NSE",
+                    timeframe: "5m",
+                    direction: direction,
+                    screenerData: screenerData,
+                    metadata: { algo: "daily_rs_checklist" },
+                });
+            })
+            .catch(function (err) {
+                if (window.console && window.console.warn) {
+                    window.console.warn("Daily checklist chart:", err);
+                }
+                toast("Chart unavailable — " + (err && err.message ? err.message : "load failed"));
+            });
+    }
     function el(tag, cls, txt) {
         var e = document.createElement(tag);
         if (cls) e.className = cls;
@@ -123,7 +259,8 @@
     function buildFastWatchCard(fw) {
         var card = el("div", "dc-fast-watch-card dc-fast-watch-card--" +
             (fw.direction === "SHORT" ? "short" : "long"));
-        var title = el("strong");
+        card.title = "Open current-month future chart + Kavach panel";
+        var title = el("strong", "dc-symbol-link");
         title.textContent = fw.symbol || "?";
         card.appendChild(title);
         if (fw.is_reversal) {
@@ -140,6 +277,13 @@
             (fw.trade_score != null ? " · Score " + fw.trade_score : "") +
             " · " + (fw.direction === "SHORT" ? "SHORT" : "LONG") + " · " + fmtFwElapsed(fw)
         ));
+        card.addEventListener("click", function () {
+            openSymbolChart(fw.symbol, {
+                direction: fw.direction,
+                instrumentKey: fw.instrument_key,
+                extra: fw,
+            });
+        });
         return card;
     }
 
@@ -315,13 +459,19 @@
         var node = $("dcCardTpl").content.firstElementChild.cloneNode(true);
         node.dataset.symbol = symbol;
         node.addEventListener("click", function (ev) {
-            if (ev.target.closest && ev.target.closest(".dc-take-trade")) return;
-            openModal(symbol);
+            if (ev.target.closest && (
+                ev.target.closest(".dc-take-trade") ||
+                ev.target.closest(".dc-gates-btn")
+            )) return;
+            openSymbolChart(symbol);
         });
         node.addEventListener("keydown", function (ev) {
             if (ev.key === "Enter" || ev.key === " ") {
-                if (ev.target.closest && ev.target.closest(".dc-take-trade")) return;
-                openModal(symbol);
+                if (ev.target.closest && (
+                    ev.target.closest(".dc-take-trade") ||
+                    ev.target.closest(".dc-gates-btn")
+                )) return;
+                openSymbolChart(symbol);
             }
         });
         var takeBtn = node.querySelector(".dc-take-trade");
@@ -330,6 +480,14 @@
                 ev.preventDefault();
                 ev.stopPropagation();
                 takeTrade(symbol);
+            });
+        }
+        var gatesBtn = node.querySelector(".dc-gates-btn");
+        if (gatesBtn) {
+            gatesBtn.addEventListener("click", function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                openModal(symbol);
             });
         }
         cardEls[symbol] = node;
@@ -936,7 +1094,21 @@
             if (takeBtn.disabled) return;
             takeTrade(sym);
         };
-        card.onclick = function () { openModal(sym); };
+        var gatesBtn = card.querySelector(".dc-ready-gates");
+        if (gatesBtn) {
+            gatesBtn.onclick = function (e) {
+                e.stopPropagation();
+                openModal(sym);
+            };
+        }
+        card.onclick = function (e) {
+            if (e.target.closest && (
+                e.target.closest(".dc-ready-take") ||
+                e.target.closest(".dc-ready-gates")
+            )) return;
+            openSymbolChart(sym, { stock: stock });
+        };
+        card.title = "Open current-month future chart + Kavach panel";
 
         var flagsEl = card.querySelector(".dc-ready-flags");
         if (flagsEl) {
@@ -997,7 +1169,18 @@
         var grade = stock.confidence || stock.dashboard_kavach || "";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
         row.querySelector(".dc-watch-meta").textContent = [rs, grade].filter(Boolean).join(" · ");
-        row.onclick = function () { openModal(stock.symbol); };
+        var gatesBtn = row.querySelector(".dc-watch-gates");
+        if (gatesBtn) {
+            gatesBtn.onclick = function (e) {
+                e.stopPropagation();
+                openModal(stock.symbol);
+            };
+        }
+        row.onclick = function (e) {
+            if (e.target.closest && e.target.closest(".dc-watch-gates")) return;
+            openSymbolChart(stock.symbol, { stock: stock });
+        };
+        row.title = "Open current-month future chart + Kavach panel";
     }
 
     function _syncReadyGrid(gridEl, stocks) {
@@ -1228,6 +1411,10 @@
                     row.dataset.symbol = stock.symbol;
                     coGrid.appendChild(row);
                 }
+                row.title = "Open current-month future chart + Kavach panel";
+                row.onclick = function () {
+                    openSymbolChart(stock.symbol, { stock: stock, direction: stock.direction });
+                };
                 row.querySelector(".dc-carry-sym").textContent = stock.symbol + " · " + stock.direction;
                 var rsv = stock.rs_pct;
                 row.querySelector(".dc-carry-rs").textContent = rsv == null ? "—" :
@@ -1283,12 +1470,20 @@
         if (empty) empty.hidden = true;
         items.forEach(function (item) {
             var card = el("div", "dc-go-board-card dc-go-board-card--" + (item.side === "SHORT" ? "short" : "long"));
-            card.innerHTML = "<strong>" + (item.symbol || "?") + "</strong>" +
+            card.title = "Open current-month future chart + Kavach panel";
+            card.innerHTML = "<strong class=\"dc-symbol-link\">" + (item.symbol || "?") + "</strong>" +
                 (item.is_reversal ? " <span class=\"dc-fw-reversal\">REVERSAL</span>" : "") +
                 " · " + (item.kavach_state || "?") +
                 " · Stop " + (item.stop_pct != null ? item.stop_pct + "%" : "—") +
                 " · ₹" + (item.stop_inr_1lot != null ? item.stop_inr_1lot : "—") + " / lot" +
                 (item.confidence_grade ? " · " + item.confidence_grade : "");
+            card.addEventListener("click", function () {
+                openSymbolChart(item.symbol, {
+                    direction: item.side === "SHORT" ? "SHORT" : "LONG",
+                    instrumentKey: item.instrument_key,
+                    extra: item,
+                });
+            });
             stack.appendChild(card);
         });
     }
@@ -1516,7 +1711,21 @@
         card.dataset.tradeId = t.id;
 
         var row1 = el("div", "dc-ot-row dc-ot-row--head");
-        row1.appendChild(el("span", "dc-ot-sym", t.symbol));
+        var symEl = el("button", "dc-ot-sym dc-symbol-link", t.symbol);
+        symEl.type = "button";
+        symEl.title = "Open current-month future chart + Kavach panel";
+        symEl.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            var linked = currentStock(t.symbol) || {};
+            openSymbolChart(t.symbol, {
+                stock: linked,
+                direction: t.direction,
+                instrumentKey: t.instrument_key || linked.instrument_key,
+                extra: t,
+                displaySymbol: t.symbol,
+            });
+        });
+        row1.appendChild(symEl);
         var dir = el("span", "dc-ot-dir dc-ot-dir--" + String(t.direction || "").toLowerCase(), t.direction || "—");
         row1.appendChild(dir);
 

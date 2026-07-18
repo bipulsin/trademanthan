@@ -228,7 +228,14 @@ button.dc-card:hover, .dc-card[role="button"]:hover { box-shadow: 0 2px 8px rgba
 .dc-ot-row--head { margin-bottom: 8px; }
 .dc-ot-row--math { font-size: 12px; font-weight: 600; opacity: 0.95; margin-bottom: 6px; }
 .dc-ot-row--hint { font-size: 12px; opacity: 0.85; }
-.dc-ot-sym { font-size: 18px; font-weight: 800; min-width: 5rem; }
+.dc-ot-sym {
+    font-size: 18px; font-weight: 800; min-width: 5rem;
+    background: none; border: none; padding: 0; cursor: pointer;
+    text-align: left; font-family: inherit;
+}
+.dc-ot-sym.dc-symbol-link:hover { filter: brightness(1.15); }
+.dc-go-board-card, .dc-fast-watch-card, .dc-carry-row { cursor: pointer; }
+.dc-go-board-card:hover, .dc-fast-watch-card:hover { filter: brightness(1.06); }
 .dc-ot-dir { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; }
 .dc-ot-dir--long { background: #166534; color: #bbf7d0; }
 .dc-ot-dir--short { background: #991b1b; color: #fecaca; }
@@ -1136,17 +1143,32 @@ body[data-theme="dark"] .dc-go-board-card {
     display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
 }
 .dc-ready-symbol { font-size: 18px; font-weight: 800; letter-spacing: 0.02em; }
+.dc-symbol-link {
+    color: #5eead4;
+    text-decoration: underline;
+    text-decoration-color: rgba(94, 234, 212, 0.35);
+    text-underline-offset: 2px;
+}
 .dc-ready-dir {
     font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px;
 }
 .dc-ready-dir--long { background: #14532d; color: #86efac !important; }
 .dc-ready-dir--short { background: #7f1d1d; color: #fca5a5 !important; }
+.dc-ready-gates, .dc-watch-gates, .dc-gates-btn {
+    font-size: 11px; font-weight: 700;
+    padding: 6px 10px; border-radius: 8px; border: 1px solid #475569;
+    background: #334155; color: #e2e8f0 !important; cursor: pointer;
+}
+.dc-ready-gates { margin-left: auto; }
 .dc-ready-take {
-    margin-left: auto; font-size: 12px; font-weight: 800;
+    font-size: 12px; font-weight: 800;
     padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
     background: #16a34a; color: #fff !important;
 }
 .dc-ready-take:disabled { background: #475569; cursor: not-allowed; opacity: 0.7; }
+.dc-gates-btn {
+    padding: 4px 8px; min-width: 28px;
+}
 .dc-ready-entry-hero {
     display: flex;
     align-items: baseline;
