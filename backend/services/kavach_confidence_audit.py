@@ -158,7 +158,7 @@ def build_component_payload(
         "Trade Score = rs+kavach+volume+adx+vwap_side (+optional persist). "
         "Confidence grade adds volume_label + VWAP purity≥60% + TRANSITION floor — "
         "volume can suppress grade even when structure is aligned. "
-        "Stretch penalty (Pine v13) is shadow-logged; live write gated by STRETCH_PENALTY_LIVE."
+        "Stretch penalty (Pine v13) applies live by default; set STRETCH_PENALTY_LIVE=0 for shadow-only."
     )
     return {
         "components": breakdown,

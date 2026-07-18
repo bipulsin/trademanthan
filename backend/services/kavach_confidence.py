@@ -1,8 +1,8 @@
 """Kavach unified confidence grade — trade score + volume + VWAP purity.
 
 Stretch penalty (Pine v2.8.7 / v13): nearer of EMA10/VWAP distance as % of price
-penalizes Trade Score and letter grade. Shadow-log always; live write gated by
-``STRETCH_PENALTY_LIVE`` (default off).
+penalizes Trade Score and letter grade. Live by default; set
+``STRETCH_PENALTY_LIVE=0`` to revert to shadow-only.
 """
 from __future__ import annotations
 
@@ -42,9 +42,9 @@ def hard_stretch_pct() -> float:
 def stretch_penalty_live_enabled() -> bool:
     """When True, written trade_score / confidence_grade are post-stretch.
 
-    Default off — shadow-log only until Bipul approves after a full session.
+    Default on after shadow review. Set ``STRETCH_PENALTY_LIVE=0`` to disable.
     """
-    return os.environ.get("STRETCH_PENALTY_LIVE", "0").strip().lower() in (
+    return os.environ.get("STRETCH_PENALTY_LIVE", "1").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -293,9 +293,8 @@ def explain_confidence_grade(
 ) -> dict:
     """Banding + stretch penalty (Pine v13). Always returns pre/post stretch fields.
 
-    When ``apply_live`` is False (default via env), ``grade`` / ``score_int`` /
-    ``display_grade`` stay on the pre-stretch path so cards are unchanged until
-    ``STRETCH_PENALTY_LIVE=1``.
+    When ``apply_live`` is False (or env ``STRETCH_PENALTY_LIVE=0``),
+    ``grade`` / ``score_int`` / ``display_grade`` stay on the pre-stretch path.
     """
     raw_s = int(round(score))
     vol = volume_label
