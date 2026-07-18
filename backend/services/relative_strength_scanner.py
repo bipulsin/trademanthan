@@ -30,10 +30,9 @@ from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.kavach_confidence import (
     REGIME_TREND,
-    compute_confidence_grade,
     compute_vwap_purity_pct,
     detect_market_regime,
-    format_confidence_display,
+    resolve_score_and_grade,
 )
 from backend.services.kavach_volume import (
     closed_bar_volume_ratio,
@@ -464,7 +463,7 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
             continue
         r = dict(r)
         r["ranking_type"] = ranking_type
-        r["trade_score"] = compute_trade_score(
+        raw_score = compute_trade_score(
             rs=r["relative_strength"],
             state=state,
             volume_ratio=r["volume_ratio"],
@@ -473,13 +472,19 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
             vwap=r["vwap"],
             ranking_type=ranking_type,
         )
-        grade, floor = compute_confidence_grade(
-            r["trade_score"],
+        resolved = resolve_score_and_grade(
+            raw_score,
             r.get("volume_label") or "Low",
             r.get("vwap_purity_pct") or 0.0,
             r.get("market_regime") or REGIME_TREND,
+            close=r.get("current_price"),
+            ema10=r.get("ema10"),
+            vwap=r.get("vwap"),
         )
-        r["confidence_grade"] = format_confidence_display(grade, floor)
+        r["trade_score"] = resolved["trade_score"]
+        r["trade_score_raw"] = raw_score
+        r["confidence_grade"] = resolved["confidence_grade"]
+        r["stretch"] = resolved.get("stretch") or {}
         bucket.append(r)
 
     # Bullish: highest RS%% on top. Bearish: lowest RS%% on top. Trade Score breaks ties.

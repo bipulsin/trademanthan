@@ -22,10 +22,9 @@ import pytz
 from backend.services.kavach_confidence import (
     REGIME_TREND,
     VWAP_CONSISTENCY_BARS,
-    compute_confidence_grade,
     compute_vwap_purity_pct,
     detect_market_regime,
-    format_confidence_display,
+    resolve_score_and_grade,
     vwap_opposite_side_consecutive,
 )
 from backend.services.kavach_engine import BEARISH_STATES, compute_trade_score, evaluate_kavach, KavachInput
@@ -317,7 +316,7 @@ def metrics_from_10m_candles(
     )
     stock_pct = (closed_price - previous_close) / previous_close * 100.0 if previous_close else 0.0
     relative_strength = stock_pct - nifty_pct
-    trade_score = compute_trade_score(
+    trade_score_raw = compute_trade_score(
         rs=relative_strength,
         state=kav.state,
         volume_ratio=volume_ratio,
@@ -328,7 +327,6 @@ def metrics_from_10m_candles(
     )
     purity_dir = "SHORT" if kav.state in BEARISH_STATES else "LONG"
     purity = compute_vwap_purity_pct(t_closes, vwap_series, direction=purity_dir, bar_size=1, num_bars=8)
-    grade, floor = compute_confidence_grade(trade_score, vol_label, purity, regime)
 
     last_bar = bars_10m[-1]
     bar_end: Optional[datetime] = last_bar.get("bar_end")
@@ -337,6 +335,17 @@ def metrics_from_10m_candles(
         bar_end = end_ts + timedelta(minutes=BAR_MINUTES_5M) if end_ts else datetime.now(IST)
 
     ema10 = ema10_10min(candles[: pair_end + 1])
+    resolved = resolve_score_and_grade(
+        trade_score_raw,
+        vol_label,
+        purity,
+        regime,
+        close=closed_price,
+        ema10=ema10,
+        vwap=vwap,
+    )
+    trade_score = resolved["trade_score"]
+    stretch = resolved.get("stretch") or {}
 
     # Pine dashboard rows: Trend (2-of-3), Supertrend, MACD (line vs signal).
     ema_above = panel_ema > vwap if vwap else False
@@ -357,11 +366,13 @@ def metrics_from_10m_candles(
     return {
         "relative_strength": relative_strength,
         "trade_score": trade_score,
+        "trade_score_raw": trade_score_raw,
         "volume_ratio": volume_ratio,
         "volume_label": vol_label,
         "vwap_purity_pct": purity,
         "market_regime": regime,
-        "confidence_grade": format_confidence_display(grade, floor),
+        "confidence_grade": resolved["confidence_grade"],
+        "stretch": stretch,
         "kavach_state": kav.state,
         "ema5": ema5,
         "ema10_10m": ema10,

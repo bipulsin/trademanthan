@@ -17,8 +17,7 @@ from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.kavach_confidence import (
     REGIME_TREND,
-    compute_confidence_grade,
-    format_confidence_display,
+    resolve_score_and_grade,
 )
 from backend.services.kavach_engine import (
     BEARISH_STATES,
@@ -133,7 +132,7 @@ def _score_directional(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dic
             continue
         row = dict(r)
         row["ranking_type"] = ranking_type
-        row["trade_score"] = compute_trade_score(
+        raw_score = compute_trade_score(
             rs=row["relative_strength"],
             state=state,
             volume_ratio=row["volume_ratio"],
@@ -142,13 +141,18 @@ def _score_directional(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dic
             vwap=row["vwap"],
             ranking_type=ranking_type,
         )
-        grade, floor = compute_confidence_grade(
-            row["trade_score"],
+        resolved = resolve_score_and_grade(
+            raw_score,
             row.get("volume_label") or "Low",
             row.get("vwap_purity_pct") or 0.0,
             row.get("market_regime") or REGIME_TREND,
+            close=row.get("current_price"),
+            ema10=row.get("ema10"),
+            vwap=row.get("vwap"),
         )
-        row["confidence_grade"] = format_confidence_display(grade, floor)
+        row["trade_score"] = resolved["trade_score"]
+        row["confidence_grade"] = resolved["confidence_grade"]
+        row["stretch"] = resolved.get("stretch") or {}
         bucket.append(row)
     bullish.sort(key=lambda x: (-x["relative_strength"], -x["trade_score"]))
     bearish.sort(key=lambda x: (x["relative_strength"], -x["trade_score"]))

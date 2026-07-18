@@ -129,6 +129,29 @@ def recompute_locked_symbol(
                 atr_pct=atr_pct,
                 source="live",
             )
+            stretch = (metrics or {}).get("stretch")
+            if stretch:
+                from backend.services.kavach_confidence import confidence_passes_gate
+                from backend.services.kavach_stretch_penalty_log import log_stretch_penalty
+
+                pre_g = stretch.get("base_grade_pre_stretch") or ""
+                post_g = stretch.get("base_grade_post_stretch") or ""
+                would_suppress = confidence_passes_gate(pre_g) and not confidence_passes_gate(
+                    post_g
+                )
+                log_stretch_penalty(
+                    db,
+                    session_date=sd,
+                    symbol=sym,
+                    stretch=stretch,
+                    direction=direction,
+                    source="live_10m",
+                    bar_at=metrics.get("bar_evaluated_at"),
+                    close_px=metrics.get("price"),
+                    ema10=metrics.get("ema10_10m"),
+                    vwap=metrics.get("vwap"),
+                    would_suppress_ready=would_suppress,
+                )
         except Exception as exc:
             logger.debug("confidence/structural shadow log skipped %s: %s", sym, exc)
 

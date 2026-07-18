@@ -162,6 +162,38 @@
 
     <section class="agg" id="agg"></section>
 
+    <details class="panel" id="stretchPanel" open>
+      <summary>
+        <span>Stretch penalty (shadow) — Ready Now candidates</span>
+        <span class="meta" id="stretchHint">load today’s first emission per symbol</span>
+      </summary>
+      <div class="panel-body">
+        <div class="row-actions" style="margin-top:0;margin-bottom:10px;">
+          <button type="button" class="primary" id="btnStretchToday">Load today</button>
+          <button type="button" class="ghost" id="btnStretchDate">Load lookup date</button>
+          <span class="meta" id="stretchMeta"></span>
+        </div>
+        <div id="stretchAgg" class="agg" style="margin-bottom:10px;"></div>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Trade Score</th>
+                <th>Confidence</th>
+                <th>Stretch %</th>
+                <th>Band</th>
+                <th>Surfaced</th>
+                <th>Would suppress</th>
+              </tr>
+            </thead>
+            <tbody id="stretchBody"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="stretchEmpty">No stretch shadow rows yet for this session.</p>
+      </div>
+    </details>
+
     <details class="panel" id="reportPanel" open>
       <summary>
         <span>Lookup report</span>
@@ -200,10 +232,12 @@
   var STORAGE_KEY = "rs_confidence_divergence_v2";
   var SETTINGS_KEY = "rs_confidence_divergence_settings_v2";
   var API = "/api/dashboard/rs-divergence/lookup";
+  var STRETCH_API = "/api/dashboard/rs-divergence/stretch-session";
 
   var state = loadState();
   var settings = loadSettings();
   var currentReport = null;
+  var stretchPayload = null;
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -295,6 +329,76 @@
     var n = t.pnl == null || t.pnl === "" ? null : Number(t.pnl);
     var win = n == null || isNaN(n) ? null : n > 0;
     return { taken: true, win: win, label: n == null || isNaN(n) ? "taken" : ((n >= 0 ? "+" : "") + n) };
+  }
+
+  function stretchBand(row) {
+    var pen = Number(row.stretch_letter_penalty || 0);
+    if (pen >= 99) return "HARD";
+    if (Number(row.stretch_score_penalty || 0) > 0) return "SOFT";
+    return "—";
+  }
+  function renderStretch() {
+    var body = $("stretchBody");
+    var empty = $("stretchEmpty");
+    var meta = $("stretchMeta");
+    var agg = $("stretchAgg");
+    body.innerHTML = "";
+    if (!stretchPayload || !stretchPayload.ok) {
+      empty.style.display = "";
+      empty.textContent = (stretchPayload && stretchPayload.error)
+        ? ("Error: " + stretchPayload.error)
+        : "No stretch shadow rows yet for this session.";
+      meta.textContent = "";
+      agg.innerHTML = "";
+      $("stretchHint").textContent = "load today’s first emission per symbol";
+      return;
+    }
+    var rows = stretchPayload.rows || [];
+    empty.style.display = rows.length ? "none" : "";
+    meta.textContent =
+      (stretchPayload.date || "") +
+      " · live=" + (stretchPayload.stretch_penalty_live ? "ON" : "OFF") +
+      " · soft=" + (stretchPayload.soft_stretch_pct != null ? stretchPayload.soft_stretch_pct : "0.35") +
+      "% / hard=" + (stretchPayload.hard_stretch_pct != null ? stretchPayload.hard_stretch_pct : "0.50") + "%";
+    $("stretchHint").textContent = rows.length + " symbols · first emission";
+    agg.innerHTML =
+      '<div class="agg-card"><div class="k">Candidates</div><div class="v">' + (stretchPayload.count || 0) + '</div></div>' +
+      '<div class="agg-card"><div class="k">Penalized</div><div class="v">' + (stretchPayload.penalized_count || 0) + '</div>' +
+        '<div class="s">soft ' + (stretchPayload.soft_count || 0) + ' · hard ' + (stretchPayload.hard_count || 0) + '</div></div>' +
+      '<div class="agg-card"><div class="k">Would suppress</div><div class="v tag-miss">' + (stretchPayload.would_suppress_count || 0) + '</div>' +
+        '<div class="s">pre passes / post fails gate</div></div>';
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      var sp = r.stretch_pct == null ? "—" : Number(r.stretch_pct).toFixed(3) + "%";
+      var score = (r.trade_score_pre_stretch != null ? r.trade_score_pre_stretch : "—") +
+        " → " + (r.trade_score_post_stretch != null ? r.trade_score_post_stretch : "—");
+      var grade = (r.base_grade_pre_stretch || "—") + " → " + (r.base_grade_post_stretch || "—");
+      var surf = r.card_surfaced == null ? "—" : (r.card_surfaced ? "yes" : "no");
+      var supp = r.would_suppress_ready == null ? "—" : (r.would_suppress_ready ? "yes" : "no");
+      tr.innerHTML =
+        "<td><strong>" + esc(r.symbol) + "</strong></td>" +
+        "<td class='mono'>" + esc(score) + "</td>" +
+        "<td class='mono prog'>" + esc(grade) + "</td>" +
+        "<td class='mono'>" + esc(sp) + "</td>" +
+        "<td>" + esc(stretchBand(r)) + "</td>" +
+        "<td>" + esc(surf) + "</td>" +
+        "<td>" + esc(supp) + "</td>";
+      body.appendChild(tr);
+    });
+  }
+  function loadStretch(dateStr) {
+    var q = dateStr ? ("?date=" + encodeURIComponent(dateStr)) : "";
+    $("stretchHint").textContent = "loading…";
+    fetch(STRETCH_API + q, { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        stretchPayload = j;
+        renderStretch();
+      })
+      .catch(function (e) {
+        stretchPayload = { ok: false, error: String(e) };
+        renderStretch();
+      });
   }
 
   function renderAgg() {
@@ -743,6 +847,10 @@
   $("fDate").addEventListener("keydown", function (ev) { if (ev.key === "Enter") runCheck(); });
   $("btnExportJson").addEventListener("click", exportJson);
   $("btnExportCsv").addEventListener("click", exportCsv);
+  $("btnStretchToday").addEventListener("click", function () { loadStretch(todayISO()); });
+  $("btnStretchDate").addEventListener("click", function () {
+    loadStretch(($("fDate").value || todayISO()).slice(0, 10));
+  });
   $("importJson").addEventListener("change", function (ev) {
     var f = ev.target.files && ev.target.files[0];
     if (f) importJson(f);
@@ -766,6 +874,7 @@
 
   renderAgg();
   renderTable();
+  loadStretch(todayISO());
 })();
   </script>
 </body>

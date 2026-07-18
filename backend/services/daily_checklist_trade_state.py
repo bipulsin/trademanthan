@@ -405,7 +405,30 @@ def overlay_live_momentum_from_candles(
         stock["live_candle_ema5"] = _f(metrics.get("ema5"))
         stock["live_candle_ema10"] = _f(metrics.get("ema10_10m"))
         stock["live_candle_price"] = _f(metrics.get("price"))
+        stock["live_candle_vwap"] = _f(metrics.get("vwap"))
         stock["live_candle_bar_at"] = str(metrics.get("bar_evaluated_at") or "")
+        if metrics.get("stretch") is not None:
+            stock["stretch"] = metrics.get("stretch")
+        if metrics.get("trade_score_raw") is not None:
+            stock["trade_score_raw"] = metrics.get("trade_score_raw")
+        if metrics.get("volume_label"):
+            stock["volume_label"] = metrics.get("volume_label")
+        if metrics.get("vwap_purity_pct") is not None:
+            stock["vwap_purity_pct"] = metrics.get("vwap_purity_pct")
+        if metrics.get("market_regime"):
+            stock["market_regime"] = metrics.get("market_regime")
+        # Live score/grade write only when stretch live-gate is on (shadow default keeps cards).
+        try:
+            from backend.services.kavach_confidence import stretch_penalty_live_enabled
+
+            if stretch_penalty_live_enabled():
+                if metrics.get("trade_score") is not None:
+                    stock["trade_score"] = metrics.get("trade_score")
+                if metrics.get("confidence_grade"):
+                    stock["confidence"] = metrics.get("confidence_grade")
+                    stock["dashboard_kavach"] = metrics.get("confidence_grade")
+        except Exception:
+            pass
         # Pine v2.6: Trend = 2-of-3; EMA-VWAP uses panel EMA(9); ST×1.5; MACD 6/13/5.
         trend_lbl = metrics.get("panel_trend")
         ema_lbl = _ema_vs_vwap_label(
@@ -1959,6 +1982,13 @@ def enrich_stocks_trade_state(
         from backend.services.ready_dwell_entry_shadow import build_dwell_entry_shadow
 
         stock_by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
+        from backend.services.kavach_confidence import (
+            confidence_passes_gate,
+            resolve_score_and_grade,
+            stretch_penalty_live_enabled,
+        )
+        from backend.services.kavach_stretch_penalty_log import log_stretch_penalty
+
         for row in consistency_rows:
             sym_u = (row.get("symbol") or "").upper()
             s_final = stock_by_sym.get(sym_u) or {}
@@ -1992,6 +2022,77 @@ def enrich_stocks_trade_state(
                 s_final["dwell_entry_shadow"] = shadow
             except Exception as exc:
                 logger.debug("dwell/entry shadow skipped %s: %s", sym_u, exc)
+            # Stretch penalty shadow (Pine v13) — always log; live gate separate.
+            try:
+                levels = levels_map.get(sym_u) or {}
+                stretch = s_final.get("stretch") or levels.get("stretch")
+                close_px = _f(s_final.get("live_candle_price") or levels.get("price"))
+                ema10 = _f(
+                    s_final.get("live_candle_ema10")
+                    or levels.get("ema10")
+                    or levels.get("ema10_10m")
+                )
+                vwap = _f(s_final.get("live_candle_vwap") or levels.get("vwap"))
+                raw_score = s_final.get("trade_score_raw")
+                if raw_score is None:
+                    raw_score = s_final.get("trade_score") or levels.get("trade_score")
+                if stretch is None and raw_score is not None:
+                    vol_lbl = (
+                        s_final.get("volume_label")
+                        or levels.get("volume_label")
+                        or "Low"
+                    )
+                    purity = float(
+                        s_final.get("vwap_purity_pct")
+                        or levels.get("vwap_purity_pct")
+                        or 0.0
+                    )
+                    regime = (
+                        s_final.get("market_regime")
+                        or levels.get("market_regime")
+                        or "TREND"
+                    )
+                    resolved = resolve_score_and_grade(
+                        float(raw_score),
+                        vol_lbl,
+                        purity,
+                        regime,
+                        close=close_px,
+                        ema10=ema10,
+                        vwap=vwap,
+                    )
+                    stretch = resolved.get("stretch") or {}
+                    s_final["stretch"] = stretch
+                if stretch:
+                    pre_g = stretch.get("base_grade_pre_stretch") or ""
+                    post_g = stretch.get("base_grade_post_stretch") or ""
+                    would_suppress = confidence_passes_gate(
+                        pre_g
+                    ) and not confidence_passes_gate(post_g)
+                    rendered = (row.get("rendered_state") or "").upper()
+                    card_surfaced = "READY" in rendered and not stretch_penalty_live_enabled()
+                    if stretch_penalty_live_enabled():
+                        card_surfaced = "READY" in rendered and confidence_passes_gate(
+                            post_g
+                        )
+                    inp["stretch"] = stretch
+                    inp["would_suppress_ready_by_stretch"] = would_suppress
+                    log_stretch_penalty(
+                        db,
+                        session_date=session_date,
+                        symbol=sym_u,
+                        stretch=stretch,
+                        direction=row.get("direction") or s_final.get("direction"),
+                        source="ready_consistency",
+                        rendered_state=row.get("rendered_state"),
+                        close_px=close_px,
+                        ema10=ema10,
+                        vwap=vwap,
+                        card_surfaced=card_surfaced,
+                        would_suppress_ready=would_suppress,
+                    )
+            except Exception as exc:
+                logger.debug("stretch penalty shadow skipped %s: %s", sym_u, exc)
         if consistency_rows:
             log_ready_consistency(db, consistency_rows)
 

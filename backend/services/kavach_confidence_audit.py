@@ -123,12 +123,24 @@ def build_component_payload(
         vwap=float(metrics.get("vwap") or 0.0),
         ranking_type=ranking,
     )
+    ema10 = metrics.get("ema10_10m")
+    if ema10 is None:
+        ema10 = metrics.get("ema10")
+    raw_score = float(
+        metrics.get("trade_score_raw")
+        if metrics.get("trade_score_raw") is not None
+        else (metrics.get("trade_score") or breakdown["trade_score"])
+    )
     grade_x = explain_confidence_grade(
-        float(metrics.get("trade_score") or breakdown["trade_score"]),
+        raw_score,
         metrics.get("volume_label") or "Low",  # type: ignore[arg-type]
         float(metrics.get("vwap_purity_pct") or 0.0),
         str(metrics.get("market_regime") or "TREND"),
+        close=metrics.get("price"),
+        ema10=ema10,
+        vwap=metrics.get("vwap"),
     )
+    stretch = grade_x.get("stretch") or {}
     # Panel / structure labels (not Trade Score buckets — logged for TV parity review)
     breakdown["panel_trend"] = metrics.get("panel_trend")
     breakdown["supertrend"] = metrics.get("supertrend")
@@ -137,17 +149,23 @@ def build_component_payload(
     breakdown["macd_histogram"] = metrics.get("macd_histogram")
     breakdown["price"] = metrics.get("price")
     breakdown["ema5"] = metrics.get("ema5")
+    breakdown["ema10"] = ema10
     breakdown["vwap"] = metrics.get("vwap")
+    breakdown["stretch"] = stretch
+    breakdown["trade_score_pre_stretch"] = stretch.get("trade_score_pre_stretch")
+    breakdown["trade_score_post_stretch"] = stretch.get("trade_score_post_stretch")
     breakdown["note"] = (
         "Trade Score = rs+kavach+volume+adx+vwap_side (+optional persist). "
         "Confidence grade adds volume_label + VWAP purity≥60% + TRANSITION floor — "
-        "volume can suppress grade even when structure is aligned."
+        "volume can suppress grade even when structure is aligned. "
+        "Stretch penalty (Pine v13) is shadow-logged; live write gated by STRETCH_PENALTY_LIVE."
     )
     return {
         "components": breakdown,
         "grade": grade_x,
-        "trade_score": breakdown["trade_score"],
+        "trade_score": grade_x.get("score_int", breakdown["trade_score"]),
         "confidence_grade": grade_x.get("display_grade") or grade_x.get("grade"),
+        "stretch": stretch,
     }
 
 
