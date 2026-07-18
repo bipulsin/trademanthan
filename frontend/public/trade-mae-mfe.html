@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trade MAE/MFE Excursion — 13–17 Jul 2026</title>
+  <style>
+    :root {
+      --bg: #0f1419; --panel: #1a222c; --panel-2: #232d3a; --border: #334155;
+      --text: #e8eef4; --muted: #94a3b8; --accent: #0d9488;
+      --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: var(--font); color: var(--text); font-size: 13px; line-height: 1.4;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a32 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 16px 18px 48px; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
+    .agg { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .agg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .agg-card .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .agg-card .v { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .agg-card .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .tag-miss { color: #fdba74; }
+    .meta { color: var(--muted); font-size: 12px; }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .warn {
+      background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4);
+      color: #fde68a; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;
+    }
+    details.panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px;
+    }
+    details.panel > summary {
+      cursor: pointer; padding: 10px 12px; font-weight: 700; list-style: none;
+    }
+    details.panel[open] > summary { border-bottom: 1px solid var(--border); }
+    .panel-body { padding: 12px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+    tr.skip td { opacity: 0.7; }
+    .pill {
+      display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+      font-weight: 700; letter-spacing: 0.03em; margin: 1px 2px 1px 0;
+      background: rgba(13, 148, 136, 0.25); color: #5eead4;
+    }
+    .pill-round { background: rgba(234, 88, 12, 0.22); color: #fdba74; }
+    .pill-post { background: rgba(192, 38, 211, 0.22); color: #f0abfc; }
+    .pill-single, .pill-exit { background: rgba(220, 38, 38, 0.22); color: #fecaca; }
+    .pill-pre { background: rgba(202, 138, 4, 0.22); color: #fcd34d; }
+    .pill-degenerate { background: rgba(100, 116, 139, 0.35); color: #cbd5e1; }
+    .empty { color: var(--muted); font-style: italic; }
+    h2 { font-size: 0.95rem; margin: 18px 0 8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Trade MAE / MFE Excursion</h1>
+      <p class="sub">13–17 Jul 2026 actual trades · 10m Upstox candles · effective planned risk =
+      nearer of EMA10 vs VWAP (Notes override when explicit). Research only — no live gating.</p>
+    </div>
+    <div class="meta">Generated 2026-07-18T12:26:11.293720+05:30<br>Source docs/diagnostics/trade_log_13Jul_17Jul2026.xlsx</div>
+  </header>
+
+  
+  <div class="warn">Headline MAE/MFE averages below exclude <b>DEGENERATE_RISK</b> rows
+  (effective SL gap &lt; max(0.5 pts, 0.05% of entry) — typically entry≈VWAP). Per-trade R still shown.</div>
+
+  <div class="agg">
+    <div class="agg-card"><div class="k">Analyzed</div><div class="v">15</div>
+      <div class="s">of 15 rows · stable 13</div></div>
+    <div class="agg-card"><div class="k">Avg MAE (stable)</div><div class="v">1.712R</div>
+      <div class="s">median 1.967R · raw avg 2.475R</div></div>
+    <div class="agg-card"><div class="k">Avg MFE (stable)</div><div class="v">1.691R</div>
+      <div class="s">median 1.191R · raw avg 6.49R</div></div>
+    <div class="agg-card"><div class="k">Round-trip</div><div class="v">2</div>
+      <div class="s">≥1.5R then BE/loss</div></div>
+    <div class="agg-card"><div class="k">Post-exit rev.</div><div class="v">8</div>
+      <div class="s">≥1R resume after exit</div></div>
+    <div class="agg-card"><div class="k">1-candle blowout</div><div class="v">5</div>
+      <div class="s">MAE≥2R on exit bar</div></div>
+    <div class="agg-card"><div class="k">Pre-entry warn</div><div class="v">11</div>
+      <div class="s">structure red flags</div></div>
+  </div>
+
+  <h2>By confidence grade</h2>
+  <div class="agg"><div class="agg-card"><div class="k">Grade A</div>
+            <div class="v">6</div>
+            <div class="s">MAE 1.648R ·
+            MFE 1.614R (stable) ·
+            RT 1 · Rev 2</div></div><div class="agg-card"><div class="k">Grade A+</div>
+            <div class="v">2</div>
+            <div class="s">MAE 2.118R ·
+            MFE 3.326R (stable) ·
+            RT 1 · Rev 2</div></div><div class="agg-card"><div class="k">Grade B</div>
+            <div class="v">3</div>
+            <div class="s">MAE 1.394R ·
+            MFE 0.586R (stable) ·
+            RT 0 · Rev 1</div></div><div class="agg-card"><div class="k">Grade C</div>
+            <div class="v">3</div>
+            <div class="s">MAE 1.815R ·
+            MFE 1.02R (stable) ·
+            RT 0 · Rev 3</div></div><div class="agg-card"><div class="k">Grade D</div>
+            <div class="v">1</div>
+            <div class="s">MAE 1.967R ·
+            MFE 3.463R (stable) ·
+            RT 0 · Rev 0</div></div></div>
+
+  <h2>By effective SL reference</h2>
+  <div class="agg"><div class="agg-card"><div class="k">SL ref EMA10</div>
+            <div class="v">7</div>
+            <div class="s">MAE 1.216R ·
+            MFE 1.587R (stable) ·
+            RT 0 · Rev 2</div></div><div class="agg-card"><div class="k">SL ref VWAP</div>
+            <div class="v">8</div>
+            <div class="s">MAE 2.29R ·
+            MFE 1.812R (stable) ·
+            RT 2 · Rev 6</div></div></div>
+
+  <details class="panel" open>
+    <summary>Per-trade excursion table</summary>
+    <div class="panel-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Date / time</th>
+            <th>Symbol</th>
+            <th>Entry → Exit</th>
+            <th>Planned risk</th>
+            <th>MAE</th>
+            <th>MFE</th>
+            <th>Round-trip</th>
+            <th>Post-exit rev</th>
+            <th>Exit bar range</th>
+            <th>Pre-entry</th>
+            <th>Flags</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">2026-07-17<br><span class="meta">11:25→11:47</span></td>
+            <td><b>KEI</b><br><span class="meta">SHORT · A+</span></td>
+            <td class="mono">4890.0 → 4939.5<br>
+              <span class="meta">P&amp;L -49.5 pts (-1.65R)</span></td>
+            <td class="mono">eff <b>30.0</b> (EMA10)<br>
+              <span class="meta">EMA10 30.0 · VWAP 47.11</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>1.683R</b> (50.5 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>0.533R</b> (16.0 pts)<br>
+              <span class="meta">@ +0 bars</span></td>
+            <td>—</td>
+            <td>YES · 1.25R</td>
+            <td class="mono">0.6R<br><span class="meta">18.0 pts</span></td>
+            <td class="tag-miss">volume decelerating into entry; candle body shrinking into entry (momentum fade); wide EMA10–VWAP gap (0.63% of price) pre-entry; price losing separation from EMA5 into entry</td>
+            <td><span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle</td>
+            </tr><tr>
+            <td class="mono">2026-07-17<br><span class="meta">09:53→10:55</span></td>
+            <td><b>BPCL</b><br><span class="meta">LONG · C</span></td>
+            <td class="mono">314.5 → 312.3<br>
+              <span class="meta">P&amp;L -2.2 pts (-2.075R)</span></td>
+            <td class="mono">eff <b>1.06</b> (VWAP)<br>
+              <span class="meta">EMA10 1.1 · VWAP 1.06</span><br>
+              <span class="meta">VWAP risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>2.028R</b> (2.15 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>0.849R</b> (0.9 pts)<br>
+              <span class="meta">@ +0 bars</span></td>
+            <td>—</td>
+            <td>YES · 1.557R</td>
+            <td class="mono">1.651R<br><span class="meta">1.75 pts</span></td>
+            <td class="tag-miss">LONG while EMA10 below VWAP at last pre-entry bar</td>
+            <td><span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-single'>SINGLE_CANDLE_MAE_BLOWOUT</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one big red candle. Though at 11:55 TV Kavach again given a LONG Buy signal with C* grade, and it never breached EMA10 till 3:00 PM</td>
+            </tr><tr>
+            <td class="mono">2026-07-17<br><span class="meta">10:34→11:05</span></td>
+            <td><b>EICHERMOT</b><br><span class="meta">LONG · B</span></td>
+            <td class="mono">7573.0 → 7521.0<br>
+              <span class="meta">P&amp;L -52.0 pts (-1.368R)</span></td>
+            <td class="mono">eff <b>38.0</b> (VWAP)<br>
+              <span class="meta">EMA10 48.0 · VWAP 38.0</span><br>
+              <span class="meta">Notes specify VWAP as SL</span></td>
+            <td class="mono"><b>1.618R</b> (61.5 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>0.303R</b> (11.5 pts)<br>
+              <span class="meta">@ +0 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.461R)</span></td>
+            <td class="mono">0.882R<br><span class="meta">33.5 pts</span></td>
+            <td class="tag-miss">volume decelerating into entry; price losing separation from EMA5 into entry</td>
+            <td><span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Trade taken basis Top performer of the day, and VWAP as SL since EMA10 was far below. Blown through VWAP in one candle EMA10 which was below VWAP also get breached in same candle</td>
+            </tr><tr>
+            <td class="mono">2026-07-17<br><span class="meta">11:28→14:05</span></td>
+            <td><b>BSE</b><br><span class="meta">SHORT · A</span></td>
+            <td class="mono">3601.5 → 3600.1<br>
+              <span class="meta">P&amp;L 1.4 pts (0.197R)</span></td>
+            <td class="mono">eff <b>7.1</b> (EMA10)<br>
+              <span class="meta">EMA10 7.1 · VWAP 27.21</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>1.789R</b> (12.7 pts)<br>
+              <span class="meta">earlier (recovered)</span></td>
+            <td class="mono"><b>2.592R</b> (18.4 pts)<br>
+              <span class="meta">@ +14 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.831R)</span></td>
+            <td class="mono">2.169R<br><span class="meta">15.4 pts</span></td>
+            <td class="tag-miss">wide EMA10–VWAP gap (0.40% of price) pre-entry; price losing separation from EMA5 into entry</td>
+            <td><span class='pill pill-exit'>EXIT_CANDLE_BLOWOUT</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle</td>
+            </tr><tr>
+            <td class="mono">2026-07-17<br><span class="meta">12:38→14:31</span></td>
+            <td><b>TCS</b><br><span class="meta">LONG · B</span></td>
+            <td class="mono">2262.0 → 2262.6<br>
+              <span class="meta">P&amp;L 0.6 pts (0.067R)</span></td>
+            <td class="mono">eff <b>9.0</b> (EMA10)<br>
+              <span class="meta">EMA10 9.0 · VWAP 18.36</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>0.4R</b> (3.6 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>1.078R</b> (9.7 pts)<br>
+              <span class="meta">@ +10 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.811R)</span></td>
+            <td class="mono">0.944R<br><span class="meta">8.5 pts</span></td>
+            <td class="tag-miss">wide EMA10–VWAP gap (0.35% of price) pre-entry</td>
+            <td><span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle</td>
+            </tr><tr>
+            <td class="mono">2026-07-16<br><span class="meta">10:30→11:02</span></td>
+            <td><b>TECHM</b><br><span class="meta">LONG · A</span></td>
+            <td class="mono">1526.4 → 1531.0<br>
+              <span class="meta">P&amp;L 4.6 pts (1.337R)</span></td>
+            <td class="mono">eff <b>3.44</b> (VWAP)<br>
+              <span class="meta">EMA10 7.43 · VWAP 3.44</span><br>
+              <span class="meta">VWAP risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>2.5R</b> (8.6 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>2.355R</b> (8.1 pts)<br>
+              <span class="meta">@ +3 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.291R)</span></td>
+            <td class="mono">4.855R<br><span class="meta">16.7 pts</span></td>
+            <td class="tag-miss">candle body shrinking into entry (momentum fade); LONG while EMA10 below VWAP at last pre-entry bar</td>
+            <td><span class='pill pill-exit'>EXIT_CANDLE_BLOWOUT</span> <span class='pill pill-single'>SINGLE_CANDLE_MAE_BLOWOUT</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Exited because 1:1.6 Target reached (booked below 1:2 as I was skeptical of the further move and confidence score also has gone down to D). I just didnt want to fight further</td>
+            </tr><tr>
+            <td class="mono">2026-07-16<br><span class="meta">11:38→13:15</span></td>
+            <td><b>POLICYBZR</b><br><span class="meta">LONG · D</span></td>
+            <td class="mono">1580.0 → 1580.2<br>
+              <span class="meta">P&amp;L 0.2 pts (0.055R)</span></td>
+            <td class="mono">eff <b>3.61</b> (EMA10)<br>
+              <span class="meta">EMA10 3.61 · VWAP 12.48</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>1.967R</b> (7.1 pts)<br>
+              <span class="meta">earlier (recovered)</span></td>
+            <td class="mono"><b>3.463R</b> (12.5 pts)<br>
+              <span class="meta">@ +6 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.055R)</span></td>
+            <td class="mono">0.582R<br><span class="meta">2.1 pts</span></td>
+            <td class="meta">no clear pre-entry red flag from 10m structure</td>
+            <td><span class='meta'>—</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle. I got an opportunity to book at 1590 around 12:45 and I missed that opportunity and led to loss</td>
+            </tr><tr>
+            <td class="mono">2026-07-16<br><span class="meta">14:49→14:59</span></td>
+            <td><b>UPL</b><br><span class="meta">LONG · A</span></td>
+            <td class="mono">620.8 → 622.05<br>
+              <span class="meta">P&amp;L 1.25 pts (0.767R)</span></td>
+            <td class="mono">eff <b>1.63</b> (EMA10)<br>
+              <span class="meta">EMA10 1.63 · VWAP 8.73</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>0.245R</b> (0.4 pts)<br>
+              <span class="meta">earlier (recovered)</span></td>
+            <td class="mono"><b>1.564R</b> (2.55 pts)<br>
+              <span class="meta">@ +1 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.0R)</span></td>
+            <td class="mono">1.656R<br><span class="meta">2.7 pts</span></td>
+            <td class="tag-miss">wide EMA10–VWAP gap (1.09% of price) pre-entry</td>
+            <td><span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">End of session, decided to enter at the cutoff time, and exited with a minor profit. Thsi was one symbol that was the top performer for teh day, but my application was completely b</td>
+            </tr><tr>
+            <td class="mono">2026-07-15<br><span class="meta">09:51→10:16</span></td>
+            <td><b>DIVISLAB</b><br><span class="meta">LONG · A</span></td>
+            <td class="mono">7300.0 → 7281.5<br>
+              <span class="meta">P&amp;L -18.5 pts (-1.402R)</span></td>
+            <td class="mono">eff <b>13.2</b> (VWAP)<br>
+              <span class="meta">EMA10 61.0 · VWAP 13.2</span><br>
+              <span class="meta">Notes specify VWAP as SL</span></td>
+            <td class="mono"><b>2.879R</b> (38.0 pts)<br>
+              <span class="meta">earlier (recovered)</span></td>
+            <td class="mono"><b>0.871R</b> (11.5 pts)<br>
+              <span class="meta">@ +1 bars</span></td>
+            <td>—</td>
+            <td>YES · 1.705R</td>
+            <td class="mono">1.061R<br><span class="meta">14.0 pts</span></td>
+            <td class="meta">no clear pre-entry red flag from 10m structure</td>
+            <td><span class='pill pill-post'>POST_EXIT_REVERSION</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle. This was the top in the list for the day from previous day RS Scan. Price has given a pullback to VWAP. I considered VWAP as SL. Entered b</td>
+            </tr><tr>
+            <td class="mono">2026-07-15<br><span class="meta">10:46→11:15</span></td>
+            <td><b>HYUNDAI</b><br><span class="meta">LONG · B</span></td>
+            <td class="mono">2037.0 → 2019.1<br>
+              <span class="meta">P&amp;L -17.9 pts (-2.106R)</span></td>
+            <td class="mono">eff <b>8.5</b> (VWAP)<br>
+              <span class="meta">EMA10 12.7 · VWAP 8.5</span><br>
+              <span class="meta">VWAP risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>2.165R</b> (18.4 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>0.376R</b> (3.2 pts)<br>
+              <span class="meta">@ +0 bars</span></td>
+            <td>—</td>
+            <td>YES · 1.165R</td>
+            <td class="mono">1.518R<br><span class="meta">12.9 pts</span></td>
+            <td class="meta">no clear pre-entry red flag from 10m structure</td>
+            <td><span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-single'>SINGLE_CANDLE_MAE_BLOWOUT</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle</td>
+            </tr><tr>
+            <td class="mono">2026-07-15<br><span class="meta">11:02→11:45</span></td>
+            <td><b>CHOLAFIN</b><br><span class="meta">LONG · A</span></td>
+            <td class="mono">1822.1 → 1818.7<br>
+              <span class="meta">P&amp;L -3.4 pts (-4.25R)</span></td>
+            <td class="mono">eff <b>0.8</b> (VWAP)<br>
+              <span class="meta">EMA10 4.2 · VWAP 0.8</span><br>
+              <span class="meta">VWAP risk smaller (default nearer stop) — near-zero gap (0.80 pts); R multiples unstable</span></td>
+            <td class="mono"><b>8.875R</b> (7.1 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>7.375R</b> (5.9 pts)<br>
+              <span class="meta">@ +1 bars</span></td>
+            <td>YES · 7.375R</td>
+            <td>YES · 4.125R</td>
+            <td class="mono">10.75R<br><span class="meta">8.6 pts</span></td>
+            <td class="tag-miss">volume decelerating into entry</td>
+            <td><span class='pill pill-degenerate'>DEGENERATE_RISK</span> <span class='pill pill-round'>ROUND_TRIP</span> <span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-exit'>EXIT_CANDLE_BLOWOUT</span> <span class='pill pill-single'>SINGLE_CANDLE_MAE_BLOWOUT</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle</td>
+            </tr><tr>
+            <td class="mono">2026-07-14<br><span class="meta">09:47→09:56</span></td>
+            <td><b>ADANIPOWER</b><br><span class="meta">LONG · C</span></td>
+            <td class="mono">219.12 → 221.4<br>
+              <span class="meta">P&amp;L 2.28 pts (32.571R)</span></td>
+            <td class="mono">eff <b>0.07</b> (VWAP)<br>
+              <span class="meta">EMA10 0.91 · VWAP 0.07</span><br>
+              <span class="meta">VWAP risk smaller (default nearer stop) — near-zero gap (0.07 pts); R multiples unstable</span></td>
+            <td class="mono"><b>6.0R</b> (0.42 pts)<br>
+              <span class="meta">earlier (recovered)</span></td>
+            <td class="mono"><b>68.0R</b> (4.76 pts)<br>
+              <span class="meta">@ +1 bars</span></td>
+            <td>—</td>
+            <td>YES · 62.143R</td>
+            <td class="mono">58.714R<br><span class="meta">4.11 pts</span></td>
+            <td class="meta">no clear pre-entry red flag from 10m structure</td>
+            <td><span class='pill pill-degenerate'>DEGENERATE_RISK</span> <span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-exit'>EXIT_CANDLE_BLOWOUT</span></td>
+            <td class="meta">Target T1 achieved (R:R got 1:2)</td>
+            </tr><tr>
+            <td class="mono">2026-07-13<br><span class="meta">09:51→11:46</span></td>
+            <td><b>ADANIGREEN</b><br><span class="meta">LONG · A+</span></td>
+            <td class="mono">1564.5 → 1559.0<br>
+              <span class="meta">P&amp;L -5.5 pts (-1.923R)</span></td>
+            <td class="mono">eff <b>2.86</b> (VWAP)<br>
+              <span class="meta">EMA10 19.73 · VWAP 2.86</span><br>
+              <span class="meta">VWAP risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>2.552R</b> (7.3 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>6.119R</b> (17.5 pts)<br>
+              <span class="meta">@ +1 bars</span></td>
+            <td>YES · 6.119R</td>
+            <td>YES · 2.378R</td>
+            <td class="mono">1.713R<br><span class="meta">4.9 pts</span></td>
+            <td class="tag-miss">LONG while EMA10 below VWAP at last pre-entry bar</td>
+            <td><span class='pill pill-round'>ROUND_TRIP</span> <span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-single'>SINGLE_CANDLE_MAE_BLOWOUT</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle, but still delayed exit by 4 candle as the very next candle in opening few seconds has pulled back to more than half of the red candle, and</td>
+            </tr><tr>
+            <td class="mono">2026-07-13<br><span class="meta">11:50→12:45</span></td>
+            <td><b>ADANIGREEN</b><br><span class="meta">SHORT · C</span></td>
+            <td class="mono">1558.0 → 1562.8<br>
+              <span class="meta">P&amp;L -4.8 pts (-0.986R)</span></td>
+            <td class="mono">eff <b>4.87</b> (EMA10)<br>
+              <span class="meta">EMA10 4.87 · VWAP 7.5</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>1.602R</b> (7.8 pts)<br>
+              <span class="meta">earlier (recovered)</span></td>
+            <td class="mono"><b>1.191R</b> (5.8 pts)<br>
+              <span class="meta">@ +2 bars</span></td>
+            <td>—</td>
+            <td>YES · 2.628R</td>
+            <td class="mono">1.006R<br><span class="meta">4.9 pts</span></td>
+            <td class="tag-miss">candle body shrinking into entry (momentum fade)</td>
+            <td><span class='pill pill-post'>POST_EXIT_REVERSION</span> <span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle. Trade was extending in SHORT side.Possibly more of a revenge trade, as the tradewithcto.com Kavach checklist was not very intutive that ti</td>
+            </tr><tr>
+            <td class="mono">2026-07-13<br><span class="meta">12:56→13:16</span></td>
+            <td><b>TATAELXSI</b><br><span class="meta">LONG · A</span></td>
+            <td class="mono">3814.0 → 3811.3<br>
+              <span class="meta">P&amp;L -2.7 pts (-0.116R)</span></td>
+            <td class="mono">eff <b>23.25</b> (EMA10)<br>
+              <span class="meta">EMA10 23.25 · VWAP 57.66</span><br>
+              <span class="meta">EMA10 risk smaller (default nearer stop)</span></td>
+            <td class="mono"><b>0.826R</b> (19.2 pts)<br>
+              <span class="meta">exit candle</span></td>
+            <td class="mono"><b>0.688R</b> (16.0 pts)<br>
+              <span class="meta">@ +0 bars</span></td>
+            <td>—</td>
+            <td>— <span class='meta'>(0.159R)</span></td>
+            <td class="mono">1.041R<br><span class="meta">24.2 pts</span></td>
+            <td class="tag-miss">wide EMA10–VWAP gap (0.89% of price) pre-entry</td>
+            <td><span class='pill pill-pre'>PRE_ENTRY_WARNING</span></td>
+            <td class="meta">Blown through EMA10 &amp; VWAP in one candle</td>
+            </tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <p class="meta">Effective risk = min(|entry−EMA10|, |entry−VWAP|) unless Notes force a reference.
+  MAE/MFE from 10m OHLC between entry and exit bars. Post-exit window = next 5 ten-minute bars.
+  Pre-entry = prior 5 bars (EMA10 vs VWAP + volume/body deceleration heuristics).</p>
+</div>
+</body>
+</html>
