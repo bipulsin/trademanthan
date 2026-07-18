@@ -1,0 +1,1872 @@
+{
+  "meta": {
+    "generated_at": "2026-07-18T13:05:34.558600+05:30",
+    "xlsx": "docs/diagnostics/trade_log_13Jul_17Jul2026.xlsx",
+    "pre_bars": 5,
+    "post_bars": 5
+  },
+  "summary": {
+    "n_total": 15,
+    "n_analyzed": 15,
+    "n_skipped": 0,
+    "skipped": [],
+    "overall": {
+      "n": 15,
+      "n_stable_risk": 13,
+      "n_degenerate_risk": 2,
+      "round_trip": 2,
+      "post_exit_reversion": 8,
+      "avg_mae_mult": 2.475,
+      "avg_mfe_mult": 6.49,
+      "median_mae_mult": 1.967,
+      "median_mfe_mult": 1.191,
+      "avg_mae_mult_stable": 1.712,
+      "avg_mfe_mult_stable": 1.691,
+      "avg_mae_pts": 16.318,
+      "avg_mfe_pts": 9.621,
+      "avg_mae_atr": 1.077,
+      "avg_mfe_atr": 1.184,
+      "single_candle_blowout": 5,
+      "single_candle_blowout_atr": 2,
+      "pre_entry_warning": 11
+    },
+    "by_grade": {
+      "A": {
+        "n": 6,
+        "n_stable_risk": 5,
+        "n_degenerate_risk": 1,
+        "round_trip": 1,
+        "post_exit_reversion": 2,
+        "avg_mae_mult": 2.852,
+        "avg_mfe_mult": 2.574,
+        "median_mae_mult": 2.144,
+        "median_mfe_mult": 1.96,
+        "avg_mae_mult_stable": 1.648,
+        "avg_mfe_mult_stable": 1.614,
+        "avg_mae_pts": 14.333,
+        "avg_mfe_pts": 10.408,
+        "avg_mae_atr": 0.886,
+        "avg_mfe_atr": 0.915,
+        "single_candle_blowout": 2,
+        "single_candle_blowout_atr": 0,
+        "pre_entry_warning": 5
+      },
+      "A+": {
+        "n": 2,
+        "n_stable_risk": 2,
+        "n_degenerate_risk": 0,
+        "round_trip": 1,
+        "post_exit_reversion": 2,
+        "avg_mae_mult": 2.118,
+        "avg_mfe_mult": 3.326,
+        "median_mae_mult": 2.118,
+        "median_mfe_mult": 3.326,
+        "avg_mae_mult_stable": 2.118,
+        "avg_mfe_mult_stable": 3.326,
+        "avg_mae_pts": 28.9,
+        "avg_mfe_pts": 16.75,
+        "avg_mae_atr": 1.226,
+        "avg_mfe_atr": 1.284,
+        "single_candle_blowout": 1,
+        "single_candle_blowout_atr": 0,
+        "pre_entry_warning": 2
+      },
+      "B": {
+        "n": 3,
+        "n_stable_risk": 3,
+        "n_degenerate_risk": 0,
+        "round_trip": 0,
+        "post_exit_reversion": 1,
+        "avg_mae_mult": 1.394,
+        "avg_mfe_mult": 0.586,
+        "median_mae_mult": 1.618,
+        "median_mfe_mult": 0.376,
+        "avg_mae_mult_stable": 1.394,
+        "avg_mfe_mult_stable": 0.586,
+        "avg_mae_pts": 27.833,
+        "avg_mfe_pts": 8.133,
+        "avg_mae_atr": 1.301,
+        "avg_mfe_atr": 0.606,
+        "single_candle_blowout": 1,
+        "single_candle_blowout_atr": 1,
+        "pre_entry_warning": 2
+      },
+      "C": {
+        "n": 3,
+        "n_stable_risk": 2,
+        "n_degenerate_risk": 1,
+        "round_trip": 0,
+        "post_exit_reversion": 3,
+        "avg_mae_mult": 3.21,
+        "avg_mfe_mult": 23.347,
+        "median_mae_mult": 2.028,
+        "median_mfe_mult": 1.191,
+        "avg_mae_mult_stable": 1.815,
+        "avg_mfe_mult_stable": 1.02,
+        "avg_mae_pts": 3.457,
+        "avg_mfe_pts": 3.82,
+        "avg_mae_atr": 1.217,
+        "avg_mfe_atr": 2.132,
+        "single_candle_blowout": 1,
+        "single_candle_blowout_atr": 1,
+        "pre_entry_warning": 2
+      },
+      "D": {
+        "n": 1,
+        "n_stable_risk": 1,
+        "n_degenerate_risk": 0,
+        "round_trip": 0,
+        "post_exit_reversion": 0,
+        "avg_mae_mult": 1.967,
+        "avg_mfe_mult": 3.463,
+        "median_mae_mult": 1.967,
+        "median_mfe_mult": 3.463,
+        "avg_mae_mult_stable": 1.967,
+        "avg_mfe_mult_stable": 3.463,
+        "avg_mae_pts": 7.1,
+        "avg_mfe_pts": 12.5,
+        "avg_mae_atr": 0.839,
+        "avg_mfe_atr": 1.478,
+        "single_candle_blowout": 0,
+        "single_candle_blowout_atr": 0,
+        "pre_entry_warning": 0
+      }
+    },
+    "by_sl_ref": {
+      "EMA10": {
+        "n": 7,
+        "n_stable_risk": 7,
+        "n_degenerate_risk": 0,
+        "round_trip": 0,
+        "post_exit_reversion": 2,
+        "avg_mae_mult": 1.216,
+        "avg_mfe_mult": 1.587,
+        "median_mae_mult": 1.602,
+        "median_mfe_mult": 1.191,
+        "avg_mae_mult_stable": 1.216,
+        "avg_mfe_mult_stable": 1.587,
+        "avg_mae_pts": 14.471,
+        "avg_mfe_pts": 11.564,
+        "avg_mae_atr": 0.866,
+        "avg_mfe_atr": 1.043,
+        "single_candle_blowout": 0,
+        "single_candle_blowout_atr": 0,
+        "pre_entry_warning": 6
+      },
+      "VWAP": {
+        "n": 8,
+        "n_stable_risk": 6,
+        "n_degenerate_risk": 2,
+        "round_trip": 2,
+        "post_exit_reversion": 6,
+        "avg_mae_mult": 3.577,
+        "avg_mfe_mult": 10.781,
+        "median_mae_mult": 2.526,
+        "median_mfe_mult": 1.613,
+        "avg_mae_mult_stable": 2.29,
+        "avg_mfe_mult_stable": 1.812,
+        "avg_mae_pts": 17.934,
+        "avg_mfe_pts": 7.92,
+        "avg_mae_atr": 1.262,
+        "avg_mfe_atr": 1.306,
+        "single_candle_blowout": 5,
+        "single_candle_blowout_atr": 2,
+        "pre_entry_warning": 5
+      }
+    },
+    "denominator_check": {
+      "sample_caveat": "n=15 trades (13\u201317 Jul). All conclusions are directional only \u2014 not statistically reliable.",
+      "verdict_label": "persists",
+      "verdict": "PARTLY PERSISTS AFTER CONTROLLING \u2014 median MAE in points is similar across SL groups (R-gap is partly a denominator artifact), but VWAP-effective remains worse on MAE/ATR and ATR-normalized single-candle blowouts. Avg MAE points look higher for VWAP but medians are nearly identical (outlier-driven, not typical). Treat as directional only (n=15), not a settled finding.",
+      "ema10": {
+        "n": 7,
+        "n_stable_risk": 7,
+        "avg_effective_risk_pts": 11.351,
+        "median_effective_risk_pts": 7.1,
+        "avg_mae_pts": 14.471,
+        "median_mae_pts": 7.8,
+        "avg_mfe_pts": 11.564,
+        "median_mfe_pts": 12.5,
+        "avg_exit_range_pts": 10.829,
+        "avg_atr14_pts": 13.029,
+        "avg_mae_atr": 0.866,
+        "median_mae_atr": 0.9,
+        "avg_mfe_atr": 1.043,
+        "median_mfe_atr": 1.174,
+        "avg_mae_mult_stable": 1.216,
+        "avg_mfe_mult_stable": 1.587,
+        "single_candle_blowout_r": 0,
+        "single_candle_blowout_atr": 0,
+        "post_exit_reversion": 2,
+        "round_trip": 0
+      },
+      "vwap": {
+        "n": 8,
+        "n_stable_risk": 6,
+        "avg_effective_risk_pts": 8.491,
+        "median_effective_risk_pts": 3.15,
+        "avg_mae_pts": 17.934,
+        "median_mae_pts": 7.95,
+        "avg_mfe_pts": 7.92,
+        "median_mfe_pts": 7.0,
+        "avg_exit_range_pts": 12.057,
+        "avg_atr14_pts": 12.614,
+        "avg_mae_atr": 1.262,
+        "median_mae_atr": 1.117,
+        "avg_mfe_atr": 1.306,
+        "median_mfe_atr": 0.867,
+        "avg_mae_mult_stable": 2.29,
+        "avg_mfe_mult_stable": 1.812,
+        "single_candle_blowout_r": 5,
+        "single_candle_blowout_atr": 2,
+        "post_exit_reversion": 6,
+        "round_trip": 2
+      },
+      "gaps": {
+        "vwap_vs_ema_avg_risk_pts": -0.252,
+        "vwap_vs_ema_avg_mae_r_stable": 0.883,
+        "vwap_vs_ema_avg_mae_pts": 0.239,
+        "vwap_vs_ema_median_mae_pts": 0.019,
+        "vwap_vs_ema_avg_mae_atr": 0.457,
+        "avg_mae_pts_outlier_driven": true
+      }
+    },
+    "pre_entry_discrimination": {
+      "sample_caveat": "n=15 trades. Win = P&L points > 0; loss/flat = P&L \u2264 0. Directional only.",
+      "combined": {
+        "n_winners": 6,
+        "n_losers": 9,
+        "rate_winners_pct": 66.7,
+        "rate_losers_pct": 77.8,
+        "delta_pp_winners_minus_losers": -11.1,
+        "discriminating": false,
+        "note": "Flag rate on winners (66.7%) vs losers (77.8%) differs by 11 pp (\u226415 pp) \u2014 not currently discriminating."
+      },
+      "sub_flags": {
+        "volume_decel": {
+          "n_winners": 6,
+          "n_losers": 9,
+          "rate_winners_pct": 0.0,
+          "rate_losers_pct": 33.3,
+          "delta_pp_winners_minus_losers": -33.3,
+          "discriminating": true,
+          "note": "Flag rate on winners (0.0%) vs losers (33.3%) differs by 33 pp \u2014 higher on losers. Directional only (small n).",
+          "label": "volume decelerating into entry"
+        },
+        "body_shrink": {
+          "n_winners": 6,
+          "n_losers": 9,
+          "rate_winners_pct": 16.7,
+          "rate_losers_pct": 22.2,
+          "delta_pp_winners_minus_losers": -5.5,
+          "discriminating": false,
+          "note": "Flag rate on winners (16.7%) vs losers (22.2%) differs by 6 pp (\u226415 pp) \u2014 not currently discriminating.",
+          "label": "candle body shrinking into entry (momentum fade)"
+        },
+        "ema_vwap_misalign": {
+          "n_winners": 6,
+          "n_losers": 9,
+          "rate_winners_pct": 16.7,
+          "rate_losers_pct": 22.2,
+          "delta_pp_winners_minus_losers": -5.5,
+          "discriminating": false,
+          "note": "Flag rate on winners (16.7%) vs losers (22.2%) differs by 6 pp (\u226415 pp) \u2014 not currently discriminating.",
+          "label": "EMA10/VWAP misaligned with trade direction"
+        },
+        "wide_ema_vwap_gap": {
+          "n_winners": 6,
+          "n_losers": 9,
+          "rate_winners_pct": 50.0,
+          "rate_losers_pct": 22.2,
+          "delta_pp_winners_minus_losers": 27.8,
+          "discriminating": true,
+          "note": "Flag rate on winners (50.0%) vs losers (22.2%) differs by 28 pp \u2014 higher on winners. Directional only (small n).",
+          "label": "wide EMA10\u2013VWAP gap pre-entry"
+        },
+        "ema5_sep_fade": {
+          "n_winners": 6,
+          "n_losers": 9,
+          "rate_winners_pct": 16.7,
+          "rate_losers_pct": 22.2,
+          "delta_pp_winners_minus_losers": -5.5,
+          "discriminating": false,
+          "note": "Flag rate on winners (16.7%) vs losers (22.2%) differs by 6 pp (\u226415 pp) \u2014 not currently discriminating.",
+          "label": "price losing separation from EMA5 into entry"
+        }
+      },
+      "overall_note": "Combined PRE_ENTRY_WARNING is not discriminating, but one or more sub-flags show a larger win/loss rate gap \u2014 see breakdown. Still directional only (n=15)."
+    },
+    "sample_caveat": "Sample is only 15 trades (13\u201317 Jul 2026). Findings are directional research signals, not statistically reliable conclusions."
+  },
+  "trades": [
+    {
+      "trade": {
+        "row": 2,
+        "date": "2026-07-17",
+        "symbol": "KEI",
+        "direction": "SHORT",
+        "entry_time": "11:25",
+        "exit_time": "11:47",
+        "entry_price": 4890.0,
+        "exit_price": 4939.5,
+        "grade": "A+",
+        "notes": "Blown through EMA10 & VWAP in one candle",
+        "ema10_sl": 4920.0,
+        "vwap_sl": 4937.11
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61224",
+      "risk_ema10_pts": 30.0,
+      "risk_vwap_pts": 47.11,
+      "effective_risk_pts": 30.0,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 4920.0,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 50.5,
+      "mae_mult": 1.683,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 16.0,
+      "mfe_mult": 0.533,
+      "mfe_bars_after_entry": 0,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 1.25,
+      "exit_candle_range_pts": 18.0,
+      "exit_candle_range_mult": 0.6,
+      "pnl_pts": -49.5,
+      "pnl_r": -1.65,
+      "atr14_pts": 31.714,
+      "mae_atr": 1.592,
+      "mfe_atr": 0.505,
+      "exit_candle_range_atr": 0.568,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "volume decelerating into entry; candle body shrinking into entry (momentum fade); wide EMA10\u2013VWAP gap pre-entry (0.63% of price); price losing separation from EMA5 into entry",
+        "details": [
+          {
+            "bar_end": "2026-07-17 10:35:00+05:30",
+            "close": 4942.5,
+            "volume": 5950.0,
+            "range": 26.0,
+            "ema10": 4933.44,
+            "vwap": 4948.41,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 14.97
+          },
+          {
+            "bar_end": "2026-07-17 10:45:00+05:30",
+            "close": 4920.5,
+            "volume": 6300.0,
+            "range": 29.0,
+            "ema10": 4931.09,
+            "vwap": 4947.68,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 16.6
+          },
+          {
+            "bar_end": "2026-07-17 10:55:00+05:30",
+            "close": 4879.5,
+            "volume": 24850.0,
+            "range": 48.0,
+            "ema10": 4921.71,
+            "vwap": 4943.08,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 21.38
+          },
+          {
+            "bar_end": "2026-07-17 11:05:00+05:30",
+            "close": 4881.0,
+            "volume": 5775.0,
+            "range": 14.0,
+            "ema10": 4914.31,
+            "vwap": 4941.76,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 27.45
+          },
+          {
+            "bar_end": "2026-07-17 11:15:00+05:30",
+            "close": 4887.5,
+            "volume": 7175.0,
+            "range": 12.5,
+            "ema10": 4909.43,
+            "vwap": 4940.11,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 30.68
+          }
+        ],
+        "warnings": [
+          "volume decelerating into entry",
+          "candle body shrinking into entry (momentum fade)",
+          "wide EMA10\u2013VWAP gap pre-entry (0.63% of price)",
+          "price losing separation from EMA5 into entry"
+        ],
+        "warning_codes": [
+          "volume_decel",
+          "body_shrink",
+          "wide_ema_vwap_gap",
+          "ema5_sep_fade"
+        ]
+      },
+      "flags": [
+        "POST_EXIT_REVERSION",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 3,
+        "date": "2026-07-17",
+        "symbol": "BPCL",
+        "direction": "LONG",
+        "entry_time": "09:53",
+        "exit_time": "10:55",
+        "entry_price": 314.5,
+        "exit_price": 312.3,
+        "grade": "C",
+        "notes": "Blown through EMA10 & VWAP in one big red candle. Though at 11:55 TV Kavach again given a LONG Buy signal with C* grade, and it never breached EMA10 till 3:00 PM",
+        "ema10_sl": 313.4,
+        "vwap_sl": 313.44
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61132",
+      "risk_ema10_pts": 1.1,
+      "risk_vwap_pts": 1.06,
+      "effective_risk_pts": 1.06,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 313.44,
+      "sl_choice_reason": "VWAP risk smaller (default nearer stop)",
+      "mae_pts": 2.15,
+      "mae_mult": 2.028,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 0.9,
+      "mfe_mult": 0.849,
+      "mfe_bars_after_entry": 0,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 1.557,
+      "exit_candle_range_pts": 1.75,
+      "exit_candle_range_mult": 1.651,
+      "pnl_pts": -2.2,
+      "pnl_r": -2.075,
+      "atr14_pts": 1.0184,
+      "mae_atr": 2.111,
+      "mfe_atr": 0.884,
+      "exit_candle_range_atr": 1.718,
+      "single_candle_blowout_atr": true,
+      "pre_entry": {
+        "warning": true,
+        "summary": "EMA10/VWAP misaligned with trade direction",
+        "details": [
+          {
+            "bar_end": "2026-07-17 09:25:00+05:30",
+            "close": 312.05,
+            "volume": 106650.0,
+            "range": 1.65,
+            "ema10": 312.05,
+            "vwap": 312.05,
+            "ema10_vwap": "EMA10=VWAP",
+            "ema10_vwap_gap": 0.0
+          },
+          {
+            "bar_end": "2026-07-17 09:35:00+05:30",
+            "close": 313.6,
+            "volume": 94800.0,
+            "range": 2.05,
+            "ema10": 312.33,
+            "vwap": 312.46,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.13
+          },
+          {
+            "bar_end": "2026-07-17 09:45:00+05:30",
+            "close": 313.75,
+            "volume": 298225.0,
+            "range": 1.65,
+            "ema10": 312.59,
+            "vwap": 312.96,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.37
+          }
+        ],
+        "warnings": [
+          "EMA10/VWAP misaligned with trade direction"
+        ],
+        "warning_codes": [
+          "ema_vwap_misalign"
+        ]
+      },
+      "flags": [
+        "POST_EXIT_REVERSION",
+        "SINGLE_CANDLE_MAE_BLOWOUT",
+        "SINGLE_CANDLE_MAE_BLOWOUT_ATR",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 4,
+        "date": "2026-07-17",
+        "symbol": "EICHERMOT",
+        "direction": "LONG",
+        "entry_time": "10:34",
+        "exit_time": "11:05",
+        "entry_price": 7573.0,
+        "exit_price": 7521.0,
+        "grade": "B",
+        "notes": "Trade taken basis Top performer of the day, and VWAP as SL since EMA10 was far below. Blown through VWAP in one candle EMA10 which was below VWAP also get breached in same candle",
+        "ema10_sl": 7525.0,
+        "vwap_sl": 7535.0
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61164",
+      "risk_ema10_pts": 48.0,
+      "risk_vwap_pts": 38.0,
+      "effective_risk_pts": 38.0,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 7535.0,
+      "sl_choice_reason": "Notes specify VWAP as SL",
+      "mae_pts": 61.5,
+      "mae_mult": 1.618,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 11.5,
+      "mfe_mult": 0.303,
+      "mfe_bars_after_entry": 0,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.461,
+      "exit_candle_range_pts": 33.5,
+      "exit_candle_range_mult": 0.882,
+      "pnl_pts": -52.0,
+      "pnl_r": -1.368,
+      "atr14_pts": 29.7771,
+      "mae_atr": 2.065,
+      "mfe_atr": 0.386,
+      "exit_candle_range_atr": 1.125,
+      "single_candle_blowout_atr": true,
+      "pre_entry": {
+        "warning": true,
+        "summary": "volume decelerating into entry; price losing separation from EMA5 into entry",
+        "details": [
+          {
+            "bar_end": "2026-07-17 09:45:00+05:30",
+            "close": 7551.5,
+            "volume": 26100.0,
+            "range": 32.5,
+            "ema10": 7519.63,
+            "vwap": 7529.81,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 10.18
+          },
+          {
+            "bar_end": "2026-07-17 09:55:00+05:30",
+            "close": 7535.0,
+            "volume": 14600.0,
+            "range": 29.5,
+            "ema10": 7522.42,
+            "vwap": 7531.05,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 8.63
+          },
+          {
+            "bar_end": "2026-07-17 10:05:00+05:30",
+            "close": 7544.0,
+            "volume": 16500.0,
+            "range": 24.0,
+            "ema10": 7526.35,
+            "vwap": 7532.19,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 5.84
+          },
+          {
+            "bar_end": "2026-07-17 10:15:00+05:30",
+            "close": 7562.0,
+            "volume": 8200.0,
+            "range": 23.0,
+            "ema10": 7532.83,
+            "vwap": 7533.15,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.32
+          },
+          {
+            "bar_end": "2026-07-17 10:25:00+05:30",
+            "close": 7543.5,
+            "volume": 6300.0,
+            "range": 23.0,
+            "ema10": 7534.77,
+            "vwap": 7533.81,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.96
+          }
+        ],
+        "warnings": [
+          "volume decelerating into entry",
+          "price losing separation from EMA5 into entry"
+        ],
+        "warning_codes": [
+          "volume_decel",
+          "ema5_sep_fade"
+        ]
+      },
+      "flags": [
+        "SINGLE_CANDLE_MAE_BLOWOUT_ATR",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 5,
+        "date": "2026-07-17",
+        "symbol": "BSE",
+        "direction": "SHORT",
+        "entry_time": "11:28",
+        "exit_time": "14:05",
+        "entry_price": 3601.5,
+        "exit_price": 3600.1,
+        "grade": "A",
+        "notes": "Blown through EMA10 & VWAP in one candle",
+        "ema10_sl": 3608.6,
+        "vwap_sl": 3628.71
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61134",
+      "risk_ema10_pts": 7.1,
+      "risk_vwap_pts": 27.21,
+      "effective_risk_pts": 7.1,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 3608.6,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 12.7,
+      "mae_mult": 1.789,
+      "mae_on_exit_candle": false,
+      "mae_recovered": true,
+      "mfe_pts": 18.4,
+      "mfe_mult": 2.592,
+      "mfe_bars_after_entry": 14,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.831,
+      "exit_candle_range_pts": 15.4,
+      "exit_candle_range_mult": 2.169,
+      "pnl_pts": 1.4,
+      "pnl_r": 0.197,
+      "atr14_pts": 14.1165,
+      "mae_atr": 0.9,
+      "mfe_atr": 1.303,
+      "exit_candle_range_atr": 1.091,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "wide EMA10\u2013VWAP gap pre-entry (0.40% of price); price losing separation from EMA5 into entry",
+        "details": [
+          {
+            "bar_end": "2026-07-17 10:45:00+05:30",
+            "close": 3606.0,
+            "volume": 84600.0,
+            "range": 15.0,
+            "ema10": 3631.18,
+            "vwap": 3635.69,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 4.52
+          },
+          {
+            "bar_end": "2026-07-17 10:55:00+05:30",
+            "close": 3603.0,
+            "volume": 55800.0,
+            "range": 14.2,
+            "ema10": 3626.05,
+            "vwap": 3632.95,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 6.9
+          },
+          {
+            "bar_end": "2026-07-17 11:05:00+05:30",
+            "close": 3596.0,
+            "volume": 27000.0,
+            "range": 15.6,
+            "ema10": 3620.59,
+            "vwap": 3631.94,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 11.35
+          },
+          {
+            "bar_end": "2026-07-17 11:15:00+05:30",
+            "close": 3602.0,
+            "volume": 37800.0,
+            "range": 14.7,
+            "ema10": 3617.21,
+            "vwap": 3630.28,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 13.07
+          },
+          {
+            "bar_end": "2026-07-17 11:25:00+05:30",
+            "close": 3601.6,
+            "volume": 40200.0,
+            "range": 8.5,
+            "ema10": 3614.37,
+            "vwap": 3628.91,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 14.53
+          }
+        ],
+        "warnings": [
+          "wide EMA10\u2013VWAP gap pre-entry (0.40% of price)",
+          "price losing separation from EMA5 into entry"
+        ],
+        "warning_codes": [
+          "wide_ema_vwap_gap",
+          "ema5_sep_fade"
+        ]
+      },
+      "flags": [
+        "EXIT_CANDLE_BLOWOUT",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 6,
+        "date": "2026-07-17",
+        "symbol": "TCS",
+        "direction": "LONG",
+        "entry_time": "12:38",
+        "exit_time": "14:31",
+        "entry_price": 2262.0,
+        "exit_price": 2262.6,
+        "grade": "B",
+        "notes": "Blown through EMA10 & VWAP in one candle",
+        "ema10_sl": 2253.0,
+        "vwap_sl": 2243.64
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61304",
+      "risk_ema10_pts": 9.0,
+      "risk_vwap_pts": 18.36,
+      "effective_risk_pts": 9.0,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 2253.0,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 3.6,
+      "mae_mult": 0.4,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 9.7,
+      "mfe_mult": 1.078,
+      "mfe_bars_after_entry": 10,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.811,
+      "exit_candle_range_pts": 8.5,
+      "exit_candle_range_mult": 0.944,
+      "pnl_pts": 0.6,
+      "pnl_r": 0.067,
+      "atr14_pts": 8.1545,
+      "mae_atr": 0.441,
+      "mfe_atr": 1.19,
+      "exit_candle_range_atr": 1.042,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "wide EMA10\u2013VWAP gap pre-entry (0.35% of price)",
+        "details": [
+          {
+            "bar_end": "2026-07-17 11:55:00+05:30",
+            "close": 2251.8,
+            "volume": 213525.0,
+            "range": 5.0,
+            "ema10": 2242.67,
+            "vwap": 2239.61,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 3.07
+          },
+          {
+            "bar_end": "2026-07-17 12:05:00+05:30",
+            "close": 2251.7,
+            "volume": 140175.0,
+            "range": 3.5,
+            "ema10": 2244.32,
+            "vwap": 2240.01,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 4.31
+          },
+          {
+            "bar_end": "2026-07-17 12:15:00+05:30",
+            "close": 2255.0,
+            "volume": 269100.0,
+            "range": 5.8,
+            "ema10": 2246.26,
+            "vwap": 2240.87,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 5.39
+          },
+          {
+            "bar_end": "2026-07-17 12:25:00+05:30",
+            "close": 2261.9,
+            "volume": 301050.0,
+            "range": 10.0,
+            "ema10": 2249.1,
+            "vwap": 2241.93,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 7.17
+          },
+          {
+            "bar_end": "2026-07-17 12:35:00+05:30",
+            "close": 2261.1,
+            "volume": 349425.0,
+            "range": 5.0,
+            "ema10": 2251.28,
+            "vwap": 2243.27,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 8.01
+          }
+        ],
+        "warnings": [
+          "wide EMA10\u2013VWAP gap pre-entry (0.35% of price)"
+        ],
+        "warning_codes": [
+          "wide_ema_vwap_gap"
+        ]
+      },
+      "flags": [
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 7,
+        "date": "2026-07-16",
+        "symbol": "TECHM",
+        "direction": "LONG",
+        "entry_time": "10:30",
+        "exit_time": "11:02",
+        "entry_price": 1526.4,
+        "exit_price": 1531.0,
+        "grade": "A",
+        "notes": "Exited because 1:1.6 Target reached (booked below 1:2 as I was skeptical of the further move and confidence score also has gone down to D). I just didnt want to fight further",
+        "ema10_sl": 1518.97,
+        "vwap_sl": 1522.96
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61305",
+      "risk_ema10_pts": 7.43,
+      "risk_vwap_pts": 3.44,
+      "effective_risk_pts": 3.44,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 1522.96,
+      "sl_choice_reason": "VWAP risk smaller (default nearer stop)",
+      "mae_pts": 8.6,
+      "mae_mult": 2.5,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 8.1,
+      "mfe_mult": 2.355,
+      "mfe_bars_after_entry": 3,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.291,
+      "exit_candle_range_pts": 16.7,
+      "exit_candle_range_mult": 4.855,
+      "pnl_pts": 4.6,
+      "pnl_r": 1.337,
+      "atr14_pts": 8.1151,
+      "mae_atr": 1.06,
+      "mfe_atr": 0.998,
+      "exit_candle_range_atr": 2.058,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "candle body shrinking into entry (momentum fade); EMA10/VWAP misaligned with trade direction",
+        "details": [
+          {
+            "bar_end": "2026-07-16 09:45:00+05:30",
+            "close": 1520.0,
+            "volume": 136200.0,
+            "range": 12.1,
+            "ema10": 1514.54,
+            "vwap": 1514.73,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.19
+          },
+          {
+            "bar_end": "2026-07-16 09:55:00+05:30",
+            "close": 1521.3,
+            "volume": 287400.0,
+            "range": 5.8,
+            "ema10": 1515.77,
+            "vwap": 1516.02,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.25
+          },
+          {
+            "bar_end": "2026-07-16 10:05:00+05:30",
+            "close": 1525.7,
+            "volume": 774600.0,
+            "range": 12.9,
+            "ema10": 1517.58,
+            "vwap": 1520.06,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 2.48
+          },
+          {
+            "bar_end": "2026-07-16 10:15:00+05:30",
+            "close": 1528.0,
+            "volume": 316800.0,
+            "range": 9.3,
+            "ema10": 1519.47,
+            "vwap": 1520.73,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 1.26
+          },
+          {
+            "bar_end": "2026-07-16 10:25:00+05:30",
+            "close": 1529.8,
+            "volume": 377400.0,
+            "range": 9.3,
+            "ema10": 1521.35,
+            "vwap": 1522.41,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 1.06
+          }
+        ],
+        "warnings": [
+          "candle body shrinking into entry (momentum fade)",
+          "EMA10/VWAP misaligned with trade direction"
+        ],
+        "warning_codes": [
+          "body_shrink",
+          "ema_vwap_misalign"
+        ]
+      },
+      "flags": [
+        "EXIT_CANDLE_BLOWOUT",
+        "SINGLE_CANDLE_MAE_BLOWOUT",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 8,
+        "date": "2026-07-16",
+        "symbol": "POLICYBZR",
+        "direction": "LONG",
+        "entry_time": "11:38",
+        "exit_time": "13:15",
+        "entry_price": 1580.0,
+        "exit_price": 1580.2,
+        "grade": "D",
+        "notes": "Blown through EMA10 & VWAP in one candle. I got an opportunity to book at 1590 around 12:45 and I missed that opportunity and led to loss",
+        "ema10_sl": 1576.39,
+        "vwap_sl": 1567.52
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61276",
+      "risk_ema10_pts": 3.61,
+      "risk_vwap_pts": 12.48,
+      "effective_risk_pts": 3.61,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 1576.39,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 7.1,
+      "mae_mult": 1.967,
+      "mae_on_exit_candle": false,
+      "mae_recovered": true,
+      "mfe_pts": 12.5,
+      "mfe_mult": 3.463,
+      "mfe_bars_after_entry": 6,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.055,
+      "exit_candle_range_pts": 2.1,
+      "exit_candle_range_mult": 0.582,
+      "pnl_pts": 0.2,
+      "pnl_r": 0.055,
+      "atr14_pts": 8.4581,
+      "mae_atr": 0.839,
+      "mfe_atr": 1.478,
+      "exit_candle_range_atr": 0.248,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": false,
+        "summary": "no clear pre-entry red flag from 10m structure",
+        "details": [
+          {
+            "bar_end": "2026-07-16 10:55:00+05:30",
+            "close": 1572.7,
+            "volume": 46550.0,
+            "range": 5.4,
+            "ema10": 1565.62,
+            "vwap": 1564.46,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 1.16
+          },
+          {
+            "bar_end": "2026-07-16 11:05:00+05:30",
+            "close": 1574.9,
+            "volume": 34300.0,
+            "range": 8.2,
+            "ema10": 1567.31,
+            "vwap": 1564.86,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 2.45
+          },
+          {
+            "bar_end": "2026-07-16 11:15:00+05:30",
+            "close": 1574.1,
+            "volume": 20650.0,
+            "range": 3.9,
+            "ema10": 1568.54,
+            "vwap": 1565.11,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 3.44
+          },
+          {
+            "bar_end": "2026-07-16 11:25:00+05:30",
+            "close": 1580.5,
+            "volume": 113400.0,
+            "range": 10.4,
+            "ema10": 1570.72,
+            "vwap": 1567.0,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 3.72
+          },
+          {
+            "bar_end": "2026-07-16 11:35:00+05:30",
+            "close": 1582.9,
+            "volume": 45500.0,
+            "range": 4.9,
+            "ema10": 1572.93,
+            "vwap": 1567.8,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 5.13
+          }
+        ],
+        "warnings": [],
+        "warning_codes": []
+      },
+      "flags": []
+    },
+    {
+      "trade": {
+        "row": 9,
+        "date": "2026-07-16",
+        "symbol": "UPL",
+        "direction": "LONG",
+        "entry_time": "14:49",
+        "exit_time": "14:59",
+        "entry_price": 620.8,
+        "exit_price": 622.05,
+        "grade": "A",
+        "notes": "End of session, decided to enter at the cutoff time, and exited with a minor profit. Thsi was one symbol that was the top performer for teh day, but my application was completely bind about this. This has a uptrend since 9:35 AM and never reverse to touch VWAP throughout the day. A classic text book LONG trade.",
+        "ema10_sl": 619.17,
+        "vwap_sl": 612.07
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61316",
+      "risk_ema10_pts": 1.63,
+      "risk_vwap_pts": 8.73,
+      "effective_risk_pts": 1.63,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 619.17,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 0.4,
+      "mae_mult": 0.245,
+      "mae_on_exit_candle": false,
+      "mae_recovered": true,
+      "mfe_pts": 2.55,
+      "mfe_mult": 1.564,
+      "mfe_bars_after_entry": 1,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.0,
+      "exit_candle_range_pts": 2.7,
+      "exit_candle_range_mult": 1.656,
+      "pnl_pts": 1.25,
+      "pnl_r": 0.767,
+      "atr14_pts": 2.1716,
+      "mae_atr": 0.184,
+      "mfe_atr": 1.174,
+      "exit_candle_range_atr": 1.243,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "wide EMA10\u2013VWAP gap pre-entry (1.09% of price)",
+        "details": [
+          {
+            "bar_end": "2026-07-16 14:05:00+05:30",
+            "close": 619.85,
+            "volume": 89430.0,
+            "range": 1.45,
+            "ema10": 617.06,
+            "vwap": 610.92,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 6.14
+          },
+          {
+            "bar_end": "2026-07-16 14:15:00+05:30",
+            "close": 619.9,
+            "volume": 43360.0,
+            "range": 1.05,
+            "ema10": 617.58,
+            "vwap": 611.0,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 6.58
+          },
+          {
+            "bar_end": "2026-07-16 14:25:00+05:30",
+            "close": 619.55,
+            "volume": 266935.0,
+            "range": 2.55,
+            "ema10": 617.94,
+            "vwap": 611.48,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 6.45
+          },
+          {
+            "bar_end": "2026-07-16 14:35:00+05:30",
+            "close": 619.05,
+            "volume": 218155.0,
+            "range": 1.65,
+            "ema10": 618.14,
+            "vwap": 611.81,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 6.33
+          },
+          {
+            "bar_end": "2026-07-16 14:45:00+05:30",
+            "close": 621.6,
+            "volume": 98915.0,
+            "range": 2.4,
+            "ema10": 618.77,
+            "vwap": 611.97,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 6.8
+          }
+        ],
+        "warnings": [
+          "wide EMA10\u2013VWAP gap pre-entry (1.09% of price)"
+        ],
+        "warning_codes": [
+          "wide_ema_vwap_gap"
+        ]
+      },
+      "flags": [
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 10,
+        "date": "2026-07-15",
+        "symbol": "DIVISLAB",
+        "direction": "LONG",
+        "entry_time": "09:51",
+        "exit_time": "10:16",
+        "entry_price": 7300.0,
+        "exit_price": 7281.5,
+        "grade": "A",
+        "notes": "Blown through EMA10 & VWAP in one candle. This was the top in the list for the day from previous day RS Scan. Price has given a pullback to VWAP. I considered VWAP as SL. Entered before 10-min close basis the previous candle, and in the TradingView Kavach previous candle was having a BUY signal. Exited when candle close below VWAP. Didnt wait for EMA10 as could have led for much bigger loss",
+        "ema10_sl": 7239.0,
+        "vwap_sl": 7286.8
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61159",
+      "risk_ema10_pts": 61.0,
+      "risk_vwap_pts": 13.2,
+      "effective_risk_pts": 13.2,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 7286.8,
+      "sl_choice_reason": "Notes specify VWAP as SL",
+      "mae_pts": 38.0,
+      "mae_mult": 2.879,
+      "mae_on_exit_candle": false,
+      "mae_recovered": true,
+      "mfe_pts": 11.5,
+      "mfe_mult": 0.871,
+      "mfe_bars_after_entry": 1,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 1.705,
+      "exit_candle_range_pts": 14.0,
+      "exit_candle_range_mult": 1.061,
+      "pnl_pts": -18.5,
+      "pnl_r": -1.402,
+      "atr14_pts": 32.3846,
+      "mae_atr": 1.173,
+      "mfe_atr": 0.355,
+      "exit_candle_range_atr": 0.432,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": false,
+        "summary": "no clear pre-entry red flag from 10m structure",
+        "details": [
+          {
+            "bar_end": "2026-07-15 09:25:00+05:30",
+            "close": 7301.0,
+            "volume": 232200.0,
+            "range": 87.5,
+            "ema10": 7301.0,
+            "vwap": 7271.1,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 29.9
+          },
+          {
+            "bar_end": "2026-07-15 09:35:00+05:30",
+            "close": 7308.0,
+            "volume": 44800.0,
+            "range": 22.5,
+            "ema10": 7302.27,
+            "vwap": 7276.34,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 25.93
+          },
+          {
+            "bar_end": "2026-07-15 09:45:00+05:30",
+            "close": 7306.0,
+            "volume": 24400.0,
+            "range": 16.5,
+            "ema10": 7302.95,
+            "vwap": 7278.7,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 24.25
+          }
+        ],
+        "warnings": [],
+        "warning_codes": []
+      },
+      "flags": [
+        "POST_EXIT_REVERSION"
+      ]
+    },
+    {
+      "trade": {
+        "row": 11,
+        "date": "2026-07-15",
+        "symbol": "HYUNDAI",
+        "direction": "LONG",
+        "entry_time": "10:46",
+        "exit_time": "11:15",
+        "entry_price": 2037.0,
+        "exit_price": 2019.1,
+        "grade": "B",
+        "notes": "Blown through EMA10 & VWAP in one candle",
+        "ema10_sl": 2024.3,
+        "vwap_sl": 2028.5
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61196",
+      "risk_ema10_pts": 12.7,
+      "risk_vwap_pts": 8.5,
+      "effective_risk_pts": 8.5,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 2028.5,
+      "sl_choice_reason": "VWAP risk smaller (default nearer stop)",
+      "mae_pts": 18.4,
+      "mae_mult": 2.165,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 3.2,
+      "mfe_mult": 0.376,
+      "mfe_bars_after_entry": 0,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 1.165,
+      "exit_candle_range_pts": 12.9,
+      "exit_candle_range_mult": 1.518,
+      "pnl_pts": -17.9,
+      "pnl_r": -2.106,
+      "atr14_pts": 13.1693,
+      "mae_atr": 1.397,
+      "mfe_atr": 0.243,
+      "exit_candle_range_atr": 0.98,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": false,
+        "summary": "no clear pre-entry red flag from 10m structure",
+        "details": [
+          {
+            "bar_end": "2026-07-15 10:05:00+05:30",
+            "close": 2028.4,
+            "volume": 82775.0,
+            "range": 15.9,
+            "ema10": 2032.9,
+            "vwap": 2027.54,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 5.36
+          },
+          {
+            "bar_end": "2026-07-15 10:15:00+05:30",
+            "close": 2036.5,
+            "volume": 65725.0,
+            "range": 17.9,
+            "ema10": 2033.55,
+            "vwap": 2027.68,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 5.87
+          },
+          {
+            "bar_end": "2026-07-15 10:25:00+05:30",
+            "close": 2031.4,
+            "volume": 36575.0,
+            "range": 11.2,
+            "ema10": 2033.16,
+            "vwap": 2027.86,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 5.3
+          },
+          {
+            "bar_end": "2026-07-15 10:35:00+05:30",
+            "close": 2037.9,
+            "volume": 50875.0,
+            "range": 12.1,
+            "ema10": 2034.02,
+            "vwap": 2028.16,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 5.86
+          },
+          {
+            "bar_end": "2026-07-15 10:45:00+05:30",
+            "close": 2041.6,
+            "volume": 29975.0,
+            "range": 7.9,
+            "ema10": 2035.4,
+            "vwap": 2028.37,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 7.03
+          }
+        ],
+        "warnings": [],
+        "warning_codes": []
+      },
+      "flags": [
+        "POST_EXIT_REVERSION",
+        "SINGLE_CANDLE_MAE_BLOWOUT"
+      ]
+    },
+    {
+      "trade": {
+        "row": 12,
+        "date": "2026-07-15",
+        "symbol": "CHOLAFIN",
+        "direction": "LONG",
+        "entry_time": "11:02",
+        "exit_time": "11:45",
+        "entry_price": 1822.1,
+        "exit_price": 1818.7,
+        "grade": "A",
+        "notes": "Blown through EMA10 & VWAP in one candle",
+        "ema10_sl": 1817.9,
+        "vwap_sl": 1822.9
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61141",
+      "risk_ema10_pts": 4.2,
+      "risk_vwap_pts": 0.8,
+      "effective_risk_pts": 0.8,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 1822.9,
+      "sl_choice_reason": "VWAP risk smaller (default nearer stop) \u2014 near-zero gap (0.80 pts); R multiples unstable",
+      "mae_pts": 7.1,
+      "mae_mult": 8.875,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 5.9,
+      "mfe_mult": 7.375,
+      "mfe_bars_after_entry": 1,
+      "round_trip": true,
+      "round_trip_peak_mult": 7.375,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 4.125,
+      "exit_candle_range_pts": 8.6,
+      "exit_candle_range_mult": 10.75,
+      "pnl_pts": -3.4,
+      "pnl_r": -4.25,
+      "atr14_pts": 6.9473,
+      "mae_atr": 1.022,
+      "mfe_atr": 0.849,
+      "exit_candle_range_atr": 1.238,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "volume decelerating into entry",
+        "details": [
+          {
+            "bar_end": "2026-07-15 10:15:00+05:30",
+            "close": 1824.0,
+            "volume": 25625.0,
+            "range": 5.1,
+            "ema10": 1820.76,
+            "vwap": 1819.02,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 1.74
+          },
+          {
+            "bar_end": "2026-07-15 10:25:00+05:30",
+            "close": 1825.9,
+            "volume": 65000.0,
+            "range": 7.0,
+            "ema10": 1821.7,
+            "vwap": 1819.33,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 2.37
+          },
+          {
+            "bar_end": "2026-07-15 10:35:00+05:30",
+            "close": 1824.1,
+            "volume": 38125.0,
+            "range": 4.1,
+            "ema10": 1822.13,
+            "vwap": 1819.53,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 2.61
+          },
+          {
+            "bar_end": "2026-07-15 10:45:00+05:30",
+            "close": 1821.8,
+            "volume": 24375.0,
+            "range": 4.3,
+            "ema10": 1822.07,
+            "vwap": 1819.58,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 2.5
+          },
+          {
+            "bar_end": "2026-07-15 10:55:00+05:30",
+            "close": 1823.6,
+            "volume": 20625.0,
+            "range": 4.6,
+            "ema10": 1822.35,
+            "vwap": 1819.63,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 2.72
+          }
+        ],
+        "warnings": [
+          "volume decelerating into entry"
+        ],
+        "warning_codes": [
+          "volume_decel"
+        ]
+      },
+      "flags": [
+        "DEGENERATE_RISK",
+        "ROUND_TRIP",
+        "POST_EXIT_REVERSION",
+        "EXIT_CANDLE_BLOWOUT",
+        "SINGLE_CANDLE_MAE_BLOWOUT",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 13,
+        "date": "2026-07-14",
+        "symbol": "ADANIPOWER",
+        "direction": "LONG",
+        "entry_time": "09:47",
+        "exit_time": "09:56",
+        "entry_price": 219.12,
+        "exit_price": 221.4,
+        "grade": "C",
+        "notes": "Target T1 achieved (R:R got 1:2)",
+        "ema10_sl": 218.21,
+        "vwap_sl": 219.05
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61102",
+      "risk_ema10_pts": 0.91,
+      "risk_vwap_pts": 0.07,
+      "effective_risk_pts": 0.07,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 219.05,
+      "sl_choice_reason": "VWAP risk smaller (default nearer stop) \u2014 near-zero gap (0.07 pts); R multiples unstable",
+      "mae_pts": 0.42,
+      "mae_mult": 6.0,
+      "mae_on_exit_candle": false,
+      "mae_recovered": true,
+      "mfe_pts": 4.76,
+      "mfe_mult": 68.0,
+      "mfe_bars_after_entry": 1,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 62.143,
+      "exit_candle_range_pts": 4.11,
+      "exit_candle_range_mult": 58.714,
+      "pnl_pts": 2.28,
+      "pnl_r": 32.571,
+      "atr14_pts": 1.0187,
+      "mae_atr": 0.412,
+      "mfe_atr": 4.673,
+      "exit_candle_range_atr": 4.034,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": false,
+        "summary": "no clear pre-entry red flag from 10m structure",
+        "details": [
+          {
+            "bar_end": "2026-07-14 09:25:00+05:30",
+            "close": 218.68,
+            "volume": 4018600.0,
+            "range": 4.5,
+            "ema10": 218.68,
+            "vwap": 218.64,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.04
+          },
+          {
+            "bar_end": "2026-07-14 09:35:00+05:30",
+            "close": 220.63,
+            "volume": 1228300.0,
+            "range": 2.13,
+            "ema10": 219.03,
+            "vwap": 218.89,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.15
+          },
+          {
+            "bar_end": "2026-07-14 09:45:00+05:30",
+            "close": 219.41,
+            "volume": 639000.0,
+            "range": 1.6,
+            "ema10": 219.1,
+            "vwap": 219.0,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.1
+          }
+        ],
+        "warnings": [],
+        "warning_codes": []
+      },
+      "flags": [
+        "DEGENERATE_RISK",
+        "POST_EXIT_REVERSION",
+        "EXIT_CANDLE_BLOWOUT"
+      ]
+    },
+    {
+      "trade": {
+        "row": 14,
+        "date": "2026-07-13",
+        "symbol": "ADANIGREEN",
+        "direction": "LONG",
+        "entry_time": "09:51",
+        "exit_time": "11:46",
+        "entry_price": 1564.5,
+        "exit_price": 1559.0,
+        "grade": "A+",
+        "notes": "Blown through EMA10 & VWAP in one candle, but still delayed exit by 4 candle as the very next candle in opening few seconds has pulled back to more than half of the red candle, and next when two consecutive red candle formed I exited",
+        "ema10_sl": 1544.77,
+        "vwap_sl": 1561.64
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61100",
+      "risk_ema10_pts": 19.73,
+      "risk_vwap_pts": 2.86,
+      "effective_risk_pts": 2.86,
+      "effective_sl_ref": "VWAP",
+      "effective_sl_price": 1561.64,
+      "sl_choice_reason": "VWAP risk smaller (default nearer stop)",
+      "mae_pts": 7.3,
+      "mae_mult": 2.552,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 17.5,
+      "mfe_mult": 6.119,
+      "mfe_bars_after_entry": 1,
+      "round_trip": true,
+      "round_trip_peak_mult": 6.119,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 2.378,
+      "exit_candle_range_pts": 4.9,
+      "exit_candle_range_mult": 1.713,
+      "pnl_pts": -5.5,
+      "pnl_r": -1.923,
+      "atr14_pts": 8.4841,
+      "mae_atr": 0.86,
+      "mfe_atr": 2.063,
+      "exit_candle_range_atr": 0.578,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "EMA10/VWAP misaligned with trade direction",
+        "details": [
+          {
+            "bar_end": "2026-07-13 09:25:00+05:30",
+            "close": 1558.2,
+            "volume": 379200.0,
+            "range": 33.4,
+            "ema10": 1558.2,
+            "vwap": 1550.54,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 7.66
+          },
+          {
+            "bar_end": "2026-07-13 09:35:00+05:30",
+            "close": 1565.4,
+            "volume": 490200.0,
+            "range": 19.1,
+            "ema10": 1559.51,
+            "vwap": 1559.64,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.13
+          },
+          {
+            "bar_end": "2026-07-13 09:45:00+05:30",
+            "close": 1569.7,
+            "volume": 271200.0,
+            "range": 15.5,
+            "ema10": 1561.36,
+            "vwap": 1561.59,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.23
+          }
+        ],
+        "warnings": [
+          "EMA10/VWAP misaligned with trade direction"
+        ],
+        "warning_codes": [
+          "ema_vwap_misalign"
+        ]
+      },
+      "flags": [
+        "ROUND_TRIP",
+        "POST_EXIT_REVERSION",
+        "SINGLE_CANDLE_MAE_BLOWOUT",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 15,
+        "date": "2026-07-13",
+        "symbol": "ADANIGREEN",
+        "direction": "SHORT",
+        "entry_time": "11:50",
+        "exit_time": "12:45",
+        "entry_price": 1558.0,
+        "exit_price": 1562.8,
+        "grade": "C",
+        "notes": "Blown through EMA10 & VWAP in one candle. Trade was extending in SHORT side.Possibly more of a revenge trade, as the tradewithcto.com Kavach checklist was not very intutive that time",
+        "ema10_sl": 1562.87,
+        "vwap_sl": 1565.5
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61100",
+      "risk_ema10_pts": 4.87,
+      "risk_vwap_pts": 7.5,
+      "effective_risk_pts": 4.87,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 1562.87,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 7.8,
+      "mae_mult": 1.602,
+      "mae_on_exit_candle": false,
+      "mae_recovered": true,
+      "mfe_pts": 5.8,
+      "mfe_mult": 1.191,
+      "mfe_bars_after_entry": 2,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": true,
+      "post_exit_reversion_mult": 2.628,
+      "exit_candle_range_pts": 4.9,
+      "exit_candle_range_mult": 1.006,
+      "pnl_pts": -4.8,
+      "pnl_r": -0.986,
+      "atr14_pts": 6.9098,
+      "mae_atr": 1.129,
+      "mfe_atr": 0.839,
+      "exit_candle_range_atr": 0.709,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "candle body shrinking into entry (momentum fade)",
+        "details": [
+          {
+            "bar_end": "2026-07-13 11:05:00+05:30",
+            "close": 1563.7,
+            "volume": 23400.0,
+            "range": 4.7,
+            "ema10": 1566.74,
+            "vwap": 1565.9,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.83
+          },
+          {
+            "bar_end": "2026-07-13 11:15:00+05:30",
+            "close": 1563.0,
+            "volume": 7800.0,
+            "range": 3.8,
+            "ema10": 1566.06,
+            "vwap": 1565.89,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.16
+          },
+          {
+            "bar_end": "2026-07-13 11:25:00+05:30",
+            "close": 1565.5,
+            "volume": 8400.0,
+            "range": 4.6,
+            "ema10": 1565.96,
+            "vwap": 1565.89,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 0.07
+          },
+          {
+            "bar_end": "2026-07-13 11:35:00+05:30",
+            "close": 1562.8,
+            "volume": 5400.0,
+            "range": 4.6,
+            "ema10": 1565.38,
+            "vwap": 1565.88,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 0.5
+          },
+          {
+            "bar_end": "2026-07-13 11:45:00+05:30",
+            "close": 1561.8,
+            "volume": 13200.0,
+            "range": 2.2,
+            "ema10": 1564.73,
+            "vwap": 1565.86,
+            "ema10_vwap": "EMA10<VWAP",
+            "ema10_vwap_gap": 1.13
+          }
+        ],
+        "warnings": [
+          "candle body shrinking into entry (momentum fade)"
+        ],
+        "warning_codes": [
+          "body_shrink"
+        ]
+      },
+      "flags": [
+        "POST_EXIT_REVERSION",
+        "PRE_ENTRY_WARNING"
+      ]
+    },
+    {
+      "trade": {
+        "row": 16,
+        "date": "2026-07-13",
+        "symbol": "TATAELXSI",
+        "direction": "LONG",
+        "entry_time": "12:56",
+        "exit_time": "13:16",
+        "entry_price": 3814.0,
+        "exit_price": 3811.3,
+        "grade": "A",
+        "notes": "Blown through EMA10 & VWAP in one candle",
+        "ema10_sl": 3790.75,
+        "vwap_sl": 3756.34
+      },
+      "skip_reason": null,
+      "instrument_key": "NSE_FO|61301",
+      "risk_ema10_pts": 23.25,
+      "risk_vwap_pts": 57.66,
+      "effective_risk_pts": 23.25,
+      "effective_sl_ref": "EMA10",
+      "effective_sl_price": 3790.75,
+      "sl_choice_reason": "EMA10 risk smaller (default nearer stop)",
+      "mae_pts": 19.2,
+      "mae_mult": 0.826,
+      "mae_on_exit_candle": true,
+      "mae_recovered": false,
+      "mfe_pts": 16.0,
+      "mfe_mult": 0.688,
+      "mfe_bars_after_entry": 0,
+      "round_trip": false,
+      "round_trip_peak_mult": null,
+      "post_exit_reversion": false,
+      "post_exit_reversion_mult": 0.159,
+      "exit_candle_range_pts": 24.2,
+      "exit_candle_range_mult": 1.041,
+      "pnl_pts": -2.7,
+      "pnl_r": -0.116,
+      "atr14_pts": 19.6809,
+      "mae_atr": 0.976,
+      "mfe_atr": 0.813,
+      "exit_candle_range_atr": 1.23,
+      "single_candle_blowout_atr": false,
+      "pre_entry": {
+        "warning": true,
+        "summary": "wide EMA10\u2013VWAP gap pre-entry (0.89% of price)",
+        "details": [
+          {
+            "bar_end": "2026-07-13 12:15:00+05:30",
+            "close": 3803.9,
+            "volume": 40250.0,
+            "range": 26.3,
+            "ema10": 3760.93,
+            "vwap": 3744.22,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 16.71
+          },
+          {
+            "bar_end": "2026-07-13 12:25:00+05:30",
+            "close": 3803.5,
+            "volume": 23000.0,
+            "range": 16.4,
+            "ema10": 3768.67,
+            "vwap": 3747.27,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 21.4
+          },
+          {
+            "bar_end": "2026-07-13 12:35:00+05:30",
+            "close": 3807.6,
+            "volume": 17750.0,
+            "range": 20.6,
+            "ema10": 3775.75,
+            "vwap": 3749.41,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 26.34
+          },
+          {
+            "bar_end": "2026-07-13 12:45:00+05:30",
+            "close": 3822.0,
+            "volume": 32250.0,
+            "range": 20.4,
+            "ema10": 3784.16,
+            "vwap": 3754.14,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 30.02
+          },
+          {
+            "bar_end": "2026-07-13 12:55:00+05:30",
+            "close": 3820.0,
+            "volume": 17125.0,
+            "range": 15.2,
+            "ema10": 3790.67,
+            "vwap": 3756.54,
+            "ema10_vwap": "EMA10>VWAP",
+            "ema10_vwap_gap": 34.13
+          }
+        ],
+        "warnings": [
+          "wide EMA10\u2013VWAP gap pre-entry (0.89% of price)"
+        ],
+        "warning_codes": [
+          "wide_ema_vwap_gap"
+        ]
+      },
+      "flags": [
+        "PRE_ENTRY_WARNING"
+      ]
+    }
+  ]
+}
