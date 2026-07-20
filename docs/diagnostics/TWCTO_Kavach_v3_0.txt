@@ -1,0 +1,1422 @@
+//@version=6
+
+// =============================================================================
+// TWCTO Kavach v3.0 — Trading Operating System
+//
+// -----------------------------------------------------------------------------
+// HOW THE SCRIPT KNOWS YOU ARE IN A TRADE (EXIT rules) — USER STEPS
+// -----------------------------------------------------------------------------
+// Pine cannot see broker fills. EXIT rules run ONLY after you set an anchor:
+//
+//   1. Take the trade from your Ready Now / checklist as usual.
+//   2. Open indicator Settings → group "Layer 9 -- Position Anchor".
+//   3. Set Position = LONG or SHORT (same side as your fill).
+//   4. Click "Entry Bar (click chart)", then click the 10m candle you entered
+//      on. Entry price defaults to that bar's close (override only if fill ≠
+//      close). This takes ~2–3 seconds.
+//   5. The script is now "in trade": yellow entry line + effective SL appear,
+//      the top-center orange banner switches from ENTER → EXIT/WARN/HOLD, and
+//      EXIT rules (2-candle fail, blowout, 1R→EMA5 trail, stall, grade D,
+//      book-half @2R) evaluate from that anchor forward.
+//   6. When flat again: set Position = FLAT (one click). Anchor clears, EXIT
+//      logic stops, ENTER flags resume.
+//
+// Flat (Position = FLAT)  → only ENTER gates / banner.
+// Anchored (LONG/SHORT + Entry Bar) → only EXIT / WARN / HOLD banner.
+// ENTER and EXIT share the same top-center orange banner (interchangeable).
+// -----------------------------------------------------------------------------
+//
+// CHANGELOG vs v2.7:
+//   [L9-ENTER] ENTER LONG / ENTER SHORT flags (confirmed bars only) when
+//            Kavach direction + unanimous Trend/ST/MACD votes + ADX + volume
+//            + % from open + pullback# gates all pass. ADX 20–25 = RECHECK
+//            style, ADX > 25 = full ENTER. Panel rows: % from open,
+//            Pullback #, ENTER state. Each gate is toggleable (trial rules).
+//   [L9-ANCHOR] Interactive position anchor: Position FLAT/LONG/SHORT + one
+//            chart click for Entry Bar (input.time confirm). Entry price =
+//            that bar's close (optional override). Set Position→FLAT to clear
+//            in one click. Script cannot see broker fills — anchor is the
+//            position source of truth for EXIT flags.
+//   [L9-EXIT] With anchor set: 2-CANDLE FAIL, BLOWOUT (≥2R against, intrabar),
+//            1R RATCHET (trail EMA10→EMA5), STALL WARN, BOOK-HALF @2R,
+//            GRADE DECAY WARN. All except BLOWOUT / BOOK-HALF are confirmed-
+//            bar only (no flash-then-vanish). alertcondition for ENTER,
+//            2-CANDLE FAIL, BLOWOUT, 1R-ratchet EMA5 exit.
+//   [L9-UX]   Top-center orange ENTER/EXIT banner; Layer-9 row colors use
+//            navy (ok) / black (mid) / maroon (not ok).
+//
+// PRIOR v2.7:
+//   [L6-ALIGN] Trade Score + Confidence realigned to tradewithcto.com backend
+//            (kavach_engine.compute_trade_score + kavach_confidence banding).
+//            Backend score is RS(40)+KavachState(30)+VolRatio(15)+ADX(10)+VWAP(5).
+//   [L6-ALIGN] Grade banding matches backend explain_confidence_grade.
+//   [L6-GAP]  RS vs NIFTY; Volume LABEL prefers TOD cumulative ratio.
+//   [L7-UX]   TOD fallback + intended-10m timeframe warnings.
+//
+// PRIOR (v2.6 / v2.5 / …): Trend 2-of-3, EMA10 exit-only, VWAP close gate,
+// nearer-of-EMA10/VWAP exit, Layer 7 horizontal Score Breakdown layout, etc.
+//
+// BACKEND-ALIGNED CONFIDENCE BANDING (tradewithcto.com):
+//   D   score < 65                               Hard block
+//   D   Low vol + purity < 60%                   Hard block
+//   A+  High vol + Purity>=60% + score>=95
+//   A   High vol + Purity>=60% + score>=85
+//   B   High vol + Purity>=60% + score>=75
+//       Average vol + Purity>=60% + score>=85
+//   C   High vol + not pure + score>=85
+//       Average vol + pure + score>=75
+//       Low vol + pure + score>=85
+//   C*  TRANSITION (ST/MACD/EMA-VWAP flip) + score>=75 lifts D -> C
+//   D   everything else
+//
+// NOTE: EMA10 (exitEmaRaw) never appears in buyAllowed/sellAllowed.
+//
+// GRADE ACTION PROTOCOL:
+//   A+/A  All confirmed. Take the trade.
+//   B     One confirmation missing. Take with-RS direction.
+//   C*    TRANSITION floor. Tight stop but take it.
+//   C     Watch only or very tight stop.
+//   D     Hard block.
+//
+// 9-LAYER ARCHITECTURE:
+//   Layer 1  Indicator Calculations
+//   Layer 2  Market Regime Detection -- TREND / TRANSITION / RANGE (FSM/UI)
+//   Layer 3  Trade Eligibility Engine
+//   Layer 4  Position State Engine
+//   Layer 5  Finite State Machine
+//   Layer 6  Unified Confidence Grade (backend-aligned Trade Score)
+//   Layer 7  Dashboard + Score Breakdown
+//   Layer 8  Alerts
+//   Layer 9  ENTER / EXIT Flags + Position Anchor (v2.8)
+// =============================================================================
+
+indicator("TWCTO Kavach v3.0", shorttitle = "Kavach3.0", overlay = true, max_labels_count = 500, max_bars_back = 5000)
+
+// Layer-9 status colors (readable on light/dark chart themes)
+colOk  = #000080   // navy — acceptable / go
+colMid = #000000   // black — midway / caution
+colBad = #4A0000   // dark maroon-red — not acceptable / exit
+
+// ============================================================================
+// Layer 9 -- Position Anchor (declared FIRST so it renders at the top of the
+// Settings dialog). Pine inputs render in group-first-seen order; keeping this
+// group at the top means opening Settings drops the user straight onto the
+// four fields they touch every trade.
+// ============================================================================
+g28a = "Layer 9 -- Position Anchor"
+posMode = input.string("FLAT", "Position", options = ["FLAT", "LONG", "SHORT"], group = g28a, tooltip = "FLAT = no trade (ENTER flags active). LONG/SHORT + Entry Bar + Anchor Symbol (REQUIRED) = EXIT flags. Set FLAT to clear.")
+// v2.8.3 fix: blank-means-current-chart was removed. TradingView carries an
+// indicator's last-used input values as the default template whenever the
+// same indicator is added to a NEW chart/symbol. That means posMode=LONG set
+// on one symbol (e.g. UNIONBANK) silently became the default on every other
+// chart Kavach was loaded on too. With posSymbol left blank on those other
+// charts, the old auto-match logic captured EACH chart's own ticker as its
+// own anchor — so the symbol guard passed trivially everywhere (blank always
+// matches itself), and unrelated symbols showed IN TRADE / HOLD / STOPPED
+// states from a single dummy entry made elsewhere. Anchor Symbol is now
+// REQUIRED and non-blank before any anchor/EXIT logic activates — no more
+// silent self-matching.
+posSymbol = input.symbol("", "Anchor Symbol  (REQUIRED — type the exact traded symbol)", group = g28a, tooltip = "Must be set explicitly to the symbol you actually entered. Left blank = anchor stays inactive (shows ANCHOR: set Anchor Symbol) rather than silently matching whatever chart you're viewing.")
+// Pine also cannot prefill Entry Bar with "now". Leave it at the placeholder
+// until you take a trade, then set the exact 10m candle time in IST.
+entryBarTime = input.time(timestamp("01 Jul 2026 09:30 +0530"), "Entry Bar (IST timestamp)", group = g28a, tooltip = "Set to the timestamp of your entry 10m candle in IST. Panel renders regardless; EXIT flags activate only when Position != FLAT AND (Anchor Symbol matches or is blank) AND this timestamp is in today's session.")
+entryPriceOverride = input.float(0.0, "Entry Price override (0 = bar close)", step = 0.05, group = g28a, tooltip = "Leave 0 to use the Entry Bar close. Set only if your actual fill differs.")
+
+// Fuzzy ticker comparison for anchor symbol matching. Handles the common
+// TradingView variants: exchange prefix (NSE:), continuous-contract suffix
+// (!), generic root suffix (#), session/adjustment suffix (|...), and stray
+// quote characters that can end up in the field from copy-pasting a symbol
+// from somewhere it was displayed in quotes (straight " ' or curly “ ” ‘ ’).
+// Also normalizes case/whitespace so a visually-identical symbol never
+// fails match on hidden formatting differences.
+f_baseTicker(s) =>
+    string mid = str.trim(s)
+    if str.contains(mid, "|")
+        arrP = str.split(mid, "|")
+        mid := array.get(arrP, 0)
+    if str.contains(mid, ":")
+        arrC = str.split(mid, ":")
+        mid := array.get(arrC, array.size(arrC) - 1)
+    if str.contains(mid, "!")
+        arrE = str.split(mid, "!")
+        mid := array.get(arrE, 0)
+    if str.contains(mid, "#")
+        arrH = str.split(mid, "#")
+        mid := array.get(arrH, 0)
+    mid := str.replace_all(mid, "\"", "")
+    mid := str.replace_all(mid, "'", "")
+    mid := str.replace_all(mid, "\u201C", "")
+    mid := str.replace_all(mid, "\u201D", "")
+    mid := str.replace_all(mid, "\u2018", "")
+    mid := str.replace_all(mid, "\u2019", "")
+    str.upper(str.trim(mid))
+
+enum TradingState
+    EXIT         = "EXIT"
+    CAUTION      = "HOLD / WATCH"
+    MANAGE_LONG  = "MANAGE LONG"
+    MANAGE_SHORT = "MANAGE SHORT"
+    BUY          = "BUY"
+    SELL         = "SELL"
+    READY        = "READY"
+    WATCH        = "WATCH"
+
+enum PositionState
+    FLAT  = "FLAT"
+    LONG  = "LONG"
+    SHORT = "SHORT"
+
+enum MarketRegime
+    TREND      = "TREND"
+    TRANSITION = "TRANSITION"
+    RANGE      = "RANGE"
+
+// #############################################################################
+// LAYER 1 -- INDICATOR CALCULATIONS
+// #############################################################################
+
+emaLen        = input.int(9,    "EMA Length",                          group = "Layer 1 -- Indicators")
+stPeriod      = input.int(10,   "Supertrend ATR Period",               group = "Layer 1 -- Indicators")
+stMult        = input.float(1.5,"Supertrend Multiplier",  step = 0.1, group = "Layer 1 -- Indicators")
+macdFast      = input.int(6,    "MACD Fast Length",                    group = "Layer 1 -- Indicators")
+macdSlow      = input.int(13,   "MACD Slow Length",                    group = "Layer 1 -- Indicators")
+macdSignalLen = input.int(5,    "MACD Signal Length",                  group = "Layer 1 -- Indicators")
+volMALen      = input.int(20,   "Volume Average Length",               group = "Layer 1 -- Indicators")
+adxLen        = input.int(14,   "ADX Length",                          group = "Layer 1 -- Indicators")
+adxSmoothing  = input.int(14,   "ADX Smoothing",                       group = "Layer 1 -- Indicators")
+atrLen        = input.int(14,   "ATR Length",                          group = "Layer 1 -- Indicators")
+exitEmaLen    = input.int(10,   "Exit EMA Length",                     group = "Layer 1 -- Indicators")
+purityLen     = input.int(8,    "Purity Lookback (bars)",  minval = 3, maxval = 20, group = "Layer 6 -- Trade Quality")
+
+ema5Raw       = ta.ema(close, emaLen)
+vwapRaw       = ta.vwap(hlc3)
+recentPurityAbove = math.sum(close[1] > vwapRaw[1] ? 1.0 : 0.0, purityLen)
+recentPurityBelow = math.sum(close[1] < vwapRaw[1] ? 1.0 : 0.0, purityLen)
+
+[supertrendRaw, stDirRaw]                 = ta.supertrend(stMult, stPeriod)
+[macdLineRaw, macdSignalRaw, macdHistRaw] = ta.macd(close, macdFast, macdSlow, macdSignalLen)
+
+volMARaw       = ta.sma(volume, volMALen)
+volSrc         = barstate.isrealtime ? volume[1]   : volume
+volMASrc       = barstate.isrealtime ? volMARaw[1] : volMARaw
+volHigh        = volSrc > volMASrc
+volContracting = volSrc < volMASrc
+
+[diPlusRaw, diMinusRaw, adxRaw] = ta.dmi(adxLen, adxSmoothing)
+atrRaw          = ta.atr(atrLen)
+exitEmaRaw      = ta.ema(close, exitEmaLen)
+isBullishCandle = close > open
+isBearishCandle = close < open
+
+stBullish        = stDirRaw < 0
+stBearish        = stDirRaw > 0
+stFlippedThisBar = ta.change(stDirRaw) != 0
+
+emaAboveVwap        = ema5Raw > vwapRaw
+emaBelowVwap        = ema5Raw < vwapRaw
+macdLineAboveSignal = macdLineRaw > macdSignalRaw
+macdLineBelowSignal = macdLineRaw < macdSignalRaw
+macdHistPositive    = macdHistRaw > 0
+macdHistNegative    = macdHistRaw < 0
+macdHistFlippedNeg  = macdHistNegative and macdHistRaw[1] >= 0
+macdHistFlippedPos  = macdHistPositive  and macdHistRaw[1] <= 0
+
+macdCrossUp      = ta.crossover (macdLineRaw, macdSignalRaw)
+macdCrossDown    = ta.crossunder(macdLineRaw, macdSignalRaw)
+emaVwapCrossUp   = ta.crossover (ema5Raw, vwapRaw)
+emaVwapCrossDown = ta.crossunder(ema5Raw, vwapRaw)
+adxWeakening     = adxRaw < adxRaw[1]
+
+emaVwapGapPct     = (ema5Raw    - vwapRaw)    / vwapRaw    * 100
+prevEmaVwapGapPct = (ema5Raw[1] - vwapRaw[1]) / vwapRaw[1] * 100
+
+// -- Trend Read (2-of-3 majority): MACD line vs signal, Supertrend, EMA5 vs
+//    VWAP. Requires at least 2 of 3 to agree before calling Bullish/Bearish --
+//    a single lagging measure (e.g. EMA5 barely above VWAP) can no longer
+//    outvote MACD+Supertrend having already flipped the other way.
+trendBullVotes   = (macdLineAboveSignal ? 1 : 0) + (stBullish ? 1 : 0) + (emaAboveVwap ? 1 : 0)
+trendBearVotes   = (macdLineBelowSignal ? 1 : 0) + (stBearish ? 1 : 0) + (emaBelowVwap ? 1 : 0)
+trendReadBullish = trendBullVotes >= 2
+trendReadBearish = trendBearVotes >= 2
+
+// #############################################################################
+// LAYER 2 -- MARKET REGIME DETECTION
+// #############################################################################
+
+regimeAdxThreshold   = input.float(18,   "RANGE: ADX Below",                               group = "Layer 2 -- Market Regime")
+regimeProxPct        = input.float(0.15, "RANGE: EMA5/VWAP Distance % Below", step = 0.01, group = "Layer 2 -- Market Regime")
+regimeMacdFlatThresh = input.float(0.02, "RANGE: |MACD Histogram| Below",     step = 0.01, group = "Layer 2 -- Market Regime")
+regimeAtrMult        = input.float(1.5,  "RANGE: 10-Bar Range Below (x ATR)", step = 0.1,  group = "Layer 2 -- Market Regime")
+
+emaVwapPctGap = math.abs(ema5Raw - vwapRaw) / vwapRaw * 100
+stFlipCount10 = math.sum(stFlippedThisBar ? 1.0 : 0.0, 10)
+tenBarRange   = ta.highest(high, 10) - ta.lowest(low, 10)
+
+rangeSign1 = adxRaw        < regimeAdxThreshold            ? 1 : 0
+rangeSign2 = emaVwapPctGap <= regimeProxPct                 ? 1 : 0
+rangeSign3 = math.abs(macdHistRaw) <= regimeMacdFlatThresh ? 1 : 0
+rangeSign4 = stFlipCount10 >= 2                             ? 1 : 0
+rangeSign5 = tenBarRange   < atrRaw * regimeAtrMult         ? 1 : 0
+rangeScore     = rangeSign1 + rangeSign2 + rangeSign3 + rangeSign4 + rangeSign5
+rangeCond      = rangeScore >= 3
+transitionCond = (not rangeCond) and (stFlippedThisBar or macdCrossUp or macdCrossDown or emaVwapCrossUp or emaVwapCrossDown)
+marketRegime   = rangeCond ? MarketRegime.RANGE : transitionCond ? MarketRegime.TRANSITION : MarketRegime.TREND
+
+// #############################################################################
+// LAYER 3 -- TRADE ELIGIBILITY ENGINE
+// #############################################################################
+
+// -- Session Time Gates: new entries only allowed 9:30 AM - 3:00 PM IST.
+//    Positions are force-exited at/after 3:15 PM IST regardless of signals
+//    (see exitLongCond / exitShortCond in Layer 5, which already run every
+//    bar for any open MANAGE_LONG / MANAGE_SHORT / CAUTION state).
+istHour                = hour(time, "Asia/Kolkata")
+istMinute              = minute(time, "Asia/Kolkata")
+istMinutesFromMidnight = istHour * 60 + istMinute
+
+entryWindowOpen = istMinutesFromMidnight >= 570 and istMinutesFromMidnight < 900  // 9:30 AM <= t < 3:00 PM
+forceExitTime   = istMinutesFromMidnight >= 915                                   // t >= 3:15 PM
+
+minEmaVwapConfirmGap = input.float(0.15, "BUY/SELL: Min EMA/VWAP gap % to confirm cross", step = 0.05, group = "Layer 3 -- Trade Eligibility")
+maxPrevEmaVwapGap    = input.float(0.50, "BUY/SELL: Max previous candle EMA/VWAP gap %",  step = 0.05, group = "Layer 3 -- Trade Eligibility")
+vwapCloseConfirmBars = input.int(2,      "BUY/SELL: Mandatory consecutive closes beyond VWAP", minval = 1, maxval = 4, group = "Layer 3 -- Trade Eligibility")
+
+buySign1 = macdHistPositive and macdLineAboveSignal
+buySign2 = stBullish
+buySign3 = close > ema5Raw and close > vwapRaw
+buySign4 = emaVwapGapPct >= minEmaVwapConfirmGap and math.abs(prevEmaVwapGapPct) <= maxPrevEmaVwapGap
+buySignalCount = (buySign1 ? 1 : 0) + (buySign2 ? 1 : 0) + (buySign3 ? 1 : 0) + (buySign4 ? 1 : 0)
+
+sellSign1 = macdHistNegative and macdLineBelowSignal
+sellSign2 = stBearish
+sellSign3 = close < ema5Raw and close < vwapRaw
+sellSign4 = (-emaVwapGapPct) >= minEmaVwapConfirmGap and math.abs(prevEmaVwapGapPct) <= maxPrevEmaVwapGap
+sellSignalCount = (sellSign1 ? 1 : 0) + (sellSign2 ? 1 : 0) + (sellSign3 ? 1 : 0) + (sellSign4 ? 1 : 0)
+
+// -- Mandatory VWAP Close-Confirmation Gate (hard AND, not a 5th vote):
+//    counts CONSECUTIVE bars, starting at the current bar and walking back,
+//    that closed beyond VWAP on the relevant side. Breaks the streak the
+//    moment a bar fails, so a single whipsaw bar resets the count to 0.
+int buyVwapStreak = 0
+if close > vwapRaw
+    buyVwapStreak := 1
+    for i = 1 to vwapCloseConfirmBars - 1
+        if close[i] > vwapRaw[i]
+            buyVwapStreak := buyVwapStreak + 1
+        else
+            break
+
+int sellVwapStreak = 0
+if close < vwapRaw
+    sellVwapStreak := 1
+    for i = 1 to vwapCloseConfirmBars - 1
+        if close[i] < vwapRaw[i]
+            sellVwapStreak := sellVwapStreak + 1
+        else
+            break
+
+buyVwapConfirmed  = buyVwapStreak  >= vwapCloseConfirmBars
+sellVwapConfirmed = sellVwapStreak >= vwapCloseConfirmBars
+
+buyEligible  = buySignalCount  >= 2 and buyVwapConfirmed
+sellEligible = sellSignalCount >= 2 and sellVwapConfirmed
+
+// #############################################################################
+// LAYER 4 -- POSITION STATE ENGINE
+// #############################################################################
+
+var PositionState posState = PositionState.FLAT
+
+// #############################################################################
+// LAYER 5 -- FINITE STATE MACHINE
+// #############################################################################
+
+freshCrossBars = input.int(2,  "WATCH: Fresh MACD Cross Lookback (bars)", group = "Layer 5 -- WATCH / READY")
+readyCrossBars = input.int(3,  "READY: EMA/VWAP Cross Lookback (bars)",   group = "Layer 5 -- WATCH / READY")
+cooldownBars   = input.int(0,  "Cooldown After EXIT (bars)",               group = "Layer 5 -- Signal Lock / Cooldown")
+
+barsSinceMacdCrossUp    = ta.barssince(macdCrossUp)
+barsSinceMacdCrossDown  = ta.barssince(macdCrossDown)
+freshMacdCross          = barsSinceMacdCrossUp <= freshCrossBars or barsSinceMacdCrossDown <= freshCrossBars
+emaApproachingVwap      = math.abs(ema5Raw - vwapRaw) < math.abs(ema5Raw[1] - vwapRaw[1])
+watchCond               = freshMacdCross and emaApproachingVwap
+
+barsSinceEmaVwapCrossUp   = ta.barssince(emaVwapCrossUp)
+barsSinceEmaVwapCrossDown = ta.barssince(emaVwapCrossDown)
+readyLongCond  = barsSinceEmaVwapCrossUp   <= readyCrossBars and macdLineAboveSignal and not stBullish
+readyShortCond = barsSinceEmaVwapCrossDown <= readyCrossBars and macdLineBelowSignal and not stBearish
+readyCond      = readyLongCond or readyShortCond
+
+cautionLongCond  = macdCrossDown or macdHistFlippedNeg or adxWeakening or volContracting
+cautionShortCond = macdCrossUp   or macdHistFlippedPos or adxWeakening or volContracting
+
+// -- Exit reference: whichever of EMA10 or VWAP is NEARER to current price.
+//    EMA10 is exit-only -- it never gates entries (see buyAllowed/sellAllowed
+//    below, which no longer reference exitEmaRaw at all).
+distToExitEma        = math.abs(close - exitEmaRaw)
+distToVwapForExit     = math.abs(close - vwapRaw)
+nearerExitIsEma10     = distToExitEma <= distToVwapForExit
+nearerExitLevel       = nearerExitIsEma10 ? exitEmaRaw : vwapRaw
+closeBelowNearerExit  = close < nearerExitLevel
+closeAboveNearerExit  = close > nearerExitLevel
+
+// -- Exit is gated on price actually crossing the nearer of EMA10/VWAP --
+//    signalCount (MACD/Supertrend/etc.) no longer contributes on its own;
+//    a single opposing indicator blip can no longer fire an exit without
+//    price having crossed the reference level.
+exitLongCond  = forceExitTime or closeBelowNearerExit
+exitShortCond = forceExitTime or closeAboveNearerExit
+
+var int cooldownBarsLeft = 0
+buyAllowed  = buyEligible  and posState == PositionState.FLAT and cooldownBarsLeft <= 0 and marketRegime != MarketRegime.RANGE and entryWindowOpen
+sellAllowed = sellEligible and posState == PositionState.FLAT and cooldownBarsLeft <= 0 and marketRegime != MarketRegime.RANGE and entryWindowOpen
+
+var TradingState tState = TradingState.WATCH
+
+TradingState newState = switch tState
+    TradingState.MANAGE_LONG  => exitLongCond  ? TradingState.EXIT : cautionLongCond  ? TradingState.CAUTION : TradingState.MANAGE_LONG
+    TradingState.MANAGE_SHORT => exitShortCond ? TradingState.EXIT : cautionShortCond ? TradingState.CAUTION : TradingState.MANAGE_SHORT
+    TradingState.CAUTION      => posState == PositionState.LONG ? (exitLongCond  ? TradingState.EXIT : (cautionLongCond  ? TradingState.CAUTION : TradingState.MANAGE_LONG))  : (exitShortCond ? TradingState.EXIT : (cautionShortCond ? TradingState.CAUTION : TradingState.MANAGE_SHORT))
+    TradingState.BUY          => TradingState.MANAGE_LONG
+    TradingState.SELL         => TradingState.MANAGE_SHORT
+    => buyAllowed ? TradingState.BUY : sellAllowed ? TradingState.SELL : readyCond ? TradingState.READY : TradingState.WATCH
+
+tState := newState
+
+posState := switch newState
+    TradingState.BUY  => PositionState.LONG
+    TradingState.SELL => PositionState.SHORT
+    TradingState.EXIT => PositionState.FLAT
+    => posState
+
+cooldownBarsLeft := newState == TradingState.EXIT ? cooldownBars : math.max(cooldownBarsLeft - 1, 0)
+
+buyTrigger     = newState == TradingState.BUY
+sellTrigger    = newState == TradingState.SELL
+exitTrigger    = newState == TradingState.EXIT
+cautionTrigger = newState == TradingState.CAUTION
+watchTrigger   = newState == TradingState.WATCH
+readyTrigger   = newState == TradingState.READY
+
+// #############################################################################
+// LAYER 6 -- UNIFIED CONFIDENCE GRADE (backend-aligned, tradewithcto.com)
+// Trade Score = RS(40) + KavachState(30) + VolRatio(15) + ADX(10) + VWAP(5)
+// Grade banding = kavach_confidence.explain_confidence_grade
+// #############################################################################
+
+purityThresh     = input.float(60.0, "VWAP Purity Threshold % (>= this = proven)", step = 5.0, group = "Layer 6 -- Trade Quality")
+vwapLookbackBars = input.int(3, "VWAP Side-Consistency Lookback (bars) [display]", minval = 2, maxval = 4, group = "Layer 6 -- Trade Quality")
+riskProxPct      = input.float(0.5, "VWAP Distance Ceiling % [display]", step = 0.1, group = "Layer 6 -- Trade Quality")
+vwapMinDistPct   = input.float(0.05, "VWAP Whipsaw Zone Min % [display]", step = 0.01, group = "Layer 6 -- Trade Quality")
+ema5ProxPct      = input.float(0.30, "EMA5 Proximity Max % [display]", step = 0.05, group = "Layer 6 -- Trade Quality")
+niftySym         = input.symbol("NSE:NIFTY", "NIFTY symbol for RS vs index", group = "Layer 6 -- Trade Quality")
+rankLongDefault  = input.bool(true, "Default ranking LONG when flat/mixed (else SHORT)", group = "Layer 6 -- Trade Quality")
+
+// -- Backend Kavach engine uses true EMA5 + EMA9 slope (panel ema5Raw stays EMA9)
+ema5True   = ta.ema(close, 5)
+ema9True   = ta.ema(close, 9)
+ema9Slope  = ema9True - ema9True[1]
+
+// Trade Score volume POINTS: closed-bar / EMA20 (kavach_10m._volume_ratio_10m)
+volEmaRaw   = ta.ema(volume, volMALen)
+volEmaSrc   = barstate.isrealtime ? volEmaRaw[1] : volEmaRaw
+volumeRatio = volEmaSrc > 0 ? volSrc / volEmaSrc : 0.0
+
+// Volume LABEL: prefer TOD cumulative ratio (backend primary); else bar EMA ratio
+newDayIst = ta.change(time("D", "Asia/Kolkata")) != 0
+var float sessCumVol = 0.0
+sessCumVol := newDayIst ? volSrc : nz(sessCumVol[1]) + volSrc
+todKey = hour(time, "Asia/Kolkata") * 60 + minute(time, "Asia/Kolkata")
+// Pine v6 has no dayofyear(); use YYYYMMDD as a unique day id.
+dayId  = year(time, "Asia/Kolkata") * 10000 + month(time, "Asia/Kolkata") * 100 + dayofmonth(time, "Asia/Kolkata")
+var map<int, float> todTodayValue = map.new<int, float>()
+// Pine v6 does not allow array-typed map values (`map<int, float[]>` is illegal).
+// Emulate the "last 5 sessions per todKey" ring buffer with 5 parallel scalar
+// maps + a shared write slot + a shared filled-slot count. Same semantics.
+var map<int, float> todHist0 = map.new<int, float>()
+var map<int, float> todHist1 = map.new<int, float>()
+var map<int, float> todHist2 = map.new<int, float>()
+var map<int, float> todHist3 = map.new<int, float>()
+var map<int, float> todHist4 = map.new<int, float>()
+var int todHistWriteSlot = 0     // 0..4 rotating write position
+var int todHistFilled    = 0     // 0..5 how many slots have data
+var int todDayId = 0
+if todDayId == 0
+    todDayId := dayId
+else if dayId != todDayId
+    // On session rollover, push yesterday's per-todKey totals into the ring
+    // slot for the whole day, then rotate the slot and grow the filled count.
+    for key in map.keys(todTodayValue)
+        v = map.get(todTodayValue, key)
+        if todHistWriteSlot == 0
+            map.put(todHist0, key, v)
+        else if todHistWriteSlot == 1
+            map.put(todHist1, key, v)
+        else if todHistWriteSlot == 2
+            map.put(todHist2, key, v)
+        else if todHistWriteSlot == 3
+            map.put(todHist3, key, v)
+        else
+            map.put(todHist4, key, v)
+    todHistWriteSlot := (todHistWriteSlot + 1) % 5
+    todHistFilled    := math.min(todHistFilled + 1, 5)
+    map.clear(todTodayValue)
+    todDayId := dayId
+map.put(todTodayValue, todKey, sessCumVol)
+// Aggregate across whichever slots currently hold this todKey.
+float sumT = 0.0
+int   cntT = 0
+if todHistFilled >= 1 and map.contains(todHist0, todKey)
+    sumT := sumT + map.get(todHist0, todKey)
+    cntT := cntT + 1
+if todHistFilled >= 2 and map.contains(todHist1, todKey)
+    sumT := sumT + map.get(todHist1, todKey)
+    cntT := cntT + 1
+if todHistFilled >= 3 and map.contains(todHist2, todKey)
+    sumT := sumT + map.get(todHist2, todKey)
+    cntT := cntT + 1
+if todHistFilled >= 4 and map.contains(todHist3, todKey)
+    sumT := sumT + map.get(todHist3, todKey)
+    cntT := cntT + 1
+if todHistFilled >= 5 and map.contains(todHist4, todKey)
+    sumT := sumT + map.get(todHist4, todKey)
+    cntT := cntT + 1
+todHistCount = cntT
+todAvg = cntT > 0 ? sumT / cntT : na
+volumeTodRatio = not na(todAvg) and todAvg > 0 ? sessCumVol / todAvg : na
+// kavach_volume.volume_participation_label — TOD when available, else bar ratio
+volUsingTod = not na(volumeTodRatio)
+volFallbackBar = not volUsingTod
+volLabelRatio = volFallbackBar ? volumeRatio : volumeTodRatio
+volLabelHigh = volLabelRatio >= 1.2
+volLabelAvg  = volLabelRatio >= 0.65 and volLabelRatio < 1.2
+volLabelLow  = volLabelRatio < 0.65
+volHighBackend = volLabelHigh
+volAverageBackend = volLabelAvg
+volContractingBackend = volLabelLow
+string volSourceText = volUsingTod ? ("TOD (" + str.tostring(todHistCount) + " sess)") : "BAR FALLBACK"
+// Intended parity TF = 10m (backend kavach_10m). Other TFs recompute on chart bars.
+chartTfOk = timeframe.period == "10"
+string chartTfText = chartTfOk ? ("10m OK (" + timeframe.period + ")") : ("WARN use 10m (now " + timeframe.period + ")")
+
+isActiveLong  = newState == TradingState.BUY  or posState == PositionState.LONG
+isActiveShort = newState == TradingState.SELL or posState == PositionState.SHORT
+direction     = isActiveLong ? 1 : isActiveShort ? -1 : (trendReadBullish ? 1 : trendReadBearish ? -1 : (rankLongDefault ? 1 : -1))
+rankingBullish = direction >= 0
+
+// -- RS vs NIFTY (backend: stock day% - nifty day% from previous close)
+stockPrevClose = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
+niftyClose     = request.security(niftySym, "D", close, lookahead = barmerge.lookahead_off)
+niftyPrevClose = request.security(niftySym, "D", close[1], lookahead = barmerge.lookahead_off)
+stockDayPct    = stockPrevClose > 0 ? (close - stockPrevClose) / stockPrevClose * 100.0 : 0.0
+niftyDayPct    = niftyPrevClose > 0 ? (niftyClose - niftyPrevClose) / niftyPrevClose * 100.0 : 0.0
+relativeStrength = stockDayPct - niftyDayPct
+rsForScore       = rankingBullish ? relativeStrength : -relativeStrength
+
+f_rsPts(_v) =>
+    _v > 1.0 ? 40 : _v >= 0.75 ? 35 : _v >= 0.50 ? 30 : _v >= 0.25 ? 20 : _v >= 0.0 ? 10 : 0
+
+rsPts = f_rsPts(rsForScore)
+
+// -- evaluate_kavach (backend kavach_engine.evaluate_kavach)
+bullCond1 = ema5True > vwapRaw
+bullCond2 = ema5True > ema9True
+bullCond3 = ema9Slope > 0
+bullCond4 = close > ema5True
+bullCond5 = close > vwapRaw
+bullCond6 = stBullish
+bullCond7 = macdLineAboveSignal
+bullCond8 = macdHistPositive
+bullCond9 = adxRaw > 20
+bullCond10 = volumeRatio > 1
+bearCond1 = ema5True < vwapRaw
+bearCond2 = ema5True < ema9True
+bearCond3 = ema9Slope < 0
+bearCond4 = close < ema5True
+bearCond5 = close < vwapRaw
+bearCond6 = stBearish
+bearCond7 = macdLineBelowSignal
+bearCond8 = macdHistNegative
+bearCond9 = adxRaw > 20
+bearCond10 = volumeRatio > 1
+bullN = (bullCond1 ? 1 : 0) + (bullCond2 ? 1 : 0) + (bullCond3 ? 1 : 0) + (bullCond4 ? 1 : 0) + (bullCond5 ? 1 : 0) + (bullCond6 ? 1 : 0) + (bullCond7 ? 1 : 0) + (bullCond8 ? 1 : 0) + (bullCond9 ? 1 : 0) + (bullCond10 ? 1 : 0)
+bearN = (bearCond1 ? 1 : 0) + (bearCond2 ? 1 : 0) + (bearCond3 ? 1 : 0) + (bearCond4 ? 1 : 0) + (bearCond5 ? 1 : 0) + (bearCond6 ? 1 : 0) + (bearCond7 ? 1 : 0) + (bearCond8 ? 1 : 0) + (bearCond9 ? 1 : 0) + (bearCond10 ? 1 : 0)
+string kavachState = bullN >= 7 ? "BUY" : bullN >= 5 ? "READY" : bearN >= 7 ? "SELL" : bearN >= 5 ? "READY SHORT" : bullN >= 3 ? "WATCH" : bearN >= 3 ? "WATCH SHORT" : "NEUTRAL"
+kavachPts = kavachState == "BUY" or kavachState == "SELL" ? 30 : kavachState == "READY" or kavachState == "READY SHORT" ? 22 : kavachState == "WATCH" or kavachState == "WATCH SHORT" ? 12 : 0
+
+f_volPts(_r) =>
+    _r > 2.0 ? 15 : _r >= 1.5 ? 12 : _r >= 1.0 ? 8 : 0
+f_adxPts(_a) =>
+    _a > 30.0 ? 10 : _a >= 25.0 ? 8 : _a >= 20.0 ? 5 : 0
+
+volumePts = f_volPts(volumeRatio)
+adxPts    = f_adxPts(adxRaw)
+vwapSidePts = rankingBullish ? (close > vwapRaw ? 5 : 0) : (close < vwapRaw ? 5 : 0)
+
+// v2.8.7: raw Trade Score computed here, penalized just below.
+tradeScoreRaw = int(math.min(100, rsPts + kavachPts + volumePts + adxPts + vwapSidePts))
+
+// v2.8.7: stretch-penalty inputs. Grouped under Rule Toggles so they appear
+// with the other tunables in Settings, but declared here so they're available
+// to the score-penalty logic below (which then feeds into baseGrade).
+softStretchPct = input.float(0.35, "Stretch: 2-letter downgrade beyond (%)", step = 0.05, minval = 0.1, maxval = 2.0, group = "Layer 9 -- Rule Toggles (trial)")
+hardStretchPct = input.float(0.50, "Stretch: force D beyond (%)",             step = 0.05, minval = 0.1, maxval = 2.0, group = "Layer 9 -- Rule Toggles (trial)")
+
+// v2.8.7: stretch % of price from the nearer effective stop.
+stretchPct = close != 0 and not na(nearerExitLevel) ? math.abs(close - nearerExitLevel) / close * 100.0 : 0.0
+
+// v2.8.7: Trade Score penalty from stretch. −20 pts in the soft band
+// (0.35–0.50%), −50 pts in the hard band (>0.50%). Applied to the score BEFORE
+// baseGrade computation, so the whole grade cascade (baseGrade / transition-
+// floor / signalFloor) sees one consistent penalized number. Fixes the KEI
+// display contradiction where Confidence was C* but Trade Score was 93/100.
+scorePenalty = stretchPct > hardStretchPct ? 50 : stretchPct > softStretchPct ? 20 : 0
+tradeScore   = math.max(0, tradeScoreRaw - scorePenalty)
+
+// Purity: last purityLen completed bars on signal side of VWAP (chart TF)
+purityPct    = purityLen > 0 ? (direction >= 0 ? recentPurityAbove : recentPurityBelow) / purityLen * 100.0 : 0.0
+purityProven = purityPct >= purityThresh
+
+// Confidence regime: backend detect_market_regime (ST / MACD / EMA5-VWAP flip)
+// Uses true EMA5 vs VWAP — not Layer-2 RANGE/TRANSITION UI regime.
+ema5AboveVwap     = ema5True > vwapRaw
+ema5AboveVwapPrev = ema5True[1] > vwapRaw[1]
+macdBullNow       = macdLineAboveSignal
+macdBullPrev      = macdLineRaw[1] > macdSignalRaw[1]
+confRegimeTrans   = stFlippedThisBar or (macdBullNow != macdBullPrev) or (ema5AboveVwap != ema5AboveVwapPrev)
+
+// Banding — mirror backend explain_confidence_grade (no Pine B* floor)
+string baseGrade = tradeScore < 65 ? "D" : volContractingBackend and not purityProven ? "D" : volHighBackend and purityProven and tradeScore >= 95 ? "A+" : volHighBackend and purityProven and tradeScore >= 85 ? "A" : volHighBackend and purityProven and tradeScore >= 75 ? "B" : volAverageBackend and purityProven and tradeScore >= 85 ? "B" : volHighBackend and not purityProven and tradeScore >= 85 ? "C" : volAverageBackend and purityProven and tradeScore >= 75 ? "C" : volContractingBackend and purityProven and tradeScore >= 85 ? "C" : "D"
+
+// v2.8.7: stretch letter-downgrade (on top of the score penalty above).
+// Both stack intentionally: the score penalty produces a consistent number in
+// the "Trade Score" row, and the letter penalty ensures the grade also drops
+// even when tradeScoreRaw was so high that penalized score still lands in a
+// non-D tier. The two together mean baseGradeStretched is D for any stretch
+// beyond hardStretchPct, and cannot be silently rescued.
+f_letterIdx(string g) => g == "A+" ? 0 : g == "A" ? 1 : g == "B" ? 2 : g == "C" ? 3 : 4
+f_idxLetter(int i) => i <= 0 ? "A+" : i == 1 ? "A" : i == 2 ? "B" : i == 3 ? "C" : "D"
+stretchDowngrade = stretchPct > softStretchPct ? 2 : 0
+stretchedIdx = math.min(4, f_letterIdx(baseGrade) + stretchDowngrade)
+string preHardGrade = f_idxLetter(stretchedIdx)
+string baseGradeStretched = stretchPct > hardStretchPct ? "D" : preHardGrade
+
+transitionFloor = confRegimeTrans and tradeScore >= 75 and baseGradeStretched == "D"
+string confidence = transitionFloor ? "C" : baseGradeStretched
+// Suffix "!" indicates stretch penalty was applied (visible on chart), so you
+// can distinguish an original A from a downgraded-from-A+ A.
+string confidenceDisplay = transitionFloor ? "C*" : (stretchDowngrade > 0 ? confidence + "!" : confidence)
+
+// Display-only helpers (not in Trade Score) — keep VWAP Persist / EMA5 Prox rows
+pctFromVwap = vwapRaw != 0 ? math.abs(close - vwapRaw) / vwapRaw * 100.0 : 0.0
+int consistentBars = 0
+for i = 1 to vwapLookbackBars
+    if direction > 0 and close[i] > vwapRaw[i]
+        consistentBars := consistentBars + 1
+    if direction < 0 and close[i] < vwapRaw[i]
+        consistentBars := consistentBars + 1
+vwapDistSweetSpot = pctFromVwap >= vwapMinDistPct and pctFromVwap <= riskProxPct
+pctFromEma5 = ema5True != 0 ? math.abs(close - ema5True) / ema5True * 100.0 : 0.0
+signalConfirmCount  = direction > 0 ? buySignalCount : direction < 0 ? sellSignalCount : 0
+freshTrigger        = newState == TradingState.BUY or newState == TradingState.SELL
+signalFloorNote     = freshTrigger and signalConfirmCount == 4 and tradeScore >= 75
+string volLabelText = volHighBackend ? "High" : volContractingBackend ? "Low" : "Average"
+
+// #############################################################################
+// LAYER 9 -- ENTER / EXIT FLAGS (v2.8 trial rules, toggleable)
+// Position awareness = interactive anchor (broker fills are invisible to Pine).
+// UX: set Position LONG/SHORT → click Entry Bar on chart (confirm) → done.
+//     Clear: set Position back to FLAT (one click in settings).
+// #############################################################################
+
+g28 = "Layer 9 -- ENTER / EXIT (v2.8)"
+g28r = "Layer 9 -- Rule Toggles (trial)"
+// v2.8.2: Position Anchor inputs moved to the very top of the Settings dialog
+// (see block just after indicator() declaration). Only ENTER/EXIT rule params
+// and rule toggles remain in this section.
+
+maxPctFromOpen = input.float(3.0, "Max % from session open", step = 0.1, minval = 0.5, group = g28)
+maxPullbacks = input.int(2, "Max pullback # in leg", minval = 1, maxval = 5, group = g28)
+// v3.0: default changed 1 -> 0. Previously a pullback count of 0 (a clean,
+// strong, unidirectional run with no pullback yet) FAILED this gate — the
+// exact opposite of the intent behind redefining Pullback # to recognize
+// unidirectional strength. Confirmed live on 20-Jul: TATAELXSI, JSWENERGY,
+// UNIONBANK all sat at Pullback # 0 during strong bullish runs and never
+// fired an entry because of this default. 0 is now a valid/qualifying count;
+// the gate still blocks LATE legs via maxPullbacks (too many pullbacks).
+minPullbacks = input.int(0, "Min pullback # in leg", minval = 0, maxval = 5, group = g28)
+blowoutMult = input.float(2.0, "Blowout multiple (× planned risk)", step = 0.1, minval = 1.0, group = g28)
+stallBarsNeed = input.int(3, "Stall WARN candle count", minval = 2, maxval = 8, group = g28)
+adxFloor = input.float(20.0, "ADX floor for ENTER", step = 0.5, group = g28)
+adxFullEnter = input.float(25.0, "ADX full-ENTER above (else RECHECK)", step = 0.5, group = g28)
+volEnterMin = input.float(0.8, "Min relative volume for ENTER", step = 0.05, group = g28)
+showEnterFlags = input.bool(true, "Show ENTER flags", group = g28)
+showExitFlags = input.bool(true, "Show EXIT / WARN flags", group = g28)
+showEeBanner = input.bool(true, "Show top-center ENTER/EXIT banner", group = g28)
+
+useEnterKavachDir = input.bool(true, "ENTER: Kavach direction + VWAP gate", group = g28r)
+useEnterAdx = input.bool(true, "ENTER: ADX floor", group = g28r)
+useEnterVotes = input.bool(true, "ENTER: unanimous Trend/ST/MACD", group = g28r)
+// v2.8.3: Diagnosis — votesLongAll/votesShortAll (below) require ALL THREE of
+// Trend/Supertrend/MACD to agree before ENTER can fire. But Confidence Grade
+// itself is computed off a LOOSER 2-of-3 majority (trendBullVotes >= 2). That
+// makes the vote check here a SEPARATE, stricter gate stacked on top of
+// Grade — not an input feeding into it, contradicting "the grade is the
+// gate" design principle. Since MACD is typically the laggard of the three,
+// it's usually the lone holdout: Grade reaches A/B on trend+ST agreement,
+// then by the time MACD also confirms, price has stretched further and the
+// stretch penalty has already pulled Grade back down to D — leaving almost
+// no window where both conditions are true together.
+// enterVotesMode lets you test relaxing this to match Grade's own 2-of-3
+// threshold instead of requiring full unanimity. Defaults to "Unanimous
+// (current)" so live behavior is UNCHANGED until you deliberately shadow
+// this and choose to flip it — do not flip to 2-of-3 without reviewing
+// enter/no-enter outcomes over a full session first.
+enterVotesMode = input.string("Unanimous (current)", "ENTER votes threshold", options = ["Unanimous (current)", "2-of-3 (matches Grade)"], group = g28r, tooltip = "Unanimous = current live behavior (Trend+ST+MACD must all agree). 2-of-3 = same threshold Confidence Grade itself already uses. SHADOW-TEST before switching live.")
+useEnterVolume = input.bool(true, "ENTER: volume not Low / not decelerating", group = g28r)
+useEnterPctOpen = input.bool(true, "ENTER: max % from open", group = g28r)
+useEnterPullback = input.bool(true, "ENTER: pullback # in range", group = g28r)
+// v3.0: NEW gate, was missing entirely. enterLongCore/enterShortCore checked
+// ADX/Votes/Volume/%-from-open/Pullback but NEVER Confidence Grade or Trade
+// Score — meaning a firm ENTER LONG/SHORT (and its arrow/label/alert) could
+// fire even while Grade sat at D/D! with a low Trade Score, directly
+// contradicting "the grade is the gate." Confirmed live on 20-Jul: SELL
+// arrows fired repeatedly on EXIDEIND while Confidence was D and Score ~45.
+// This closes that gap — firm entries now also require the same Grade
+// threshold as the Readiness banner (B or better).
+useEnterGrade = input.bool(true, "ENTER: Confidence Grade B or better", group = g28r)
+
+useExit2Candle = input.bool(true, "EXIT: 2-candle fail", group = g28r)
+useExitBlowout = input.bool(true, "EXIT: blowout (intrabar)", group = g28r)
+useExitRatchet = input.bool(true, "EXIT: 1R ratchet → EMA5 trail", group = g28r)
+useExitStall = input.bool(true, "WARN: stall (no new extreme)", group = g28r)
+useExitBookHalf = input.bool(true, "MARK: book-half @ 2R", group = g28r)
+useExitGradeDecay = input.bool(true, "WARN: grade decay to D in profit", group = g28r)
+// v2.8.3: informational only, never auto-exits.
+useExitAgainstStreak = input.bool(true, "WARN: against-direction streak (below +1R)", group = g28r)
+againstBarsNeed      = input.int(3, "  ...consecutive confirmed bars against direction", minval = 2, maxval = 10, group = g28r)
+// v2.8.4: single-candle structure-break warnings. Fire immediately on the
+// FIRST confirmed close that breaches the level — no streak needed. These
+// catch the "wiggle reversal" case where one green bar in a red sequence
+// resets the streak counter but the trend has actually flipped.
+useExitEma5Pierce    = input.bool(true, "WARN: EMA5 pierce against direction (below +1R)", group = g28r)
+useExitEntryBoundary = input.bool(true, "WARN: back inside entry candle range",             group = g28r)
+
+// -- Session open (IST day) for % from open --
+var float sessOpenPx = na
+if newDayIst
+    sessOpenPx := open
+else
+    sessOpenPx := nz(sessOpenPx[1], open)
+pctFromOpenRaw = sessOpenPx > 0 ? (close - sessOpenPx) / sessOpenPx * 100.0 : 0.0
+pctFromOpenLong = pctFromOpenRaw
+pctFromOpenShort = -pctFromOpenRaw
+
+// v3.0: Pullback # redefined. Was: touch EMA5 then reclaim. Now: touch the
+// NEARER of EMA10/VWAP then reclaim — this answers "how many times has price
+// pulled back to a real support/stop reference," not the tighter EMA5 line,
+// so a high count means a genuinely late/tired leg, not just normal EMA5
+// noise. Also adds an auto-reset: if 3 consecutive CONFIRMED 10m candles pass
+// with no pullback touch, the leg is treated as a fresh unidirectional run
+// and the counter resets to 0 — a stale high count from an old leg should
+// not make a strong new one-directional trend look "late."
+nearerRefLong  = math.abs(close - exitEmaRaw) <= math.abs(close - vwapRaw) ? exitEmaRaw : vwapRaw
+nearerRefShort = nearerRefLong
+var int pullbackCountLong = 0
+var int pullbackCountShort = 0
+var bool inPullLong = false
+var bool inPullShort = false
+var int barsSinceLastPullLong = 0
+var int barsSinceLastPullShort = 0
+if emaVwapCrossUp
+    pullbackCountLong := 0
+    inPullLong := false
+    barsSinceLastPullLong := 0
+if emaVwapCrossDown
+    pullbackCountShort := 0
+    inPullShort := false
+    barsSinceLastPullShort := 0
+// Long leg active while EMA5 above VWAP
+if emaAboveVwap
+    if not inPullLong and low <= nearerRefLong and close[1] > nearerRefLong[1]
+        inPullLong := true
+    if inPullLong and close > nearerRefLong and barstate.isconfirmed
+        pullbackCountLong := pullbackCountLong + 1
+        inPullLong := false
+        barsSinceLastPullLong := 0
+    else if barstate.isconfirmed
+        barsSinceLastPullLong := barsSinceLastPullLong + 1
+        if barsSinceLastPullLong >= 3 and pullbackCountLong > 0
+            pullbackCountLong := 0
+else
+    inPullLong := false
+    barsSinceLastPullLong := 0
+if emaBelowVwap
+    if not inPullShort and high >= nearerRefShort and close[1] < nearerRefShort[1]
+        inPullShort := true
+    if inPullShort and close < nearerRefShort and barstate.isconfirmed
+        pullbackCountShort := pullbackCountShort + 1
+        inPullShort := false
+        barsSinceLastPullShort := 0
+    else if barstate.isconfirmed
+        barsSinceLastPullShort := barsSinceLastPullShort + 1
+        if barsSinceLastPullShort >= 3 and pullbackCountShort > 0
+            pullbackCountShort := 0
+else
+    inPullShort := false
+    barsSinceLastPullShort := 0
+
+volDecel3 = volume < volume[1] and volume[1] < volume[2] and volume[2] < volume[3]
+volEnterOk = volLabelRatio >= volEnterMin and not volDecel3
+
+// Unanimous direction votes (stricter than Layer-1 2-of-3 Trend Read):
+// Trend(=EMA vs VWAP) + Supertrend + MACD must ALL agree.
+// Kept as-is for the Votes 3/3 dashboard panel — this always shows the true
+// unanimous state regardless of enterVotesMode, so you can still see exactly
+// which single vote (usually MACD) is dissenting even when the ENTER gate
+// itself has been relaxed to 2-of-3.
+votesLongAll = emaAboveVwap and stBullish and macdLineAboveSignal
+votesShortAll = emaBelowVwap and stBearish and macdLineBelowSignal
+// v2.8.3: gate-facing vote pass, respects enterVotesMode. When set to
+// "2-of-3 (matches Grade)", this uses the SAME majority threshold Confidence
+// Grade already uses internally (trendBullVotes/trendBearVotes >= 2), so
+// votes stop acting as a second, stricter, parallel gate on top of Grade.
+enterVotesLongPass = enterVotesMode == "Unanimous (current)" ? votesLongAll : trendReadBullish
+enterVotesShortPass = enterVotesMode == "Unanimous (current)" ? votesShortAll : trendReadBearish
+
+adxEnterOk = adxRaw > adxFloor
+adxRecheckBand = adxRaw > adxFloor and adxRaw <= adxFullEnter
+adxFullBand = adxRaw > adxFullEnter
+
+pullLongOk = pullbackCountLong >= minPullbacks and pullbackCountLong <= maxPullbacks
+pullShortOk = pullbackCountShort >= minPullbacks and pullbackCountShort <= maxPullbacks
+pctLongOk = pctFromOpenLong < maxPctFromOpen
+pctShortOk = pctFromOpenShort < maxPctFromOpen
+
+// Existing Kavach direction: buyEligible / sellEligible (VWAP streak + signal votes)
+kavachDirLong = buyEligible
+kavachDirShort = sellEligible
+
+// v3.0: firm-entry grade gate — B or better required, same threshold as the
+// Readiness banner, so the arrow/label/alert can never again disagree with
+// what the banner and dashboard are showing.
+gradeGateOk = confidenceDisplay == "A+" or confidenceDisplay == "A" or confidenceDisplay == "B" or confidenceDisplay == "B*"
+
+enterLongCore =
+     (not useEnterKavachDir or kavachDirLong) and
+     (not useEnterAdx or adxEnterOk) and
+     (not useEnterVotes or enterVotesLongPass) and
+     (not useEnterVolume or volEnterOk) and
+     (not useEnterPctOpen or pctLongOk) and
+     (not useEnterPullback or pullLongOk) and
+     (not useEnterGrade or gradeGateOk)
+enterShortCore =
+     (not useEnterKavachDir or kavachDirShort) and
+     (not useEnterAdx or adxEnterOk) and
+     (not useEnterVotes or enterVotesShortPass) and
+     (not useEnterVolume or volEnterOk) and
+     (not useEnterPctOpen or pctShortOk) and
+     (not useEnterPullback or pullShortOk) and
+     (not useEnterGrade or gradeGateOk)
+
+// ENTER only while flat (no anchor). Confirmed bars only — no mid-candle flash.
+isFlatAnchor = posMode == "FLAT"
+// Note: ENTER flags require the user to be truly flat (posMode == FLAT). If
+// posMode is LONG/SHORT but anchor guards fail, we're neither in a valid trade
+// nor eligible for ENTER — the banner will show "ANCHOR: …" instead.
+enterLongFull = showEnterFlags and isFlatAnchor and barstate.isconfirmed and enterLongCore and adxFullBand
+enterLongRecheck = showEnterFlags and isFlatAnchor and barstate.isconfirmed and enterLongCore and adxRecheckBand
+enterShortFull = showEnterFlags and isFlatAnchor and barstate.isconfirmed and enterShortCore and adxFullBand
+enterShortRecheck = showEnterFlags and isFlatAnchor and barstate.isconfirmed and enterShortCore and adxRecheckBand
+
+// ---- Anchor capture (persists from Entry Bar forward) ----
+// v2.8.1 guards: require symbol match AND same-session date to prevent the
+// entryBarTime input from bleeding across symbols (identical NSE 10m clocks)
+// or across days (yesterday's anchor timestamp still exists in history).
+// v2.8.3: removed blank-means-current-chart auto-capture. That fallback let
+// posSymbol="" silently resolve to "match whatever chart I'm running on" —
+// harmless on the symbol you intended, but since TradingView carries
+// posMode=LONG/SHORT as a shared default template across every chart the
+// indicator is added to, blank posSymbol on OTHER charts also auto-matched
+// itself, causing IN TRADE/HOLD/STOPPED states to appear on unrelated
+// symbols from a single dummy entry. posSymbol must now be explicitly typed;
+// blank always fails the guard (isFlatEffective stays true) instead of
+// auto-resolving to the current chart.
+effectiveAnchorSym = posSymbol
+anchorSymbolOk = effectiveAnchorSym != "" and f_baseTicker(effectiveAnchorSym) == f_baseTicker(syminfo.tickerid)
+anchorDayId    = year(entryBarTime, "Asia/Kolkata") * 10000 + month(entryBarTime, "Asia/Kolkata") * 100 + dayofmonth(entryBarTime, "Asia/Kolkata")
+anchorSameDay  = anchorDayId == dayId
+// Effective flat = user set FLAT, OR symbol/day guards fail. All anchor logic
+// (including panel rows tied to inAnchoredTrade) reads this instead of posMode.
+isFlatEffective = isFlatAnchor or not anchorSymbolOk or not anchorSameDay
+isAnchorBar = not isFlatEffective and time == entryBarTime
+var int ancBar = na
+var float ancEntry = na
+var float ancEma10 = na
+var float ancVwap = na
+var float ancHigh = na
+var float ancLow = na
+var bool ancIsLong = false
+var bool hit1R = false
+var float bestFavExt = na
+var int stallRun = 0
+var bool twoCandleFailFired = false
+var bool blowoutFired = false
+var bool ratchetExitFired = false
+var bool bookHalfSeen = false
+// v2.8.3 additions:
+//   worstAdvExt      -> running max ADVERSE excursion price (for MAE display)
+//   againstStreak    -> consecutive confirmed bars closing against direction
+//   tradeStoppedFlag -> once any EXIT NOW rule fires, latches true until FLAT
+//   tradeStoppedReason -> latched short reason string ("2-CANDLE FAIL" etc.)
+var float worstAdvExt = na
+var int   againstStreak = 0
+var bool  tradeStoppedFlag = false
+var string tradeStoppedReason = na
+
+if isFlatEffective
+    ancBar := na
+    ancEntry := na
+    ancEma10 := na
+    ancVwap := na
+    ancHigh := na
+    ancLow := na
+    ancIsLong := false
+    hit1R := false
+    bestFavExt := na
+    stallRun := 0
+    twoCandleFailFired := false
+    blowoutFired := false
+    ratchetExitFired := false
+    bookHalfSeen := false
+    worstAdvExt := na
+    againstStreak := 0
+    tradeStoppedFlag := false
+    tradeStoppedReason := na
+else if isAnchorBar
+    ancBar := bar_index
+    ancEntry := entryPriceOverride > 0 ? entryPriceOverride : close
+    ancEma10 := exitEmaRaw
+    ancVwap := vwapRaw
+    ancHigh := high
+    ancLow := low
+    ancIsLong := posMode == "LONG"
+    hit1R := false
+    bestFavExt := posMode == "LONG" ? high : low
+    stallRun := 0
+    twoCandleFailFired := false
+    blowoutFired := false
+    ratchetExitFired := false
+    bookHalfSeen := false
+    worstAdvExt := posMode == "LONG" ? low : high
+    againstStreak := 0
+    tradeStoppedFlag := false
+    tradeStoppedReason := na
+
+inAnchoredTrade = not isFlatEffective and not na(ancBar) and bar_index >= ancBar
+barsSinceAnc = inAnchoredTrade ? bar_index - ancBar : na
+
+string enterStateText =
+     not isFlatEffective and inAnchoredTrade ? "IN TRADE (anchor)" :
+     posMode != "FLAT" and posSymbol == "" ? "ANCHOR: set Anchor Symbol" :
+     posMode != "FLAT" and not anchorSymbolOk ? "ANCHOR: wrong symbol (" + f_baseTicker(effectiveAnchorSym) + "≠" + f_baseTicker(syminfo.tickerid) + ")" :
+     posMode != "FLAT" and not anchorSameDay ? "ANCHOR: stale (not today)" :
+     posMode != "FLAT" ? "SET ENTRY BAR (time)" :
+     enterLongFull ? "ENTER LONG" :
+     enterLongRecheck ? "ENTER LONG (recheck ADX)" :
+     enterShortFull ? "ENTER SHORT" :
+     enterShortRecheck ? "ENTER SHORT (recheck ADX)" :
+     "NO ENTER"
+enterStateColor =
+     str.contains(enterStateText, "ENTER LONG") or str.contains(enterStateText, "ENTER SHORT") ? colOk :
+     enterStateText == "IN TRADE (anchor)" ? colOk :
+     enterStateText == "SET ENTRY BAR (time)" or str.startswith(enterStateText, "ANCHOR:") or str.contains(enterStateText, "recheck") ? colMid :
+     colBad
+riskEmaPts = not na(ancEntry) and not na(ancEma10) ? math.abs(ancEntry - ancEma10) : na
+riskVwapPts = not na(ancEntry) and not na(ancVwap) ? math.abs(ancEntry - ancVwap) : na
+// Effective SL = nearer of EMA10 / VWAP at entry bar (same spirit as trade log)
+effRiskPts =
+     na(riskEmaPts) and na(riskVwapPts) ? na :
+     na(riskEmaPts) ? riskVwapPts :
+     na(riskVwapPts) ? riskEmaPts :
+     math.min(riskEmaPts, riskVwapPts)
+effSlIsEma10 = not na(riskEmaPts) and (na(riskVwapPts) or riskEmaPts <= riskVwapPts)
+effSlPx = effSlIsEma10 ? ancEma10 : ancVwap
+plannedRiskOk = not na(effRiskPts) and effRiskPts > 0
+
+// Favorable / adverse extremes vs entry
+favExtNow = ancIsLong ? high : low
+advExtNow = ancIsLong ? low : high
+inProfitNow = inAnchoredTrade and plannedRiskOk and (ancIsLong ? close > ancEntry : close < ancEntry)
+touched1R = inAnchoredTrade and plannedRiskOk and (ancIsLong ? high >= ancEntry + effRiskPts : low <= ancEntry - effRiskPts)
+touched2R = inAnchoredTrade and plannedRiskOk and (ancIsLong ? high >= ancEntry + 2.0 * effRiskPts : low <= ancEntry - 2.0 * effRiskPts)
+if inAnchoredTrade and touched1R
+    hit1R := true
+
+// 1) 2-CANDLE FAIL — evaluate once on confirmed close of 2nd bar after entry
+twoCandleFail =
+     showExitFlags and useExit2Candle and inAnchoredTrade and plannedRiskOk and
+     barstate.isconfirmed and barsSinceAnc == 2 and not twoCandleFailFired and
+     (ancIsLong ? math.max(high, high[1]) <= ancHigh : math.min(low, low[1]) >= ancLow)
+if twoCandleFail
+    twoCandleFailFired := true
+
+// 2) BLOWOUT — intrabar OK (only intrabar EXIT rule)
+blowoutNow =
+     showExitFlags and useExitBlowout and inAnchoredTrade and plannedRiskOk and
+     not blowoutFired and
+     (ancIsLong ? low <= ancEntry - blowoutMult * effRiskPts : high >= ancEntry + blowoutMult * effRiskPts)
+if blowoutNow
+    blowoutFired := true
+
+// 3) 1R RATCHET — trail EMA5 after +1R; EXIT on confirmed close beyond EMA5
+trailIsEma5 = hit1R
+ratchetExit =
+     showExitFlags and useExitRatchet and inAnchoredTrade and trailIsEma5 and
+     barstate.isconfirmed and not ratchetExitFired and
+     (ancIsLong ? close < ema5True : close > ema5True)
+if ratchetExit
+    ratchetExitFired := true
+
+// v2.8.3: latch the first EXIT NOW reason so the banner persists across bars.
+if not tradeStoppedFlag and inAnchoredTrade
+    if twoCandleFail
+        tradeStoppedFlag   := true
+        tradeStoppedReason := "2-CANDLE FAIL"
+    else if blowoutNow
+        tradeStoppedFlag   := true
+        tradeStoppedReason := "BLOWOUT"
+    else if ratchetExit
+        tradeStoppedFlag   := true
+        tradeStoppedReason := "EMA5 TRAIL"
+
+// 4) STALL WARN — in profit, N confirmed bars with no new favorable extreme
+if inAnchoredTrade and barstate.isconfirmed and not na(bestFavExt)
+    newFav = ancIsLong ? high > bestFavExt : low < bestFavExt
+    if newFav
+        bestFavExt := favExtNow
+        stallRun := 0
+    else if inProfitNow
+        stallRun := stallRun + 1
+    else
+        stallRun := 0
+
+// v2.8.3: MAE (worst adverse excursion) + against-direction streak trackers,
+// updated on every confirmed bar while in trade. Independent of stallRun.
+if inAnchoredTrade and barstate.isconfirmed
+    if na(worstAdvExt)
+        worstAdvExt := ancIsLong ? low : high
+    else
+        newAdv = ancIsLong ? low < worstAdvExt : high > worstAdvExt
+        if newAdv
+            worstAdvExt := ancIsLong ? low : high
+    againstBar = ancIsLong ? close < nz(close[1], close) : close > nz(close[1], close)
+    againstStreak := againstBar ? againstStreak + 1 : 0
+stallWarn =
+     showExitFlags and useExitStall and inAnchoredTrade and barstate.isconfirmed and
+     inProfitNow and stallRun >= stallBarsNeed
+
+// 5) BOOK-HALF marker @ 2R (intrabar display, informational) — first touch only
+bookHalfMark =
+     showExitFlags and useExitBookHalf and inAnchoredTrade and plannedRiskOk and
+     touched2R and not bookHalfSeen
+if bookHalfMark
+    bookHalfSeen := true
+
+// 6) GRADE DECAY WARN — in profit and Confidence == D (confirmed)
+gradeDecayWarn =
+     showExitFlags and useExitGradeDecay and inAnchoredTrade and barstate.isconfirmed and
+     inProfitNow and confidence == "D"
+
+// 7) AGAINST-STREAK WARN — N consecutive confirmed bars closing against
+// direction while below +1R. Fills the gap between the one-shot 2-candle rule
+// and the EMA10 stop.
+againstStreakWarn =
+     showExitFlags and useExitAgainstStreak and inAnchoredTrade and barstate.isconfirmed and
+     not hit1R and againstStreak >= againstBarsNeed
+
+// 8) EMA5 PIERCE WARN — first confirmed close on the wrong side of EMA5 while
+// below +1R. Fires immediately, no streak reset problem. This is the earliest
+// possible warning that the pullback-entry thesis is broken.
+var bool ema5PierceFired = false
+if isFlatEffective or isAnchorBar
+    ema5PierceFired := false
+ema5PierceRaw = inAnchoredTrade and barstate.isconfirmed and not hit1R and
+     (ancIsLong ? close < ema5True : close > ema5True)
+ema5PierceWarn =
+     showExitFlags and useExitEma5Pierce and ema5PierceRaw and not ema5PierceFired
+if ema5PierceWarn
+    ema5PierceFired := true
+
+// 9) ENTRY-BOUNDARY WARN — first confirmed bar where price closes back inside
+// the entry candle's range against direction. For SHORT: close > ancHigh.
+// For LONG: close < ancLow. Signals the trade thesis is broken — the move
+// that motivated entry has fully retraced.
+var bool entryBoundaryFired = false
+if isFlatEffective or isAnchorBar
+    entryBoundaryFired := false
+entryBoundaryRaw = inAnchoredTrade and barstate.isconfirmed and
+     (ancIsLong ? close < ancLow : close > ancHigh)
+entryBoundaryWarn =
+     showExitFlags and useExitEntryBoundary and entryBoundaryRaw and not entryBoundaryFired
+if entryBoundaryWarn
+    entryBoundaryFired := true
+
+string trailText = not inAnchoredTrade ? "—" : trailIsEma5 ? "Trail: EMA5" : "Trail: EMA10"
+string slRefText =
+     not inAnchoredTrade or na(effRiskPts) ? "—" :
+     (effSlIsEma10 ? "EMA10" : "VWAP") + " (" + str.tostring(effRiskPts, "#.##") + " pts)"
+string exitFlagText =
+     tradeStoppedFlag ? "STOPPED · " + tradeStoppedReason :
+     twoCandleFail ? "EXIT NOW · 2-CANDLE FAIL" :
+     blowoutNow ? "EXIT NOW · BLOWOUT" :
+     ratchetExit ? "EXIT NOW · EMA5 TRAIL" :
+     entryBoundaryWarn ? "WARN · BACK-IN-ENTRY" :
+     ema5PierceWarn ? "WARN · EMA5 PIERCED" :
+     stallWarn ? "WARN · STALL" :
+     gradeDecayWarn ? "WARN · GRADE D" :
+     againstStreakWarn ? "WARN · AGAINST " + str.tostring(againstStreak) + " bars" :
+     bookHalfMark ? "BOOK-HALF · 2R" :
+     inAnchoredTrade ? "HOLD" : "—"
+exitFlagColor =
+     str.contains(exitFlagText, "STOPPED") ? colBad :
+     str.contains(exitFlagText, "EXIT NOW") ? colBad :
+     str.contains(exitFlagText, "WARN") ? colMid :
+     str.contains(exitFlagText, "BOOK") ? colOk :
+     exitFlagText == "HOLD" ? colOk :
+     colMid
+
+// Use isFlatEffective so a half-set anchor (posMode LONG/SHORT but wrong symbol
+// or stale day) still shows the market-direction values on the panel, not
+// stale ancIsLong.
+pctPanelVal = isFlatEffective ? (votesLongAll or trendReadBullish ? pctFromOpenLong : pctFromOpenShort) : (ancIsLong ? pctFromOpenLong : pctFromOpenShort)
+pullPanelVal = isFlatEffective ? (votesLongAll or (not votesShortAll and trendReadBullish) ? pullbackCountLong : pullbackCountShort) : (ancIsLong ? pullbackCountLong : pullbackCountShort)
+
+// v3.0: Readiness message. The old flat-state banner just showed enterStateText
+// ("NO ENTER" in bold red almost always, since it requires Votes unanimity which
+// is structurally lagging — see 20-Jul discussion). That's misleading when Grade
+// and Trade Score are actually decent; "NO ENTER" reads as "nothing here" even
+// when a genuinely promising setup is developing. This computes a softer,
+// meaningful pre-trade readiness read from Confidence Grade + Trade Score alone
+// (NOT gated by Votes unanimity), purely for display on the banner/row-1 — it
+// does NOT change enterLongFull/enterShortFull or any alertcondition/live-signal
+// logic, which remain exactly as before.
+gradeReadyLevel = (confidenceDisplay == "A+" or confidenceDisplay == "A") ? 2 : (confidenceDisplay == "B" or confidenceDisplay == "B*") ? 1 : 0
+readinessDirLong  = kavachDirLong or trendReadBullish
+readinessDirShort = kavachDirShort or trendReadBearish
+// v3.0 fix: previously only checked Grade/Score/direction — JSWENERGY showed
+// READY TO LONG at 4.71% from open against a 3% max, i.e. already over the
+// real entry gate's stretch limit, so the banner said "ready" while the
+// actual firm-entry logic would correctly have blocked it. Now also requires
+// the stretch (%-from-open), pullback-range, and volume gates to agree —
+// everything the real entry checks EXCEPT Votes unanimity, which stays
+// excluded on purpose since that's the structurally-lagging piece this
+// banner is meant to get ahead of.
+readyLongPractical  = readinessDirLong  and pctLongOk  and pullLongOk  and volEnterOk
+readyShortPractical = readinessDirShort and pctShortOk and pullShortOk and volEnterOk
+string readinessText =
+     gradeReadyLevel >= 1 and tradeScore >= 65 and readyLongPractical and not readyShortPractical ? "READY TO LONG" :
+     gradeReadyLevel >= 1 and tradeScore >= 65 and readyShortPractical and not readyLongPractical ? "READY TO SHORT" :
+     gradeReadyLevel >= 1 and tradeScore >= 50 ? "WATCHING" :
+     "NOT READY"
+readinessColor =
+     readinessText == "READY TO LONG" or readinessText == "READY TO SHORT" ? colOk :
+     readinessText == "WATCHING" ? colMid :
+     colBad
+
+// Top-center banner: ENTER (flat) and EXIT/WARN/HOLD (anchored) share one slot
+string eeBannerText =
+     inAnchoredTrade ? (exitFlagText == "—" ? "IN TRADE" : exitFlagText) :
+     posMode != "FLAT" ? enterStateText :
+     readinessText
+eeBannerTextColor =
+     inAnchoredTrade ? (str.contains(exitFlagText, "STOPPED") or str.contains(exitFlagText, "EXIT NOW") ? colBad : str.contains(exitFlagText, "WARN") ? colMid : colOk) :
+     posMode != "FLAT" ? enterStateColor :
+     readinessColor
+
+// #############################################################################
+// LAYER 7 -- DASHBOARD + SCORE BREAKDOWN
+// #############################################################################
+
+showDashboard         = input.bool(true,      "Show Dashboard",                                                                  group = "Layer 7 -- Display")
+hideRow1WhenFlat      = input.bool(true,      "Row 1: hide pre-trade (show only once a trade is placed)",                       group = "Layer 7 -- Display")
+showTfParityLabel     = input.bool(true,      "Show 10m timeframe parity label on chart",                                        group = "Layer 7 -- Display")
+showTodFallbackLabel  = input.bool(true,      "Show TOD volume fallback label on chart",                                         group = "Layer 7 -- Display")
+dashTitleSizeInp      = input.string("Small",  "Dashboard Title Size",     options = ["Tiny","Small","Normal","Large","Huge"],   group = "Layer 7 -- Text Style: Title")
+dashTitleBoldInp      = input.bool(true,       "Dashboard Title Bold",                                                           group = "Layer 7 -- Text Style: Title")
+dashTitleColorInp     = input.color(color.navy,   "Dashboard Title Color",                                                       group = "Layer 7 -- Text Style: Title")
+dashLabelSizeInp      = input.string("Small",  "Dashboard Row-Label Size", options = ["Tiny","Small","Normal","Large","Huge"],   group = "Layer 7 -- Text Style: Row Labels")
+dashLabelBoldInp      = input.bool(false,      "Dashboard Row-Label Bold",                                                       group = "Layer 7 -- Text Style: Row Labels")
+dashLabelColorInp     = input.color(color.black, "Dashboard Row-Label Color",                                                    group = "Layer 7 -- Text Style: Row Labels")
+dashValueSizeInp      = input.string("Normal", "Dashboard Row-Value Size", options = ["Tiny","Small","Normal","Large","Huge"],   group = "Layer 7 -- Text Style: Row Values")
+dashValueBoldInp      = input.bool(false,      "Dashboard Row-Value Bold",                                                       group = "Layer 7 -- Text Style: Row Values")
+dashValueAutoColorInp = input.bool(true,       "Row Values Use Auto (State-Based) Color",                                        group = "Layer 7 -- Text Style: Row Values")
+dashValueColorInp     = input.color(color.white, "Row-Value Color (used when Auto is OFF)",                                      group = "Layer 7 -- Text Style: Row Values")
+
+// -- Score Breakdown panel: its OWN group, fully independent toggle from the
+//    main dashboard above (showDashboard can be off while this stays on).
+showScoreBreakdown  = input.bool(true,     "Show Score Breakdown Panel",        group = "Layer 7 -- Score Breakdown")
+diagHeadingSizeInp  = input.string("Tiny",  "Score Breakdown Heading Size", options = ["Tiny","Small","Normal","Large","Huge"], group = "Layer 7 -- Score Breakdown")
+diagValueSizeInp    = input.string("Small", "Score Breakdown Value Size",   options = ["Tiny","Small","Normal","Large","Huge"], group = "Layer 7 -- Score Breakdown")
+diagHeadingColorInp = input.color(color.white, "Score Breakdown Heading Color", group = "Layer 7 -- Score Breakdown")
+
+f_size(sizeStr) =>
+    switch sizeStr
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        =>          size.normal
+
+f_formatting(bold) => bold ? text.format_bold : text.format_none
+
+dashTitleSizeRes    = f_size(dashTitleSizeInp)
+dashLabelSizeRes    = f_size(dashLabelSizeInp)
+dashValueSizeRes    = f_size(dashValueSizeInp)
+dashTitleFormatting = f_formatting(dashTitleBoldInp)
+dashLabelFormatting = f_formatting(dashLabelBoldInp)
+dashValueFormatting = f_formatting(dashValueBoldInp)
+dashStateText       = (newState == TradingState.WATCH or newState == TradingState.READY) ? "SCANNING" : str.tostring(newState)
+
+diagHeadingSizeRes  = f_size(diagHeadingSizeInp)
+diagValueSizeRes    = f_size(diagValueSizeInp)
+
+stateColor    = newState == TradingState.BUY ? color.navy : newState == TradingState.SELL ? color.red : newState == TradingState.MANAGE_LONG ? color.blue : newState == TradingState.MANAGE_SHORT ? color.maroon : newState == TradingState.CAUTION ? color.rgb(180, 62, 62) : newState == TradingState.EXIT ? color.red : color.gray
+regimeColor   = marketRegime == MarketRegime.TREND ? color.green : marketRegime == MarketRegime.TRANSITION ? color.orange : color.gray
+positionColor = posState == PositionState.LONG ? color.blue : posState == PositionState.SHORT ? color.red : color.black
+confColor     = (confidenceDisplay == "A+" or confidenceDisplay == "A") ? color.green : (confidenceDisplay == "B" or confidenceDisplay == "B*") ? color.yellow : (confidenceDisplay == "C" or confidenceDisplay == "C*") ? color.orange : color.red
+gateColor     = (buyVwapConfirmed or sellVwapConfirmed) ? color.green : color.gray
+trendColor    = trendReadBullish ? color.green : trendReadBearish ? color.red : color.gray
+
+f_row(_table, _row, _label, _value, _autoValColor) =>
+    valColor = dashValueAutoColorInp ? _autoValColor : dashValueColorInp
+    table.cell(_table, 0, _row, _label, text_color = dashLabelColorInp, text_halign = text.align_left,  text_size = dashLabelSizeRes, text_formatting = dashLabelFormatting)
+    table.cell(_table, 1, _row, _value, text_color = valColor,          text_halign = text.align_right, text_size = dashValueSizeRes, text_formatting = dashValueFormatting)
+
+// v3.0: Display-hierarchy fix. ENTER and Confidence must be the sole PRIMARY
+// decision surface — everything else (Votes 3/3, RS-scanner state, Fast Watch,
+// etc.) is an INPUT to that decision, not a competing verdict, and should read
+// as visually secondary so a trader under time pressure has exactly one place
+// to look for "go / no-go." f_rowSub renders a row one size step down from the
+// standard dashLabelSizeRes/dashValueSizeRes, in a muted gray label color,
+// regardless of the value's semantic color (which is kept, just de-emphasized
+// by the smaller size) — used for rows that are context, not the verdict.
+f_sizeDown(_sz) =>
+    _sz == size.huge ? size.large : _sz == size.large ? size.normal : _sz == size.normal ? size.small : size.tiny
+
+f_rowSub(_table, _row, _label, _value, _autoValColor) =>
+    valColor = dashValueAutoColorInp ? _autoValColor : dashValueColorInp
+    table.cell(_table, 0, _row, _label, text_color = color.gray, text_halign = text.align_left,  text_size = f_sizeDown(dashLabelSizeRes), text_formatting = dashLabelFormatting)
+    table.cell(_table, 1, _row, _value, text_color = valColor,   text_halign = text.align_right, text_size = f_sizeDown(dashValueSizeRes), text_formatting = dashValueFormatting)
+
+// -- Score sub-component color: green if maxed, red if zero, orange if partial
+f_scoreColor(_val, _max) =>
+    _val >= _max ? color.green : _val <= 0.0 ? color.red : color.orange
+
+// -- One column per metric: row 0 = heading, row 1 = value
+f_diagCol(_table, _col, _heading, _value, _valColor) =>
+    table.cell(_table, _col, 0, _heading, text_color = diagHeadingColorInp, text_halign = text.align_center, text_size = diagHeadingSizeRes)
+    table.cell(_table, _col, 1, _value,   text_color = _valColor,          text_halign = text.align_center, text_size = diagValueSizeRes)
+
+var table dash = table.new(position.top_right, 2, 17, border_width = 1, border_color = color.gray, bgcolor = color.new(#bfbfca, 70))
+
+// v2.8.2: dashboard is now DYNAMIC. Rows 1-7 always render (the 6 checklist
+// gates + the rolled-up ENTER verdict). Rows 8-12 render only when in a trade
+// (posMode set + symbol match + same session + entry bar seen), giving you
+// planned risk, both @entry references, active trail, and EXIT/WARN state.
+// Unwritten rows collapse to zero height, so the panel is 8 rows tall when
+// flat and 13 rows tall when anchored.
+if showDashboard and barstate.islast
+    table.cell(dash, 0, 0, "TradeWithCTO Kavach v3.0", text_color = dashTitleColorInp, text_size = dashTitleSizeRes, text_formatting = dashTitleFormatting)
+    table.merge_cells(dash, 0, 0, 1, 0)
+    // ---- Always-on rows: checklist gates + verdict ----
+    // v2.8.6: Trade Score reinstated as its own row, right after Confidence,
+    // since it's the numeric that drives the grade and Bipul is used to
+    // reading it as a fast integer sanity check (73/100, 84/100 style).
+    // v3.0: row 1 relabeled — "ENTER" language implied a pre-trade go/no-go
+    // verdict, which isn't accurate given Votes-unanimity lag. Pre-trade it now
+    // shows the Grade-based Readiness read; once anchored it shows trade status.
+    // Optional per Bipul's request: can be hidden entirely pre-trade, showing
+    // only once a trade is actually placed.
+    if inAnchoredTrade or not hideRow1WhenFlat
+        f_row(dash, 1, inAnchoredTrade ? "Status" : "Readiness", inAnchoredTrade ? enterStateText : readinessText, inAnchoredTrade ? enterStateColor : readinessColor)
+    f_row(dash, 2, "Confidence",  confidenceDisplay, confColor)
+    f_row(dash, 3, "Trade Score", str.tostring(tradeScore, "#") + " / 100", tradeScore >= 85 ? colOk : tradeScore >= 65 ? colMid : colBad)
+    f_row(dash, 4, "ADX",         str.tostring(adxRaw, "#.##"), adxFullBand ? colOk : adxRecheckBand ? colMid : colBad)
+    f_row(dash, 6, "Volume",      volLabelText + " (" + str.tostring(volLabelRatio, "#.##") + "x)" + (volDecel3 ? " decel" : ""), volEnterOk ? colOk : colBad)
+    f_row(dash, 7, "% from open", str.tostring(pctPanelVal, "#.##") + "% (max " + str.tostring(maxPctFromOpen, "#.#") + ")", math.abs(pctPanelVal) < maxPctFromOpen ? colOk : colBad)
+    f_row(dash, 8, "Pullback #",  str.tostring(pullPanelVal) + " (leg " + str.tostring(minPullbacks) + "-" + str.tostring(maxPullbacks) + ")", (pullPanelVal >= minPullbacks and pullPanelVal <= maxPullbacks) ? colOk : colMid)
+    // ---- Trade-in-flight rows: only render when anchored ----
+    if inAnchoredTrade
+        mfePts = na(bestFavExt) ? 0.0 : (ancIsLong ? bestFavExt - ancEntry : ancEntry - bestFavExt)
+        maePts = na(worstAdvExt) ? 0.0 : (ancIsLong ? ancEntry - worstAdvExt : worstAdvExt - ancEntry)
+        mfeR   = plannedRiskOk ? mfePts / effRiskPts : na
+        maeR   = plannedRiskOk ? maePts / effRiskPts : na
+        // v3.0: Votes 3/3 moved here — it's a lagging trend-confirmation
+        // indicator (MACD/Supertrend), not useful as a pre-trade gate signal;
+        // its real value is telling you whether the trend backing your open
+        // position is still confirmed or has started to reverse.
+        f_rowSub(dash, 9, "Votes 3/3", (votesLongAll ? "LONG" : votesShortAll ? "SHORT" : "SPLIT"), (votesLongAll or votesShortAll) ? colOk : colBad)
+        f_row(dash, 10,  "Planned risk",     slRefText, colOk)
+        f_row(dash, 11, "EMA10@entry",      str.tostring(ancEma10, "#.##") + " (" + str.tostring(riskEmaPts, "#.##") + ")", colOk)
+        f_row(dash, 12, "VWAP@entry",       str.tostring(ancVwap, "#.##") + " (" + str.tostring(riskVwapPts, "#.##") + ")", colOk)
+        f_row(dash, 13, trailText,          hit1R ? "1R hit" : "await 1R", trailIsEma5 ? colMid : colOk)
+        f_row(dash, 14, "Bars since entry", str.tostring(barsSinceAnc) + (againstStreak > 0 ? "  (against " + str.tostring(againstStreak) + ")" : ""), againstStreak >= againstBarsNeed ? colBad : againstStreak > 0 ? colMid : colOk)
+        f_row(dash, 15, "MFE / MAE",        (na(mfeR) ? "—" : str.tostring(mfeR, "0.00") + "R") + " / " + (na(maeR) ? "—" : str.tostring(maeR, "0.00") + "R"), (not na(maeR) and maeR >= 1.0) ? colBad : (not na(mfeR) and mfeR >= 1.0) ? colOk : colMid)
+        f_row(dash, 16, "EXIT / WARN",      exitFlagText, exitFlagColor)
+
+// Top-center ENTER ↔ EXIT banner (bright orange box; TV places this at chart top —
+// exact 20px offset is not available in Pine; position.top_center is the fixed slot).
+var table eeBanner = table.new(position.top_center, 1, 1, border_width = 2, border_color = #cc5500, frame_color = #cc5500, frame_width = 2)
+if barstate.islast
+    if showEeBanner
+        table.cell(eeBanner, 0, 0, eeBannerText, text_color = eeBannerTextColor, text_halign = text.align_center, text_valign = text.align_center, text_size = size.large, text_formatting = text.format_bold, bgcolor = color.orange)
+    else
+        table.cell(eeBanner, 0, 0, "", bgcolor = color.new(color.white, 100))
+
+// -- Score Breakdown: backend Trade Score components (RS/Kav/Vol/ADX/VWAP)
+var table diag = table.new(position.bottom_center, 8, 20, border_width = 1, border_color = color.gray, bgcolor = color.new(#bfbfca, 70))
+
+if showScoreBreakdown and barstate.islast
+    f_diagCol(diag, 0, "RS",     str.tostring(rsPts) + "/40",      f_scoreColor(rsPts, 40.0))
+    f_diagCol(diag, 1, "Kavach", str.tostring(kavachPts) + "/30",  f_scoreColor(kavachPts, 30.0))
+    f_diagCol(diag, 2, "Vol",    str.tostring(volumePts) + "/15",  f_scoreColor(volumePts, 15.0))
+    f_diagCol(diag, 3, "ADX",    str.tostring(adxPts) + "/10",     f_scoreColor(adxPts, 10.0))
+    f_diagCol(diag, 4, "VWAP",   str.tostring(vwapSidePts) + "/5", f_scoreColor(vwapSidePts, 5.0))
+    f_diagCol(diag, 5, "RS%",    str.tostring(relativeStrength, "#.##"), color.navy)
+    f_diagCol(diag, 6, "State",  kavachState, color.navy)
+    f_diagCol(diag, 7, "Score",  str.tostring(tradeScore, "#") + "/100", confColor)
+
+// #############################################################################
+// CHART DISPLAY
+// #############################################################################
+
+plot(ema5Raw,       "EMA",        color = color.orange,                        linewidth = 2)
+plot(vwapRaw,       "VWAP",       color = color.blue,                          linewidth = 2)
+plot(supertrendRaw, "Supertrend", color = stBullish ? color.green : color.red, linewidth = 2)
+
+// v3.0: BUY/SELL/EXIT arrows RE-ENABLED, rewired to the authoritative signal.
+// Previously these fired from `newState` (TradingState enum) — a separate,
+// disconnected machine that could show BUY/SELL independent of Confidence
+// Grade/Trade Score/the real ENTER gate, causing exactly the "arrow says
+// SELL, banner says NOT READY" conflict Bipul flagged live.
+// Fix: dedicated trigger variables below reference the EXACT SAME conditions
+// that drive the ENTER LONG/SHORT labels and the real EXIT labels — so the
+// arrow, the on-bar label, and the dashboard/banner all fire on the identical
+// bar, from the identical condition. No separate/lagging logic, no chance of
+// disagreement. (Deliberately NOT reusing the old buyTrigger/sellTrigger/
+// exitTrigger variable names — those still feed posState/isActiveLong/
+// freshTrigger elsewhere and are left untouched to avoid side effects; these
+// are new, arrow-only variables.)
+// v3.0: per-leg latch. Previously buyArrowTrigger/sellArrowTrigger re-evaluated
+// fresh every bar with no memory — if conditions kept qualifying (or briefly
+// re-qualified) across many candles, the arrow kept re-firing, producing 8
+// SELL arrows in 12 candles on 20-Jul with no way to tell which one was the
+// actual trade cue. This latches after the first fire in a leg and only
+// resets on a genuinely new leg (EMA5×VWAP cross — the same boundary already
+// used to reset the Pullback # counter), so at most ONE arrow appears per
+// leg per direction until a fresh setup begins.
+var bool longArrowFiredThisLeg = false
+var bool shortArrowFiredThisLeg = false
+if emaVwapCrossUp
+    longArrowFiredThisLeg := false
+if emaVwapCrossDown
+    shortArrowFiredThisLeg := false
+buyArrowTrigger  = (enterLongFull or enterLongRecheck) and not longArrowFiredThisLeg
+sellArrowTrigger = (enterShortFull or enterShortRecheck) and not shortArrowFiredThisLeg
+if buyArrowTrigger and barstate.isconfirmed
+    longArrowFiredThisLeg := true
+if sellArrowTrigger and barstate.isconfirmed
+    shortArrowFiredThisLeg := true
+exitArrowTrigger = ratchetExit or twoCandleFail or blowoutNow
+plotshape(buyArrowTrigger,  title = "BUY Arrow",  style = shape.triangleup,   location = location.belowbar, color = color.blue, size = size.small)
+plotshape(sellArrowTrigger, title = "SELL Arrow", style = shape.triangledown, location = location.abovebar, color = color.red,  size = size.small)
+plotshape(exitArrowTrigger, title = "EXIT Arrow", style = shape.xcross,       location = location.abovebar, color = color.red,  size = size.small)
+
+// v2.8 ENTER / EXIT markers on bars (navy / black / maroon — matches panel)
+// v2.8.1: ENTER labels appear on-chart only for the current session and the
+// most recent prior session. Older ENTER flags are hidden to avoid a chart
+// littered with historical noise; ENTER logic and alerts still evaluate on
+// every bar. `barDayId` = YYYYMMDD of the bar, `dayId` = of current (last) bar.
+// We keep the two most recent DISTINCT session dayIds seen in the data stream.
+var int lastSessionDayId = na
+var int prevSessionDayId = na
+if barstate.isconfirmed and dayId != lastSessionDayId
+    prevSessionDayId := lastSessionDayId
+    lastSessionDayId := dayId
+barDayId = year(time, "Asia/Kolkata") * 10000 + month(time, "Asia/Kolkata") * 100 + dayofmonth(time, "Asia/Kolkata")
+enterLabelRecent = barDayId == lastSessionDayId or (not na(prevSessionDayId) and barDayId == prevSessionDayId)
+// v3.0: labels now gated by the same latched buyArrowTrigger/sellArrowTrigger
+// as the arrows — guarantees the arrow and its text label always appear on
+// the identical single bar per leg, never independently, never repeated.
+plotshape(buyArrowTrigger and enterLongFull and enterLabelRecent, title = "ENTER LONG", style = shape.labelup, location = location.belowbar, color = color.new(colOk, 0), textcolor = color.white, text = "ENTER\nLONG", size = size.small)
+plotshape(buyArrowTrigger and enterLongRecheck and not enterLongFull and enterLabelRecent, title = "ENTER LONG recheck", style = shape.labelup, location = location.belowbar, color = color.new(colMid, 0), textcolor = color.white, text = "ENTER\nrecheck", size = size.tiny)
+plotshape(sellArrowTrigger and enterShortFull and enterLabelRecent, title = "ENTER SHORT", style = shape.labeldown, location = location.abovebar, color = color.new(colOk, 0), textcolor = color.white, text = "ENTER\nSHORT", size = size.small)
+plotshape(sellArrowTrigger and enterShortRecheck and not enterShortFull and enterLabelRecent, title = "ENTER SHORT recheck", style = shape.labeldown, location = location.abovebar, color = color.new(colMid, 0), textcolor = color.white, text = "ENTER\nrecheck", size = size.tiny)
+plotshape(twoCandleFail, title = "EXIT 2-CANDLE FAIL", style = shape.labeldown, location = location.abovebar, color = color.new(colBad, 0), textcolor = color.white, text = "EXIT\n2-CANDLE", size = size.normal)
+plotshape(blowoutNow, title = "EXIT BLOWOUT", style = shape.labeldown, location = location.abovebar, color = color.new(colBad, 0), textcolor = color.white, text = "EXIT\nBLOWOUT", size = size.normal)
+plotshape(ratchetExit, title = "EXIT EMA5 TRAIL", style = shape.labeldown, location = location.abovebar, color = color.new(colBad, 0), textcolor = color.white, text = "EXIT\nEMA5", size = size.small)
+plotshape(stallWarn, title = "WARN STALL", style = shape.triangledown, location = location.abovebar, color = color.new(colMid, 0), size = size.small)
+plotshape(gradeDecayWarn, title = "WARN GRADE D", style = shape.diamond, location = location.abovebar, color = color.new(colMid, 0), size = size.small)
+plotshape(againstStreakWarn, title = "WARN against streak", style = shape.labeldown, location = location.abovebar, color = color.new(colMid, 0), textcolor = color.white, text = "WARN\nAGAINST", size = size.tiny)
+plotshape(ema5PierceWarn, title = "WARN EMA5 pierced", style = shape.labeldown, location = location.abovebar, color = color.new(colMid, 0), textcolor = color.white, text = "WARN\nEMA5", size = size.tiny)
+plotshape(entryBoundaryWarn, title = "WARN back in entry range", style = shape.labeldown, location = location.abovebar, color = color.new(colBad, 30), textcolor = color.white, text = "WARN\nENTRY-BACK", size = size.small)
+plotshape(bookHalfMark, title = "BOOK-HALF 2R", style = shape.circle, location = location.belowbar, color = color.new(colOk, 0), size = size.small)
+plot(inAnchoredTrade ? ancEntry : na, "Entry Anchor", color = color.new(color.yellow, 0), style = plot.style_linebr, linewidth = 1)
+plot(inAnchoredTrade ? effSlPx : na, "Effective SL @ entry", color = color.new(color.red, 30), style = plot.style_linebr, linewidth = 1)
+
+// Parity / warm-up labels (display only — not part of Trade Score)
+var label tfParityLabel = na
+var label todFallbackLabel = na
+if barstate.islast
+    if not na(tfParityLabel)
+        label.delete(tfParityLabel)
+    if not na(todFallbackLabel)
+        label.delete(todFallbackLabel)
+    // v3.0: intended-TF label disabled on-chart per request (not required).
+    // Left commented rather than deleted so it can be restored easily if
+    // needed later — the underlying chartTfOk / WARN alertcondition logic
+    // below is untouched, only this label draw is turned off.
+    // if showTfParityLabel
+    //     tfParityLabel := label.new(bar_index, high, chartTfOk ? "Kavach v3.0 · intended TF: 10m" : "Kavach v3.0 · WARNING: use 10m chart (now " + timeframe.period + ")", style = label.style_label_down, color = chartTfOk ? color.new(color.green, 70) : color.new(color.orange, 20), textcolor = chartTfOk ? color.green : color.orange, size = size.small)
+    if showTodFallbackLabel and volFallbackBar
+        todFallbackLabel := label.new(bar_index, low, "Vol: BAR FALLBACK (no prior TOD session) — may under-grade vs dashboard", style = label.style_label_up, color = color.new(color.orange, 20), textcolor = color.orange, size = size.small)
+
+// #############################################################################
+// LAYER 8 -- ALERTS
+// #############################################################################
+
+alertcondition(buyTrigger,  title = "Kavach BUY",  message = "TWCTO Kavach: BUY signal on {{ticker}} ({{interval}})")
+alertcondition(sellTrigger, title = "Kavach SELL", message = "TWCTO Kavach: SELL signal on {{ticker}} ({{interval}})")
+alertcondition(exitTrigger, title = "Kavach EXIT", message = "TWCTO Kavach: EXIT signal on {{ticker}} ({{interval}})")
+alertcondition(volFallbackBar, title = "Kavach Vol BAR FALLBACK", message = "TWCTO Kavach: volume label on BAR FALLBACK (TOD not warmed up) for {{ticker}}")
+alertcondition(not chartTfOk, title = "Kavach TF not 10m", message = "TWCTO Kavach: chart TF is {{interval}} — intended parity TF is 10m")
+
+// v2.8 flag alerts (same once-per-bar convention as R1/EXIT NOW style alerts)
+alertcondition(buyArrowTrigger or sellArrowTrigger, title = "Kavach ENTER", message = "TWCTO Kavach v3.0: ENTER flag on {{ticker}} ({{interval}})")
+alertcondition(enterLongRecheck or enterShortRecheck, title = "Kavach ENTER recheck", message = "TWCTO Kavach v3.0: ENTER recheck (ADX 20-25) on {{ticker}}")
+alertcondition(twoCandleFail, title = "Kavach EXIT 2-CANDLE FAIL", message = "TWCTO Kavach v3.0: EXIT NOW — 2-candle fail on {{ticker}}")
+alertcondition(blowoutNow, title = "Kavach EXIT BLOWOUT", message = "TWCTO Kavach v3.0: EXIT NOW — blowout on {{ticker}}")
+alertcondition(ratchetExit, title = "Kavach EXIT EMA5 TRAIL", message = "TWCTO Kavach v3.0: EXIT NOW — 1R ratchet EMA5 close on {{ticker}}")
+
+// v3.0: legacy buyTrigger/sellTrigger/exitTrigger alert() calls REMOVED.
+// Same root cause as the old arrows — these come from the disconnected
+// TradingState machine and would have kept sending push alerts from the old,
+// un-gated system even after the on-chart arrows were fixed. Left commented
+// for the same reason as the arrows above (documented reasoning, in case
+// TradingState is intentionally revived later).
+// if buyTrigger
+//     alert("TWCTO Kavach: BUY signal on "  + syminfo.ticker, alert.freq_once_per_bar)
+// if sellTrigger
+//     alert("TWCTO Kavach: SELL signal on " + syminfo.ticker, alert.freq_once_per_bar)
+// if exitTrigger
+//     alert("TWCTO Kavach: EXIT signal on " + syminfo.ticker, alert.freq_once_per_bar)
+if buyArrowTrigger or sellArrowTrigger
+    alert("TWCTO Kavach v3.0: ENTER on " + syminfo.ticker, alert.freq_once_per_bar)
+if twoCandleFail
+    alert("TWCTO Kavach v3.0: EXIT NOW 2-CANDLE FAIL on " + syminfo.ticker, alert.freq_once_per_bar)
+if blowoutNow
+    alert("TWCTO Kavach v3.0: EXIT NOW BLOWOUT on " + syminfo.ticker, alert.freq_once_per_bar)
+if ratchetExit
+    alert("TWCTO Kavach v3.0: EXIT NOW EMA5 TRAIL on " + syminfo.ticker, alert.freq_once_per_bar)

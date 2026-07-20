@@ -4,11 +4,12 @@ Pairs consecutive 5m bars into 10m OHLCV aligned with TradingView session
 boundaries (first close 09:25 IST, then 09:35, 09:45, …). Pairing always
 resets at each session date so 09:15+09:20 form the first 10m bar.
 
-PARITY vs TWCTO Kavach Pine v2.6 (``TWCTO_Kavach_v2.6``):
+PARITY vs TWCTO Kavach Pine v3.0 (``TWCTO_Kavach_v3_0``):
 - SuperTrend: ATR period 10, **multiplier 1.5** (not classic 3.0).
-- MACD: **6 / 13 / 5** (not classic 12/26/9).
+- MACD: **12 / 26 / 9** (updated 21-Jul with Pine v3.0 default).
 - Panel EMA vs VWAP / Trend votes use Pine ``emaLen`` default **9** (script name
   ``ema5Raw``); READY entry price still uses true EMA5.
+- VWAP purity: last 8 **10m** bars (5m series resampled with ``bar_size=2``).
 - Panel Trend row = 2-of-3 majority of (MACD line vs signal, Supertrend, EMA vs VWAP).
 - Residual: Upstox 5m→10m vs TV native 10m feed; session VWAP from 5m H/L/C/V.
 """
@@ -49,12 +50,12 @@ from backend.services.vajra.indicators import cumulative_vwap, ema_series
 IST = pytz.timezone("Asia/Kolkata")
 BAR_MINUTES_5M = 5
 
-# TWCTO Kavach Pine v2.6 Layer-1 defaults (chart panel parity).
+# TWCTO Kavach Pine v3.0 Layer-1 defaults (chart panel parity).
 PINE_ST_PERIOD = 10
 PINE_ST_MULT = 1.5
-PINE_MACD_FAST = 6
-PINE_MACD_SLOW = 13
-PINE_MACD_SIGNAL = 5
+PINE_MACD_FAST = 12
+PINE_MACD_SLOW = 26
+PINE_MACD_SIGNAL = 9
 PINE_EMA_LEN = 9  # input "EMA Length"; script variable ema5Raw
 
 
@@ -326,7 +327,11 @@ def metrics_from_10m_candles(
         ranking_type=ranking_type,
     )
     purity_dir = "SHORT" if kav.state in BEARISH_STATES else "LONG"
-    purity = compute_vwap_purity_pct(t_closes, vwap_series, direction=purity_dir, bar_size=1, num_bars=8)
+    # Pine: last purityLen completed *chart-TF* (10m) bars on signal side of VWAP.
+    # t_closes is 5m — resample with bar_size=2 (never bar_size=1 / 5m lookback).
+    purity = compute_vwap_purity_pct(
+        t_closes, vwap_series, direction=purity_dir, bar_size=2, num_bars=8
+    )
 
     last_bar = bars_10m[-1]
     bar_end: Optional[datetime] = last_bar.get("bar_end")
@@ -368,7 +373,9 @@ def metrics_from_10m_candles(
         "trade_score": trade_score,
         "trade_score_raw": trade_score_raw,
         "volume_ratio": volume_ratio,
+        "volume_tod_ratio": volume_tod_ratio,
         "volume_label": vol_label,
+        "volumes_10m": vols_10m[-8:],
         "vwap_purity_pct": purity,
         "market_regime": regime,
         "confidence_grade": resolved["confidence_grade"],

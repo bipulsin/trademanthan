@@ -2,13 +2,13 @@
 
 **Scope:** Locked-symbol live recompute (`daily_checklist_live.recompute_locked_symbol`) now uses `kavach_10m.metrics_from_10m_candles`.
 
-## Aligned with TradingView Kavach Pine v2.6 (10m chart)
+## Aligned with TradingView Kavach Pine v3.0 (10m chart)
 
 | Input | Backend (`kavach_10m`) | Pine v2.6 default |
 |-------|------------------------|-------------------|
 | Bar timeframe | Pairs consecutive **5m** → **10m** | Chart 10m |
 | SuperTrend | ATR period **10**, multiplier **1.5** | `stPeriod=10`, `stMult=1.5` |
-| MACD | **6 / 13 / 5** | `macdFast/Slow/Signal` |
+| MACD | **12 / 26 / 9** | `macdFast/Slow/Signal` (v3.0 default 21-Jul) |
 | Panel EMA vs VWAP | EMA(**9**) vs session VWAP | `emaLen=9` (`ema5Raw`) |
 | Panel Trend | 2-of-3 of MACD line, ST, EMA vs VWAP | `trendReadBullish/Bearish` |
 | READY entry EMA | True **EMA5** (unchanged) | n/a (entry elsewhere) |

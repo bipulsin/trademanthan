@@ -264,38 +264,17 @@ def count_pullback_attempts(
     *,
     session_date: str,
     is_long: bool,
-    near_atr: float,
-    atr: Optional[float],
+    near_atr: float = 0.35,
+    atr: Optional[float] = None,
 ) -> int:
-    """Distinct EMA5 proximity visits in lock direction (pullback ordinal)."""
-    from backend.services.vajra.indicators import ema_series
+    """Pine v3.0 pullback #: touch nearer of EMA10/VWAP then reclaim (+ 3-bar reset).
 
-    bars = _session_day_bars_10m(candles, session_date)
-    if len(bars) < 5 or not atr or atr <= 0:
-        return 0
-    closes = [float(b["close"]) for b in bars]
-    highs = [float(b["high"]) for b in bars]
-    lows = [float(b["low"]) for b in bars]
-    ema5_s = ema_series(closes, 5)
-    attempts = 0
-    in_zone = False
-    for i in range(4, len(bars)):
-        e5 = ema5_s[i]
-        near = abs(closes[i] - e5) <= near_atr * atr or (
-            lows[i] <= e5 <= highs[i]
-        )
-        # Directional context: LONG pullback = price was above and came to EMA5
-        if is_long:
-            context_ok = highs[i] >= e5 or (i > 0 and closes[i - 1] > e5)
-        else:
-            context_ok = lows[i] <= e5 or (i > 0 and closes[i - 1] < e5)
-        if near and context_ok:
-            if not in_zone:
-                attempts += 1
-                in_zone = True
-        else:
-            in_zone = False
-    return attempts
+    ``near_atr`` / ``atr`` retained for call-site compatibility (unused).
+    """
+    from backend.services.kavach_readiness import count_nearer_pullbacks
+
+    pb_long, pb_short = count_nearer_pullbacks(candles, session_date=session_date)
+    return pb_long if is_long else pb_short
 
 
 def _load_nifty_candles() -> List[Dict]:

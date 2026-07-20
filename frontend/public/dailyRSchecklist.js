@@ -643,14 +643,41 @@
     }
 
     function tradeStateClass(st) {
-        if (st === "READY") return "dc-tstate--ready";
+        if (st === "READY" || st === "READY TO LONG" || st === "READY TO SHORT") return "dc-tstate--ready";
         if (st === "READY(RECHECK)") return "dc-tstate--recheck";
+        if (st === "WATCHING") return "dc-tstate--watching";
         if (st === "WAIT FOR PULLBACK") return "dc-tstate--wait";
         if (st === "SCANNING") return "dc-tstate--scanning";
         if (st === "EXPIRED") return "dc-tstate--expired";
         if (st === "BLOCKED") return "dc-tstate--blocked";
         if (st === "CHART REVERSED") return "dc-tstate--reversed";
         return "";
+    }
+
+    function confidenceGradeClass(grade) {
+        var g = String(grade || "").replace("!", "").trim();
+        if (g === "A+" || g === "A") return "dc-grade--a";
+        if (g === "B" || g === "B*") return "dc-grade--b";
+        if (g === "C" || g === "C*") return "dc-grade--c";
+        if (g === "D" || g === "D!") return "dc-grade--d";
+        return "";
+    }
+
+    function pineReadinessShown(stock) {
+        var r = String(stock.pine_readiness || "").toUpperCase();
+        return r === "READY TO LONG" || r === "READY TO SHORT" || r === "WATCHING";
+    }
+
+    /** Watching primary: hard ops gates first, else Pine readiness, else trade_state. */
+    function watchingPrimaryState(stock) {
+        var d = String(stock.decision || "").toUpperCase();
+        if (stock.trade_state === "BLOCKED") return "BLOCKED";
+        if (d.indexOf("CHART REVERSED") >= 0) return "CHART REVERSED";
+        if (stock.trade_state === "EXPIRED") return "EXPIRED";
+        if (pineReadinessShown(stock)) return stock.pine_readiness;
+        if (stock.trade_state === "SCANNING") return "SCANNING";
+        if (stock.trade_state === "WAIT FOR PULLBACK") return "WAIT FOR PULLBACK";
+        return stock.trade_state || stock.section || "—";
     }
 
     function patchTradeRow(card, stock) {
@@ -987,21 +1014,14 @@
         return (stock.trade_state_reason || "").split(/[·—-]/)[0].trim().slice(0, 24) || "";
     }
 
-    /** Watching primary gate label — hard blocks outrank soft WAIT / info. */
-    function watchingPrimaryState(stock) {
-        var d = String(stock.decision || "").toUpperCase();
-        if (stock.trade_state === "BLOCKED") return "BLOCKED";
-        if (d.indexOf("CHART REVERSED") >= 0) return "CHART REVERSED";
-        if (stock.trade_state === "EXPIRED") return "EXPIRED";
-        if (stock.trade_state === "SCANNING") return "SCANNING";
-        if (stock.trade_state === "WAIT FOR PULLBACK") return "WAIT FOR PULLBACK";
-        return stock.trade_state || stock.section || "—";
-    }
-
     function watchingReasonRedundant(primary, reason) {
         var r = String(reason || "").toLowerCase().trim();
         if (!r) return true;
         if (primary === "WAIT FOR PULLBACK" && (r === "wait pullback" || r.indexOf("wait") === 0)) {
+            return true;
+        }
+        if (primary === "WATCHING" && r === "watching") return true;
+        if ((primary === "READY TO LONG" || primary === "READY TO SHORT") && r.indexOf("ready") === 0) {
             return true;
         }
         if (primary === "BLOCKED" && r === "blocked") return true;
@@ -1266,9 +1286,19 @@
                 };
             }
         }
-        var grade = stock.confidence || stock.dashboard_kavach || "";
+        var grade = stock.confidence || "";
+        // Same 0–100 Trade Score as Pine (kavach_engine.compute_trade_score); whole number only.
+        var scoreRaw = stock.trade_score != null ? stock.trade_score : stock.dashboard_score;
+        var score = scoreRaw != null && scoreRaw !== "" ? Math.round(Number(scoreRaw)) : null;
+        if (score != null && !isFinite(score)) score = null;
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
-        row.querySelector(".dc-watch-meta").textContent = [rs, grade].filter(Boolean).join(" · ");
+        var metaEl = row.querySelector(".dc-watch-meta");
+        var gradeCls = confidenceGradeClass(grade);
+        var scoreBit = score != null ? ('<span class="dc-watch-score">TS ' + score + "</span>") : "";
+        var gradeBit = grade
+            ? ('<span class="dc-watch-grade ' + gradeCls + '">' + escWatchText(grade) + "</span>")
+            : "";
+        metaEl.innerHTML = [rs ? escWatchText(rs) : "", gradeBit, scoreBit].filter(Boolean).join(" · ");
         var gatesBtn = row.querySelector(".dc-watch-gates");
         if (gatesBtn) {
             gatesBtn.onclick = function (e) {
@@ -1328,7 +1358,10 @@
         var readyPast = (windowOpen && !afterClose) ? [] : readyAll;
         var expired = sortStocks(stocks.filter(function (s) { return isExpiredCard(s.trade_state); }));
         var watching = sortStocks(stocks.filter(function (s) {
-            return !isReadyState(s.trade_state) && !isExpiredCard(s.trade_state);
+            if (isReadyState(s.trade_state) || isExpiredCard(s.trade_state)) return false;
+            // Pine v3.0: only surface names at WATCHING / READY TO LONG|SHORT (NOT READY hidden).
+            if (s.pine_readiness) return pineReadinessShown(s);
+            return true;
         }));
 
         var z3 = $("dcZone3Grid");

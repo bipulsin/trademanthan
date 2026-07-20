@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Watching — before/after Kavach v3.0 readiness</title>
+<style>
+  :root { --bg:#0f1419; --panel:#1a222c; --text:#e2e8f0; --muted:#94a3b8; --ok:#4ade80; --mid:#94a3b8; --bad:#f87171; --a:#4ade80; --b:#facc15; --c:#fb923c; --d:#f87171; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 13px/1.45 "IBM Plex Sans", system-ui, sans-serif; background:var(--bg); color:var(--text); padding:24px; }
+  h1 { font-size:18px; font-weight:600; margin:0 0 8px; }
+  p { color:var(--muted); margin:0 0 20px; max-width:72ch; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .panel { background:var(--panel); border:1px solid #2a3544; border-radius:8px; padding:14px 16px; }
+  .panel h2 { margin:0 0 12px; font-size:14px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+  .row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #243040; flex-wrap:wrap; }
+  .row:last-child { border-bottom:0; }
+  .sym { font-weight:700; min-width:6.5rem; }
+  .dir { font-size:10px; font-weight:700; padding:1px 5px; border-radius:3px; }
+  .dir-long { background:#14532d; color:#86efac; }
+  .dir-short { background:#7f1d1d; color:#fca5a5; }
+  .state { font-weight:700; min-width:8.5rem; }
+  .state-ready { color:var(--ok); }
+  .state-watch { color:var(--mid); }
+  .state-old { color:#64748b; }
+  .state-block { color:var(--bad); }
+  .meta { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .g-a { color:var(--a); font-weight:700; }
+  .g-b { color:var(--b); font-weight:700; }
+  .g-c { color:var(--c); font-weight:700; }
+  .g-d { color:var(--d); font-weight:700; }
+  .note { margin-top:24px; padding:14px 16px; background:var(--panel); border-left:3px solid #38bdf8; }
+  .note h3 { margin:0 0 8px; font-size:14px; }
+  code { background:#0b1016; padding:1px 5px; border-radius:3px; }
+  @media (max-width:900px){ .cols{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+  <h1>RS Checklist Watching — before / after (session 2026-07-21 preview lock)</h1>
+  <p>Before = production today (trade_state primary, all non-READY rows). After = Pine v3.0 readiness filter + badges (READY TO LONG/SHORT / WATCHING only; Grade color bands; NOT READY hidden).</p>
+  <div class="cols">
+    <div class="panel" id="before">
+      <h2>Before</h2>
+    </div>
+    <div class="panel" id="after">
+      <h2>After (v3.0 readiness)</h2>
+    </div>
+  </div>
+  <div class="note">
+    <h3>FEDERALBNK grade parity (#2)</h3>
+    <p>Replay on paperclip candles for <strong>2026-07-20</strong> (forming 11:30 IST, nifty −0.3%):</p>
+    <ul>
+      <li>Production (MACD 6/13/5, purity 5m window risk): often <span class="g-d">D</span> on closed bars; forming path <span class="g-c">C</span> / 91 with TOD volume <em>Low</em>.</li>
+      <li>Same inputs with volume labeled Average (Pine-typical when bar ratio ~1.0×): banding → <span class="g-b">B</span> / 91 — matches the reported Pine <span class="g-b">B</span>/93 band.</li>
+      <li>This change: always overlay live 10m grade/score on cards, purity lookback = 8×10m (<code>bar_size=2</code>), MACD <code>12/26/9</code>. Residual: TOD volume ratio vs TV can still differ → High/Avg/Low label drift.</li>
+    </ul>
+  </div>
+<script>
+const before = [
+  {symbol:"HDFCBANK", direction:"SHORT", confidence:"A+", score:88, trade_state:"WAIT FOR PULLBACK", rs:-4.88},
+  {symbol:"MANKIND", direction:"LONG", confidence:"A", score:91, trade_state:"WAIT FOR PULLBACK", rs:4.12},
+  {symbol:"NHPC", direction:"LONG", confidence:"A", score:88, trade_state:"WAIT FOR PULLBACK", rs:4.36},
+  {symbol:"PNB", direction:"LONG", confidence:"B", score:85, trade_state:"WAIT FOR PULLBACK", rs:6.13},
+  {symbol:"JSWENERGY", direction:"LONG", confidence:"C", score:75, trade_state:"BLOCKED", rs:5.47},
+  {symbol:"OFSS", direction:"SHORT", confidence:"C", score:70, trade_state:"BLOCKED", rs:-0.93},
+  {symbol:"SBICARD", direction:"SHORT", confidence:"D!", score:38, trade_state:"BLOCKED", rs:-1.61},
+  {symbol:"VOLTAS", direction:"SHORT", confidence:"D", score:67, trade_state:"BLOCKED", rs:-2.25},
+  {symbol:"SWIGGY", direction:"SHORT", confidence:"D!", score:80, trade_state:"BLOCKED", rs:-1.75},
+  {symbol:"MANAPPURAM", direction:"LONG", confidence:"D!", score:85, trade_state:"BLOCKED", rs:4.7},
+];
+
+function gradeLevel(g) {
+  g = String(g||"");
+  if (g==="A+"||g==="A") return 2;
+  if (g==="B"||g==="B*") return 1;
+  return 0;
+}
+function gradeCls(g) {
+  const x = String(g||"").replace("!","");
+  if (x==="A+"||x==="A") return "g-a";
+  if (x==="B"||x==="B*") return "g-b";
+  if (x==="C"||x==="C*") return "g-c";
+  return "g-d";
+}
+/** Approximate after: readiness from grade+score only (practical gates assume OK overnight). */
+function approxReadiness(s) {
+  const lvl = gradeLevel(s.confidence);
+  const score = s.score||0;
+  if (lvl>=1 && score>=65) {
+    return s.direction==="SHORT" ? "READY TO SHORT" : "READY TO LONG";
+  }
+  if (lvl>=1 && score>=50) return "WATCHING";
+  return "NOT READY";
+}
+function renderRow(s, mode) {
+  const readiness = approxReadiness(s);
+  const primary = mode==="before" ? s.trade_state : readiness;
+  if (mode==="after" && readiness==="NOT READY") return "";
+  let stateCls = "state-old";
+  if (primary.startsWith("READY")) stateCls = "state-ready";
+  else if (primary==="WATCHING") stateCls = "state-watch";
+  else if (primary==="BLOCKED") stateCls = "state-block";
+  const rs = (s.rs>=0?"+":"")+Number(s.rs).toFixed(2)+"%";
+  return `<div class="row">
+    <span class="sym">${s.symbol}</span>
+    <span class="dir ${s.direction==="SHORT"?"dir-short":"dir-long"}">${s.direction}</span>
+    <span class="state ${stateCls}">${primary}</span>
+    <span class="meta">${rs} · <span class="${gradeCls(s.confidence)}">${s.confidence}</span> · TS ${s.score}</span>
+  </div>`;
+}
+document.getElementById("before").innerHTML += before.map(s=>renderRow(s,"before")).join("");
+document.getElementById("after").innerHTML += before.map(s=>renderRow(s,"after")).filter(Boolean).join("")
+  || "<p class='meta'>No names at WATCHING/READY (all NOT READY)</p>";
+</script>
+</body>
+</html>

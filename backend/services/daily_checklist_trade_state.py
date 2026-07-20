@@ -413,23 +413,22 @@ def overlay_live_momentum_from_candles(
             stock["trade_score_raw"] = metrics.get("trade_score_raw")
         if metrics.get("volume_label"):
             stock["volume_label"] = metrics.get("volume_label")
+        if metrics.get("volume_ratio") is not None:
+            stock["vol_multiplier"] = metrics.get("volume_ratio")
+        if metrics.get("volume_tod_ratio") is not None:
+            stock["volume_tod_ratio"] = metrics.get("volume_tod_ratio")
         if metrics.get("vwap_purity_pct") is not None:
             stock["vwap_purity_pct"] = metrics.get("vwap_purity_pct")
         if metrics.get("market_regime"):
             stock["market_regime"] = metrics.get("market_regime")
-        # Live score/grade write only when stretch live-gate is on (shadow default keeps cards).
-        try:
-            from backend.services.kavach_confidence import stretch_penalty_live_enabled
-
-            if stretch_penalty_live_enabled():
-                if metrics.get("trade_score") is not None:
-                    stock["trade_score"] = metrics.get("trade_score")
-                if metrics.get("confidence_grade"):
-                    stock["confidence"] = metrics.get("confidence_grade")
-                    stock["dashboard_kavach"] = metrics.get("confidence_grade")
-        except Exception:
-            pass
-        # Pine v2.6: Trend = 2-of-3; EMA-VWAP uses panel EMA(9); ST×1.5; MACD 6/13/5.
+        # Always overlay live grade/score from the same 10m path as the chart panel
+        # (fixes Checklist D vs Pine B when cards were stuck on stale RS snapshot).
+        if metrics.get("trade_score") is not None:
+            stock["trade_score"] = metrics.get("trade_score")
+            stock["dashboard_score"] = metrics.get("trade_score")
+        if metrics.get("confidence_grade"):
+            stock["confidence"] = metrics.get("confidence_grade")
+        # Pine v3.0: Trend = 2-of-3; EMA-VWAP uses panel EMA(9); ST×1.5; MACD 12/26/9.
         trend_lbl = metrics.get("panel_trend")
         ema_lbl = _ema_vs_vwap_label(
             _f(metrics.get("panel_ema") if metrics.get("panel_ema") is not None else metrics.get("ema5")),
@@ -455,6 +454,7 @@ def overlay_live_momentum_from_candles(
             ts_lbl = _trading_state_label(kav, direction)
             if ts_lbl:
                 stock["trading_state"] = ts_lbl
+        stock["_live_kavach_metrics"] = metrics
         return {
             "trend": stock.get("trend"),
             "ema_vs_vwap": stock.get("ema_vs_vwap"),
@@ -1567,7 +1567,6 @@ def enrich_stocks_trade_state(
     try:
         from backend.services.daily_checklist_chop_gates import (
             compute_market_regime,
-            count_pullback_attempts,
             count_whipsaw_reversals,
             direction_unstable_flags,
             stopped_out_today,
@@ -1677,9 +1676,16 @@ def enrich_stocks_trade_state(
             whip = count_whipsaw_reversals(
                 candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
             ) if candles else 0
-            pb = count_pullback_attempts(
-                candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
-            ) if candles else 0
+            from backend.services.kavach_readiness import attach_readiness_to_stock
+
+            attach_readiness_to_stock(
+                s,
+                candles,
+                session_date=session_date,
+                session_open=smeta.get("session_open"),
+                metrics=s.get("_live_kavach_metrics"),
+            )
+            pb = int(s.get("pullback_count") or 0)
             flip = flips.get(sym) or {}
             from backend.services.ready_dwell_entry_shadow import levels_with_live_candle_emas
 
@@ -1704,6 +1710,8 @@ def enrich_stocks_trade_state(
                 opening_candle_low=smeta.get("opening_candle_low"),
             )
             s.update(ts)
+            # Drop bulky metrics stash from API payload.
+            s.pop("_live_kavach_metrics", None)
 
             lock_row = lock_map.get(sym)
             in_lock = lock_row is not None
