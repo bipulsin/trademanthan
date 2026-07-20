@@ -17,7 +17,7 @@ from backend.database import SessionLocal
 from backend.services.daily_checklist_snapshot import get_locked_symbols, locked_direction_map
 from backend.services.kavach_engine import BEARISH_STATES, BULLISH_STATES
 from backend.services.rs_conviction_config import get_config
-from backend.services.rs_live_kavach_audit import last_audit_state
+from backend.services.rs_live_kavach_audit import latest_audit_pair
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")

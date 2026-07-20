@@ -1,0 +1,210 @@
+{
+  "primary_session_extreme": {
+    "n_flags_analyzed": 269,
+    "n_core_ex_near_extreme": 262,
+    "date_span": [
+      "2026-07-06",
+      "2026-07-10"
+    ],
+    "remaining_mult_dist": {
+      "p25": 0.138,
+      "p50": 0.462,
+      "p75": 1.293,
+      "p90": 3.472
+    },
+    "captured_mult_dist_1x_delayed": {
+      "p25": 0.11,
+      "p50": 0.414,
+      "p75": 1.258,
+      "p90": 3.031
+    },
+    "all_flags": {
+      "remaining_ge_4x": {
+        "count": 23,
+        "n": 269,
+        "pct": 8.6,
+        "wilson95": [
+          5.8,
+          12.5
+        ]
+      },
+      "remaining_ge_5x": {
+        "count": 19,
+        "n": 269,
+        "pct": 7.1,
+        "wilson95": [
+          4.6,
+          10.8
+        ]
+      },
+      "fizzle_fp_remaining_lt_1x": {
+        "count": 189,
+        "n": 269,
+        "pct": 70.3,
+        "wilson95": [
+          64.5,
+          75.4
+        ]
+      },
+      "delayed_captured_ge_3x": {
+        "count": 28,
+        "n": 269,
+        "pct": 10.4,
+        "wilson95": [
+          7.3,
+          14.6
+        ]
+      },
+      "delayed_captured_ge_4x": {
+        "count": 20,
+        "n": 269,
+        "pct": 7.4,
+        "wilson95": [
+          4.9,
+          11.2
+        ]
+      }
+    },
+    "core_ex_near_extreme": {
+      "remaining_ge_4x": {
+        "count": 16,
+        "n": 262,
+        "pct": 6.1,
+        "wilson95": [
+          3.8,
+          9.7
+        ]
+      },
+      "remaining_ge_5x": {
+        "count": 12,
+        "n": 262,
+        "pct": 4.6,
+        "wilson95": [
+          2.6,
+          7.8
+        ]
+      },
+      "fizzle_fp_remaining_lt_1x": {
+        "count": 189,
+        "n": 262,
+        "pct": 72.1,
+        "wilson95": [
+          66.4,
+          77.2
+        ]
+      },
+      "delayed_captured_ge_3x": {
+        "count": 22,
+        "n": 262,
+        "pct": 8.4,
+        "wilson95": [
+          5.6,
+          12.4
+        ]
+      },
+      "delayed_captured_ge_4x": {
+        "count": 14,
+        "n": 262,
+        "pct": 5.3,
+        "wilson95": [
+          3.2,
+          8.8
+        ]
+      }
+    },
+    "by_direction": {
+      "LONG": {
+        "n": 127,
+        "delayed_ge_3x_pct": 6.3,
+        "fizzle_pct": 79.5
+      },
+      "SHORT": {
+        "n": 135,
+        "delayed_ge_3x_pct": 10.4,
+        "fizzle_pct": 65.2
+      }
+    },
+    "by_reversal": {
+      "False": {
+        "n": 247,
+        "delayed_ge_3x_pct": 8.5,
+        "fizzle_pct": 72.9
+      },
+      "True": {
+        "n": 15,
+        "delayed_ge_3x_pct": 6.7,
+        "fizzle_pct": 60.0
+      }
+    },
+    "skips": {},
+    "definitions": {
+      "entry_ref": "session extreme (low for LONG / high for SHORT) from 09:15 through flag bar",
+      "follow_through_window": "flag bar through 15:30 IST same session",
+      "delayed_entry": "close of next completed 10m bar after first_flip_at",
+      "instrument": "currmth futures key from arbitrage_master (Kavach parity)",
+      "4x_5x": "remaining_at_flag / pre_flag_move",
+      "fp": "remaining_mult < 1.0"
+    },
+    "verdict": {
+      "call": "NO_GO_STANDALONE",
+      "rationale": "Delayed \u22653\u00d7 only 8.4% with fizzle 72.1% \u2014 not good enough alone vs Votes/Grade lag tradeoff.",
+      "ge3_pct": 8.4,
+      "fizzle_pct": 72.1
+    }
+  },
+  "sensitivity_session_open": {
+    "n": 263,
+    "remaining_ge_4x": {
+      "count": 20,
+      "n": 263,
+      "pct": 7.6,
+      "wilson95": [
+        5.0,
+        11.5
+      ]
+    },
+    "remaining_ge_5x": {
+      "count": 15,
+      "n": 263,
+      "pct": 5.7,
+      "wilson95": [
+        3.5,
+        9.2
+      ]
+    },
+    "fizzle": {
+      "count": 174,
+      "n": 263,
+      "pct": 66.2,
+      "wilson95": [
+        60.2,
+        71.6
+      ]
+    },
+    "delayed_ge_3x": {
+      "count": 31,
+      "n": 263,
+      "pct": 11.8,
+      "wilson95": [
+        8.4,
+        16.2
+      ]
+    },
+    "delayed_ge_4x": {
+      "count": 22,
+      "n": 263,
+      "pct": 8.4,
+      "wilson95": [
+        5.6,
+        12.3
+      ]
+    },
+    "med_remaining_mult": 0.563,
+    "med_captured_mult": 0.481
+  },
+  "absolute_remaining_primary": {
+    "ge_0_5pct": 54.2,
+    "ge_1_0pct": 34.4,
+    "n": 262
+  }
+}
