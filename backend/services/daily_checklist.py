@@ -630,6 +630,13 @@ def _apply_live_recompute(db, sd: str, symbol: str, direction: str, merged: Dict
         merged.update(live["fields"])
         merged["indicator_as_of"] = live["indicator_as_of"]
         merged["indicator_source"] = live["source"]
+        # Stash for Fast Watch edge detection in the same refresh cycle.
+        # Not a checklist column — consumed by record_fast_watch_flips only.
+        if live.get("prev_kavach_state") is not None:
+            merged["prev_kavach_state"] = live["prev_kavach_state"]
+        price = (live.get("metrics") or {}).get("price")
+        if price is not None:
+            merged["flip_price"] = price
     elif rs_row is not None and getattr(rs_row, "scan_time", None):
         merged["indicator_as_of"] = rs_row.scan_time
         merged["indicator_source"] = "rs_fallback"
@@ -1090,6 +1097,9 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
         row_by_sym = {r.symbol: r for r in rows}
         lock_dirs = locked_direction_map(db, sd)
         refreshed = 0
+        # Preserve live prev/price across upsert so Fast Watch can edge-detect
+        # without waiting for a committed audit row in a separate session.
+        live_flip_meta: Dict[str, Dict[str, Any]] = {}
 
         for sym in locked_syms:
             row = row_by_sym.get(sym)
@@ -1110,6 +1120,12 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             merged["sector_badge"] = badges.get(sym)
             merged["data_refreshed_at"] = now
             _apply_live_recompute(db, sd, sym, direction, merged, row)
+            if merged.get("prev_kavach_state") is not None or merged.get("flip_price") is not None:
+                live_flip_meta[sym] = {
+                    "prev_kavach_state": merged.get("prev_kavach_state"),
+                    "flip_price": merged.get("flip_price"),
+                    "dashboard_kavach": merged.get("dashboard_kavach"),
+                }
             _upsert_stock(db, sd, sym, direction, merged)
             refreshed += 1
 
@@ -1119,7 +1135,15 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
             if sym in locked_syms:
                 raw = _load_raw(db, sd, sym)
                 if raw:
-                    flip_updates.append({**raw, "lock_direction": lock_dirs.get(sym)})
+                    upd = {**raw, "lock_direction": lock_dirs.get(sym)}
+                    meta = live_flip_meta.get(sym) or {}
+                    if meta.get("prev_kavach_state") is not None:
+                        upd["prev_kavach_state"] = meta["prev_kavach_state"]
+                    if meta.get("flip_price") is not None:
+                        upd["flip_price"] = meta["flip_price"]
+                    if meta.get("dashboard_kavach") is not None:
+                        upd["dashboard_kavach"] = meta["dashboard_kavach"]
+                    flip_updates.append(upd)
                 continue
             row = row_by_sym.get(sym)
             if row is not None:
@@ -1133,9 +1157,10 @@ def _refresh_checklist_from_rs(*, full_populate: bool) -> Dict[str, Any]:
                 flip_updates,
                 locked_symbols=locked_syms,
                 top5_symbols={r.symbol for r in rows if r.symbol},
+                db=db,
             )
         except Exception as exc:
-            logger.debug("fast watch record skipped: %s", exc)
+            logger.warning("fast watch record skipped: %s", exc)
 
         logger.info("daily_checklist: refreshed %d locked stocks for %s", refreshed, sd)
         audit_checklist_lock_coverage(db, sd, rs_rows=rows)
