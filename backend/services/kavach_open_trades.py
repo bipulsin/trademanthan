@@ -738,16 +738,152 @@ def _confirmed_10m_levels(db, symbol: str) -> Dict[str, Any]:
                 vwap = float(vw[-1])
         except Exception:
             vwap = None
+        prev_close = float(closes[-2]) if len(closes) >= 2 else None
         return {
             "close": closes[-1],
+            "open": _f(last.get("open")),
+            "high": _f(last.get("high")),
+            "low": _f(last.get("low")),
+            "prev_close": prev_close,
             "ema5": ema5_s[-1] if ema5_s else None,
             "ema10": ema10_s[-1] if ema10_s else None,
             "vwap": vwap,
             "bar_at": bar_ts,
+            "bar_index": len(bars) - 1,
         }
     except Exception as exc:
         logger.debug("10m levels failed %s: %s", symbol, exc)
         return {}
+
+
+def _log_exit_candidate_shadow_eval(
+    db,
+    *,
+    trade: Dict[str, Any],
+    session_date: str,
+    tid: str,
+    sym: str,
+    state: str,
+    is_long: bool,
+    entry: Optional[float],
+    close: float,
+    ema5: Optional[float],
+    ema10: Optional[float],
+    peak_r: float,
+    bar_at: Any,
+    bar_high: Optional[float],
+    bar_low: Optional[float],
+    bar_open: Optional[float],
+    prev_close: Optional[float] = None,
+    bar_index: int = 0,
+) -> None:
+    """Research-only would-fire log for C1/C2/C3. Does not change trade state."""
+    from backend.services.kavach_exit_candidate_shadow import (
+        Bar,
+        evaluate_bar_snapshot,
+        log_exit_candidate_shadow,
+    )
+
+    if entry is None:
+        return
+    initial_risk_inr = _f(trade.get("initial_sl_inr")) or 0.0
+    qty = max(int(trade.get("entry_qty") or 1), 1)
+    risk_pts = (initial_risk_inr / qty) if initial_risk_inr > 0 else 0.0
+    if risk_pts <= 0 and ema10 is not None:
+        risk_pts = abs(float(entry) - float(ema10))
+    if risk_pts <= 0:
+        return
+
+    snap_ctx = trade.get("state_context_snapshot")
+    if isinstance(snap_ctx, str):
+        try:
+            snap_ctx = json.loads(snap_ctx)
+        except Exception:
+            snap_ctx = {}
+    if not isinstance(snap_ctx, dict):
+        snap_ctx = {}
+    shadow_meta = snap_ctx.get("exit_candidate_shadow")
+    if not isinstance(shadow_meta, dict):
+        shadow_meta = {}
+
+    peak_extreme = _f(shadow_meta.get("peak_extreme"))
+    touch_bar_index = shadow_meta.get("touch_bar_index")
+    if touch_bar_index is not None:
+        try:
+            touch_bar_index = int(touch_bar_index)
+        except (TypeError, ValueError):
+            touch_bar_index = None
+    stored_prev = _f(shadow_meta.get("prev_close"))
+    if prev_close is None:
+        prev_close = stored_prev
+
+    bar = Bar(
+        open=float(bar_open if bar_open is not None else close),
+        high=float(bar_high if bar_high is not None else close),
+        low=float(bar_low if bar_low is not None else close),
+        close=float(close),
+        ema5=ema5,
+        ema10=ema10,
+        bar_at=str(bar_at) if bar_at else None,
+    )
+    snapshot = evaluate_bar_snapshot(
+        is_long=is_long,
+        entry=float(entry),
+        risk_pts=float(risk_pts),
+        peak_r_so_far=float(peak_r or 0),
+        bar=bar,
+        prev_close=prev_close,
+        touch_bar_index=touch_bar_index,
+        current_bar_index=int(bar_index or 0),
+        peak_extreme=peak_extreme,
+    )
+    new_meta = {
+        "peak_extreme": snapshot.get("peak_extreme"),
+        "touch_bar_index": snapshot.get("touch_bar_index"),
+        "prev_close": float(close),
+        "last_peak_r": snapshot.get("peak_r"),
+        "last_would_exit": list((snapshot.get("would_exit") or {}).keys()),
+        "shadow_mode": True,
+    }
+    # Keep in-memory snapshot current so a later full-row UPDATE does not wipe meta.
+    snap_ctx = dict(snap_ctx)
+    snap_ctx["exit_candidate_shadow"] = new_meta
+    trade["state_context_snapshot"] = snap_ctx
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE kavach_checklist_trades
+                SET state_context_snapshot = COALESCE(state_context_snapshot, '{}'::jsonb)
+                    || CAST(:patch AS jsonb),
+                    updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {
+                "patch": json.dumps({"exit_candidate_shadow": new_meta}),
+                "id": tid,
+            },
+        )
+    except Exception as exc:
+        logger.debug("exit candidate shadow meta persist failed %s: %s", sym, exc)
+
+    bat = _parse_ts(bar_at) if bar_at else None
+    log_exit_candidate_shadow(
+        db,
+        session_date=session_date,
+        symbol=sym,
+        snapshot=snapshot,
+        trade_id=tid,
+        direction=trade.get("direction") or ("LONG" if is_long else "SHORT"),
+        entry_price=float(entry),
+        risk_pts=float(risk_pts),
+        live_state=state,
+        bar_at=bat,
+        ema5=ema5,
+        ema10=ema10,
+        close_px=float(close),
+    )
 
 
 def _bar_hm(bar_at: Any) -> str:
@@ -1995,6 +2131,32 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
                             new_state = STATE_EXIT_NOW
                             trigger_reason = "EMA5 reverse close after profit protection"
                             trigger_px = close
+
+                # Shadow-only high-R exit candidates (C1/C2/C3). Never mutates
+                # new_state here — EXIT_CANDIDATE_LIVE stays off until 22-Jul review.
+                try:
+                    _log_exit_candidate_shadow_eval(
+                        db,
+                        trade=t,
+                        session_date=session_date,
+                        tid=str(tid),
+                        sym=sym,
+                        state=state,
+                        is_long=is_long,
+                        entry=entry,
+                        close=close,
+                        ema5=ema5,
+                        ema10=ema10,
+                        peak_r=peak,
+                        bar_at=bar_at,
+                        bar_high=_f(bar.get("high")) or close,
+                        bar_low=_f(bar.get("low")) or close,
+                        bar_open=_f(bar.get("open")) or close,
+                        prev_close=_f(bar.get("prev_close")),
+                        bar_index=int(bar.get("bar_index") or 0),
+                    )
+                except Exception as exc:
+                    logger.debug("exit candidate shadow skipped %s: %s", sym, exc)
         elif not lock_exit:
             continue
 
