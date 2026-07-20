@@ -1,0 +1,511 @@
+{
+  "meta": {
+    "generated_at": "2026-07-20T11:16:14.432682+00:00",
+    "shadow_only": true,
+    "live_enabled": false,
+    "constraint": "single-lot binary full-exit only \u2014 no partial booking",
+    "tunables": {
+      "HIGH_R_ARM": 2.0,
+      "RATCHET_GIVEBACK_R": 1.0,
+      "RATCHET_FLOOR_R": 1.0,
+      "SPIKE_RETAIN_R": 1.5
+    },
+    "note": "FEDERALBNK bars from 20-Jul case log; POLICYBZR/ADANIGREEN/CHOLAFIN are shape-preserving reconstructions for candidate comparison. Re-fetch Upstox 5m\u219210m on paperclip before treating R deltas as final."
+  },
+  "rollup": {
+    "C1_faster_ratchet": {
+      "fired_on_giveback_cases": 4,
+      "giveback_case_count": 4,
+      "mean_saved_r": 0.7574,
+      "mean_bars_earlier": 1.0,
+      "control_silent": true,
+      "control_peak_r": 1.0,
+      "control_any_fire": false
+    },
+    "C2_spike_reverse": {
+      "fired_on_giveback_cases": 3,
+      "giveback_case_count": 4,
+      "mean_saved_r": 1.0099,
+      "mean_bars_earlier": 1.33,
+      "control_silent": true,
+      "control_peak_r": 1.0,
+      "control_any_fire": false
+    },
+    "C3_intrabar_ema5_fast": {
+      "fired_on_giveback_cases": 4,
+      "giveback_case_count": 4,
+      "mean_saved_r": 0.3246,
+      "mean_bars_earlier": 0.5,
+      "control_silent": true,
+      "control_peak_r": 1.0,
+      "control_any_fire": false
+    }
+  },
+  "cases": [
+    {
+      "trade": {
+        "symbol": "FEDERALBNK",
+        "direction": "LONG",
+        "entry": 350.1,
+        "risk_pts": 0.5,
+        "session_date": "2026-07-20",
+        "notes": "3.7R peak \u2192 round-trip scratch; spike closed above EMA5"
+      },
+      "peak_r": 3.7,
+      "peak_bar_index": 3,
+      "peak_price": 351.95,
+      "giveback_r": 3.1,
+      "shadow_mode": true,
+      "baseline": {
+        "bar_index": 4,
+        "bar_at": "2026-07-20T10:40:00+05:30",
+        "exit_price": 350.4,
+        "exit_r": 0.599999999999909,
+        "peak_r": 3.699999999999932,
+        "reason": "EMA5 reverse close after profit protection",
+        "state_at_exit": "PROFIT_LOCKED"
+      },
+      "candidates": {
+        "C1_faster_ratchet": {
+          "candidate_id": "C1_faster_ratchet",
+          "bar_index": 3,
+          "bar_at": "2026-07-20T10:30:00+05:30",
+          "exit_price": 350.8,
+          "exit_r": 1.3999999999999773,
+          "peak_r_at_exit": 3.699999999999932,
+          "reason": "Faster ratchet close beyond peak\u2212giveback stop",
+          "detail": {
+            "arm_r": 2.0,
+            "giveback_r": 1.0,
+            "floor_r": 1.0,
+            "peak_extreme": 351.95,
+            "stop": 351.45
+          }
+        },
+        "C2_spike_reverse": {
+          "candidate_id": "C2_spike_reverse",
+          "bar_index": 3,
+          "bar_at": "2026-07-20T10:30:00+05:30",
+          "exit_price": 350.8,
+          "exit_r": 1.3999999999999773,
+          "peak_r_at_exit": 3.699999999999932,
+          "reason": "Spike\u2265arm then close back \u2264 retain R (same/next bar)",
+          "detail": {
+            "arm_r": 2.0,
+            "retain_r": 1.5,
+            "touch_bar_index": 2,
+            "bars_after_touch": 1
+          }
+        },
+        "C3_intrabar_ema5_fast": {
+          "candidate_id": "C3_intrabar_ema5_fast",
+          "bar_index": 3,
+          "bar_at": "2026-07-20T10:30:00+05:30",
+          "exit_price": 350.8,
+          "exit_r": 1.3999999999999773,
+          "peak_r_at_exit": 3.699999999999932,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "detail": {
+            "arm_r": 2.0,
+            "ema5": 350.55,
+            "pierced": true,
+            "beyond_close": false,
+            "weaker_than_prior": true,
+            "prior_close": 351.1
+          }
+        }
+      },
+      "case_id": "FEDERALBNK_20260720",
+      "n_bars": 5,
+      "vs_baseline": {
+        "C1_faster_ratchet": {
+          "fired": true,
+          "bars_earlier": 1,
+          "exit_r_delta": 0.8,
+          "saved_vs_baseline_r": 0.8,
+          "candidate_exit_r": 1.3999999999999773,
+          "baseline_exit_r": 0.599999999999909,
+          "candidate_bar_index": 3,
+          "baseline_bar_index": 4
+        },
+        "C2_spike_reverse": {
+          "fired": true,
+          "bars_earlier": 1,
+          "exit_r_delta": 0.8,
+          "saved_vs_baseline_r": 0.8,
+          "candidate_exit_r": 1.3999999999999773,
+          "baseline_exit_r": 0.599999999999909,
+          "candidate_bar_index": 3,
+          "baseline_bar_index": 4
+        },
+        "C3_intrabar_ema5_fast": {
+          "fired": true,
+          "bars_earlier": 1,
+          "exit_r_delta": 0.8,
+          "saved_vs_baseline_r": 0.8,
+          "candidate_exit_r": 1.3999999999999773,
+          "baseline_exit_r": 0.599999999999909,
+          "candidate_bar_index": 3,
+          "baseline_bar_index": 4
+        }
+      }
+    },
+    {
+      "trade": {
+        "symbol": "POLICYBZR",
+        "direction": "LONG",
+        "entry": 1580.0,
+        "risk_pts": 3.61,
+        "session_date": "2026-07-16",
+        "notes": "MAE MFE 3.46R \u2192 exit ~0R; missed ~1590 book"
+      },
+      "peak_r": 3.4626,
+      "peak_bar_index": 2,
+      "peak_price": 1592.5,
+      "giveback_r": 3.4072,
+      "shadow_mode": true,
+      "baseline": {
+        "bar_index": 4,
+        "bar_at": "2026-07-16T13:15:00+05:30",
+        "exit_price": 1580.2,
+        "exit_r": 0.055401662049874095,
+        "peak_r": 3.4626038781163437,
+        "reason": "EMA10 reverse close",
+        "state_at_exit": "TRAILING"
+      },
+      "candidates": {
+        "C1_faster_ratchet": {
+          "candidate_id": "C1_faster_ratchet",
+          "bar_index": 2,
+          "bar_at": "2026-07-16T12:05:00+05:30",
+          "exit_price": 1585.0,
+          "exit_r": 1.3850415512465375,
+          "peak_r_at_exit": 3.4626038781163437,
+          "reason": "Faster ratchet close beyond peak\u2212giveback stop",
+          "detail": {
+            "arm_r": 2.0,
+            "giveback_r": 1.0,
+            "floor_r": 1.0,
+            "peak_extreme": 1592.5,
+            "stop": 1588.89
+          }
+        },
+        "C2_spike_reverse": {
+          "candidate_id": "C2_spike_reverse",
+          "bar_index": 2,
+          "bar_at": "2026-07-16T12:05:00+05:30",
+          "exit_price": 1585.0,
+          "exit_r": 1.3850415512465375,
+          "peak_r_at_exit": 3.4626038781163437,
+          "reason": "Spike\u2265arm then close back \u2264 retain R (same/next bar)",
+          "detail": {
+            "arm_r": 2.0,
+            "retain_r": 1.5,
+            "touch_bar_index": 1,
+            "bars_after_touch": 1
+          }
+        },
+        "C3_intrabar_ema5_fast": {
+          "candidate_id": "C3_intrabar_ema5_fast",
+          "bar_index": 3,
+          "bar_at": "2026-07-16T12:25:00+05:30",
+          "exit_price": 1582.0,
+          "exit_r": 0.554016620498615,
+          "peak_r_at_exit": 3.4626038781163437,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "detail": {
+            "arm_r": 2.0,
+            "ema5": 1584.5,
+            "pierced": true,
+            "beyond_close": true,
+            "weaker_than_prior": true,
+            "prior_close": 1585.0
+          }
+        }
+      },
+      "case_id": "POLICYBZR_giveback",
+      "n_bars": 5,
+      "vs_baseline": {
+        "C1_faster_ratchet": {
+          "fired": true,
+          "bars_earlier": 2,
+          "exit_r_delta": 1.3296,
+          "saved_vs_baseline_r": 1.3296,
+          "candidate_exit_r": 1.3850415512465375,
+          "baseline_exit_r": 0.055401662049874095,
+          "candidate_bar_index": 2,
+          "baseline_bar_index": 4
+        },
+        "C2_spike_reverse": {
+          "fired": true,
+          "bars_earlier": 2,
+          "exit_r_delta": 1.3296,
+          "saved_vs_baseline_r": 1.3296,
+          "candidate_exit_r": 1.3850415512465375,
+          "baseline_exit_r": 0.055401662049874095,
+          "candidate_bar_index": 2,
+          "baseline_bar_index": 4
+        },
+        "C3_intrabar_ema5_fast": {
+          "fired": true,
+          "bars_earlier": 1,
+          "exit_r_delta": 0.4986,
+          "saved_vs_baseline_r": 0.4986,
+          "candidate_exit_r": 0.554016620498615,
+          "baseline_exit_r": 0.055401662049874095,
+          "candidate_bar_index": 3,
+          "baseline_bar_index": 4
+        }
+      }
+    },
+    {
+      "trade": {
+        "symbol": "ADANIGREEN",
+        "direction": "LONG",
+        "entry": 1564.5,
+        "risk_pts": 5.0,
+        "session_date": "2026-07-13",
+        "notes": "High-R then EMA10 trail round-trip (research narrative)"
+      },
+      "peak_r": 3.5,
+      "peak_bar_index": 2,
+      "peak_price": 1582.0,
+      "giveback_r": 3.0,
+      "shadow_mode": true,
+      "baseline": {
+        "bar_index": 3,
+        "bar_at": "2026-07-13T10:40:00+05:30",
+        "exit_price": 1567.0,
+        "exit_r": 0.5,
+        "peak_r": 3.5,
+        "reason": "EMA5 reverse close after profit protection",
+        "state_at_exit": "PROFIT_LOCKED"
+      },
+      "candidates": {
+        "C1_faster_ratchet": {
+          "candidate_id": "C1_faster_ratchet",
+          "bar_index": 2,
+          "bar_at": "2026-07-13T10:20:00+05:30",
+          "exit_price": 1571.5,
+          "exit_r": 1.4,
+          "peak_r_at_exit": 3.5,
+          "reason": "Faster ratchet close beyond peak\u2212giveback stop",
+          "detail": {
+            "arm_r": 2.0,
+            "giveback_r": 1.0,
+            "floor_r": 1.0,
+            "peak_extreme": 1582.0,
+            "stop": 1577.0
+          }
+        },
+        "C2_spike_reverse": {
+          "candidate_id": "C2_spike_reverse",
+          "bar_index": 2,
+          "bar_at": "2026-07-13T10:20:00+05:30",
+          "exit_price": 1571.5,
+          "exit_r": 1.4,
+          "peak_r_at_exit": 3.5,
+          "reason": "Spike\u2265arm then close back \u2264 retain R (same/next bar)",
+          "detail": {
+            "arm_r": 2.0,
+            "retain_r": 1.5,
+            "touch_bar_index": 1,
+            "bars_after_touch": 1
+          }
+        },
+        "C3_intrabar_ema5_fast": {
+          "candidate_id": "C3_intrabar_ema5_fast",
+          "bar_index": 3,
+          "bar_at": "2026-07-13T10:40:00+05:30",
+          "exit_price": 1567.0,
+          "exit_r": 0.5,
+          "peak_r_at_exit": 3.5,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "detail": {
+            "arm_r": 2.0,
+            "ema5": 1569.0,
+            "pierced": true,
+            "beyond_close": true,
+            "weaker_than_prior": true,
+            "prior_close": 1571.5
+          }
+        }
+      },
+      "case_id": "ADANIGREEN_long_giveback",
+      "n_bars": 5,
+      "vs_baseline": {
+        "C1_faster_ratchet": {
+          "fired": true,
+          "bars_earlier": 1,
+          "exit_r_delta": 0.9,
+          "saved_vs_baseline_r": 0.9,
+          "candidate_exit_r": 1.4,
+          "baseline_exit_r": 0.5,
+          "candidate_bar_index": 2,
+          "baseline_bar_index": 3
+        },
+        "C2_spike_reverse": {
+          "fired": true,
+          "bars_earlier": 1,
+          "exit_r_delta": 0.9,
+          "saved_vs_baseline_r": 0.9,
+          "candidate_exit_r": 1.4,
+          "baseline_exit_r": 0.5,
+          "candidate_bar_index": 2,
+          "baseline_bar_index": 3
+        },
+        "C3_intrabar_ema5_fast": {
+          "fired": true,
+          "bars_earlier": 0,
+          "exit_r_delta": 0.0,
+          "saved_vs_baseline_r": 0.0,
+          "candidate_exit_r": 0.5,
+          "baseline_exit_r": 0.5,
+          "candidate_bar_index": 3,
+          "baseline_bar_index": 3
+        }
+      }
+    },
+    {
+      "trade": {
+        "symbol": "CHOLAFIN",
+        "direction": "LONG",
+        "entry": 1822.1,
+        "risk_pts": 0.8,
+        "session_date": "2026-07-15",
+        "notes": "MAE round_trip peak 7.38R \u2192 large loss; stress-test candidates"
+      },
+      "peak_r": 7.375,
+      "peak_bar_index": 2,
+      "peak_price": 1828.0,
+      "giveback_r": 6.0,
+      "shadow_mode": true,
+      "baseline": {
+        "bar_index": 2,
+        "bar_at": "2026-07-15T11:20:00+05:30",
+        "exit_price": 1823.2,
+        "exit_r": 1.3750000000001705,
+        "peak_r": 7.375000000000114,
+        "reason": "EMA5 reverse close after profit protection",
+        "state_at_exit": "PROFIT_LOCKED"
+      },
+      "candidates": {
+        "C1_faster_ratchet": {
+          "candidate_id": "C1_faster_ratchet",
+          "bar_index": 2,
+          "bar_at": "2026-07-15T11:20:00+05:30",
+          "exit_price": 1823.2,
+          "exit_r": 1.3750000000001705,
+          "peak_r_at_exit": 7.375000000000114,
+          "reason": "Faster ratchet close beyond peak\u2212giveback stop",
+          "detail": {
+            "arm_r": 2.0,
+            "giveback_r": 1.0,
+            "floor_r": 1.0,
+            "peak_extreme": 1828.0,
+            "stop": 1827.2
+          }
+        },
+        "C2_spike_reverse": null,
+        "C3_intrabar_ema5_fast": {
+          "candidate_id": "C3_intrabar_ema5_fast",
+          "bar_index": 2,
+          "bar_at": "2026-07-15T11:20:00+05:30",
+          "exit_price": 1823.2,
+          "exit_r": 1.3750000000001705,
+          "peak_r_at_exit": 7.375000000000114,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "detail": {
+            "arm_r": 2.0,
+            "ema5": 1823.5,
+            "pierced": true,
+            "beyond_close": true,
+            "weaker_than_prior": true,
+            "prior_close": 1825.5
+          }
+        }
+      },
+      "case_id": "CHOLAFIN_round_trip",
+      "n_bars": 4,
+      "vs_baseline": {
+        "C1_faster_ratchet": {
+          "fired": true,
+          "bars_earlier": 0,
+          "exit_r_delta": 0.0,
+          "saved_vs_baseline_r": 0.0,
+          "candidate_exit_r": 1.3750000000001705,
+          "baseline_exit_r": 1.3750000000001705,
+          "candidate_bar_index": 2,
+          "baseline_bar_index": 2
+        },
+        "C2_spike_reverse": {
+          "fired": false,
+          "bars_earlier": null,
+          "exit_r_delta": null,
+          "saved_vs_baseline_r": null
+        },
+        "C3_intrabar_ema5_fast": {
+          "fired": true,
+          "bars_earlier": 0,
+          "exit_r_delta": 0.0,
+          "saved_vs_baseline_r": 0.0,
+          "candidate_exit_r": 1.3750000000001705,
+          "baseline_exit_r": 1.3750000000001705,
+          "candidate_bar_index": 2,
+          "baseline_bar_index": 2
+        }
+      }
+    },
+    {
+      "trade": {
+        "symbol": "TATAELXSI",
+        "direction": "LONG",
+        "entry": 3510.0,
+        "risk_pts": 8.0,
+        "session_date": "2026-07-20",
+        "notes": "False stop then continuation to 3532.50 post-exit \u2014 candidates must stay silent (<2R) on held bars"
+      },
+      "peak_r": 1.0,
+      "peak_bar_index": 1,
+      "peak_price": 3518.0,
+      "giveback_r": 2.2125,
+      "shadow_mode": true,
+      "baseline": {
+        "bar_index": 2,
+        "bar_at": "2026-07-20T11:20:00+05:30",
+        "exit_price": 3500.3,
+        "exit_r": -1.2124999999999773,
+        "peak_r": 1.0,
+        "reason": "EMA10 reverse close",
+        "state_at_exit": "TRAILING"
+      },
+      "candidates": {
+        "C1_faster_ratchet": null,
+        "C2_spike_reverse": null,
+        "C3_intrabar_ema5_fast": null
+      },
+      "case_id": "TATAELXSI_false_stop_20260720",
+      "n_bars": 3,
+      "vs_baseline": {
+        "C1_faster_ratchet": {
+          "fired": false,
+          "bars_earlier": null,
+          "exit_r_delta": null,
+          "saved_vs_baseline_r": null
+        },
+        "C2_spike_reverse": {
+          "fired": false,
+          "bars_earlier": null,
+          "exit_r_delta": null,
+          "saved_vs_baseline_r": null
+        },
+        "C3_intrabar_ema5_fast": {
+          "fired": false,
+          "bars_earlier": null,
+          "exit_r_delta": null,
+          "saved_vs_baseline_r": null
+        }
+      }
+    }
+  ]
+}
