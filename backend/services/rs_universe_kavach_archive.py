@@ -197,7 +197,7 @@ def run_universe_kavach_archive(*, force: bool = False) -> Dict[str, Any]:
     errors = 0
     for entry in universe:
         try:
-            m = _compute_symbol_metrics(upstox, entry, nifty_pct, cache_only=False)
+            m, _excl = _compute_symbol_metrics(upstox, entry, nifty_pct, cache_only=False)
             if m:
                 m.pop("from_cache", None)
                 rows.append(m)

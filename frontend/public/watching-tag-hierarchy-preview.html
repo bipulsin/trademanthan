@@ -44,11 +44,10 @@
     <p class="note">Open live checklist after deploy to confirm against real session data.</p>
   </div>
 
-  <script src="dailyRSchecklist.js?v=38"></script>
   <script>
 (function () {
   "use strict";
-  // Preview uses duplicated markup — helpers are inside dailyRSchecklist IIFE, so rebuild rows locally.
+  // Standalone preview (does not load dailyRSchecklist.js — helpers are inlined).
   function badgeClass(t) {
     var cls = "dc-gate-badge";
     t = String(t || "");

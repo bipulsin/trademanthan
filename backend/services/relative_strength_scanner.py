@@ -184,16 +184,28 @@ def _candles_for_symbol(
 
 def _compute_symbol_metrics(
     upstox: UpstoxService, entry: Dict[str, str], nifty_pct: float, *, cache_only: bool
-) -> Optional[Dict[str, Any]]:
-    """Compute all indicators + RS + Kavach for one symbol (cache-first candles)."""
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Compute all indicators + RS + Kavach for one symbol (cache-first candles).
+
+    Returns ``(metrics, exclusion_reason)``. On success ``exclusion_reason`` is
+    None; on failure ``metrics`` is None and reason is a canonical code from
+    ``rs_exclusion_audit``.
+    """
+    from backend.services.rs_exclusion_audit import (
+        REASON_MISSING_CANDLES,
+        REASON_MISSING_KEY,
+        REASON_NO_CLOSED_BAR,
+        REASON_NO_PREV_CLOSE,
+    )
+
     instrument_key = entry.get("instrument_key") or ""
     symbol = entry.get("stock") or ""
     if not instrument_key or not symbol:
-        return None
+        return None, REASON_MISSING_KEY
 
     candles, from_cache = _candles_for_symbol(upstox, instrument_key, cache_only=cache_only)
     if not candles or len(candles) < MIN_BARS:
-        return None
+        return None, REASON_MISSING_CANDLES
     candles = _sorted_candles(candles)
 
     closes = [_f(c.get("close")) for c in candles]
@@ -204,7 +216,7 @@ def _compute_symbol_metrics(
     # Stock %% basis = (current price - previous DAY close) / previous DAY close.
     split = _current_and_prev_day_close(candles)
     if split is None:
-        return None
+        return None, REASON_NO_PREV_CLOSE
     current_price, previous_close, first_today = split
 
     # EMAs / MACD / Supertrend / ADX over the continuous 5m series (chart basis).
@@ -227,7 +239,7 @@ def _compute_symbol_metrics(
 
     closed_idx = last_closed_bar_index(candles)
     if closed_idx < 0:
-        return None
+        return None, REASON_NO_CLOSED_BAR
     closed_price = closes[closed_idx]
     cur_volume, vol_ema, volume_ratio = closed_bar_volume_ratio(volumes, closed_idx=closed_idx)
     volume_tod_ratio = cumulative_volume_tod_ratio(candles, closed_idx=closed_idx)
@@ -317,7 +329,7 @@ def _compute_symbol_metrics(
         "market_regime": regime,
         "kavach_state": kav.state,
         "kavach_strength": kav.strength,
-    }
+    }, None
 
 
 def _is_market_live_ist() -> bool:
@@ -447,10 +459,21 @@ def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
 # --- ranking -----------------------------------------------------------------
 
 
-def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
-    """Build Top-N Bullish / Bearish lists with trade scores and rank positions."""
+def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+    """Build Top-N Bullish / Bearish lists with trade scores and rank positions.
+
+    Also returns exclusion rows for NEUTRAL Kavach and beyond-persist truncates
+    (audit only — ranking output unchanged).
+    """
+    from backend.services.rs_exclusion_audit import (
+        REASON_BEYOND_PERSIST,
+        REASON_NEUTRAL,
+        exclusion_row,
+    )
+
     bullish: List[Dict] = []
     bearish: List[Dict] = []
+    exclusions: List[Dict] = []
     for r in rows:
         state = r["kavach_state"]
         if state in BULLISH_STATES:
@@ -460,6 +483,20 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
             ranking_type = RANKING_BEARISH
             bucket = bearish
         else:
+            exclusions.append(
+                exclusion_row(
+                    symbol=r.get("symbol") or "",
+                    exclusion_reason=REASON_NEUTRAL,
+                    instrument_key=r.get("instrument_key"),
+                    kavach_state=state,
+                    relative_strength=r.get("relative_strength"),
+                    ranking_side="NEUTRAL",
+                    current_price=r.get("current_price"),
+                    volume_ratio=r.get("volume_ratio"),
+                    volume_label=r.get("volume_label"),
+                    detail=f"kavach_state={state}",
+                )
+            )
             continue
         r = dict(r)
         r["ranking_type"] = ranking_type
@@ -492,13 +529,45 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
     persist_n = max(int(TOP_N), int(PERSIST_TOP_N))
     bullish.sort(key=lambda x: (-x["relative_strength"], -x["trade_score"]))
     bearish.sort(key=lambda x: (x["relative_strength"], -x["trade_score"]))
-    bullish = bullish[:persist_n]
-    bearish = bearish[:persist_n]
-    for i, r in enumerate(bullish, start=1):
-        r["rank_position"] = i
-    for i, r in enumerate(bearish, start=1):
-        r["rank_position"] = i
-    return bullish, bearish
+
+    def _truncate(bucket: List[Dict], side: str) -> List[Dict]:
+        cutoff_rs_persist = (
+            bucket[persist_n - 1]["relative_strength"] if len(bucket) >= persist_n else None
+        )
+        cutoff_rs_top_n = (
+            bucket[TOP_N - 1]["relative_strength"] if len(bucket) >= TOP_N else None
+        )
+        kept: List[Dict] = []
+        for i, row in enumerate(bucket, start=1):
+            if i <= persist_n:
+                row = dict(row)
+                row["rank_position"] = i
+                kept.append(row)
+            else:
+                exclusions.append(
+                    exclusion_row(
+                        symbol=row.get("symbol") or "",
+                        exclusion_reason=REASON_BEYOND_PERSIST,
+                        instrument_key=row.get("instrument_key"),
+                        kavach_state=row.get("kavach_state"),
+                        relative_strength=row.get("relative_strength"),
+                        trade_score=row.get("trade_score"),
+                        confidence_grade=row.get("confidence_grade"),
+                        ranking_side=side,
+                        would_be_rank=i,
+                        rank_cutoff=persist_n,
+                        top_n_cutoff=TOP_N,
+                        cutoff_rs_persist=cutoff_rs_persist,
+                        cutoff_rs_top_n=cutoff_rs_top_n,
+                        current_price=row.get("current_price"),
+                        volume_ratio=row.get("volume_ratio"),
+                        volume_label=row.get("volume_label"),
+                        detail=f"side={side} would_be_rank={i} persist_n={persist_n}",
+                    )
+                )
+        return kept
+
+    return _truncate(bullish, RANKING_BULLISH), _truncate(bearish, RANKING_BEARISH), exclusions
 
 
 # --- persistence -------------------------------------------------------------
@@ -572,20 +641,47 @@ def run_relative_strength_scan(
 
     universe = load_arbitrage_curr_mth_universe()
     rows: List[Dict[str, Any]] = []
+    exclusions: List[Dict[str, Any]] = []
     cache_hits = 0
+    from backend.services.rs_exclusion_audit import (
+        REASON_EXCEPTION,
+        exclusion_row,
+        write_exclusion_log,
+    )
+
     for entry in universe:
         try:
-            m = _compute_symbol_metrics(upstox, entry, nifty_pct, cache_only=cache_only)
+            m, excl_reason = _compute_symbol_metrics(
+                upstox, entry, nifty_pct, cache_only=cache_only
+            )
             if m:
                 if m.pop("from_cache", False):
                     cache_hits += 1
                 rows.append(m)
+            elif excl_reason:
+                exclusions.append(
+                    exclusion_row(
+                        symbol=entry.get("stock") or "",
+                        exclusion_reason=excl_reason,
+                        instrument_key=entry.get("instrument_key"),
+                        detail=f"cache_only={cache_only}",
+                    )
+                )
         except Exception as exc:  # one bad symbol must not abort the scan
             logger.warning(
                 "Relative Strength scan: %s failed: %s", entry.get("stock"), exc
             )
+            exclusions.append(
+                exclusion_row(
+                    symbol=entry.get("stock") or "",
+                    exclusion_reason=REASON_EXCEPTION,
+                    instrument_key=entry.get("instrument_key"),
+                    detail=str(exc)[:500],
+                )
+            )
 
-    bullish, bearish = _rank(rows)
+    bullish, bearish, rank_exclusions = _rank(rows)
+    exclusions.extend(rank_exclusions)
     ranked = bullish + bearish
     try:
         from backend.services.rs_scanner_maturity import enrich_ranked_with_maturity
@@ -596,13 +692,16 @@ def run_relative_strength_scan(
 
     scan_time = datetime.now(IST)
     _persist(scan_time, ranked)
+    excl_n = write_exclusion_log(
+        scan_time=scan_time, scan_trigger=scan_trigger, exclusions=exclusions
+    )
 
     duration = time.time() - started
     logger.info(
         "Relative Strength scan (%s, cache_only=%s): %d/%d symbols (%d from cache), "
-        "NIFTY %+.2f%%, %d bullish / %d bearish in %.1fs",
+        "NIFTY %+.2f%%, %d bullish / %d bearish, %d exclusions logged in %.1fs",
         scan_trigger, cache_only, len(rows), len(universe), cache_hits, nifty_pct,
-        len(bullish), len(bearish), duration,
+        len(bullish), len(bearish), excl_n, duration,
     )
     return {
         "ok": True,
@@ -613,6 +712,7 @@ def run_relative_strength_scan(
         "nifty_percent": nifty_pct,
         "bullish": len(bullish),
         "bearish": len(bearish),
+        "exclusions_logged": excl_n,
         "duration_sec": round(duration, 1),
     }
 

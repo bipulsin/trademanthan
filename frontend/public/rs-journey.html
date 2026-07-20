@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>RS Journey / Exclusion Audit</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --panel-2: #232d3a;
+      --border: #334155;
+      --text: #e8eef4;
+      --muted: #94a3b8;
+      --accent: #0d9488;
+      --pass: #34d399;
+      --fail: #f87171;
+      --warn: #fbbf24;
+      --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: var(--font); color: var(--text); font-size: 13px; line-height: 1.4;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a32 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px 18px 48px; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; max-width: 70ch; }
+    .lookup {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: end;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px; margin-bottom: 12px;
+    }
+    .lookup .field { margin: 0; min-width: 140px; }
+    .lookup .field.grow { flex: 1; min-width: 160px; }
+    label { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+    input {
+      width: 100%; background: var(--panel-2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 7px 8px; font: inherit;
+    }
+    button {
+      appearance: none; border: 1px solid var(--border); background: var(--panel-2);
+      color: var(--text); border-radius: 6px; padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #042f2e; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .agg { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .agg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .agg-card .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .agg-card .v { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .agg-card .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    details.panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px;
+    }
+    details.panel > summary {
+      cursor: pointer; padding: 10px 12px; font-weight: 700; list-style: none;
+      display: flex; justify-content: space-between; gap: 8px; align-items: center;
+    }
+    details.panel > summary::-webkit-details-marker { display: none; }
+    details.panel[open] > summary { border-bottom: 1px solid var(--border); }
+    .panel-body { padding: 12px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .empty { color: var(--muted); font-style: italic; }
+    .warn {
+      background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4);
+      color: #fde68a; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;
+    }
+    .okbox {
+      background: rgba(13, 148, 136, 0.12); border: 1px solid rgba(13, 148, 136, 0.35);
+      color: #99f6e4; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;
+    }
+    .pill {
+      display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+      font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    }
+    .pill-pass { background: rgba(52, 211, 153, 0.2); color: var(--pass); }
+    .pill-fail { background: rgba(248, 113, 113, 0.2); color: var(--fail); }
+    .pill-unk { background: rgba(148, 163, 184, 0.2); color: var(--muted); }
+    .pill-persist { background: rgba(13, 148, 136, 0.25); color: #5eead4; }
+    .pill-beyond { background: rgba(251, 191, 36, 0.2); color: var(--warn); }
+    .pill-neutral { background: rgba(148, 163, 184, 0.25); color: #cbd5e1; }
+    .pill-failhard { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+    .meta { color: var(--muted); font-size: 12px; }
+    tr.row-persist { background: rgba(13, 148, 136, 0.06); }
+    tr.row-beyond { background: rgba(251, 191, 36, 0.05); }
+    tr.row-fail { background: rgba(248, 113, 113, 0.05); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>RS Journey / Exclusion Audit</h1>
+        <p class="sub">Read-only tracer: universe eligibility → each scan checkpoint (RS%, rank, cutoff, pass/fail) → lock. Prospective exclusion log fills the pre-Top-10 gap from deploy forward.</p>
+      </div>
+    </header>
+
+    <div class="lookup">
+      <div class="field grow">
+        <label for="fSymbol">Symbol</label>
+        <input type="text" id="fSymbol" placeholder="e.g. UNIONBANK" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="fDate">Date</label>
+        <input type="date" id="fDate">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button type="button" class="primary" id="btnCheck">Trace</button>
+      </div>
+    </div>
+
+    <section class="agg" id="agg"></section>
+    <div id="completeness"></div>
+
+    <details class="panel" open>
+      <summary>
+        <span>Checkpoint timeline</span>
+        <span class="meta" id="cpHint">enter symbol + date → Trace</span>
+      </summary>
+      <div class="panel-body" id="cpBody">
+        <p class="empty">No lookup yet.</p>
+      </div>
+    </details>
+
+    <details class="panel" open>
+      <summary>
+        <span>Lock / membership audit</span>
+        <span class="meta" id="lockHint"></span>
+      </summary>
+      <div class="panel-body" id="lockBody">
+        <p class="empty">—</p>
+      </div>
+    </details>
+
+    <details class="panel">
+      <summary>
+        <span>Anchors + EOD archive</span>
+        <span class="meta" id="extraHint"></span>
+      </summary>
+      <div class="panel-body" id="extraBody">
+        <p class="empty">—</p>
+      </div>
+    </details>
+  </div>
+
+  <script>
+(function () {
+  "use strict";
+  var API = "/api/dashboard/rs-journey/lookup";
+  var $ = function (id) { return document.getElementById(id); };
+  function todayISO() {
+    var d = new Date(), off = d.getTimezoneOffset();
+    return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10);
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+  }
+  function fmt(n, d) {
+    if (n == null || n === "") return "—";
+    var x = Number(n);
+    if (isNaN(x)) return esc(n);
+    return x.toFixed(d == null ? 2 : d);
+  }
+  function passPill(v) {
+    if (v === true) return '<span class="pill pill-pass">PASS</span>';
+    if (v === false) return '<span class="pill pill-fail">FAIL</span>';
+    return '<span class="pill pill-unk">—</span>';
+  }
+  function statusPill(st) {
+    if (st === "persisted") return '<span class="pill pill-persist">persisted</span>';
+    if (st === "beyond_persist") return '<span class="pill pill-beyond">beyond Top-10</span>';
+    if (st === "neutral") return '<span class="pill pill-neutral">neutral</span>';
+    if (st === "metrics_fail" || st === "not_in_universe") return '<span class="pill pill-failhard">' + esc(st) + '</span>';
+    return '<span class="pill pill-unk">' + esc(st || "—") + '</span>';
+  }
+  function rowClass(st) {
+    if (st === "persisted") return "row-persist";
+    if (st === "beyond_persist") return "row-beyond";
+    if (st === "metrics_fail" || st === "neutral" || st === "not_in_universe") return "row-fail";
+    return "";
+  }
+
+  function render(data) {
+    if (!data || !data.ok) {
+      $("agg").innerHTML = "";
+      $("completeness").innerHTML = '<div class="warn">' + esc((data && data.error) || "Lookup failed") + "</div>";
+      $("cpBody").innerHTML = '<p class="empty">No data.</p>';
+      $("lockBody").innerHTML = '<p class="empty">—</p>';
+      $("extraBody").innerHTML = '<p class="empty">—</p>';
+      return;
+    }
+    var sum = data.summary || {};
+    var uni = data.universe || {};
+    var pol = data.cutoffs_policy || {};
+    $("agg").innerHTML =
+      '<div class="agg-card"><div class="k">Symbol</div><div class="v">' + esc(data.symbol) + '</div>' +
+        '<div class="s">in: ' + esc((data.symbol_resolution || {}).input || "") + '</div></div>' +
+      '<div class="agg-card"><div class="k">Universe</div><div class="v">' + (uni.in_universe ? "YES" : "NO") + '</div>' +
+        '<div class="s">' + esc(uni.currmth_future_symbol || uni.exclusion_label || "") + '</div></div>' +
+      '<div class="agg-card"><div class="k">Ever Top-' + (pol.top_n || 5) + '</div><div class="v">' + (sum.ever_top5 ? "YES" : "NO") + '</div>' +
+        '<div class="s">persist Top-' + (pol.persist_top_n || 10) + ': ' + (sum.ever_persisted_top10 ? "yes" : "no") + '</div></div>' +
+      '<div class="agg-card"><div class="k">First Top-10</div><div class="v">' + esc(sum.first_persisted_at_ist || "—") + '</div>' +
+        '<div class="s">rank #' + esc(sum.first_persisted_rank != null ? sum.first_persisted_rank : "—") + '</div></div>' +
+      '<div class="agg-card"><div class="k">Locked</div><div class="v">' + (sum.locked ? "YES" : "NO") + '</div></div>';
+
+    var dc = data.data_completeness || {};
+    if (dc.full_exclusion_reasons) {
+      $("completeness").innerHTML = '<div class="okbox">' + esc(dc.note) + "</div>";
+    } else {
+      $("completeness").innerHTML = '<div class="warn">' + esc(dc.note) + "</div>";
+    }
+
+    var cps = data.checkpoints || [];
+    $("cpHint").textContent = cps.length + " checkpoints · " + (data.date || "");
+    if (!cps.length) {
+      $("cpBody").innerHTML = '<p class="empty">No scans found for this date.</p>';
+    } else {
+      var html = "<table><thead><tr>" +
+        "<th>IST</th><th>Status</th><th>Side</th><th>Rank</th><th>Would-be</th>" +
+        "<th>RS%</th><th>Top-" + (pol.top_n || 5) + " cutoff RS</th><th>Top-" + (pol.persist_top_n || 10) + " cutoff RS</th>" +
+        "<th>Top-N</th><th>Persist</th><th>Reason</th><th>Score</th><th>Grade</th><th>Kavach</th>" +
+        "</tr></thead><tbody>";
+      cps.forEach(function (c) {
+        html += '<tr class="' + rowClass(c.status) + '">' +
+          '<td class="mono">' + esc(c.scan_time_ist || "—") + "</td>" +
+          "<td>" + statusPill(c.status) + "</td>" +
+          "<td>" + esc(c.ranking_side || "—") + "</td>" +
+          '<td class="mono">' + esc(c.rank != null ? c.rank : "—") + "</td>" +
+          '<td class="mono">' + esc(c.would_be_rank != null ? c.would_be_rank : "—") + "</td>" +
+          '<td class="mono">' + fmt(c.relative_strength, 3) + "</td>" +
+          '<td class="mono">' + fmt(c.cutoff_rs_top_n, 3) + "</td>" +
+          '<td class="mono">' + fmt(c.cutoff_rs_persist, 3) + "</td>" +
+          "<td>" + passPill(c.pass_top_n) + "</td>" +
+          "<td>" + passPill(c.pass_persist) + "</td>" +
+          "<td>" + esc(c.exclusion_label || "—") +
+            (c.detail ? '<div class="meta">' + esc(c.detail) + "</div>" : "") +
+          "</td>" +
+          '<td class="mono">' + fmt(c.trade_score, 0) + "</td>" +
+          "<td>" + esc(c.confidence_grade || "—") + "</td>" +
+          "<td>" + esc(c.kavach_state || "—") + "</td>" +
+          "</tr>";
+      });
+      html += "</tbody></table>";
+      $("cpBody").innerHTML = html;
+    }
+
+    var lock = (sum.lock || []);
+    var audit = data.lock_audit || [];
+    $("lockHint").textContent = (lock.length ? "in lock" : "not locked") + " · " + audit.length + " audit events";
+    var lh = "";
+    if (lock.length) {
+      lh += "<table><thead><tr><th>Direction</th><th>Rank</th><th>RS</th><th>Locked IST</th></tr></thead><tbody>";
+      lock.forEach(function (r) {
+        lh += "<tr><td>" + esc(r.direction) + '</td><td class="mono">' + esc(r.rank) +
+          '</td><td class="mono">' + fmt(r.rs_score, 3) + '</td><td class="mono">' +
+          esc(r.locked_at_ist || r.locked_at || "—") + "</td></tr>";
+      });
+      lh += "</tbody></table>";
+    }
+    if (audit.length) {
+      lh += "<table style='margin-top:10px'><thead><tr><th>IST</th><th>Event</th><th>Rule</th><th>Dir</th><th>Rank</th></tr></thead><tbody>";
+      audit.forEach(function (r) {
+        lh += '<tr><td class="mono">' + esc(r.event_at_ist || "—") + "</td><td>" + esc(r.event_type) +
+          "</td><td>" + esc(r.rule) + "</td><td>" + esc(r.direction) +
+          '</td><td class="mono">' + esc(r.rank != null ? r.rank : "—") + "</td></tr>";
+      });
+      lh += "</tbody></table>";
+    }
+    $("lockBody").innerHTML = lh || '<p class="empty">No lock / audit rows.</p>';
+
+    var anchors = data.anchors || [];
+    var eod = data.eod_archive;
+    $("extraHint").textContent = anchors.length + " anchors";
+    var eh = "";
+    if (anchors.length) {
+      eh += "<table><thead><tr><th>Label</th><th>IST</th><th>Dir</th><th>Rank</th><th>RS%</th><th>Score</th><th>Grade</th></tr></thead><tbody>";
+      anchors.forEach(function (r) {
+        eh += "<tr><td>" + esc(r.capture_label) + '</td><td class="mono">' + esc(r.capture_time_ist || "—") +
+          "</td><td>" + esc(r.direction) + '</td><td class="mono">' + esc(r.rank_position) +
+          '</td><td class="mono">' + fmt(r.relative_strength, 3) + '</td><td class="mono">' +
+          fmt(r.trade_score, 0) + "</td><td>" + esc(r.confidence_grade || "—") + "</td></tr>";
+      });
+      eh += "</tbody></table>";
+    }
+    if (eod) {
+      eh += '<div class="meta" style="margin-top:8px">EOD archive: side=' + esc(eod.ranking_side) +
+        " RS=" + fmt(eod.relative_strength, 3) +
+        " would_be_bull=" + esc(eod.would_be_rank_bull) +
+        " would_be_bear=" + esc(eod.would_be_rank_bear) +
+        " kavach=" + esc(eod.kavach_state) +
+        " grade=" + esc(eod.confidence_grade) + "</div>";
+    }
+    $("extraBody").innerHTML = eh || '<p class="empty">No anchors / EOD archive.</p>';
+  }
+
+  function run() {
+    var sym = ($("fSymbol").value || "").trim();
+    var date = ($("fDate").value || todayISO()).slice(0, 10);
+    if (!sym) return;
+    $("btnCheck").disabled = true;
+    $("cpHint").textContent = "loading…";
+    fetch(API + "?symbol=" + encodeURIComponent(sym) + "&date=" + encodeURIComponent(date), {
+      credentials: "same-origin",
+    })
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function (e) { render({ ok: false, error: String(e) }); })
+      .finally(function () { $("btnCheck").disabled = false; });
+  }
+
+  $("fDate").value = todayISO();
+  $("btnCheck").addEventListener("click", run);
+  $("fSymbol").addEventListener("keydown", function (ev) { if (ev.key === "Enter") run(); });
+  $("fDate").addEventListener("keydown", function (ev) { if (ev.key === "Enter") run(); });
+
+  // Deep-link ?symbol=&date=
+  try {
+    var q = new URLSearchParams(location.search);
+    if (q.get("symbol")) $("fSymbol").value = q.get("symbol");
+    if (q.get("date")) $("fDate").value = q.get("date");
+    if (q.get("symbol")) run();
+  } catch (e) {}
+})();
+  </script>
+</body>
+</html>
