@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Watching tag hierarchy — preview</title>
+  <link rel="stylesheet" href="dailyRSchecklist.css?v=38">
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #0f1419;
+      color: #e2e8f0;
+      font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    }
+    h1 { font-size: 1.15rem; margin: 0 0 6px; }
+    .sub { color: #94a3b8; font-size: 13px; margin: 0 0 18px; max-width: 62ch; }
+    .panel {
+      background: #1a222c;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+      max-width: 920px;
+    }
+    .label {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+      text-transform: uppercase; color: #64748b; margin: 14px 0 6px;
+    }
+    .label:first-child { margin-top: 0; }
+    .note { margin-top: 16px; font-size: 12px; color: #94a3b8; }
+  </style>
+</head>
+<body data-theme="dark">
+  <h1>Watching — tag hierarchy preview</h1>
+  <p class="sub">
+    Primary gate stays prominent. VWAP+ always visible. DIR CONFLICT / CHURN / REGIME / extra
+    reasons collapse under <strong>+N</strong> (click to expand). Display-only — no gate logic change.
+  </p>
+  <div class="panel">
+    <div class="label">Collapsed (default)</div>
+    <div class="dc-zone4-list" id="collapsed"></div>
+    <div class="label">Same rows expanded</div>
+    <div class="dc-zone4-list" id="expanded"></div>
+    <p class="note">Open live checklist after deploy to confirm against real session data.</p>
+  </div>
+
+  <script src="dailyRSchecklist.js?v=38"></script>
+  <script>
+(function () {
+  "use strict";
+  // Preview uses duplicated markup — helpers are inside dailyRSchecklist IIFE, so rebuild rows locally.
+  function badgeClass(t) {
+    var cls = "dc-gate-badge";
+    t = String(t || "");
+    if (t.indexOf("DIR CONFLICT") >= 0) cls += " dc-gate-badge--dirconflict";
+    else if (t.indexOf("COUNTER-REGIME") >= 0) cls += " dc-gate-badge--counter";
+    else if (t.indexOf("REGIME") >= 0) cls += " dc-gate-badge--regime";
+    else if (t.indexOf("CHURN") >= 0) cls += " dc-gate-badge--churn";
+    else if (t.indexOf("VWAP+") === 0) cls += " dc-gate-badge--vwapplus";
+    return cls;
+  }
+  function stateClass(st) {
+    if (st === "WAIT FOR PULLBACK") return "dc-tstate--wait";
+    if (st === "SCANNING") return "dc-tstate--scanning";
+    if (st === "EXPIRED") return "dc-tstate--expired";
+    if (st === "BLOCKED") return "dc-tstate--blocked";
+    if (st === "CHART REVERSED") return "dc-tstate--reversed";
+    return "";
+  }
+  function rowHtml(s, expand) {
+    var secondary = (s.secondary || []).map(function (item) {
+      if (item.kind === "reason") {
+        return '<span class="dc-watch-sec-reason">' + item.text + "</span>";
+      }
+      return '<span class="' + badgeClass(item.text) + '">' + item.text + "</span>";
+    }).join("");
+    var flags = "";
+    if (s.vwap) flags += '<span class="' + badgeClass(s.vwap) + '">' + s.vwap + "</span>";
+    if (s.secondary && s.secondary.length) {
+      flags +=
+        '<button type="button" class="dc-watch-more' +
+        (expand ? " dc-watch-more--open" : "") +
+        '" aria-expanded="' +
+        (expand ? "true" : "false") +
+        '">' +
+        (expand ? "−" : "+" + s.secondary.length) +
+        "</button>" +
+        '<span class="dc-watch-secondary"' +
+        (expand ? "" : " hidden") +
+        ">" +
+        secondary +
+        "</span>";
+    }
+    return (
+      '<div class="dc-watch-row" role="presentation">' +
+      '<span class="dc-watch-sym">' + s.sym + "</span>" +
+      '<span class="dc-watch-dir dc-watch-dir--' + (s.dir === "SHORT" ? "short" : "long") + '">' +
+      s.dir +
+      "</span>" +
+      '<span class="dc-watch-state ' + stateClass(s.primary) + '">' + s.primary + "</span>" +
+      '<span class="dc-watch-flags">' + flags + "</span>" +
+      '<span class="dc-watch-meta">' + s.meta + "</span>" +
+      '<button type="button" class="dc-watch-gates">Gates</button>' +
+      "</div>"
+    );
+  }
+
+  var samples = [
+    {
+      sym: "KEI",
+      dir: "SHORT",
+      primary: "WAIT FOR PULLBACK",
+      vwap: "VWAP+",
+      secondary: [
+        { kind: "reason", text: "risk high" },
+        { kind: "badge", text: "REGIME UNSTABLE" },
+        { kind: "badge", text: "CHURN 9" },
+        { kind: "badge", text: "DIR CONFLICT" },
+      ],
+      meta: "+0.42% · A",
+    },
+    {
+      sym: "BPCL",
+      dir: "LONG",
+      primary: "BLOCKED",
+      vwap: null,
+      secondary: [
+        { kind: "reason", text: "SL earlier today" },
+        { kind: "badge", text: "CHURN 3" },
+      ],
+      meta: "-0.18% · C",
+    },
+    {
+      sym: "TECHM",
+      dir: "LONG",
+      primary: "CHART REVERSED",
+      vwap: "VWAP+",
+      secondary: [{ kind: "badge", text: "COUNTER-REGIME" }],
+      meta: "+0.91% · B",
+    },
+    {
+      sym: "UPL",
+      dir: "LONG",
+      primary: "WAIT FOR PULLBACK",
+      vwap: "VWAP+",
+      secondary: [],
+      meta: "+1.12% · A+",
+    },
+    {
+      sym: "TCS",
+      dir: "SHORT",
+      primary: "SCANNING",
+      vwap: null,
+      secondary: [{ kind: "badge", text: "REGIME UNSTABLE" }],
+      meta: "-0.05% · B",
+    },
+  ];
+
+  document.getElementById("collapsed").innerHTML = samples.map(function (s) {
+    return rowHtml(s, false);
+  }).join("");
+  document.getElementById("expanded").innerHTML = samples.map(function (s) {
+    return rowHtml(s, true);
+  }).join("");
+
+  document.getElementById("collapsed").addEventListener("click", function (ev) {
+    var btn = ev.target.closest(".dc-watch-more");
+    if (!btn) return;
+    var sec = btn.nextElementSibling;
+    if (!sec || !sec.classList.contains("dc-watch-secondary")) return;
+    var open = sec.hidden;
+    sec.hidden = !open;
+    btn.classList.toggle("dc-watch-more--open", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.textContent = open ? "−" : ("+" + sec.children.length);
+  });
+})();
+  </script>
+</body>
+</html>

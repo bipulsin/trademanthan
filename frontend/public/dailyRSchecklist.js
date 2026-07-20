@@ -987,6 +987,101 @@
         return (stock.trade_state_reason || "").split(/[·—-]/)[0].trim().slice(0, 24) || "";
     }
 
+    /** Watching primary gate label — hard blocks outrank soft WAIT / info. */
+    function watchingPrimaryState(stock) {
+        var d = String(stock.decision || "").toUpperCase();
+        if (stock.trade_state === "BLOCKED") return "BLOCKED";
+        if (d.indexOf("CHART REVERSED") >= 0) return "CHART REVERSED";
+        if (stock.trade_state === "EXPIRED") return "EXPIRED";
+        if (stock.trade_state === "SCANNING") return "SCANNING";
+        if (stock.trade_state === "WAIT FOR PULLBACK") return "WAIT FOR PULLBACK";
+        return stock.trade_state || stock.section || "—";
+    }
+
+    function watchingReasonRedundant(primary, reason) {
+        var r = String(reason || "").toLowerCase().trim();
+        if (!r) return true;
+        if (primary === "WAIT FOR PULLBACK" && (r === "wait pullback" || r.indexOf("wait") === 0)) {
+            return true;
+        }
+        if (primary === "BLOCKED" && r === "blocked") return true;
+        if (primary === "CHART REVERSED" && r.indexOf("chart reversed") >= 0) return true;
+        if (primary === "SCANNING" && r === "scanning") return true;
+        if (primary === "EXPIRED" && r === "expired") return true;
+        return false;
+    }
+
+    function escWatchText(s) {
+        return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/"/g, "&quot;");
+    }
+
+    /**
+     * Watching flags: VWAP+ always visible; DIR CONFLICT / regime / churn / reason
+     * collapse under click-to-expand +N (display-only hierarchy).
+     */
+    function renderWatchFlagsHtml(stock, primary) {
+        var parts = [];
+        var vwapPlus = null;
+        (stock.gate_badges || []).forEach(function (b) {
+            var t = String(b);
+            if (t.indexOf("VWAP+") === 0) vwapPlus = t;
+        });
+        if (vwapPlus) {
+            parts.push(
+                '<span class="' + gateBadgeClass(vwapPlus) + '">' + escWatchText(vwapPlus) + "</span>"
+            );
+        }
+
+        var secondary = [];
+        var reason = oneWordReason(stock);
+        if (reason && !watchingReasonRedundant(primary, reason)) {
+            secondary.push({ kind: "reason", text: reason });
+        }
+        var seen = {};
+        var rf = (stock.regime_context && stock.regime_context.flags) || [];
+        rf.forEach(function (flag) {
+            var t = String(flag);
+            if (!t || t.indexOf("VWAP+") === 0 || seen[t]) return;
+            seen[t] = true;
+            secondary.push({ kind: "badge", text: t });
+        });
+        (stock.gate_badges || []).forEach(function (b) {
+            var t = String(b);
+            if (t.indexOf("DIR CONFLICT") < 0 || seen[t]) return;
+            seen[t] = true;
+            secondary.push({ kind: "badge", text: t });
+        });
+
+        if (secondary.length) {
+            parts.push(
+                '<button type="button" class="dc-watch-more" aria-expanded="false" title="Show secondary signals">+' +
+                    secondary.length +
+                    "</button>"
+            );
+            parts.push('<span class="dc-watch-secondary" hidden>');
+            secondary.forEach(function (item) {
+                if (item.kind === "reason") {
+                    parts.push(
+                        '<span class="dc-watch-sec-reason">' + escWatchText(item.text) + "</span>"
+                    );
+                } else {
+                    parts.push(
+                        '<span class="' +
+                            gateBadgeClass(item.text) +
+                            '">' +
+                            escWatchText(item.text) +
+                            "</span>"
+                    );
+                }
+            });
+            parts.push("</span>");
+        }
+        return parts.join("");
+    }
+
     function patchReadyCard(card, stock) {
         var sym = stock.symbol;
         card.dataset.symbol = sym;
@@ -1141,30 +1236,35 @@
         var dirEl = row.querySelector(".dc-watch-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
         dirEl.className = "dc-watch-dir dc-watch-dir--" + (dir === "SHORT" ? "short" : "long");
-        var st = stock.trade_state || stock.section || "—";
+        var primary = watchingPrimaryState(stock);
         var stEl = row.querySelector(".dc-watch-state");
-        stEl.textContent = st;
-        stEl.className = "dc-watch-state " + tradeStateClass(st);
-        if (String(stock.decision || "").indexOf("CHART REVERSED") >= 0) {
-            stEl.className = "dc-watch-state dc-tstate--reversed";
-            stEl.textContent = "CHART REVERSED";
+        stEl.textContent = primary;
+        stEl.className = "dc-watch-state " + tradeStateClass(primary);
+        // Reason folded into secondary +N when present (legacy slot cleared).
+        var reasonEl = row.querySelector(".dc-watch-reason");
+        if (reasonEl) {
+            reasonEl.textContent = "";
+            reasonEl.hidden = true;
         }
-        row.querySelector(".dc-watch-reason").textContent = oneWordReason(stock);
         var wflags = row.querySelector(".dc-watch-flags");
         if (wflags) {
-            var rf = (stock.regime_context && stock.regime_context.flags) || [];
-            var wshow = rf.length ? rf.slice() : [];
-            (stock.gate_badges || []).forEach(function (b) {
-                var t = String(b);
-                if (
-                    (t.indexOf("DIR CONFLICT") >= 0 || t.indexOf("VWAP+") === 0)
-                    && wshow.indexOf(t) < 0
-                ) {
-                    wshow.push(t);
-                }
-            });
-            wflags.innerHTML = renderGateBadgesHtml(wshow);
-            wflags.hidden = !wshow.length;
+            var flagsHtml = renderWatchFlagsHtml(stock, primary);
+            wflags.innerHTML = flagsHtml;
+            wflags.hidden = !flagsHtml;
+            var moreBtn = wflags.querySelector(".dc-watch-more");
+            var secEl = wflags.querySelector(".dc-watch-secondary");
+            if (moreBtn && secEl) {
+                moreBtn.onclick = function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var open = secEl.hidden;
+                    secEl.hidden = !open;
+                    moreBtn.setAttribute("aria-expanded", open ? "true" : "false");
+                    moreBtn.classList.toggle("dc-watch-more--open", open);
+                    moreBtn.textContent = open ? "−" : ("+" + secEl.children.length);
+                    moreBtn.title = open ? "Hide secondary signals" : "Show secondary signals";
+                };
+            }
         }
         var grade = stock.confidence || stock.dashboard_kavach || "";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
@@ -1177,7 +1277,14 @@
             };
         }
         row.onclick = function (e) {
-            if (e.target.closest && e.target.closest(".dc-watch-gates")) return;
+            if (
+                e.target.closest &&
+                (e.target.closest(".dc-watch-gates") ||
+                    e.target.closest(".dc-watch-more") ||
+                    e.target.closest(".dc-watch-secondary"))
+            ) {
+                return;
+            }
             openSymbolChart(stock.symbol, { stock: stock });
         };
         row.title = "Open current-month future chart + Kavach panel";
