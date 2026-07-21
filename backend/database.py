@@ -1097,6 +1097,57 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created rs_live_kavach_audit (PostgreSQL)")
 
+            if "trade_log" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS trade_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                contract TEXT,
+                                direction TEXT NOT NULL,
+                                qty INTEGER,
+                                entry_time TIME NOT NULL,
+                                entry_price DOUBLE PRECISION NOT NULL,
+                                exit_time TIME,
+                                exit_price DOUBLE PRECISION,
+                                exit_price_intended DOUBLE PRECISION,
+                                slippage_pts DOUBLE PRECISION,
+                                points_captured DOUBLE PRECISION,
+                                ema10_at_entry DOUBLE PRECISION,
+                                ema5_at_entry DOUBLE PRECISION,
+                                vwap_at_entry DOUBLE PRECISION,
+                                planned_risk_pts DOUBLE PRECISION,
+                                planned_risk_inr DOUBLE PRECISION,
+                                confidence_at_entry TEXT,
+                                trade_score_at_entry DOUBLE PRECISION,
+                                adx_at_entry DOUBLE PRECISION,
+                                confidence_at_exit TEXT,
+                                trade_score_at_exit DOUBLE PRECISION,
+                                mfe_r DOUBLE PRECISION,
+                                mae_r DOUBLE PRECISION,
+                                r_realized DOUBLE PRECISION,
+                                bars_held_10m INTEGER,
+                                exit_trigger TEXT,
+                                notes TEXT,
+                                source TEXT DEFAULT 'manual',
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (session_date, symbol, direction, entry_time)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_trade_log_session "
+                            "ON trade_log (session_date DESC, symbol)"
+                        )
+                    )
+                    print("Applied migration: created trade_log (Rule 27 journal)")
+
             if "rs_go_board_shadow_log" not in table_names:
                 if db_engine.dialect.name == "postgresql":
                     conn.execute(
