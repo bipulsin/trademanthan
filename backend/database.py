@@ -1119,6 +1119,7 @@ def _run_startup_schema_migrations(db_engine):
                                 ema10_at_entry DOUBLE PRECISION,
                                 ema5_at_entry DOUBLE PRECISION,
                                 vwap_at_entry DOUBLE PRECISION,
+                                entry_to_ema10_buffer_pct DOUBLE PRECISION,
                                 planned_risk_pts DOUBLE PRECISION,
                                 planned_risk_inr DOUBLE PRECISION,
                                 confidence_at_entry TEXT,
@@ -1147,6 +1148,18 @@ def _run_startup_schema_migrations(db_engine):
                         )
                     )
                     print("Applied migration: created trade_log (Rule 27 journal)")
+
+            # Shadow-only: |entry−EMA10|/entry×100 — never used to gate entries.
+            if db_engine.dialect.name == "postgresql":
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS entry_to_ema10_buffer_pct DOUBLE PRECISION"
+                        )
+                    )
+                except Exception:
+                    pass
 
             if "rs_go_board_shadow_log" not in table_names:
                 if db_engine.dialect.name == "postgresql":

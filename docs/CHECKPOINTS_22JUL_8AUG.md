@@ -123,6 +123,50 @@ Report must show: (1) same-metric table vs 17-Jul baseline, (2) atypical high-ch
 
 ---
 
+## Rule 15 open items (2-candle validation) — 22-Jul session note
+
+Logged from **DELHIVERY SHORT** `trade_log` 2026-07-22 (entry 11:12 @ 474.50 → exit 11:57 @ 473.15). Research annotation only — **no live rule change**.
+
+| Open question | Context from DELHIVERY |
+|---|---|
+| Does “beyond entry candle” require a **strict intrabar wick** lower/higher than the entry candle extreme? | Entry candle low **474.00**; next candle low **474.10** (not beyond); following candle **closed 474.00** (exact match of entry low, no lower low across 2 candles). Rule 15 initially looked like a **fail**. |
+| Should a candle that **closes exactly at** the entry candle low/high count as **pass** or **fail**? | Ambiguous under a strict wick reading; price later made a fresh low to **473.10** before the Rule 20 exit — so the trade still extended, but the 2-candle validator’s formal outcome is unclear. |
+
+**Disposition:** keep as open review item for the **22-Jul** checkpoint pass. Do not tighten or loosen Rule 15 live until this edge case is decided with more examples.
+
+Also noted on that trade (not a Rule 15 change): post-exit grade recovered to **A** within minutes — treated as **noise** (no re-chase of grade flicker after exit).
+
+---
+
+## Profit-protection research thread — 22-Jul contrast case
+
+| Case | Session | Pattern | Outcome class |
+|---|---|---|---|
+| ADANIGREEN / POLICYBZR / FEDERALBANK (prior) | Earlier Jul | Peak R then give-back toward BE / full round-trip | Give-back / ratchet miss or late |
+| **HAL LONG** | **2026-07-22** | Peaked ~**+₹3,150 (~1.84R)**; Rule 23 EMA5 ratchet after 1R fired; exit **+₹915** | **CONTRAST** — ratchet caught reversal **before** full round-trip to breakeven |
+
+Use HAL vs the three give-back cases when comparing **ratchet response time vs give-back size** in the 22-Jul checkpoint review. Source: `trade_log` id for HAL 11:14 entry (see DB). No live gating change.
+
+---
+
+## Entry-to-EMA10 buffer at fill time (open — shadow logging)
+
+**Question:** Does a thin buffer (entry candle closing at/near EMA10) predict outsized losses **independent of Confidence grade**?
+
+| Symbol (22-Jul) | Dir | Entry vs EMA10 | Grade @ entry | Outcome |
+|---|---|---|---|---|
+| **POLYCAB** | LONG | Fill 9163 vs EMA10 **9139.63** (~23 pts / ~0.26% by fill formula), but **entry candle closed essentially at EMA10** — near-zero usable buffer / SL already underfoot | A (85) | **−₹4,937.50** (Rule 16 blowout; ~1.6–2.1× planned EMA10 risk ₹2,348–3,145) |
+| DELHIVERY | SHORT | Fill 474.50 vs EMA10 475.86 (~1.36 pts) — clear side of SL | A (85) | +₹2,801.25 |
+| HAL | LONG | Fill 4604 vs EMA10 4593.87 (**~10.1 pts** gap) | A (85) | +₹915 |
+
+**First data point:** POLYCAB 22-Jul — thin/zero usable buffer at fill (candle closed at EMA10), A-grade, outsized loss. Root cause tagged as **ENTRY QUALITY**, not grade/score/ADX. Rule 24 had fired 1–2 candles earlier but was not acted on in time (monitoring-latency miss); still secondary to the thin-buffer entry.
+
+**Instrumentation (shadow-only, no live gate):** `trade_log.entry_to_ema10_buffer_pct = |entry_price − EMA10_at_entry| / entry_price × 100`, auto-filled on every upsert going forward. Compare against DELHIVERY/HAL same-day and later samples; note POLYCAB’s narrative is also about **candle-close vs EMA10**, which may need a companion field later if fill-only % is insufficient.
+
+**If pattern holds over multiple weeks:** consider a checklist addition similar to Rule 2’s ADX 20–25 half-size treatment — thin EMA10 buffer at entry → half-size or skip, regardless of Confidence grade or Trade Score. **Not live until reviewed.**
+
+---
+
 ## Maintenance
 
 Update this file when an item is decided, deferred, or scope changes.  

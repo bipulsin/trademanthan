@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     ema10_at_entry DOUBLE PRECISION,
     ema5_at_entry DOUBLE PRECISION,
     vwap_at_entry DOUBLE PRECISION,
+    entry_to_ema10_buffer_pct DOUBLE PRECISION,
     planned_risk_pts DOUBLE PRECISION,
     planned_risk_inr DOUBLE PRECISION,
     confidence_at_entry TEXT,
@@ -68,7 +69,7 @@ _UPSERT = text(
         session_date, symbol, contract, direction, qty,
         entry_time, entry_price, exit_time, exit_price, exit_price_intended,
         slippage_pts, points_captured,
-        ema10_at_entry, ema5_at_entry, vwap_at_entry,
+        ema10_at_entry, ema5_at_entry, vwap_at_entry, entry_to_ema10_buffer_pct,
         planned_risk_pts, planned_risk_inr,
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
         confidence_at_exit, trade_score_at_exit,
@@ -79,7 +80,7 @@ _UPSERT = text(
         CAST(:entry_time AS time), :entry_price, CAST(:exit_time AS time),
         :exit_price, :exit_price_intended,
         :slippage_pts, :points_captured,
-        :ema10_at_entry, :ema5_at_entry, :vwap_at_entry,
+        :ema10_at_entry, :ema5_at_entry, :vwap_at_entry, :entry_to_ema10_buffer_pct,
         :planned_risk_pts, :planned_risk_inr,
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
         :confidence_at_exit, :trade_score_at_exit,
@@ -97,6 +98,9 @@ _UPSERT = text(
         ema10_at_entry = COALESCE(EXCLUDED.ema10_at_entry, {TABLE}.ema10_at_entry),
         ema5_at_entry = COALESCE(EXCLUDED.ema5_at_entry, {TABLE}.ema5_at_entry),
         vwap_at_entry = COALESCE(EXCLUDED.vwap_at_entry, {TABLE}.vwap_at_entry),
+        entry_to_ema10_buffer_pct = COALESCE(
+            EXCLUDED.entry_to_ema10_buffer_pct, {TABLE}.entry_to_ema10_buffer_pct
+        ),
         planned_risk_pts = COALESCE(EXCLUDED.planned_risk_pts, {TABLE}.planned_risk_pts),
         planned_risk_inr = COALESCE(EXCLUDED.planned_risk_inr, {TABLE}.planned_risk_inr),
         confidence_at_entry = COALESCE(EXCLUDED.confidence_at_entry, {TABLE}.confidence_at_entry),
@@ -121,6 +125,29 @@ def ensure_trade_log_table() -> None:
     with engine.begin() as conn:
         conn.execute(text(_CREATE_SQL))
         conn.execute(text(_INDEX_SQL))
+        # Shadow-only research field — no live gate.
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS entry_to_ema10_buffer_pct DOUBLE PRECISION"
+            )
+        )
+
+
+def compute_entry_to_ema10_buffer_pct(
+    entry_price: Optional[float], ema10_at_entry: Optional[float]
+) -> Optional[float]:
+    """|entry − EMA10| / entry × 100. Shadow logging only — never used to gate."""
+    if entry_price is None or ema10_at_entry is None:
+        return None
+    try:
+        ep = float(entry_price)
+        e10 = float(ema10_at_entry)
+    except (TypeError, ValueError):
+        return None
+    if ep == 0:
+        return None
+    return round(abs(ep - e10) / ep * 100.0, 6)
 
 
 def _as_date(val: Any) -> Optional[date]:
@@ -192,6 +219,11 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         "ema10_at_entry": _f(payload.get("ema10_at_entry")),
         "ema5_at_entry": _f(payload.get("ema5_at_entry")),
         "vwap_at_entry": _f(payload.get("vwap_at_entry")),
+        "entry_to_ema10_buffer_pct": (
+            _f(payload.get("entry_to_ema10_buffer_pct"))
+            if payload.get("entry_to_ema10_buffer_pct") is not None
+            else compute_entry_to_ema10_buffer_pct(entry, _f(payload.get("ema10_at_entry")))
+        ),
         "planned_risk_pts": _f(payload.get("planned_risk_pts")),
         "planned_risk_inr": _f(payload.get("planned_risk_inr")),
         "confidence_at_entry": payload.get("confidence_at_entry") or payload.get("confidence_grade"),
