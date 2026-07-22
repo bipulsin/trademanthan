@@ -1161,6 +1161,41 @@ def _run_startup_schema_migrations(db_engine):
                 except Exception:
                     pass
 
+            # Shadow-only VWAP touch-reject candle log (research; no live gate).
+            if db_engine.dialect.name == "postgresql":
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS kavach_vwap_touch_reject_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                lock_direction TEXT NOT NULL,
+                                bar_evaluated_at TIMESTAMPTZ NOT NULL,
+                                bar_open DOUBLE PRECISION,
+                                bar_high DOUBLE PRECISION,
+                                bar_low DOUBLE PRECISION,
+                                bar_close DOUBLE PRECISION,
+                                vwap DOUBLE PRECISION,
+                                vwap_touch_reject BOOLEAN NOT NULL DEFAULT FALSE,
+                                vwap_wick_through_pts DOUBLE PRECISION,
+                                source TEXT DEFAULT 'live',
+                                logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (session_date, symbol, lock_direction, bar_evaluated_at)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_vwap_touch_reject_session "
+                            "ON kavach_vwap_touch_reject_log (session_date DESC, symbol)"
+                        )
+                    )
+                except Exception:
+                    pass
+
             if "rs_go_board_shadow_log" not in table_names:
                 if db_engine.dialect.name == "postgresql":
                     conn.execute(

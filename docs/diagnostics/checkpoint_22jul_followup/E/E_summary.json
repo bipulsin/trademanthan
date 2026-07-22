@@ -1,0 +1,9 @@
+{
+  "n": 25,
+  "late_entry_decay_flags": 1,
+  "flagged": [
+    "KEI 2026-07-17"
+  ],
+  "note": "Votes reconstructed from ST/MACD/panel-EMA vs VWAP at entry bar (not historical Votes store).",
+  "depends_on_A": true
+}

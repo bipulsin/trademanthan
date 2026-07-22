@@ -104,6 +104,19 @@ def persist_live_kavach_audit(
         "timeframe": metrics.get("timeframe") or "10m",
     }
     db.execute(_INSERT, params)
+    # Shadow-only VWAP touch-reject (never gates).
+    try:
+        from backend.services.kavach_vwap_touch_reject_log import persist_vwap_touch_reject
+
+        persist_vwap_touch_reject(
+            db,
+            symbol=symbol,
+            lock_direction=lock_direction,
+            metrics=metrics,
+            source="live",
+        )
+    except Exception:
+        logger.exception("vwap_touch_reject shadow log failed for %s", symbol)
 
 
 def prune_old_audit_rows(db, *, keep_days: int = RETENTION_TRADING_DAYS) -> int:

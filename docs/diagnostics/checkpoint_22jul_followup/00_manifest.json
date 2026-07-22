@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-07-22T16:45:15.715445+05:30",
+  "items": {
+    "A": {
+      "n": 25,
+      "primary": true
+    },
+    "B": {
+      "depends_on_A": true,
+      "test_pop": 8
+    },
+    "C": {
+      "tata_trades": 1
+    },
+    "D": {
+      "status": "pending_code_change"
+    },
+    "E": {
+      "depends_on_A": true,
+      "n": 25
+    },
+    "F": {
+      "passes": 9,
+      "block_sample": 10
+    }
+  },
+  "ordering_note": "A first; B/E use A; C/F independent; D instrumentation after extract."
+}

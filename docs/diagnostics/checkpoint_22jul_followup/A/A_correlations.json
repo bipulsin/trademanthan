@@ -1,0 +1,57 @@
+{
+  "n_trades": 25,
+  "n_with_pnl": 9,
+  "caveat": "n=25 is small \u2014 exploratory associations only, not statistical significance.",
+  "losers_n": 13,
+  "winners_n": 11,
+  "losers_stretch_before_entry_rate": 0.3076923076923077,
+  "winners_stretch_before_entry_rate": 0.6363636363636364,
+  "losers_avg_pre_ema_aligned": 1.9230769230769231,
+  "winners_avg_pre_ema_aligned": 2.8181818181818183,
+  "losers_avg_dist_vwap_pct": 0.8979076923076923,
+  "winners_avg_dist_vwap_pct": 0.9715181818181818,
+  "post_exit_class_counts": {
+    "CONTINUATION": 13,
+    "REVERSAL": 11,
+    "TRUNCATED": 1
+  },
+  "by_exit_trigger_post_class": {
+    "unknown/none": {
+      "CONTINUATION": 7,
+      "REVERSAL": 8
+    },
+    "Rule-compliant SL hit": {
+      "TRUNCATED": 1
+    },
+    "Rule-compliant SL hit (confirmed close beyond EMA10)": {
+      "REVERSAL": 1
+    },
+    "Confirmed close below EMA5 after spike (fill with slippage t": {
+      "CONTINUATION": 1
+    },
+    "Target/SL hit correctly": {
+      "REVERSAL": 1
+    },
+    "Confirmed 10m close above EMA5 (766.23), 1R ratchet engaged": {
+      "REVERSAL": 1
+    },
+    "Target Exit": {
+      "CONTINUATION": 1
+    },
+    "Confirmed 10m candle close below EMA10 (536.22) \u2014 rule-compl": {
+      "CONTINUATION": 1
+    },
+    "Rule 20 (grade decay to D! while in profit)": {
+      "CONTINUATION": 1
+    },
+    "Rule 23 (confirmed 10m close beyond EMA5 after 1R ratchet)": {
+      "CONTINUATION": 1
+    },
+    "Rule 16 (blowout backstop); Rule 24 had fired 1-2 candles ea": {
+      "CONTINUATION": 1
+    }
+  },
+  "errors": [
+    "EXIDEIND 2026-07-20: no_10m_bars"
+  ]
+}

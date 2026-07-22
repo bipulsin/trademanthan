@@ -1,0 +1,5 @@
+{
+  "instrumentation_live_at_extract_time": false,
+  "action": "Separate code change adds kavach_vwap_touch_reject_log + forward write; backfill via Upstox.",
+  "depends_on_A": false
+}

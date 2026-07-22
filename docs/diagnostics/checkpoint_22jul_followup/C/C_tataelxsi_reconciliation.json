@@ -1,0 +1,21 @@
+{
+  "found_trades": [
+    {
+      "trade_id": 20,
+      "session_date": "2026-07-20",
+      "symbol": "TATAELXSI",
+      "direction": "LONG",
+      "entry": 3510.0,
+      "exit": 3500.3,
+      "trade_log_ema10_at_entry": null,
+      "trade_log_planned_risk_pts": null,
+      "trade_log_vwap_at_entry": null,
+      "scanner_exclusion": "SKIPPED \u2014 no risk basis (null ema10/planned_risk/vwap on trade_log row)",
+      "ohlc_replay_note": "Futures 10m: no high above entry between entry and exit (through-exit MFE\u22480). Hand anecdote 3532.50 is post-exit continuation, not pre-exit \u22652R giveback.",
+      "reached_2r_through_exit": false,
+      "classification": "post_exit_continuation_miss / not_pre_exit_2r_giveback",
+      "matcher_bug": false
+    }
+  ],
+  "verdict": "Not a matcher OHLC bug. Missing risk fields caused skip; price action was SL loser then post-exit bounce."
+}

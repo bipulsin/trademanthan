@@ -1,0 +1,37 @@
+{
+  "quality_pass_count": 9,
+  "block_sample_n": 10,
+  "pass_steep_ok_rate": 1.0,
+  "block_steep_ok_rate": 0.0,
+  "pass_flip_flop_rate": 0.0,
+  "block_flip_flop_rate": 0.0,
+  "pass_avg_slope_score": 72.57111111111111,
+  "block_avg_slope_score": 1.421,
+  "pass_avg_whipsaw": 0.0,
+  "block_avg_whipsaw": 0.0,
+  "definition": "quality_pass = steep_ok AND NOT (flip_flop OR whipsaw>max). Gate would_block when not quality_pass (shadow).",
+  "interpretation": "If passes all have steep_ok=true and low flip/whipsaw while A-grade blocks fail steep_ok or show flip/whipsaw, filter is intentionally strict (slope/stability), not a confidence bug.",
+  "pass_ids": [
+    38,
+    124,
+    131,
+    138,
+    145,
+    152,
+    159,
+    166,
+    173
+  ],
+  "block_sample_ids": [
+    2497,
+    2402,
+    1334,
+    740,
+    1293,
+    1223,
+    961,
+    671,
+    1804,
+    1322
+  ]
+}

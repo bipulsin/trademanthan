@@ -1,0 +1,8 @@
+{
+  "coverage": "trade_log 2026-07-13 \u2192 2026-07-22 (25 trades)",
+  "pre_post_bars": 6,
+  "soft_stretch_pct": 0.35,
+  "hard_stretch_pct": 0.5,
+  "note": "Grade/score/votes/ADX/ST/MACD reconstructed via metrics_from_10m_candles (nifty_pct=0 so scores are approximate). Badges from nearest badge_input_log \u2264 bar.",
+  "n": 25
+}
