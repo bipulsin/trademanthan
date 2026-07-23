@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=39">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=40">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -118,57 +118,6 @@
                     Lock churn elevated — multiple symbols re-cycled today. Check promotion / R1·R2 behaviour.
                 </div>
 
-                <!-- Zone 5 — recent activity (collapsed) -->
-                <section class="dc-zone5" id="dcZone5">
-                    <button type="button" class="dc-zone5-toggle" id="dcRemovalsToggle" aria-expanded="false">
-                        <i class="fas fa-chevron-right"></i>
-                        Removed today (<span id="dcRemovalsCount">0</span>)
-                    </button>
-                    <div class="dc-removals-strip" id="dcRemovalsStrip" hidden>
-                        <div class="dc-removals-chips" id="dcRemovalsChips"></div>
-                    </div>
-                </section>
-
-                <!-- GO Board: curated entry panel -->
-                <section class="dc-go-board-section" id="dcGoBoard" hidden aria-label="GO Board entry panel">
-                    <div class="dc-go-board-head">
-                        <span class="dc-go-board-label"><i class="fas fa-crosshairs"></i> GO Board</span>
-                        <span class="dc-go-board-unvalidated" id="dcGoBoardUnvalidated"
-                              title="Historical validation in progress — cross-check against your chart before acting. Report: github.com/bipulsin/trademanthan/blob/main/docs/diagnostics/GO_BOARD_VALIDATION_REPORT.md">
-                            UNVALIDATED — cross-check against chart before acting
-                            <a class="dc-go-board-unvalidated-link" href="https://github.com/bipulsin/trademanthan/blob/main/docs/diagnostics/GO_BOARD_VALIDATION_REPORT.md" target="_blank" rel="noopener" title="Open validation report">ℹ</a>
-                        </span>
-                        <span class="dc-go-board-window" id="dcGoBoardWindow"></span>
-                    </div>
-                    <div class="dc-go-board-empty" id="dcGoBoardEmpty" hidden>No qualifying entries this window</div>
-                    <div class="dc-go-board-stack" id="dcGoBoardStack"></div>
-                </section>
-
-                <!-- Fast Watch: reversals + off-lock flips -->
-                <section class="dc-fast-watch-section" id="dcFastWatch" hidden aria-label="Fast Watch unconfirmed signals">
-                    <div class="dc-fast-watch-head">
-                        <span class="dc-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="dc-beta">beta</span></span>
-                        <span class="dc-fast-watch-hint">Unconfirmed — not on today's 09:25 lock · no entry authority</span>
-                        <button type="button" class="dc-fast-watch-expand" id="dcFastWatchExpand" hidden>Show all flips</button>
-                    </div>
-                    <div class="dc-fast-watch-cols">
-                        <div class="dc-fast-watch-col dc-fast-watch-col--bull">
-                            <div class="dc-fast-watch-stack" id="dcFastWatchBull"></div>
-                        </div>
-                        <div class="dc-fast-watch-col dc-fast-watch-col--bear">
-                            <div class="dc-fast-watch-stack" id="dcFastWatchBear"></div>
-                        </div>
-                    </div>
-                    <div class="dc-fast-watch-all-cols" id="dcFastWatchAll" hidden>
-                        <div class="dc-fast-watch-col dc-fast-watch-col--bull">
-                            <div class="dc-fast-watch-stack" id="dcFastWatchAllBull"></div>
-                        </div>
-                        <div class="dc-fast-watch-col dc-fast-watch-col--bear">
-                            <div class="dc-fast-watch-stack" id="dcFastWatchAllBear"></div>
-                        </div>
-                    </div>
-                </section>
-
                 <!-- Pre-9:25 pending lock -->
                 <div class="dc-pending-lock-banner" id="dcPendingLock" hidden>
                     Waiting for 09:25 scan to lock today's watchlist… Entry opens in <span id="dcLockCountdown">—</span>
@@ -186,9 +135,12 @@
                         <span class="dc-locked-at" id="dcLockedAt"></span>
                     </div>
 
-                    <!-- Zone 3 — READY NOW (actionable only; entry window 09:45–14:30) -->
+                    <!-- Tier 1 — READY NOW (actionable only; entry window 09:45–14:30) -->
                     <section class="dc-zone3" id="dcZone3" aria-label="Ready now">
                         <h3 class="dc-zone-title"><i class="fas fa-bolt"></i> READY NOW</h3>
+                        <p class="dc-zone3-auth-note" id="dcZone3AuthNote">
+                            Take Trade authority lives here only. Watching “READY TO …” is chart readiness — not entry.
+                        </p>
                         <p class="dc-zone3-window-note" id="dcZone3WindowNote" hidden></p>
                         <div class="dc-zone3-empty" id="dcZone3Empty">
                             No READY setups right now. Rechecks at :05, :15, :25, :35, :45, :55 past every hour.
@@ -218,21 +170,86 @@
                         </div>
                     </section>
 
-                    <!-- Zone 4 — Watching (compact) -->
+                    <!-- Tier 2 — Watching (compact near-misses) -->
                     <section class="dc-zone4" id="dcZone4" aria-label="Watching">
                         <h3 class="dc-zone-title dc-zone-title--muted"><i class="fas fa-eye"></i> Watching</h3>
+                        <p class="dc-zone4-hint">Near-misses / chart readiness — not Take Trade</p>
                         <div class="dc-zone4-list" id="dcZone4List"></div>
                     </section>
 
-                    <section class="dc-carryover-section" id="dcCarryoverSection" hidden>
-                        <button type="button" class="dc-carryover-toggle" id="dcCarryoverToggle" aria-expanded="false">
-                            <i class="fas fa-chevron-right dc-carryover-chevron"></i>
-                            Carry-over from previous scans (<span id="dcCarryoverCount">0</span>)
-                        </button>
-                        <div class="dc-carryover-body" id="dcCarryoverBody" hidden>
-                            <div class="dc-carryover-grid" id="dcCarryoverGrid"></div>
-                        </div>
-                    </section>
+                    <!-- Tier 3 — collapsed by default (one click) -->
+                    <div class="dc-tier3" id="dcTier3">
+                        <!-- GO Board -->
+                        <section class="dc-go-board-section dc-tier3-section" id="dcGoBoard" hidden aria-label="GO Board entry panel">
+                            <button type="button" class="dc-zone-collapse-toggle" id="dcGoBoardToggle" aria-expanded="false">
+                                <i class="fas fa-chevron-right dc-zone-collapse-chevron"></i>
+                                <span class="dc-go-board-label"><i class="fas fa-crosshairs"></i> GO Board</span>
+                                <span class="dc-tier3-count" id="dcGoBoardCount"></span>
+                                <span class="dc-go-board-unvalidated" id="dcGoBoardUnvalidated"
+                                      title="Historical validation in progress — cross-check against your chart before acting.">
+                                    UNVALIDATED
+                                    <a class="dc-go-board-unvalidated-link" href="https://github.com/bipulsin/trademanthan/blob/main/docs/diagnostics/GO_BOARD_VALIDATION_REPORT.md" target="_blank" rel="noopener" title="Open validation report">ℹ</a>
+                                </span>
+                                <span class="dc-go-board-window" id="dcGoBoardWindow"></span>
+                            </button>
+                            <div class="dc-tier3-body" id="dcGoBoardBody" hidden>
+                                <div class="dc-go-board-empty" id="dcGoBoardEmpty" hidden>No qualifying entries this window</div>
+                                <div class="dc-go-board-stack" id="dcGoBoardStack"></div>
+                            </div>
+                        </section>
+
+                        <!-- Fast Watch -->
+                        <section class="dc-fast-watch-section dc-tier3-section" id="dcFastWatch" hidden aria-label="Fast Watch unconfirmed signals">
+                            <button type="button" class="dc-zone-collapse-toggle" id="dcFastWatchToggle" aria-expanded="false">
+                                <i class="fas fa-chevron-right dc-zone-collapse-chevron"></i>
+                                <span class="dc-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="dc-beta">beta</span></span>
+                                <span class="dc-tier3-count" id="dcFastWatchCount"></span>
+                                <span class="dc-fast-watch-hint">Unconfirmed · no entry authority</span>
+                            </button>
+                            <div class="dc-tier3-body" id="dcFastWatchBody" hidden>
+                                <button type="button" class="dc-fast-watch-expand" id="dcFastWatchExpand" hidden>Show all flips</button>
+                                <div class="dc-fast-watch-cols">
+                                    <div class="dc-fast-watch-col dc-fast-watch-col--bull">
+                                        <div class="dc-fast-watch-stack" id="dcFastWatchBull"></div>
+                                    </div>
+                                    <div class="dc-fast-watch-col dc-fast-watch-col--bear">
+                                        <div class="dc-fast-watch-stack" id="dcFastWatchBear"></div>
+                                    </div>
+                                </div>
+                                <div class="dc-fast-watch-all-cols" id="dcFastWatchAll" hidden>
+                                    <div class="dc-fast-watch-col dc-fast-watch-col--bull">
+                                        <div class="dc-fast-watch-stack" id="dcFastWatchAllBull"></div>
+                                    </div>
+                                    <div class="dc-fast-watch-col dc-fast-watch-col--bear">
+                                        <div class="dc-fast-watch-stack" id="dcFastWatchAllBear"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Session log = Removed today + Carry-over -->
+                        <section class="dc-session-log dc-tier3-section" id="dcSessionLog" hidden aria-label="Session log">
+                            <button type="button" class="dc-zone-collapse-toggle" id="dcSessionLogToggle" aria-expanded="false">
+                                <i class="fas fa-chevron-right dc-zone-collapse-chevron"></i>
+                                Session log
+                                <span class="dc-tier3-count" id="dcSessionLogCount">(0)</span>
+                            </button>
+                            <div class="dc-tier3-body" id="dcSessionLogBody" hidden>
+                                <div class="dc-session-log-block">
+                                    <div class="dc-session-log-subhead">Removed today (<span id="dcRemovalsCount">0</span>)</div>
+                                    <div class="dc-removals-strip" id="dcRemovalsStrip">
+                                        <div class="dc-removals-chips" id="dcRemovalsChips"></div>
+                                    </div>
+                                    <div class="dc-session-log-empty" id="dcRemovalsEmpty" hidden>No removals today</div>
+                                </div>
+                                <div class="dc-session-log-block" id="dcCarryoverSection">
+                                    <div class="dc-session-log-subhead">Carry-over from previous scans (<span id="dcCarryoverCount">0</span>)</div>
+                                    <div class="dc-carryover-grid" id="dcCarryoverGrid"></div>
+                                    <div class="dc-session-log-empty" id="dcCarryoverEmpty" hidden>No carry-over</div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
                 </div>
             </div>
         </main>
@@ -275,6 +292,7 @@
             </div>
             <div class="dc-ready-waiver" hidden></div>
             <div class="dc-ready-flags"></div>
+            <div class="dc-ready-confirm-note">Take Trade OK — Watching READY TO ≠ entry</div>
             <div class="dc-ready-expiry"></div>
             <div class="dc-ready-expired-label" hidden>EXPIRED — pullback missed</div>
             <div class="dc-ready-meta"></div>
@@ -348,6 +366,6 @@
     </template>
 
     <script src="left-menu.js?v=3.26"></script>
-    <script src="dailyRSchecklist.js?v=39"></script>
+    <script src="dailyRSchecklist.js?v=40"></script>
 </body>
 </html>

@@ -21,7 +21,7 @@ Last reconciled: **2026-07-23** (Items 2/3/13/14/touch-reject closed or actioned
 | 4 | R1 PLAN EXIT — live event validation | Primary | Pre vs post roll event rates / outcomes | Collecting; see `R1_EXIT_NOW_HOLD_VS_EMA10_*` |
 | 5 | ATR-consumed logging — instrumentation review | Review | Continuity across roll | Research-only; no READY gate |
 | 6 | ABB fix coverage | **CLOSED (code+tests)** | Spot-check if regressions | Fix `1abee67` live; `test_abb_and_any_symbol_use_same_conflict_path` green; optional live visual spot-check |
-| 7 | Watching-vs-READY-NOW (Requirement 5) | **OPEN — next step** | Same | Dual surfaces by design; repro any lock with `pine_readiness=READY TO *` and `trade_state≠READY`. Next: single primary decision surface **or** explicit UI label that Pine ≠ Take Trade (owner: product; timeline: before 8-Aug) |
+| 7 | Watching-vs-READY-NOW (Requirement 5) | **CLOSED (UI label)** | Same | Dual surfaces remain; READY NOW shows confirmation note that Take Trade authority is here only — Watching “READY TO …” ≠ entry (23-Jul) |
 | 8 | Backend FSM vs Pine confidence | **OPEN — verify chart** | Same | Backend live path claims **v3.0** panel parity; Pine **v2.7/v3.0 drafts** in `docs/diagnostics/` — **not confirmed published on TV**. Next: bipulsin confirm chart script version; if already v3.0-aligned, close Item 8 |
 | 9 | HCLTECH direction-flip ticket | **CLOSED → DIR CONFLICT** | Same | Original HCLTECH SHORT-vs-TV-BUY case covered by DIR CONFLICT live path (`9047d3f`/`1abee67`); no separate unsent ticket body in repo |
 | 10 | BANKINDIA shadow log capture gap | Confirm fix held | Same | Root-caused 15-Jul (`READY_SHADOW_REVIEW_2026-07-15.md`) |

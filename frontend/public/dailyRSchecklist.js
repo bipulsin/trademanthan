@@ -885,10 +885,13 @@
         }
         if (!strip || !chips) return;
         var rem = obs.recent_removals || [];
+        var emptyEl = $("dcRemovalsEmpty");
         if (remCount) remCount.textContent = String(rem.length);
         if (!rem.length) {
             strip.hidden = true;
             chips.innerHTML = "";
+            if (emptyEl) emptyEl.hidden = false;
+            updateSessionLogVisibility(0, null);
             return;
         }
         chips.innerHTML = rem.map(function (r) {
@@ -901,10 +904,57 @@
                 String(r.rule_tag || "").toLowerCase() + '">' +
                 r.symbol + " · " + (r.rule_tag || "—") + (t ? " @" + t : "") + "</span>";
         }).join("");
-        // keep collapsed unless expanded
-        var tog = $("dcRemovalsToggle");
-        if (tog && tog.getAttribute("aria-expanded") === "true") strip.hidden = false;
-        else strip.hidden = true;
+        strip.hidden = false;
+        if (emptyEl) emptyEl.hidden = true;
+        updateSessionLogVisibility(rem.length, null);
+    }
+
+    function updateSessionLogVisibility(remCountOpt, carryCountOpt) {
+        var sec = $("dcSessionLog");
+        var countEl = $("dcSessionLogCount");
+        if (!sec) return;
+        var remN = remCountOpt;
+        if (remN == null) {
+            var rc = $("dcRemovalsCount");
+            remN = rc ? parseInt(rc.textContent, 10) || 0 : 0;
+        }
+        var coN = carryCountOpt;
+        if (coN == null) {
+            var cc = $("dcCarryoverCount");
+            coN = cc ? parseInt(cc.textContent, 10) || 0 : 0;
+        }
+        var total = remN + coN;
+        sec.hidden = total === 0;
+        if (countEl) {
+            countEl.textContent = "(" + remN + " removed · " + coN + " carry-over)";
+        }
+        syncTier3Body("dcSessionLogToggle", "dcSessionLogBody");
+    }
+
+    function syncTier3Body(toggleId, bodyId) {
+        var tog = $(toggleId);
+        var body = $(bodyId);
+        if (!tog || !body) return;
+        var open = tog.getAttribute("aria-expanded") === "true";
+        body.hidden = !open;
+        var chev = tog.querySelector(".dc-zone-collapse-chevron");
+        if (chev) chev.classList.toggle("dc-carryover-chevron--open", open);
+    }
+
+    function wireTier3Toggle(toggleId, bodyId) {
+        var tog = $(toggleId);
+        if (!tog || tog.dataset.wired === "1") return;
+        tog.dataset.wired = "1";
+        tog.addEventListener("click", function (e) {
+            if (e.target.closest && e.target.closest("a")) return;
+            var body = $(bodyId);
+            if (!body) return;
+            var open = body.hidden;
+            body.hidden = !open;
+            this.setAttribute("aria-expanded", open ? "true" : "false");
+            var chev = this.querySelector(".dc-zone-collapse-chevron");
+            if (chev) chev.classList.toggle("dc-carryover-chevron--open", open);
+        });
     }
 
     function isReadyState(st) {
@@ -1147,6 +1197,8 @@
         card.classList.toggle("dc-ready-card--expired", expired);
         var expLabel = card.querySelector(".dc-ready-expired-label");
         if (expLabel) expLabel.hidden = !expired;
+        var confirmNote = card.querySelector(".dc-ready-confirm-note");
+        if (confirmNote) confirmNote.hidden = expired;
 
         var grade = stock.confidence || stock.dashboard_kavach || "—";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
@@ -1541,9 +1593,12 @@
 
         var coSec = $("dcCarryoverSection");
         var coGrid = $("dcCarryoverGrid");
+        var coEmpty = $("dcCarryoverEmpty");
+        wireTier3Toggle("dcSessionLogToggle", "dcSessionLogBody");
         if (carry.length > 0) {
-            coSec.hidden = false;
+            if (coSec) coSec.hidden = false;
             $("dcCarryoverCount").textContent = String(carry.length);
+            if (coEmpty) coEmpty.hidden = true;
             carry.forEach(function (stock) {
                 var row = coGrid.querySelector('[data-symbol="' + stock.symbol + '"]');
                 if (!row) {
@@ -1569,9 +1624,11 @@
                 if (!carrySyms[ch.dataset.symbol]) coGrid.removeChild(ch);
             });
         } else {
-            coSec.hidden = true;
-            coGrid.innerHTML = "";
+            $("dcCarryoverCount").textContent = "0";
+            if (coGrid) coGrid.innerHTML = "";
+            if (coEmpty) coEmpty.hidden = false;
         }
+        updateSessionLogVisibility(null, carry.length);
 
         renderLiveSetups();
         renderTradeObs();
@@ -1594,7 +1651,9 @@
         var stack = $("dcGoBoardStack");
         var empty = $("dcGoBoardEmpty");
         var winEl = $("dcGoBoardWindow");
+        var countEl = $("dcGoBoardCount");
         if (!wrap || !stack) return;
+        wireTier3Toggle("dcGoBoardToggle", "dcGoBoardBody");
         var cfg = (state && state.checklist_config) || {};
         var gb = (state && state.go_board) || {};
         var items = gb.symbols || [];
@@ -1605,6 +1664,7 @@
             return;
         }
         wrap.hidden = false;
+        if (countEl) countEl.textContent = "(" + items.length + ")";
         if (winEl) winEl.textContent = gb.window ? ("Window " + gb.window) : "";
         stack.innerHTML = "";
         if (empty) empty.hidden = true;
@@ -1626,6 +1686,7 @@
             });
             stack.appendChild(card);
         });
+        syncTier3Body("dcGoBoardToggle", "dcGoBoardBody");
     }
 
     function renderFastWatch() {
@@ -1636,7 +1697,9 @@
         var allWrap = $("dcFastWatchAll");
         var allBull = $("dcFastWatchAllBull");
         var allBear = $("dcFastWatchAllBear");
+        var countEl = $("dcFastWatchCount");
         if (!wrap || !bullStack || !bearStack) return;
+        wireTier3Toggle("dcFastWatchToggle", "dcFastWatchBody");
         var cfg = (state && state.checklist_config) || {};
         var fw = normalizeFastWatch(state && state.fast_watch);
         var longs = fw.featured.long || [];
@@ -1653,6 +1716,7 @@
             return;
         }
         wrap.hidden = false;
+        if (countEl) countEl.textContent = "(" + fw.total_count + ")";
         fillFastWatchStack(bullStack, longs);
         fillFastWatchStack(bearStack, shorts);
         if (expandBtn) {
@@ -1679,6 +1743,7 @@
                 fillFastWatchStack(allBear, []);
             }
         }
+        syncTier3Body("dcFastWatchToggle", "dcFastWatchBody");
     }
 
     var EXIT_REASONS = [
@@ -2447,25 +2512,9 @@
         });
         $("dcModalClose").addEventListener("click", closeModal);
         $("dcModalBackdrop").addEventListener("click", closeModal);
-        $("dcCarryoverToggle").addEventListener("click", function () {
-            var body = $("dcCarryoverBody");
-            var open = body.hidden;
-            body.hidden = !open;
-            this.setAttribute("aria-expanded", open ? "true" : "false");
-            this.querySelector(".dc-carryover-chevron").classList.toggle("dc-carryover-chevron--open", open);
-        });
-        var remTog = $("dcRemovalsToggle");
-        if (remTog) {
-            remTog.addEventListener("click", function () {
-                var strip = $("dcRemovalsStrip");
-                if (!strip) return;
-                var open = strip.hidden;
-                strip.hidden = !open;
-                this.setAttribute("aria-expanded", open ? "true" : "false");
-                var icon = this.querySelector("i");
-                if (icon) icon.classList.toggle("dc-carryover-chevron--open", open);
-            });
-        }
+        wireTier3Toggle("dcSessionLogToggle", "dcSessionLogBody");
+        wireTier3Toggle("dcGoBoardToggle", "dcGoBoardBody");
+        wireTier3Toggle("dcFastWatchToggle", "dcFastWatchBody");
         var fwExpand = $("dcFastWatchExpand");
         if (fwExpand) {
             fwExpand.addEventListener("click", function () {
