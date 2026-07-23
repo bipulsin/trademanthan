@@ -5,19 +5,18 @@
 #   ./scripts/wait-twcto-docker-build.sh
 #   WAIT_TIMEOUT_SEC=1800 ./scripts/wait-twcto-docker-build.sh
 #
-# Requires GITHUB_TOKEN or GH_TOKEN.
+# Requires GITHUB_TOKEN or GH_TOKEN (or ~/.config/trademanthan/github_token).
 
 set -euo pipefail
 
-TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/load-github-token.sh
+source "${ROOT}/scripts/load-github-token.sh"
+load_github_token || exit 1
+TOKEN="${GITHUB_TOKEN}"
 WAIT_TIMEOUT_SEC="${WAIT_TIMEOUT_SEC:-1800}"
 POLL_SEC="${POLL_SEC:-30}"
 API="https://api.github.com/repos/bipulsin/twcto_docker/actions/workflows/publish-images.yml/runs?per_page=1"
-
-if [[ -z "$TOKEN" ]]; then
-  echo "Set GITHUB_TOKEN or GH_TOKEN." >&2
-  exit 1
-fi
 
 echo "Waiting for twcto_docker CI (timeout ${WAIT_TIMEOUT_SEC}s, poll every ${POLL_SEC}s)..."
 

@@ -68,3 +68,7 @@ exports/*.txt
 # Deployment packages
 deployment_package/
 
+
+# GitHub PAT for REBUILD=0 CI dispatch (never commit)
+**/github_token
+.config/trademanthan/

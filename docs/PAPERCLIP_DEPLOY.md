@@ -49,7 +49,8 @@ Workflow also runs on `main` pushes that touch `backend/`, `frontend/`, or deplo
 GHCR images are **multi-arch** (amd64 + arm64). Fast path: CI builds in GitHub, paperclip **pulls** (~1 min).
 
 ```bash
-export GITHUB_TOKEN=ghp_your_pat   # repo scope for bipulsin/*
+# Preferred: token auto-loaded from ~/.config/trademanthan/github_token
+# (provision once: ./scripts/provision-github-token.sh)
 ./scripts/release-push-and-deploy.sh -m "your commit message"
 ```
 
@@ -62,7 +63,19 @@ git push origin main
 REBUILD=0 ./scripts/trigger-paperclip-deploy.sh
 ```
 
-Fallback if CI unavailable: `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh` (~4 min local build on paperclip).
+### One-time: provision `GITHUB_TOKEN` (REBUILD=0 CI dispatch)
+
+CI dispatch + wait need a GitHub PAT with **`repo`** (+ **`workflow`** helpful). Paperclip GHCR **pull** itself does not need the token when packages are public; the token is for `repository_dispatch` / Actions API from the release scripts.
+
+```bash
+./scripts/provision-github-token.sh
+# Writes:
+#   ~/.config/trademanthan/github_token
+#   paperclip:/home/ubuntu/.config/trademanthan/github_token  (mode 600)
+./scripts/provision-github-token.sh --verify-only
+```
+
+Do **not** commit the token file. Fallback if CI unavailable: `REBUILD=1 ./scripts/trigger-paperclip-deploy.sh`.
 
 ## Deploy after Docker/compose changes (twcto_docker)
 

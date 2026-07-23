@@ -7,6 +7,7 @@
 #   3. wait for CI (default), then pull images on paperclip-vm
 #
 # Usage:
+#   ./scripts/release-push-and-deploy.sh -m "message"   # loads token from config if unset
 #   GITHUB_TOKEN=ghp_... ./scripts/release-push-and-deploy.sh -m "message"
 #   WAIT_CI=0 ./scripts/release-push-and-deploy.sh   # skip wait (deploy may fail if images stale)
 #   REBUILD=1 ./scripts/release-push-and-deploy.sh   # fallback: local build on paperclip
@@ -14,6 +15,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+
+# shellcheck source=scripts/load-github-token.sh
+source "${ROOT}/scripts/load-github-token.sh"
+load_github_token || exit 1
 
 COMMIT_MSG=""
 while [[ $# -gt 0 ]]; do

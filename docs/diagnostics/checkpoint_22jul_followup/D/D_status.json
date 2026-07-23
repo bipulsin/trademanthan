@@ -1,0 +1,11 @@
+{
+  "instrumentation_live": true,
+  "backfill_done": true,
+  "reject_events": 2092,
+  "rows_written": 17707,
+  "research_decision": "NO_GO",
+  "research_closed_at": "2026-07-23",
+  "further_backtest": false,
+  "forward_logging": "keep_running_cheap",
+  "evidence": "D/README_winrate.md"
+}

@@ -10,13 +10,13 @@
 set -euo pipefail
 
 REF="${1:-main}"
-TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 
-if [[ -z "$TOKEN" ]]; then
-  echo "Set GITHUB_TOKEN or GH_TOKEN to trigger bipulsin/twcto_docker CI." >&2
-  echo "Create a PAT at https://github.com/settings/tokens with repo scope." >&2
-  exit 1
-fi
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/load-github-token.sh
+source "${ROOT}/scripts/load-github-token.sh"
+load_github_token || exit 1
+TOKEN="${GITHUB_TOKEN}"
+
 
 echo "Triggering twcto_docker image build for trademanthan ref: ${REF}"
 

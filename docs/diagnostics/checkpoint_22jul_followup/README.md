@@ -69,17 +69,17 @@ Candidate: after peak ≥2R, exit when close gives back ≥ X R from peak.
 
 ## ITEM D — VWAP touch-and-reject instrumentation
 
-**Status:** **Forward logging added** (shadow-only).
+**Status:** **CLOSED — NO_GO** (2026-07-23). Forward logging may keep running (cheap); **no further backtest cycles** on this hypothesis.
 
 | Piece | Detail |
 |---|---|
-| Table | `kavach_vwap_touch_reject_log` |
-| Definition | LONG: `low≤vwap & close>vwap`; SHORT: `high≥vwap & close<vwap` |
-| Live path | `metrics_from_10m` now emits `bar_high/low/open`; `persist_live_kavach_audit` → `persist_vwap_touch_reject` |
-| Gate | **None** |
-| Backfill | Script `scripts/backfill_vwap_touch_reject.py` (Upstox replay for audit lock symbol-days 13→22 Jul). Summary in `D/D_backfill_summary.json` when job completes. |
+| Table | `kavach_vwap_touch_reject_log` (shadow-only; keep writing) |
+| Decision | **NO_GO_EVEN_SHADOW_RULE** — see `D/README_winrate.md` |
+| Why | Median ≪ mean (outlier-pulled); LONG edge vs all-bars &lt;3pp and mean worse than baseline; near-VWAP baseline often beats reject; PM underperforms AM; high-wick fat left tails |
+| Gate | **None** (never wire live) |
+| Related | Close-confirmation entry filter is a **separate** thread: [`D2_vwap_close_confirm/`](D2_vwap_close_confirm/) |
 
-Prior research study remains: `docs/diagnostics/VWAP_TOUCH_REJECT_CONTINUATION_20260721.json`.
+Prior research study: `docs/diagnostics/VWAP_TOUCH_REJECT_CONTINUATION_20260721.json`.
 
 ---
 

@@ -7,7 +7,7 @@
 | **22-Jul** | July-series data alone, full review before the roll | July futures only — **nothing skipped** just because 8-Aug re-covers it |
 | **8-Aug** | **4-week rolling window**, not pure August-contract data | July futures through ~**23-Jul**, then August futures from the roll (~**24/28-Jul**) through **8-Aug**. Review all 16 items on the **combined** window; where relevant, **flag pre-roll vs post-roll shifts** (liquidity / spread / vol around expiry can move gate thresholds, lock churn, dwell, etc.) |
 
-Last reconciled: **2026-07-18** against owner list (16 items).
+Last reconciled: **2026-07-23** (VWAP touch-reject research closed NO_GO; prior 16-item reconcile 2026-07-18).
 
 ---
 
@@ -164,6 +164,21 @@ Use HAL vs the three give-back cases when comparing **ratchet response time vs g
 **Instrumentation (shadow-only, no live gate):** `trade_log.entry_to_ema10_buffer_pct = |entry_price − EMA10_at_entry| / entry_price × 100`, auto-filled on every upsert going forward. Compare against DELHIVERY/HAL same-day and later samples; note POLYCAB’s narrative is also about **candle-close vs EMA10**, which may need a companion field later if fill-only % is insufficient.
 
 **If pattern holds over multiple weeks:** consider a checklist addition similar to Rule 2’s ADX 20–25 half-size treatment — thin EMA10 buffer at entry → half-size or skip, regardless of Confidence grade or Trade Score. **Not live until reviewed.**
+
+---
+
+## VWAP touch-and-reject research — CLOSED (NO_GO)
+
+| Field | Value |
+|---|---|
+| Closed | **2026-07-23** |
+| Decision | **NO_GO** — do not promote to shadow rule or live gate; **no further backtest cycles** |
+| Evidence | `docs/diagnostics/checkpoint_22jul_followup/D/README_winrate.md` (+ `D_winrate_baseline_summary.json`) |
+| Headline | Mean fwd n3 (~+2–3 pts) was **outlier-pulled** (median ~0.3–0.4); LONG edge vs all-bars only ~2.2pp with mean **worse** than baseline; near-VWAP non-reject often beats reject; **PM** win-rates &lt;50%; high-wick buckets fat left tails |
+| Forward logging | May **keep running** (`kavach_vwap_touch_reject_log`) — cheap; not an open research thread |
+| Do not confuse with | **VWAP close-confirmation** entry filter (`kavach_vwap_close_confirm_shadow` / D2) — separate sticky READY-episode close-above/below VWAP study |
+
+**8-Aug:** treat as closed; no carry-forward open item. Optional glance at live log volume only.
 
 ---
 
