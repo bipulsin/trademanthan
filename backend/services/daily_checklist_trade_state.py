@@ -2101,6 +2101,35 @@ def enrich_stocks_trade_state(
                     )
             except Exception as exc:
                 logger.debug("stretch penalty shadow skipped %s: %s", sym_u, exc)
+
+        # Shadow-only: sticky VWAP close-confirmation for READY episodes (no live gate).
+        vwap_close_confirm_stats: Dict[str, int] = {}
+        try:
+            from backend.services.kavach_vwap_close_confirm_shadow import (
+                update_vwap_close_confirm_shadow,
+            )
+
+            vwap_close_confirm_stats = update_vwap_close_confirm_shadow(
+                db,
+                session_date=session_date,
+                stocks=stocks,
+                candle_cache=candle_cache,
+                levels_map=levels_map,
+                nifty_pct=float(nifty_pct or 0.0),
+                source="live",
+            )
+            for row in consistency_rows:
+                sym_u = (row.get("symbol") or "").upper()
+                s_final = stock_by_sym.get(sym_u) or {}
+                snap = s_final.get("vwap_close_confirm_shadow")
+                if snap:
+                    row.setdefault("inputs", {})["vwap_close_confirm_shadow"] = snap
+            if any(int(vwap_close_confirm_stats.get(k) or 0) for k in ("started", "confirmed", "ended", "touched")):
+                db.commit()
+        except Exception as exc:
+            logger.debug("vwap close-confirm shadow skipped: %s", exc)
+            vwap_close_confirm_stats = {}
+
         if consistency_rows:
             log_ready_consistency(db, consistency_rows)
 
@@ -2133,6 +2162,7 @@ def enrich_stocks_trade_state(
             "warning_stack_downgraded": stack_n,
             "badge_input_logged": badge_logged,
             "dwell_entry_live": dwell_live_stats,
+            "vwap_close_confirm_shadow": vwap_close_confirm_stats,
             **mkt,
             **zone1_early,
         }

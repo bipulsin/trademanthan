@@ -5,6 +5,10 @@ Folder: `docs/diagnostics/checkpoint_22jul_followup/{A,B,C,D,E,F}/`
 
 **Ordering:** A primary → B/E depend on A post-exit / candle grades → C/F independent → D instrumentation (+ backfill).
 
+**B follow-up:** See [`B2_structural_ratchet/`](B2_structural_ratchet/) — EMA5-close-confirm after ≥2R cuts CONTINUATION FP rate from ~7/8 (naive) to **1/8** on the same test set (shadow only; n=10 caveat).
+
+**D follow-up:** See [`D2_vwap_close_confirm/`](D2_vwap_close_confirm/) — sticky READY-episode VWAP **close** confirmation (shadow log only; no live gate).
+
 ---
 
 ## ITEM A — Pre-entry / post-exit candle context (primary)

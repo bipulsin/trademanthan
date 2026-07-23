@@ -1196,6 +1196,43 @@ def _run_startup_schema_migrations(db_engine):
                 except Exception:
                     pass
 
+            # Shadow-only READY VWAP close-confirmation episodes (research; no live gate).
+            if db_engine.dialect.name == "postgresql":
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS kavach_vwap_close_confirm_shadow (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                ts_ready_first_flagged TIMESTAMPTZ NOT NULL,
+                                price_at_ready DOUBLE PRECISION,
+                                vwap_at_ready DOUBLE PRECISION,
+                                vwap_close_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+                                ts_vwap_close_confirmed TIMESTAMPTZ,
+                                price_at_vwap_confirm DOUBLE PRECISION,
+                                candles_to_confirm INTEGER,
+                                bars_since_ready_at_eod_or_expiry INTEGER,
+                                episode_ended_at TIMESTAMPTZ,
+                                episode_end_reason TEXT,
+                                source TEXT DEFAULT 'live',
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (session_date, symbol, ts_ready_first_flagged)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_vwap_close_confirm_session "
+                            "ON kavach_vwap_close_confirm_shadow (session_date DESC, symbol)"
+                        )
+                    )
+                except Exception:
+                    pass
+
             if "rs_go_board_shadow_log" not in table_names:
                 if db_engine.dialect.name == "postgresql":
                     conn.execute(
