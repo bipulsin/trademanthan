@@ -95,11 +95,11 @@
       <div>
         <h1>READY Shadow Log Review</h1>
         <p class="sub">
-          Backend rollup of <span class="mono">kavach_ready_consistency_log</span> —
-          lock mismatches and VWAP-quality shadow gate decisions. Classify rows, then export for the 22-Jul checkpoint.
-          <strong>Export Shortlist ADX</strong> joins Kavach ADX(14) onto the steep-outside-lock symbol/date shortlist.
-          <strong>Export for Analysis</strong> bundles consistency + universe VWAP scan + raw lock VWAP + R1/R2 + snapshot
-          into one JSON. No login required. Does not change live flags.
+          Read-only review of shadow tables. Primary view = <span class="mono">kavach_ready_consistency_log</span>
+          (would_block / quality_pass / distance A/B/C in inputs / ATR-consumed).
+          Extra sources: touch-reject (closed research), VWAP close-confirm, Expansion Watch shadow.
+          Classify consistency rows only — <strong>no live gating controls</strong>.
+          <strong>Export for Analysis</strong> bundles all shadow tables for the date.
         </p>
       </div>
     </header>
@@ -108,6 +108,19 @@
       <div class="field">
         <label for="sessionDate">Session date</label>
         <input type="date" id="sessionDate">
+      </div>
+      <div class="field">
+        <label for="sourceSel">Source</label>
+        <select id="sourceSel">
+          <option value="consistency">consistency (READY)</option>
+          <option value="touch_reject">vwap touch-reject</option>
+          <option value="close_confirm">vwap close-confirm</option>
+          <option value="expansion_watch">expansion watch shadow</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="symbolFilter">Symbol</label>
+        <input type="text" id="symbolFilter" placeholder="optional" style="width:110px">
       </div>
       <div class="field">
         <label>Filter</label>
@@ -306,8 +319,37 @@
 
   function load() {
     var sd = $("sessionDate").value || todayIST();
+    var source = ($("sourceSel") && $("sourceSel").value) || "consistency";
+    var sym = ($("symbolFilter") && $("symbolFilter").value || "").trim();
     setStatus("Loading…");
     $("btnLoad").disabled = true;
+    if (source !== "consistency") {
+      var q2 = API + "/api/shadow-logs?source=" + encodeURIComponent(source)
+        + "&session_date=" + encodeURIComponent(sd)
+        + "&limit=500"
+        + (sym ? ("&symbol=" + encodeURIComponent(sym)) : "");
+      fetch(q2, { cache: "no-store" })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          $("btnLoad").disabled = false;
+          if (!data.ok) {
+            setStatus(data.error || "Load failed", true);
+            renderRollup({});
+            renderRows([]);
+            return;
+          }
+          state.rows = data.rows || [];
+          renderRollup({ total_rows: data.row_count || 0, source: source });
+          renderGenericRows(state.rows);
+          setStatus(sd + " · source=" + source + " · rows=" + (data.row_count || 0)
+            + (sym ? (" · symbol=" + sym) : "") + " · read-only");
+        })
+        .catch(function (e) {
+          $("btnLoad").disabled = false;
+          setStatus(String(e), true);
+        });
+      return;
+    }
     var q = API + "/api/ready-shadow-review?session_date=" + encodeURIComponent(sd)
       + "&filter=" + encodeURIComponent(state.filter);
     fetch(q, { cache: "no-store" })
@@ -321,20 +363,47 @@
           return;
         }
         state.rows = data.rows || [];
+        if (sym) {
+          var su = sym.toUpperCase();
+          state.rows = state.rows.filter(function (r) {
+            return String(r.symbol || "").toUpperCase() === su;
+          });
+        }
         state.choices = data.outcome_choices || ["correct exclusion", "wrong exclusion", "unclear"];
         state.sessionDate = data.session_date;
         renderRollup(data.rollup);
         renderRows(state.rows);
         setStatus(
-          data.session_date + " · showing " + (data.row_count || 0)
+          data.session_date + " · showing " + state.rows.length
           + " of " + ((data.rollup && data.rollup.total_rows) || 0)
           + " · filter=" + (data.filter || "all")
+          + (sym ? (" · symbol=" + sym) : "")
         );
       })
       .catch(function (e) {
         $("btnLoad").disabled = false;
         setStatus(String(e), true);
       });
+  }
+
+  function renderGenericRows(rows) {
+    var tb = $("tbody");
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="13" class="empty">No rows for this source/date.</td></tr>';
+      return;
+    }
+    var keys = Object.keys(rows[0]).slice(0, 12);
+    var thead = document.querySelector(".table-wrap thead tr");
+    if (thead) {
+      thead.innerHTML = keys.map(function (k) { return "<th>" + k + "</th>"; }).join("");
+    }
+    tb.innerHTML = rows.map(function (r) {
+      return "<tr>" + keys.map(function (k) {
+        var v = r[k];
+        if (v && typeof v === "object") v = JSON.stringify(v).slice(0, 120);
+        return '<td class="mono">' + (v == null ? "—" : String(v)) + "</td>";
+      }).join("") + "</tr>";
+    }).join("");
   }
 
   function download(fmt) {

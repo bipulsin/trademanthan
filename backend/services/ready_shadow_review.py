@@ -490,6 +490,39 @@ def export_analysis_bundle(session_date: Optional[str] = None) -> Dict[str, Any]
                 ORDER BY event_at, id
                 """,
             ),
+            (
+                "kavach_vwap_touch_reject_log",
+                """
+                SELECT id, session_date, symbol, lock_direction, bar_evaluated_at,
+                       bar_close, vwap, vwap_touch_reject, vwap_wick_through_pts, source
+                FROM kavach_vwap_touch_reject_log
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY bar_evaluated_at, symbol
+                LIMIT 5000
+                """,
+            ),
+            (
+                "kavach_vwap_close_confirm_shadow",
+                """
+                SELECT id, session_date, symbol, direction, ts_ready_first_flagged,
+                       price_at_ready, vwap_at_ready, vwap_close_confirmed,
+                       ts_vwap_close_confirmed, price_at_vwap_confirm, candles_to_confirm,
+                       bars_since_ready_at_eod_or_expiry, episode_ended_at, episode_end_reason
+                FROM kavach_vwap_close_confirm_shadow
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY ts_ready_first_flagged, symbol
+                """,
+            ),
+            (
+                "kavach_expansion_watch_shadow_log",
+                """
+                SELECT id, session_date, symbol, direction, bar_at, vwap_slope_score,
+                       extension_atr, confirmed_close, live_enabled, source, logged_at
+                FROM kavach_expansion_watch_shadow_log
+                WHERE session_date = CAST(:d AS date)
+                ORDER BY logged_at, symbol
+                """,
+            ),
         ]
         for key, sql in sections:
             block = _safe_table_fetch(db, sql, {"d": sd}, key)
@@ -505,10 +538,152 @@ def export_analysis_bundle(session_date: Optional[str] = None) -> Dict[str, Any]
             if block.get("error"):
                 bundle["warnings"].append(f"{key}: {block['error']}")
 
+        # Distance-guard A/B/C disagreements extracted from consistency inputs (no extra table).
+        disagree_rows = []
+        for r in cons_rows:
+            inp = r.get("inputs") or {}
+            if isinstance(inp, str):
+                try:
+                    inp = json.loads(inp)
+                except Exception:
+                    inp = {}
+            dwell = (inp or {}).get("dwell_entry_shadow") or {}
+            sens = dwell.get("threshold_sensitivity") or {}
+            if any(
+                sens.get(k)
+                for k in (
+                    "A_stricter_than_B",
+                    "A_stricter_than_C",
+                    "B_stricter_than_A",
+                    "C_stricter_than_A",
+                )
+            ):
+                disagree_rows.append(
+                    {
+                        "log_id": r.get("log_id") or r.get("id"),
+                        "symbol": r.get("symbol"),
+                        "logged_at": r.get("logged_at"),
+                        "rendered_state": r.get("rendered_state"),
+                        "threshold_sensitivity": sens,
+                        "atr_consumed": (inp or {}).get("atr_consumed"),
+                        "vwap_extension_pct": (inp or {}).get("vwap_extension_pct")
+                        or r.get("vwap_extension_pct"),
+                    }
+                )
+        bundle["distance_guard_abc_disagreements"] = disagree_rows
+        bundle["table_meta"]["distance_guard_abc_disagreements"] = {
+            "ok": True,
+            "row_count": len(disagree_rows),
+        }
+
         bundle["filename"] = f"shadow-analysis-bundle-{sd}.json"
         return bundle
     except Exception as exc:
         logger.warning("analysis bundle export failed: %s", exc)
         return {"ok": False, "error": str(exc), "session_date": sd}
+    finally:
+        db.close()
+
+
+def list_shadow_source(
+    source: str,
+    session_date: Optional[str] = None,
+    symbol: Optional[str] = None,
+    limit: int = 500,
+) -> Dict[str, Any]:
+    """Read-only multi-source list for /shadow.html (no gating controls)."""
+    sd = session_date or today_ist()
+    sym = (symbol or "").strip().upper() or None
+    limit = max(1, min(int(limit or 500), 2000))
+    queries = {
+        "consistency": (
+            """
+            SELECT id, session_date, symbol, direction, rendered_state, pre_gate_state,
+                   in_lock, lock_mismatch, quality_pass, vwap_would_block, steep_ok,
+                   vwap_slope_score, vwap_extension_pct, inputs, logged_at
+            FROM kavach_ready_consistency_log
+            WHERE session_date = CAST(:d AS date)
+              AND (:sym IS NULL OR UPPER(symbol) = :sym)
+            ORDER BY logged_at DESC
+            LIMIT :lim
+            """
+        ),
+        "touch_reject": (
+            """
+            SELECT id, session_date, symbol, lock_direction AS direction, bar_evaluated_at,
+                   bar_close, vwap, vwap_touch_reject, vwap_wick_through_pts, source, logged_at
+            FROM kavach_vwap_touch_reject_log
+            WHERE session_date = CAST(:d AS date)
+              AND (:sym IS NULL OR UPPER(symbol) = :sym)
+            ORDER BY bar_evaluated_at DESC
+            LIMIT :lim
+            """
+        ),
+        "close_confirm": (
+            """
+            SELECT id, session_date, symbol, direction, ts_ready_first_flagged,
+                   price_at_ready, vwap_at_ready, vwap_close_confirmed,
+                   ts_vwap_close_confirmed, candles_to_confirm,
+                   bars_since_ready_at_eod_or_expiry, episode_end_reason, updated_at AS logged_at
+            FROM kavach_vwap_close_confirm_shadow
+            WHERE session_date = CAST(:d AS date)
+              AND (:sym IS NULL OR UPPER(symbol) = :sym)
+            ORDER BY ts_ready_first_flagged DESC
+            LIMIT :lim
+            """
+        ),
+        "expansion_watch": (
+            """
+            SELECT id, session_date, symbol, direction, bar_at, vwap_slope_score,
+                   extension_atr, confirmed_close, live_enabled, source, logged_at
+            FROM kavach_expansion_watch_shadow_log
+            WHERE session_date = CAST(:d AS date)
+              AND (:sym IS NULL OR UPPER(symbol) = :sym)
+            ORDER BY logged_at DESC
+            LIMIT :lim
+            """
+        ),
+    }
+    key = (source or "consistency").strip().lower()
+    if key not in queries:
+        return {
+            "ok": False,
+            "error": f"Unknown source '{source}'. Use: {', '.join(sorted(queries))}",
+            "session_date": sd,
+            "rows": [],
+        }
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(queries[key]), {"d": sd, "sym": sym, "lim": limit}
+        ).mappings()
+        ser = []
+        for r in rows:
+            d = dict(r)
+            for k, v in list(d.items()):
+                if hasattr(v, "isoformat"):
+                    d[k] = v.isoformat()
+            # ATR-consumed + distance A/B/C from consistency inputs
+            if key == "consistency" and isinstance(d.get("inputs"), dict):
+                inp = d["inputs"]
+                d["atr_consumed"] = inp.get("atr_consumed")
+                d["vwap_extension_pct"] = d.get("vwap_extension_pct") or inp.get(
+                    "vwap_extension_pct"
+                )
+                dwell = inp.get("dwell_entry_shadow") or {}
+                d["distance_abc"] = dwell.get("threshold_sensitivity")
+            ser.append(d)
+        return {
+            "ok": True,
+            "session_date": sd,
+            "source": key,
+            "symbol": sym,
+            "row_count": len(ser),
+            "rows": ser,
+            "read_only": True,
+        }
+    except Exception as exc:
+        logger.warning("list_shadow_source failed %s: %s", key, exc)
+        return {"ok": False, "error": str(exc), "session_date": sd, "source": key, "rows": []}
     finally:
         db.close()

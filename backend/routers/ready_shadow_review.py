@@ -107,6 +107,23 @@ def get_review(
     return svc.list_session_review(session_date, filter=filter)
 
 
+@router.get("/api/shadow-logs")
+@router.get("/shadow-logs")
+def get_shadow_logs(
+    source: str = Query(
+        "consistency",
+        description="consistency | touch_reject | close_confirm | expansion_watch",
+    ),
+    session_date: Optional[str] = Query(None),
+    symbol: Optional[str] = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
+):
+    """Read-only multi-source shadow tables for /shadow.html (no gating)."""
+    return svc.list_shadow_source(
+        source, session_date=session_date, symbol=symbol, limit=limit
+    )
+
+
 @router.put("/api/ready-shadow-review/{log_id}")
 @router.put("/ready-shadow-review/{log_id}")
 def put_review(log_id: int, body: ReviewBody):

@@ -1196,6 +1196,44 @@ def _run_startup_schema_migrations(db_engine):
                 except Exception:
                     pass
 
+            # Shadow-only Expansion Watch hits (research; EXPANSION_WATCH_LIVE still gates alerts).
+            if db_engine.dialect.name == "postgresql":
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS kavach_expansion_watch_shadow_log (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                bar_at TIMESTAMPTZ,
+                                vwap_slope_score DOUBLE PRECISION,
+                                signed_slope_atr DOUBLE PRECISION,
+                                ema_align_bars INTEGER,
+                                extension_atr DOUBLE PRECISION,
+                                atr_ext_max DOUBLE PRECISION,
+                                breakout_close DOUBLE PRECISION,
+                                confirmed_close DOUBLE PRECISION,
+                                ema5 DOUBLE PRECISION,
+                                ema10 DOUBLE PRECISION,
+                                live_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                                source TEXT DEFAULT 'shadow_scan',
+                                logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                UNIQUE (session_date, symbol, direction, bar_at)
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_expansion_watch_shadow_session "
+                            "ON kavach_expansion_watch_shadow_log (session_date DESC, symbol)"
+                        )
+                    )
+                except Exception:
+                    pass
+
             # Shadow-only READY VWAP close-confirmation episodes (research; no live gate).
             if db_engine.dialect.name == "postgresql":
                 try:

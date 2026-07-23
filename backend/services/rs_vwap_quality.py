@@ -78,6 +78,14 @@ def vwap_extension_pct(candles: List[Dict[str, Any]]) -> Optional[float]:
     return round((float(close) - vwap) / vwap, 6)
 
 
+def vwap_extension_abs_pct(candles: List[Dict[str, Any]]) -> Optional[float]:
+    """Absolute |close−VWAP|/VWAP×100 on last closed bar (Item 13 consistency log)."""
+    signed = vwap_extension_pct(candles)
+    if signed is None:
+        return None
+    return round(abs(float(signed)) * 100.0, 4)
+
+
 def vwap_slope_steepening(
     candles: List[Dict[str, Any]],
     *,

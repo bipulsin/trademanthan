@@ -594,9 +594,18 @@ def ensure_ready_consistency_log() -> None:
                     vwap_gate_enabled BOOLEAN,
                     vwap_would_block BOOLEAN,
                     vwap_gate_applied BOOLEAN,
+                    vwap_extension_pct NUMERIC(12,4),
                     inputs JSONB,
                     logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE kavach_ready_consistency_log
+                ADD COLUMN IF NOT EXISTS vwap_extension_pct NUMERIC(12,4)
                 """
             )
         )
@@ -627,14 +636,14 @@ def log_ready_consistency(db, rows: List[Dict[str, Any]]) -> None:
                         in_lock, lock_rank, lock_direction, lock_mismatch,
                         vwap_slope_score, steep_ok, flip_flop, whipsaw_crosses,
                         quality_pass, vwap_gate_enabled, vwap_would_block,
-                        vwap_gate_applied, inputs
+                        vwap_gate_applied, vwap_extension_pct, inputs
                     ) VALUES (
                         CAST(:d AS date), :sym, :dir,
                         :rst, :pst,
                         :il, :lr, :ld, :mm,
                         :vs, :so, :ff, :wc,
                         :qp, :vge, :vwb,
-                        :vga, CAST(:inp AS jsonb)
+                        :vga, :vext, CAST(:inp AS jsonb)
                     )
                     """
                 ),
@@ -656,6 +665,7 @@ def log_ready_consistency(db, rows: List[Dict[str, Any]]) -> None:
                     "vge": r.get("vwap_gate_enabled"),
                     "vwb": r.get("vwap_would_block"),
                     "vga": r.get("vwap_gate_applied"),
+                    "vext": r.get("vwap_extension_pct"),
                     "inp": json.dumps(r.get("inputs") or {}),
                 },
             )
@@ -1629,6 +1639,7 @@ def enrich_stocks_trade_state(
         from backend.services.rs_vwap_quality import (
             ready_vwap_quality_gate_enabled,
             score_vwap_quality,
+            vwap_extension_abs_pct,
             vwap_extension_pct,
         )
 
@@ -1844,6 +1855,8 @@ def enrich_stocks_trade_state(
                     removals=removals,
                     direction=s.get("direction"),
                 )
+                ext_signed = vwap_extension_pct(candles)
+                ext_abs = vwap_extension_abs_pct(candles)
                 consistency_rows.append(
                     {
                         "session_date": session_date,
@@ -1864,12 +1877,16 @@ def enrich_stocks_trade_state(
                         "vwap_gate_enabled": vwap_gate_on,
                         "vwap_would_block": would_block,
                         "vwap_gate_applied": gate_applied,
+                        "vwap_extension_pct": ext_abs,
                         "inputs": {
                             "adverse_closes": vq.get("adverse_closes"),
                             "first_adverse_hm": vq.get("first_adverse_hm"),
                             "signed_slope_atr": vq.get("signed_slope_atr"),
                             "promoted_at": str(qualify_since) if qualify_since else None,
                             "atr_pct": atr_pct,
+                            # Item 13: abs |close−VWAP|/VWAP×100 (+ signed fraction for joins).
+                            "vwap_extension_pct": ext_abs,
+                            "vwap_extension_signed": ext_signed,
                             # Research: regime at READY signal (no enforcement).
                             "regime": regime_snap.get("market_regime"),
                             "regime_label": regime_snap.get("market_regime_label"),

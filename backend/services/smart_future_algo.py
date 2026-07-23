@@ -1324,6 +1324,48 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Universe VWAP slope scan (Mon–Fri :01/:06… IST, research)"
             )
 
+            def _run_expansion_watch_shadow():
+                """Research-only: persist Expansion Watch hits without live alerts."""
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("Expansion Watch shadow", now):
+                    return
+                # Avoid hammering Upstox before lunch / after 15:20.
+                if now.hour == 9 and now.minute < 20:
+                    return
+                if now.hour >= 15 and now.minute > 20:
+                    return
+                try:
+                    from backend.services.rs_expansion_watch import (
+                        run_expansion_watch_shadow_scan,
+                    )
+
+                    out = run_expansion_watch_shadow_scan()
+                    logger.info("✅ Expansion Watch shadow scan: %s", out)
+                except Exception as e:
+                    logger.error(
+                        "❌ Expansion Watch shadow scan failed: %s", e, exc_info=True
+                    )
+
+            self.scheduler.add_job(
+                _run_expansion_watch_shadow,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="5,35",
+                    timezone="Asia/Kolkata",
+                ),
+                id="kavach_expansion_watch_shadow",
+                name="Expansion Watch shadow persist (research, :05/:35)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Expansion Watch shadow persist (Mon–Fri :05/:35 IST)"
+            )
+
             def _run_daily_checklist_refresh():
                 ist = pytz.timezone("Asia/Kolkata")
                 now = datetime.now(ist)

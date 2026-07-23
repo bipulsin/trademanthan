@@ -1,0 +1,39 @@
+{
+  "item": 14,
+  "title": "rs_universe_kavach_archive status (8–22 Jul 2026)",
+  "reviewed_at": "2026-07-23",
+  "job": {
+    "scheduler": "Mon–Fri 15:40 IST",
+    "id": "rs_universe_kavach_archive_eod",
+    "window_guard": "≥15:30 IST unless force"
+  },
+  "sessions_in_window": {
+    "expected_weekdays": ["2026-07-08", "2026-07-09", "2026-07-10", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-20", "2026-07-21", "2026-07-22"],
+    "runs_present": 11,
+    "gaps": [],
+    "note": "All weekdays in 8–22 Jul have a run row (weekends excluded)."
+  },
+  "daily": [
+    {"session_date": "2026-07-08", "universe_size": 202, "symbols_archived": 202, "discard_rate_pct": 0.0, "directional_bull": 162, "directional_bear": 40, "rollover_detected": false},
+    {"session_date": "2026-07-09", "universe_size": 202, "symbols_archived": 132, "discard_rate_pct": 34.7, "directional_bull": 60, "directional_bear": 72, "rollover_detected": false},
+    {"session_date": "2026-07-10", "universe_size": 202, "symbols_archived": 138, "discard_rate_pct": 31.7, "directional_bull": 94, "directional_bear": 44, "rollover_detected": false},
+    {"session_date": "2026-07-13", "universe_size": 202, "symbols_archived": 131, "discard_rate_pct": 35.1, "directional_bull": 83, "directional_bear": 48, "rollover_detected": false},
+    {"session_date": "2026-07-14", "universe_size": 202, "symbols_archived": 126, "discard_rate_pct": 37.6, "directional_bull": 80, "directional_bear": 46, "rollover_detected": false},
+    {"session_date": "2026-07-15", "universe_size": 202, "symbols_archived": 202, "discard_rate_pct": 0.0, "directional_bull": 114, "directional_bear": 88, "rollover_detected": false},
+    {"session_date": "2026-07-16", "universe_size": 202, "symbols_archived": 140, "discard_rate_pct": 30.7, "directional_bull": 75, "directional_bear": 65, "rollover_detected": false},
+    {"session_date": "2026-07-17", "universe_size": 202, "symbols_archived": 160, "discard_rate_pct": 20.8, "directional_bull": 88, "directional_bear": 72, "rollover_detected": false},
+    {"session_date": "2026-07-20", "universe_size": 202, "symbols_archived": 104, "discard_rate_pct": 48.5, "directional_bull": 76, "directional_bear": 28, "rollover_detected": false},
+    {"session_date": "2026-07-21", "universe_size": 200, "symbols_archived": 150, "discard_rate_pct": 25.0, "directional_bull": 85, "directional_bear": 65, "rollover_detected": true},
+    {"session_date": "2026-07-22", "universe_size": 200, "symbols_archived": 13, "discard_rate_pct": 93.5, "directional_bull": 8, "directional_bear": 5, "rollover_detected": false}
+  ],
+  "discard_semantics": {
+    "formula": "discard_rate = 1 - symbols_archived/universe_size",
+    "why_not_logged_per_symbol": "Per-symbol metric failures only logger.debug + aggregate errors count is NOT persisted on run table (no errors column in production schema). Failures = empty metrics from Upstox/candle path, not an explicit exclusion policy.",
+    "ranking_side_values": ["BULLISH", "BEARISH", "NEUTRAL"]
+  },
+  "usable_for_8aug": {
+    "verdict": "MOSTLY_YES_WITH_CAVEAT",
+    "detail": "Job ran every session day; rows are analyzable (kavach_state, trade_score, confidence_grade, ranking_side, RS). Typical discard ~20–50% when candle fetch fails. 2026-07-22 is NOT usable for coverage (only 13/200 symbols) — treat as outlier/partial run. Prefer 15-Jul (full 202) and 8–21 Jul excluding 22 for coverage checks."
+  },
+  "code_change": "none (status-only; not silently failing — runs exist)"
+}

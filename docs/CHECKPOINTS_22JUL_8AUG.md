@@ -7,7 +7,7 @@
 | **22-Jul** | July-series data alone, full review before the roll | July futures only — **nothing skipped** just because 8-Aug re-covers it |
 | **8-Aug** | **4-week rolling window**, not pure August-contract data | July futures through ~**23-Jul**, then August futures from the roll (~**24/28-Jul**) through **8-Aug**. Review all 16 items on the **combined** window; where relevant, **flag pre-roll vs post-roll shifts** (liquidity / spread / vol around expiry can move gate thresholds, lock churn, dwell, etc.) |
 
-Last reconciled: **2026-07-23** (VWAP touch-reject research closed NO_GO; prior 16-item reconcile 2026-07-18).
+Last reconciled: **2026-07-23** (Items 2/3/13/14/touch-reject closed or actioned; Items 6–9 given close-or-next-step).
 
 ---
 
@@ -16,19 +16,19 @@ Last reconciled: **2026-07-23** (VWAP touch-reject research closed NO_GO; prior 
 | # | Item | 22-Jul | 8-Aug (+ pre/post-roll note) | Status / notes |
 |---|---|---|---|---|
 | 1 | VWAP quality gate activation (`vwap_gate_enabled` / `READY_VWAP_QUALITY_GATE`) | Decide | Re-decide on full 4w; note if A/B differ pre vs post roll | Shadow default off; decision pending |
-| 2 | Shadow Log Review HTML page (requirements drafted, not sent) | Spec → build decision | UX/data completeness on 4w | Requirements drafted; page not shipped |
-| 3 | Expansion Watch backtest clearance (`EXPANSION_WATCH_LIVE`) | Clearance | Confirm still credible across roll | Live gated off until backtest clears |
+| 2 | Shadow Log Review HTML page | **CLOSED** | UX/data completeness on 4w | **Shipped** `/shadow.html` + APIs (15-Jul); 23-Jul extended sources (touch-reject / close-confirm / expansion) |
+| 3 | Expansion Watch (`EXPANSION_WATCH_LIVE`) | **Shadow logging ON** | Confirm still credible across roll | Live alerts still **OFF**; shadow table + :05/:35 scan added 23-Jul so 8-Aug has data |
 | 4 | R1 PLAN EXIT — live event validation | Primary | Pre vs post roll event rates / outcomes | Collecting; see `R1_EXIT_NOW_HOLD_VS_EMA10_*` |
 | 5 | ATR-consumed logging — instrumentation review | Review | Continuity across roll | Research-only; no READY gate |
-| 6 | ABB fix coverage — unconfirmed | Confirm | N/A unless regressions | **Unconfirmed** |
-| 7 | Watching-vs-READY-NOW state contradiction (Requirement 5) | Review | Same | Open |
-| 8 | Backend FSM vs Pine state machine divergence | Review | Same | Open (Pine v2.7 confidence realign drafted, not live) |
-| 9 | HCLTECH direction-flip ticket | Review | Same | Open |
+| 6 | ABB fix coverage | **CLOSED (code+tests)** | Spot-check if regressions | Fix `1abee67` live; `test_abb_and_any_symbol_use_same_conflict_path` green; optional live visual spot-check |
+| 7 | Watching-vs-READY-NOW (Requirement 5) | **OPEN — next step** | Same | Dual surfaces by design; repro any lock with `pine_readiness=READY TO *` and `trade_state≠READY`. Next: single primary decision surface **or** explicit UI label that Pine ≠ Take Trade (owner: product; timeline: before 8-Aug) |
+| 8 | Backend FSM vs Pine confidence | **OPEN — verify chart** | Same | Backend live path claims **v3.0** panel parity; Pine **v2.7/v3.0 drafts** in `docs/diagnostics/` — **not confirmed published on TV**. Next: bipulsin confirm chart script version; if already v3.0-aligned, close Item 8 |
+| 9 | HCLTECH direction-flip ticket | **CLOSED → DIR CONFLICT** | Same | Original HCLTECH SHORT-vs-TV-BUY case covered by DIR CONFLICT live path (`9047d3f`/`1abee67`); no separate unsent ticket body in repo |
 | 10 | BANKINDIA shadow log capture gap | Confirm fix held | Same | Root-caused 15-Jul (`READY_SHADOW_REVIEW_2026-07-15.md`) |
 | 11 | 09:25 / 09:45 / 10:15 lock-timing shadow comparison | 2w early read → 22-Jul | Full 4w + pre/post roll | `rs_shadow_selection` + `analyze_rs_shadow_checkpoints.py` |
-| 12 | `steep_ok` threshold investigation | Flag | Re-check if roll changes slope distribution | Flagged `STEEP_OK_THRESHOLD_CHECK` |
-| 13 | VWAP price-to-VWAP extension metric | Flag / add if missing | Same | Flagged `VWAP_EXTENSION_METRIC_MISSING`; raw log has extension field path |
-| 14 | After-hours full-universe Kavach archive | Accumulation check | Discard-rate / coverage on 4w | Job `rs_universe_kavach_archive` ~15:40 IST |
+| 12 | `steep_ok` threshold investigation | **CLOSED (intentional)** | Re-check if roll changes slope distribution | Confirmed steep-slope filter (Item F); not a confidence bug |
+| 13 | VWAP price-to-VWAP extension metric | **CLOSED (logging)** | Same | `vwap_extension_pct` = \|close−VWAP\|/VWAP×100 on consistency log (+ signed in inputs) from 23-Jul |
+| 14 | After-hours full-universe Kavach archive | **Reviewed** | Discard-rate / coverage on 4w | Ran all 8–22 Jul sessions; typical discard 20–50%; **22-Jul partial (13/200) — exclude from coverage**. See `ITEM14_universe_kavach_archive_status.json` |
 | 15 | Bug 1 + Bug 2 live dwell / entry-guard behavior review | First live sessions (Jul) | Full 4w; **compare Option B (live) vs A & C (shadow)**; **pre-roll vs post-roll** | **LIVE 2026-07-18: Option B** |
 | 16 | Option A vs B vs C threshold sensitivity comparison | Early live read | Full 4w; decide stay on B / move to A / month-specific | A+C shadow forever; B live |
 

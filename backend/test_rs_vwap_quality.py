@@ -75,6 +75,16 @@ def test_vwap_extension_pct_signed():
     assert ext_d < ext
 
 
+def test_vwap_extension_abs_pct_is_percent_points():
+    from backend.services.rs_vwap_quality import vwap_extension_abs_pct
+
+    candles = _trend_candles(90, up=True)
+    signed = vwap_extension_pct(candles)
+    abs_pct = vwap_extension_abs_pct(candles)
+    assert abs_pct is not None and signed is not None
+    assert abs_pct == round(abs(signed) * 100.0, 4)
+
+
 def test_build_raw_row_minimal():
     from backend.services.kavach_vwap_raw_log import build_raw_row, lock_direction_to_side
 

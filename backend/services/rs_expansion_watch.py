@@ -151,9 +151,13 @@ def scan_expansion_candidates(
     *,
     symbols: Optional[List[str]] = None,
     atr_by_symbol: Optional[Dict[str, float]] = None,
+    for_shadow: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Evaluate F&O universe (or given symbols). Empty when live flag is off."""
-    if not live_enabled():
+    """Evaluate F&O universe (or given symbols).
+
+    Empty when live flag is off **unless** ``for_shadow=True`` (research persist path).
+    """
+    if not live_enabled() and not for_shadow:
         return []
 
     from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
@@ -179,6 +183,123 @@ def scan_expansion_candidates(
         except Exception as exc:
             logger.debug("expansion watch skip %s: %s", sym, exc)
     return out
+
+
+_SHADOW_TABLE = "kavach_expansion_watch_shadow_log"
+_SHADOW_ENSURED = False
+
+_SHADOW_CREATE = f"""
+CREATE TABLE IF NOT EXISTS {_SHADOW_TABLE} (
+    id BIGSERIAL PRIMARY KEY,
+    session_date DATE NOT NULL,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    bar_at TIMESTAMPTZ,
+    vwap_slope_score DOUBLE PRECISION,
+    signed_slope_atr DOUBLE PRECISION,
+    ema_align_bars INTEGER,
+    extension_atr DOUBLE PRECISION,
+    atr_ext_max DOUBLE PRECISION,
+    breakout_close DOUBLE PRECISION,
+    confirmed_close DOUBLE PRECISION,
+    ema5 DOUBLE PRECISION,
+    ema10 DOUBLE PRECISION,
+    live_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    source TEXT DEFAULT 'shadow_scan',
+    logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (session_date, symbol, direction, bar_at)
+)
+"""
+
+_SHADOW_INSERT = text(
+    f"""
+    INSERT INTO {_SHADOW_TABLE} (
+        session_date, symbol, direction, bar_at,
+        vwap_slope_score, signed_slope_atr, ema_align_bars, extension_atr, atr_ext_max,
+        breakout_close, confirmed_close, ema5, ema10, live_enabled, source
+    ) VALUES (
+        CAST(:session_date AS date), :symbol, :direction, :bar_at,
+        :vwap_slope_score, :signed_slope_atr, :ema_align_bars, :extension_atr, :atr_ext_max,
+        :breakout_close, :confirmed_close, :ema5, :ema10, :live_enabled, :source
+    )
+    ON CONFLICT (session_date, symbol, direction, bar_at) DO UPDATE SET
+        vwap_slope_score = EXCLUDED.vwap_slope_score,
+        signed_slope_atr = EXCLUDED.signed_slope_atr,
+        extension_atr = EXCLUDED.extension_atr,
+        confirmed_close = EXCLUDED.confirmed_close,
+        logged_at = NOW()
+    """
+)
+
+
+def ensure_expansion_watch_shadow_table() -> None:
+    global _SHADOW_ENSURED
+    if _SHADOW_ENSURED:
+        return
+    from backend.database import engine as _engine
+
+    with _engine.begin() as conn:
+        conn.execute(text(_SHADOW_CREATE))
+        conn.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS idx_{_SHADOW_TABLE}_session "
+                f"ON {_SHADOW_TABLE} (session_date DESC, symbol)"
+            )
+        )
+    _SHADOW_ENSURED = True
+
+
+def run_expansion_watch_shadow_scan(
+    *, session_date: Optional[str] = None
+) -> Dict[str, Any]:
+    """Evaluate universe and persist hits — shadow only; does not enable live alerts."""
+    ensure_expansion_watch_shadow_table()
+    sd = session_date or today_ist()
+    db = SessionLocal()
+    try:
+        hits = scan_expansion_candidates(db, sd, for_shadow=True)
+        n = 0
+        for h in hits:
+            bar_at = h.get("bar_at")
+            if isinstance(bar_at, str):
+                try:
+                    bar_at = datetime.fromisoformat(bar_at.replace("Z", "+00:00"))
+                except ValueError:
+                    bar_at = None
+            db.execute(
+                _SHADOW_INSERT,
+                {
+                    "session_date": sd,
+                    "symbol": h.get("symbol"),
+                    "direction": h.get("direction"),
+                    "bar_at": bar_at,
+                    "vwap_slope_score": h.get("vwap_slope_score"),
+                    "signed_slope_atr": h.get("signed_slope_atr"),
+                    "ema_align_bars": h.get("ema_align_bars"),
+                    "extension_atr": h.get("extension_atr"),
+                    "atr_ext_max": h.get("atr_ext_max"),
+                    "breakout_close": h.get("breakout_close"),
+                    "confirmed_close": h.get("confirmed_close"),
+                    "ema5": h.get("ema5"),
+                    "ema10": h.get("ema10"),
+                    "live_enabled": bool(live_enabled()),
+                    "source": "shadow_scan",
+                },
+            )
+            n += 1
+        db.commit()
+        return {
+            "ok": True,
+            "session_date": sd,
+            "hits": n,
+            "live_enabled": live_enabled(),
+            "note": "Shadow persist only; EXPANSION_WATCH_LIVE still gates alerts.",
+        }
+    except Exception as exc:
+        logger.exception("expansion watch shadow scan failed")
+        return {"ok": False, "error": str(exc), "session_date": sd}
+    finally:
+        db.close()
 
 
 def get_expansion_watch(session_date: Optional[str] = None) -> Dict[str, Any]:
