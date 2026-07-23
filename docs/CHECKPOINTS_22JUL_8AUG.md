@@ -7,7 +7,7 @@
 | **22-Jul** | July-series data alone, full review before the roll | July futures only — **nothing skipped** just because 8-Aug re-covers it |
 | **8-Aug** | **4-week rolling window**, not pure August-contract data | July futures through ~**23-Jul**, then August futures from the roll (~**24/28-Jul**) through **8-Aug**. Review all 16 items on the **combined** window; where relevant, **flag pre-roll vs post-roll shifts** (liquidity / spread / vol around expiry can move gate thresholds, lock churn, dwell, etc.) |
 
-Last reconciled: **2026-07-23** (Items 2/3/13/14/touch-reject closed or actioned; Items 6–9 given close-or-next-step).
+Last reconciled: **2026-07-24** — 22-Jul cycle closed end-to-end (trader offline until next session). Min 10m READY card floor **live**.
 
 ---
 
@@ -29,7 +29,7 @@ Last reconciled: **2026-07-23** (Items 2/3/13/14/touch-reject closed or actioned
 | 12 | `steep_ok` threshold investigation | **CLOSED (intentional)** | Re-check if roll changes slope distribution | Confirmed steep-slope filter (Item F); not a confidence bug |
 | 13 | VWAP price-to-VWAP extension metric | **CLOSED (logging)** | Same | `vwap_extension_pct` = \|close−VWAP\|/VWAP×100 on consistency log (+ signed in inputs) from 23-Jul |
 | 14 | After-hours full-universe Kavach archive | **Reviewed** | Discard-rate / coverage on 4w | Ran all 8–22 Jul sessions; typical discard 20–50%; **22-Jul partial (13/200) — exclude from coverage**. See `ITEM14_universe_kavach_archive_status.json` |
-| 15 | Bug 1 + Bug 2 live dwell / entry-guard behavior review | First live sessions (Jul) | Full 4w; **compare Option B (live) vs A & C (shadow)**; **pre-roll vs post-roll** | **LIVE 2026-07-18: Option B** |
+| 15 | Bug 1 + Bug 2 live dwell / entry-guard behavior review | **CLOSED (floor strengthened 24-Jul)** | Full 4w; **compare Option B (live) vs A & C (shadow)**; **pre-roll vs post-roll** | **LIVE** Option B + **min 10m card visibility** (distance/soft/natural hold; EMA10 close early-hide). See `ready_dwell_card_vanish/` |
 | 16 | Option A vs B vs C threshold sensitivity comparison | Early live read | Full 4w; decide stay on B / move to A / month-specific | A+C shadow forever; B live |
 
 ---
@@ -77,6 +77,7 @@ Outcome: stay on B, move to A, or allow threshold to differ by contract month.
 | Shadow forever | Option A, Option C, check2 vs check3, `check3_only` research flag |
 | Hard dwell ends | EMA10 confirmed close reverse, R1/R2 lock removal, EXIT NOW / PLAN EXIT |
 | Soft (in dwell) | Badges + `trade_take_enabled=false`; **card stays visible** (`card_visible`) |
+| 2026-07-24 strengthen | Mid-dwell **distance** + natural leave also hold card ≥10m; Take Trade off. Confirmed EMA10 close / lock remove / EXIT NOW still early-hide (misleading otherwise). **Live, no shadow.** |
 
 ### Pre-live baseline (2026-07-17 consistency log)
 
@@ -186,3 +187,49 @@ Use HAL vs the three give-back cases when comparing **ratchet response time vs g
 
 Update this file when an item is decided, deferred, or scope changes.  
 Do **not** treat agent chat transcripts as the checklist.
+
+---
+
+## 22-Jul cycle close-out (2026-07-24)
+
+Trader offline after this close. Status snapshot for **8-Aug** handoff:
+
+| Thread | Status |
+|---|---|
+| Rule 25 | **Live** |
+| Item 7 / 8 fixes | **Closed** (UI authority label; Pine v3.0 I8-A/B/C) |
+| UI declutter | **Live** |
+| READY NOW audio | **Live** |
+| Expansion Watch | Shadow logging **fixed/on**; live alerts still OFF |
+| VWAP close-confirm shadow | **Collecting** (`kavach_vwap_close_confirm_shadow`) |
+| VWAP touch-reject | **Closed NO-GO** |
+| +4-candle extension | **Closed, no rule** (see `PLUS4_EXTENSION_OUTLIER_DIAGNOSIS.md`) |
+| Appearance-count pattern | **Closed, no rule — retracted** |
+| Realism-filter findings | **Documented** (`ready_watching_trade_trace/REALISM_FILTER_SUMMARY.md`) |
+| READY card min 10m dwell floor | **Live** (2026-07-24; no shadow). Soft/distance/natural hold inside floor; confirmed EMA10 close / lock remove / EXIT NOW early-hide. See `checkpoint_22jul_followup/ready_dwell_card_vanish/` |
+
+### Prospective logging tables (paperclip, as of close-out)
+
+| Table | Rows | Note |
+|---|---:|---|
+| `kavach_watching_grade_a_counter` | 0 | Tables exist; empty until next session enrich (market closed / deployed late) — **not broken** |
+| `kavach_watching_grade_a_episode` | 0 | Same |
+| `kavach_ready_exit_plus4_shadow` | 0 | Same |
+| `kavach_vwap_close_confirm_shadow` | 33 | Accumulating |
+
+Shadow modules: `kavach_watching_shadow.py`, `kavach_ready_exit_plus4_shadow.py`.
+
+### Carried forward to 8-Aug (unresolved only)
+
+1. **Item 1** — VWAP quality gate activation decision (still shadow-off).
+2. **Item 4** — R1 PLAN EXIT live event validation (collecting).
+3. **Item 5** — ATR-consumed logging review (research-only).
+4. **Item 11** — Lock-timing 09:25/09:45/10:15 shadow comparison on full 4w + pre/post roll.
+5. **Item 16** — Option A vs B vs C stay/move decision on full 4w (B remains live).
+6. **Entry-to-EMA10 buffer** — shadow field on `trade_log`; promote only if pattern holds (POLYCAB thin-buffer case).
+7. **Rule 15** open edge (exact close at entry extreme) — review only, no live change.
+8. **VWAP close-confirm** — keep collecting; decide at 8-Aug (separate from touch-reject NO-GO).
+9. **Expansion Watch** — confirm shadow credibility across roll; live still OFF.
+10. **Min-10m dwell floor** — spot-check first live session after 24-Jul deploy (expected: zero under-10m distance vanishings).
+
+Do **not** carry: touch-reject, +4 extension rule, appearance-count rule, Item 7/8, UI declutter, READY audio, realism (docs only).

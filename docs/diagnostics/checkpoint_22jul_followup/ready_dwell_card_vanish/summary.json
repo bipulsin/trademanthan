@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-07-24",
+  "window": "2026-07-08..2026-07-22",
+  "consistency_log_sessions": ["2026-07-15", "2026-07-16", "2026-07-17", "2026-07-20", "2026-07-21", "2026-07-22"],
+  "note_missing_8_to_14": "No kavach_ready_consistency_log rows before 2026-07-15",
+  "spells_15_to_22": {
+    "n": 142,
+    "buckets": {"lt_1m": 9, "m1_5": 36, "m5_10": 20, "ge_10m": 77},
+    "avg_min": 24.44,
+    "median_min": 10.17
+  },
+  "post_live_20_to_22_vanished": {
+    "n": 47,
+    "causes": {
+      "distance_guard": 29,
+      "soft_should_dwell": 14,
+      "hard_exit": 3,
+      "hard_lock_removed": 1
+    },
+    "under_10m": {"n": 10, "all_cause": "distance_guard"}
+  },
+  "take_trade_while_visible_polls": {
+    "warning_stack": 449,
+    "dwell_soft_hold": 44,
+    "entry_window": 26
+  },
+  "soft_bypass_polls_post_live": 18,
+  "dwell_live_verdict_pre_fix": {
+    "soft_hold": "mostly_working",
+    "distance_mid_dwell": "bypass_removes_card",
+    "natural_leave": "no_explicit_hold"
+  },
+  "fix": {
+    "live": true,
+    "shadow_period": false,
+    "ema10_confirmed_close": "early_hide",
+    "distance_mid_dwell": "keep_card_disable_take"
+  }
+}

@@ -748,11 +748,18 @@ def apply_ready_dwell_entry_live(
 ) -> Dict[str, int]:
     """Apply dwell + Option-B distance guard when ``READY_DWELL_ENTRY_LIVE=1``.
 
-    Soft warning_stack / imbalance: keep ``trade_state`` READY inside the 10-min
-    floor (``card_visible=True``) but disable Take Trade. Hard invalidation and
-    distance failures clear dwell and hide the card.
+    Once a READY card has appeared (dwell clock started), it stays visible for
+    ``READY_DWELL_MINUTES`` despite soft hides, distance/price drift, grade or
+    score changes. Take Trade may disable; badges keep updating.
+
+    Early hide inside the floor (judgment — card would be misleading):
+      confirmed EMA10 close reverse, lock removal, EXIT NOW / PLAN EXIT, EXPIRED.
+
+    Distance on a *first* READY poll (no dwell yet) still suppresses appearance —
+    the floor starts only after a card actually appears.
     """
     from backend.services.daily_checklist_trade_state import (
+        STATE_EXPIRED,
         STATE_READY,
         STATE_READY_RECHECK,
         STATE_WAIT,
@@ -767,7 +774,9 @@ def apply_ready_dwell_entry_live(
         "live_applied": 0,
         "entry_overridden": 0,
         "distance_blocked": 0,
+        "distance_dwell_held": 0,
         "dwell_soft_kept": 0,
+        "dwell_natural_kept": 0,
         "dwell_started": 0,
         "warn_entry_drift": 0,
     }
@@ -775,6 +784,7 @@ def apply_ready_dwell_entry_live(
         return stats
 
     opt = live_distance_option()
+    floor_sec = READY_DWELL_MINUTES * 60
     clock = now or datetime.now(IST)
     if clock.tzinfo is None:
         clock = IST.localize(clock)
@@ -839,6 +849,11 @@ def apply_ready_dwell_entry_live(
             nifty_pct=nifty_pct,
         )
         prev_since = _load_shadow_since(db, session_date, sym)
+        hold_state = (
+            pre_stack
+            if pre_stack in (STATE_READY, STATE_READY_RECHECK)
+            else STATE_READY
+        )
 
         def _persist(since: Optional[datetime], outcome: str, blocked: bool) -> None:
             _upsert_shadow_state(
@@ -859,19 +874,170 @@ def apply_ready_dwell_entry_live(
                     "trade_state": s.get("trade_state"),
                     "card_visible": s.get("card_visible"),
                     "trade_take_enabled": s.get("trade_take_enabled"),
+                    "dwell_soft_hold": s.get("dwell_soft_hold"),
+                    "dwell_hold_reason": s.get("dwell_hold_reason"),
                 },
             )
 
-        # Distance failure: never READY, no dwell guarantee.
+        def _distance_wait_reason() -> str:
+            if dist.get("check1_beyond_ema10"):
+                return "WAIT · entry at/beyond EMA10"
+            if dist.get("check3_only"):
+                return "WAIT · EMA5–EMA10 gap too thin for valid stop"
+            return "WAIT · entry too close to exit zone"
+
+        def _force_card_hold(
+            *,
+            since: datetime,
+            hold_reason: str,
+            zone: Optional[str],
+            outcome: str,
+            take_enabled: bool,
+            state_reason: str,
+            blocked: bool = False,
+        ) -> None:
+            """Keep READY visible inside the floor; UI keys off trade_state."""
+            s["trade_state"] = hold_state
+            s["card_visible"] = True
+            s["dwell_soft_hold"] = True
+            s["dwell_hold_reason"] = hold_reason
+            s["ready_visible_since"] = since.isoformat()
+            s["trade_take_enabled"] = bool(take_enabled)
+            s["trade_state_reason"] = state_reason
+            if zone:
+                s["zone_downgrade"] = zone
+            s["trade_take_disable_reason"] = trade_take_disable_reason(
+                trade_state=hold_state,
+                trade_take_enabled=bool(take_enabled),
+                trade_state_reason=state_reason,
+                trade_entry_window_open=s.get("trade_entry_window_open"),
+                entry=s.get("trade_entry"),
+                sl=s.get("trade_sl"),
+                risk_inr=s.get("trade_risk_inr"),
+                rr=s.get("trade_rr"),
+                zone_downgrade=s.get("zone_downgrade"),
+            )
+            _persist(since, outcome, blocked)
+
+        def _structurally_take_ok() -> bool:
+            return bool(
+                entry_window_open_ist()
+                and take_trade_structurally_ok(
+                    entry=s.get("trade_entry"),
+                    sl=s.get("trade_sl"),
+                    risk_inr=s.get("trade_risk_inr"),
+                )
+                and not risk_cap_blocks_ready(s.get("trade_risk_inr"), s.get("trade_rr"))
+                and not rr_below_minimum(s.get("trade_rr"))
+            )
+
+        # Session expiry: never hold a READY NOW card past EXPIRED.
+        if s.get("trade_state") == STATE_EXPIRED or s.get("trade_expiry_crossed"):
+            s["card_visible"] = False
+            s["ready_visible_since"] = None
+            if prev_since is not None:
+                _persist(None, "live_end_expired", bool(dist.get("would_block")))
+            continue
+
+        # Early hide: confirmed EMA10 close / lock gone / open-trade exit labels.
+        # Keeping READY after a confirmed exit-side EMA10 close is actively misleading.
+        if hard_reason:
+            s["card_visible"] = False
+            s["ready_visible_since"] = None
+            if s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK):
+                # Drop to WAIT so the UI does not keep a false READY NOW card.
+                s["trade_state"] = STATE_WAIT
+                s["trade_take_enabled"] = False
+                s["trade_state_reason"] = (
+                    f"WAIT · dwell hard end ({hard_reason})"
+                )
+            _persist(None, f"live_end_hard:{hard_reason}", False)
+            continue
+
+        in_dwell = prev_since is not None
+        elapsed = (
+            (clock - _as_ist(prev_since)).total_seconds() if in_dwell else None
+        )
+        within_floor = bool(in_dwell and elapsed is not None and elapsed < floor_sec)
+
+        # --- Inside 10m floor: card stays; Take Trade may turn off. ---
+        if within_floor:
+            since = _as_ist(prev_since)
+            if dist.get("would_block"):
+                reason = (
+                    f"READY · dwell hold (entry_distance) — Take Trade disabled"
+                )
+                s["zone_downgrade"] = "entry_distance"
+                _force_card_hold(
+                    since=since,
+                    hold_reason="entry_distance",
+                    zone="entry_distance",
+                    outcome="live_dwell_distance_hold",
+                    take_enabled=False,
+                    state_reason=reason,
+                    blocked=True,
+                )
+                stats["distance_dwell_held"] += 1
+                continue
+
+            if soft or (
+                s.get("zone_downgrade")
+                in ("warning_stack", "vwap_quality", "direction_imbalance", "compromised_lock")
+            ):
+                hold_key = soft or s.get("zone_downgrade") or "soft"
+                _force_card_hold(
+                    since=since,
+                    hold_reason=str(hold_key),
+                    zone=s.get("zone_downgrade") or soft,
+                    outcome=f"live_dwell_soft:{hold_key}",
+                    take_enabled=False,
+                    state_reason=(
+                        f"READY · dwell hold ({hold_key}) — Take Trade disabled"
+                    ),
+                )
+                stats["dwell_soft_kept"] += 1
+                continue
+
+            if s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK):
+                take_ok = _structurally_take_ok()
+                s["card_visible"] = True
+                s["ready_visible_since"] = since.isoformat()
+                s["trade_take_enabled"] = take_ok
+                s["trade_take_disable_reason"] = trade_take_disable_reason(
+                    trade_state=s.get("trade_state"),
+                    trade_take_enabled=take_ok,
+                    trade_state_reason=s.get("trade_state_reason"),
+                    trade_entry_window_open=s.get("trade_entry_window_open"),
+                    entry=s.get("trade_entry"),
+                    sl=s.get("trade_sl"),
+                    risk_inr=s.get("trade_risk_inr"),
+                    rr=s.get("trade_rr"),
+                    zone_downgrade=s.get("zone_downgrade"),
+                )
+                _persist(since, "live_dwell_active", False)
+                continue
+
+            # Natural leave (grade/score/gates) inside floor — keep card, disarm Take.
+            _force_card_hold(
+                since=since,
+                hold_reason="natural",
+                zone=s.get("zone_downgrade"),
+                outcome="live_dwell_natural_hold",
+                take_enabled=False,
+                state_reason=(
+                    "READY · dwell hold (setup changed) — Take Trade disabled"
+                ),
+            )
+            stats["dwell_natural_kept"] += 1
+            continue
+
+        # --- Floor elapsed or no dwell yet. ---
+
+        # Distance failure with no active dwell: suppress READY appearance.
         if dist.get("would_block") and (
             s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK) or was_ready
         ):
-            if dist.get("check1_beyond_ema10"):
-                reason = "WAIT · entry at/beyond EMA10"
-            elif dist.get("check3_only"):
-                reason = "WAIT · EMA5–EMA10 gap too thin for valid stop"
-            else:
-                reason = "WAIT · entry too close to exit zone"
+            reason = _distance_wait_reason()
             s["trade_state"] = STATE_WAIT
             s["trade_state_reason"] = reason
             s["trade_take_enabled"] = False
@@ -893,47 +1059,29 @@ def apply_ready_dwell_entry_live(
             stats["distance_blocked"] += 1
             continue
 
-        if hard_reason:
-            s["card_visible"] = s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK)
-            s["ready_visible_since"] = None
-            _persist(None, f"live_end_hard:{hard_reason}", False)
-            continue
-
-        # Soft hide after warning_stack/imbalance: hold READY card inside 10-min floor.
+        # Soft hide after floor: allow normal WAIT removal.
         if (
             was_ready
             and soft
             and s.get("trade_state") == STATE_WAIT
-            and s.get("zone_downgrade") in (
-                "warning_stack",
-                "vwap_quality",
-                "direction_imbalance",
-            )
+            and s.get("zone_downgrade")
+            in ("warning_stack", "vwap_quality", "direction_imbalance")
         ):
-            since = prev_since or clock
-            elapsed = (clock - _as_ist(since)).total_seconds()
-            if elapsed < READY_DWELL_MINUTES * 60:
-                s["trade_state"] = pre_stack
-                s["trade_take_enabled"] = False
-                s["card_visible"] = True
-                s["dwell_soft_hold"] = True
-                s["ready_visible_since"] = _as_ist(since).isoformat()
-                s["trade_state_reason"] = (
-                    f"READY · dwell hold ({soft}) — Take Trade disabled"
+            # No dwell yet (first poll already soft): start clock + hold.
+            if not in_dwell:
+                since = clock
+                _force_card_hold(
+                    since=since,
+                    hold_reason=str(soft),
+                    zone=s.get("zone_downgrade") or soft,
+                    outcome=f"live_dwell_soft:{soft}",
+                    take_enabled=False,
+                    state_reason=(
+                        f"READY · dwell hold ({soft}) — Take Trade disabled"
+                    ),
                 )
-                s["trade_take_disable_reason"] = trade_take_disable_reason(
-                    trade_state=pre_stack,
-                    trade_take_enabled=False,
-                    trade_state_reason=s["trade_state_reason"],
-                    trade_entry_window_open=s.get("trade_entry_window_open"),
-                    entry=s.get("trade_entry"),
-                    sl=s.get("trade_sl"),
-                    risk_inr=s.get("trade_risk_inr"),
-                    rr=s.get("trade_rr"),
-                    zone_downgrade=s.get("zone_downgrade"),
-                )
-                _persist(_as_ist(since), f"live_dwell_soft:{soft}", False)
                 stats["dwell_soft_kept"] += 1
+                stats["dwell_started"] += 1
                 continue
             s["card_visible"] = False
             s["ready_visible_since"] = None
@@ -941,23 +1089,14 @@ def apply_ready_dwell_entry_live(
             continue
 
         if s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK):
-            since = prev_since or clock
-            since = _as_ist(since)
+            since = _as_ist(prev_since) if prev_since is not None else clock
+            take_ok = _structurally_take_ok()
             s["card_visible"] = True
             s["ready_visible_since"] = since.isoformat()
-            s["trade_take_enabled"] = bool(
-                entry_window_open_ist()
-                and take_trade_structurally_ok(
-                    entry=s.get("trade_entry"),
-                    sl=s.get("trade_sl"),
-                    risk_inr=s.get("trade_risk_inr"),
-                )
-                and not risk_cap_blocks_ready(s.get("trade_risk_inr"), s.get("trade_rr"))
-                and not rr_below_minimum(s.get("trade_rr"))
-            )
+            s["trade_take_enabled"] = take_ok
             s["trade_take_disable_reason"] = trade_take_disable_reason(
                 trade_state=s.get("trade_state"),
-                trade_take_enabled=bool(s.get("trade_take_enabled")),
+                trade_take_enabled=take_ok,
                 trade_state_reason=s.get("trade_state_reason"),
                 trade_entry_window_open=s.get("trade_entry_window_open"),
                 entry=s.get("trade_entry"),
@@ -972,7 +1111,7 @@ def apply_ready_dwell_entry_live(
             continue
 
         s["card_visible"] = False
-        if prev_since is not None and not soft:
+        if prev_since is not None:
             _persist(None, "live_end_natural", False)
 
     return stats

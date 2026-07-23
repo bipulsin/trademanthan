@@ -1,12 +1,77 @@
 """Unit tests for READY dwell + entry distance shadow helpers (no live flip)."""
+from datetime import datetime
+from unittest.mock import MagicMock
+
+import pytz
+
+from backend.services.daily_checklist_trade_state import (
+    STATE_READY,
+    STATE_WAIT,
+)
 from backend.services.ready_dwell_entry_shadow import (
     ENTRY_EMA5_WARN_PCT,
+    apply_ready_dwell_entry_live,
     evaluate_entry_distance_guard,
     evaluate_threshold_sensitivity,
     min_gap_pts,
     ready_dwell_entry_live_enabled,
     soft_hide_reason,
 )
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _stock(**kwargs):
+    base = {
+        "symbol": "TEST",
+        "direction": "LONG",
+        "in_lock": True,
+        "_pre_stack_state": STATE_READY,
+        "trade_state": STATE_READY,
+        "trade_entry": 100.0,
+        "trade_sl": 90.0,
+        "trade_risk_inr": 500,
+        "trade_rr": 2.0,
+        "trade_lot": 50,
+        "live_candle_ema5": 100.0,
+        "live_candle_ema10": 90.0,
+        "live_candle_price": 100.0,
+        "trade_entry_window_open": True,
+        "gate_badges": [],
+    }
+    base.update(kwargs)
+    return base
+
+
+def _apply(monkeypatch, stocks, *, since=None, now=None, live=True):
+    if live:
+        monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
+        monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "B")
+    else:
+        monkeypatch.delenv("READY_DWELL_ENTRY_LIVE", raising=False)
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._load_shadow_since",
+        lambda *_a, **_k: since,
+    )
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._upsert_shadow_state",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_trade_state.entry_window_open_ist",
+        lambda: True,
+    )
+    clock = now or IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    return apply_ready_dwell_entry_live(
+        stocks,
+        db=MagicMock(),
+        session_date="2026-07-22",
+        candle_cache={},
+        lot_cache={"TEST": 50},
+        atr_pct_map={"TEST": 1.0},
+        nifty_pct=0.0,
+        now=clock,
+    )
 
 
 def test_live_flip_default_off(monkeypatch):
@@ -148,3 +213,110 @@ def test_live_option_env_override(monkeypatch):
     from backend.services.ready_dwell_entry_shadow import live_distance_option
 
     assert live_distance_option() == "A"
+
+
+def test_live_starts_dwell_when_ready(monkeypatch):
+    s = _stock()
+    stats = _apply(monkeypatch, [s], since=None)
+    assert stats["dwell_started"] == 1
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY
+    assert s["trade_take_enabled"] is True
+    assert s.get("ready_visible_since")
+
+
+def test_live_soft_warning_stack_holds_card_disables_take(monkeypatch):
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))  # 5m elapsed
+    s = _stock(
+        trade_state=STATE_WAIT,
+        zone_downgrade="warning_stack",
+        trade_state_reason="WAIT · warning stack (CHURN+REGIME UNSTABLE)",
+        trade_take_enabled=False,
+    )
+    stats = _apply(monkeypatch, [s], since=since, now=now)
+    assert stats["dwell_soft_kept"] == 1
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY
+    assert s["trade_take_enabled"] is False
+    assert s.get("dwell_soft_hold") is True
+
+
+def test_live_distance_mid_dwell_keeps_card(monkeypatch):
+    """Post-live under-10m vanish cause: distance must not remove card inside floor."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    # Gap too thin for Option B (500/lot=10 on lot 50 → floor 10; gap=5)
+    s = _stock(
+        live_candle_ema5=100.0,
+        live_candle_ema10=95.0,
+        live_candle_price=100.0,
+        trade_entry=100.0,
+        trade_sl=95.0,
+    )
+    stats = _apply(monkeypatch, [s], since=since, now=now)
+    assert stats["distance_dwell_held"] == 1
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY
+    assert s["trade_take_enabled"] is False
+    assert s.get("zone_downgrade") == "entry_distance"
+
+
+def test_live_distance_first_poll_still_suppresses(monkeypatch):
+    s = _stock(
+        live_candle_ema5=100.0,
+        live_candle_ema10=95.0,
+        live_candle_price=100.0,
+        trade_entry=100.0,
+        trade_sl=95.0,
+    )
+    stats = _apply(monkeypatch, [s], since=None)
+    assert stats["distance_blocked"] == 1
+    assert s["card_visible"] is False
+    assert s["trade_state"] == STATE_WAIT
+
+
+def test_live_natural_leave_inside_floor_keeps_card(monkeypatch):
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    s = _stock(
+        trade_state=STATE_WAIT,
+        _pre_stack_state=STATE_WAIT,
+        trade_state_reason="WAIT · grade decay",
+        trade_take_enabled=False,
+    )
+    stats = _apply(monkeypatch, [s], since=since, now=now)
+    assert stats["dwell_natural_kept"] == 1
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY
+    assert s["trade_take_enabled"] is False
+
+
+def test_live_ema10_hard_hides_inside_floor(monkeypatch):
+    """Confirmed EMA10 close reverse: hide early (misleading to keep READY NOW)."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    s = _stock()
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow.hard_invalidate_reason",
+        lambda *a, **k: ("ema10_close", {"beyond": True}),
+    )
+    stats = _apply(monkeypatch, [s], since=since, now=now)
+    assert s["card_visible"] is False
+    assert s["trade_state"] == STATE_WAIT
+    assert s.get("ready_visible_since") is None
+    assert stats.get("dwell_soft_kept", 0) == 0
+
+
+def test_live_soft_after_floor_allows_removal(monkeypatch):
+    since = IST.localize(datetime(2026, 7, 22, 10, 45, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))  # 15m elapsed
+    s = _stock(
+        trade_state=STATE_WAIT,
+        zone_downgrade="warning_stack",
+        trade_state_reason="WAIT · warning stack",
+        trade_take_enabled=False,
+    )
+    _apply(monkeypatch, [s], since=since, now=now)
+    assert s["card_visible"] is False
+    assert s["trade_state"] == STATE_WAIT
