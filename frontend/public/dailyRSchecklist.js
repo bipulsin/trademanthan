@@ -13,6 +13,12 @@
     var lastAdxRecheckAlertKey = null;
     var lastGoAlertKey = null;
     var goAlertEnabled = false;
+    /** Symbols currently in live READY NOW that already triggered the sound this episode. */
+    var readyNowAlerted = {};
+    var readyNowAlertEnabled = false;
+    var readyNowAudio = null;
+    var readyNowAudioUnlocked = false;
+    var readyNowAlertsPrimed = false;
 
     var AUTO_FIELDS = [
         "entry_time", "kavach_score_entry", "confidence", "trading_state",
@@ -323,6 +329,95 @@
             lastGoAlertKey = key;
             playGoAlert();
         });
+    }
+
+    function ensureReadyNowAudio() {
+        if (!readyNowAudio) {
+            readyNowAudio = new Audio("audio/ready_now.mp3");
+            readyNowAudio.preload = "auto";
+        }
+        return readyNowAudio;
+    }
+
+    function unlockReadyNowAudio() {
+        if (readyNowAudioUnlocked) return;
+        try {
+            var a = ensureReadyNowAudio();
+            a.muted = true;
+            var p = a.play();
+            if (p && typeof p.then === "function") {
+                p.then(function () {
+                    a.pause();
+                    a.currentTime = 0;
+                    a.muted = false;
+                    readyNowAudioUnlocked = true;
+                    var ban = $("dcReadyNowAckBanner");
+                    if (ban) ban.hidden = true;
+                }).catch(function () {
+                    a.muted = false;
+                });
+            } else {
+                a.muted = false;
+                readyNowAudioUnlocked = true;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function playReadyNowAlert() {
+        if (!readyNowAlertEnabled) return;
+        try {
+            var a = ensureReadyNowAudio();
+            a.muted = false;
+            a.currentTime = 0;
+            var p = a.play();
+            if (p && typeof p.then === "function") {
+                p.then(function () {
+                    readyNowAudioUnlocked = true;
+                    var ban = $("dcReadyNowAckBanner");
+                    if (ban) ban.hidden = true;
+                }).catch(function () {
+                    var ban = $("dcReadyNowAckBanner");
+                    if (ban) ban.hidden = false;
+                });
+            }
+        } catch (e) { /* muted */ }
+    }
+
+    /**
+     * Fresh READY NOW card appearance only (same render path as GO alerts).
+     * Plays once when a symbol newly enters live READY NOW; silent while it stays READY;
+     * clears on leave so a later re-appearance can alert again.
+     * First render after page load only seeds (no sound) to avoid refresh storms.
+     */
+    function checkReadyNowAlerts(stocks) {
+        if (!stocks) return;
+        var windowOpen = entryWindowOpenIST();
+        var afterClose = afterSquareOffIST();
+        var live = {};
+        stocks.forEach(function (s) {
+            if (!isReadyState(s.trade_state)) return;
+            if (!windowOpen || afterClose) return;
+            if (s.trade_state === "EXPIRED" || s.trade_expiry_crossed) return;
+            var sym = s.symbol;
+            if (!sym) return;
+            live[sym] = true;
+        });
+        if (!readyNowAlertsPrimed) {
+            Object.keys(live).forEach(function (sym) { readyNowAlerted[sym] = true; });
+            readyNowAlertsPrimed = true;
+            return;
+        }
+        var fresh = [];
+        Object.keys(live).forEach(function (sym) {
+            if (!readyNowAlerted[sym]) {
+                readyNowAlerted[sym] = true;
+                fresh.push(sym);
+            }
+        });
+        Object.keys(readyNowAlerted).forEach(function (sym) {
+            if (!live[sym]) delete readyNowAlerted[sym];
+        });
+        if (readyNowAlertEnabled && fresh.length) playReadyNowAlert();
     }
 
     function fmtIstAmPm(totalMinutes) {
@@ -1636,6 +1731,7 @@
         renderGoBoard();
         renderFastWatch();
         checkGoAlerts(stocks);
+        checkReadyNowAlerts(stocks);
 
         if (modalSymbol) renderModal(currentStock(modalSymbol));
     }
@@ -2191,6 +2287,15 @@
             goAlertEnabled = !!s.checklist_config.go_alert_sound_enabled;
             $("dcGoAlertSound").checked = goAlertEnabled;
         }
+        if (
+            s.checklist_config
+            && $("dcReadyNowAlertSound")
+            && localStorage.getItem("dc_ready_now_alert_sound") == null
+        ) {
+            // Same default as GO alert (config flag, else off).
+            readyNowAlertEnabled = !!s.checklist_config.go_alert_sound_enabled;
+            $("dcReadyNowAlertSound").checked = readyNowAlertEnabled;
+        }
         try { localStorage.setItem(lsKey(), JSON.stringify(s)); } catch (e) {}
         render();
     }
@@ -2535,6 +2640,37 @@
                 } catch (e) { /* ignore */ }
             });
         }
+        var readyNowAlertEl = $("dcReadyNowAlertSound");
+        if (readyNowAlertEl) {
+            try {
+                var rnLs = localStorage.getItem("dc_ready_now_alert_sound");
+                if (rnLs == null) {
+                    // Match GO default when user has never set READY NOW toggle.
+                    readyNowAlertEnabled = localStorage.getItem("dc_go_alert_sound") === "1";
+                } else {
+                    readyNowAlertEnabled = rnLs === "1";
+                }
+            } catch (e) { readyNowAlertEnabled = false; }
+            readyNowAlertEl.checked = readyNowAlertEnabled;
+            readyNowAlertEl.addEventListener("change", function () {
+                readyNowAlertEnabled = !!this.checked;
+                try {
+                    localStorage.setItem("dc_ready_now_alert_sound", readyNowAlertEnabled ? "1" : "0");
+                } catch (e) { /* ignore */ }
+                if (readyNowAlertEnabled) unlockReadyNowAudio();
+            });
+        }
+        var readyNowAckBtn = $("dcReadyNowAckBtn");
+        if (readyNowAckBtn) {
+            readyNowAckBtn.addEventListener("click", function () {
+                unlockReadyNowAudio();
+                playReadyNowAlert();
+            });
+        }
+        // One gesture unlocks HTMLAudio for later READY NOW cues (autoplay policy).
+        document.addEventListener("click", function () {
+            if (readyNowAlertEnabled) unlockReadyNowAudio();
+        }, { once: true, capture: true });
         var ackBtn = $("dcExitAckBtn");
         if (ackBtn) {
             ackBtn.addEventListener("click", function () {
