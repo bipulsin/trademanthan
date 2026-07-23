@@ -652,6 +652,8 @@ def list_shadow_source(
             "session_date": sd,
             "rows": [],
         }
+    if key == "consistency":
+        ensure_ready_consistency_log()
     db = SessionLocal()
     try:
         rows = db.execute(
