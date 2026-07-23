@@ -583,3 +583,31 @@ def test_atr_consumed_logged_on_ready_no_gating():
     ac = out["atr_consumed"]
     assert ac["atr_consumed_pct_from_open"] is not None
     assert any(str(b).startswith("ATR ") for b in (out["gate_badges"] or []))
+
+
+def test_i8b_stretch_bang_grade_not_ready_eligible():
+    """Pine gradeReadyLevel excludes A!/B! — checklist READY must match."""
+    from backend.services.daily_checklist_trade_state import _grade_ok, _norm_grade
+
+    assert _norm_grade("A!") == "A!"
+    assert _norm_grade("B!") == "B!"
+    assert _norm_grade("A") == "A"
+    assert _norm_grade("B*") == "B"
+    assert _grade_ok("A!") is False
+    assert _grade_ok("B!") is False
+    assert _grade_ok("A") is True
+    assert _grade_ok("B") is True
+
+    out = _compute(levels={"confidence_grade": "A!"})
+    assert out["trade_state"] != STATE_READY
+    reason = (out.get("trade_state_reason") or "").lower()
+    assert "conf" in reason
+
+
+def test_i8c_macd_label_uses_line_vs_signal():
+    """DIR CONFLICT / panel MACD follows Pine Votes (line vs signal), not histogram."""
+    from backend.services.daily_checklist import _macd_label
+
+    assert _macd_label(macd=1.0, sig=2.0, hist=0.5) == "Bearish"
+    assert _macd_label(macd=2.0, sig=1.0, hist=-0.5) == "Bullish"
+    assert _macd_label(macd=1.0, sig=0.5, hist=0.001) == "Bullish"

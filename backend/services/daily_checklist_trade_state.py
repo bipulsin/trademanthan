@@ -687,7 +687,7 @@ _STATE_SORT = {
     STATE_BLOCKED: 4,
 }
 
-_GRADE_RANK = {"A+": 0, "A": 1, "B": 2, "C": 3, "C*": 3, "D": 4}
+_GRADE_RANK = {"A+": 0, "A": 1, "B": 2, "C": 3, "C*": 3, "D": 4, "A!": 5, "A+!": 5, "B!": 6, "C!": 7, "D!": 8}
 
 
 def _f(v: Any) -> Optional[float]:
@@ -700,22 +700,34 @@ def _f(v: Any) -> Optional[float]:
 
 
 def _norm_grade(raw: Optional[str]) -> str:
-    g = (raw or "").strip().upper().replace("*", "")
-    if g.startswith("A+"):
-        return "A+"
-    if g.startswith("A"):
-        return "A"
-    if g.startswith("B"):
-        return "B"
-    if g.startswith("C"):
-        return "C"
-    if g.startswith("D"):
-        return "D"
-    return g or ""
+    """Normalize grade letter; preserve stretch ``!`` (Pine gradeReadyLevel excludes it)."""
+    g = (raw or "").strip().upper()
+    has_bang = "!" in g
+    core = g.replace("!", "").replace("*", "").replace("⋆", "")
+    if core.startswith("A+"):
+        letter = "A+"
+    elif core.startswith("A"):
+        letter = "A"
+    elif core.startswith("B"):
+        letter = "B"
+    elif core.startswith("C"):
+        letter = "C"
+    elif core.startswith("D"):
+        letter = "D"
+    else:
+        letter = core or ""
+    if has_bang and letter:
+        return f"{letter}!"
+    return letter
 
 
 def _grade_ok(grade: str) -> bool:
-    return grade in ("A+", "A", "B")
+    """Pine gradeReadyLevel ≥ 1: exact A+/A/B/B* only — stretch ``!`` is not READY-eligible."""
+    g = (grade or "").strip().upper()
+    if "!" in g:
+        return False
+    base = g.replace("*", "").replace("⋆", "")
+    return base in ("A+", "A", "B")
 
 
 def _regime_ok(regime: Optional[str]) -> bool:

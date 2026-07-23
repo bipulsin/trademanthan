@@ -91,3 +91,78 @@ def test_vol_decel_helper():
 
 def test_pullback_empty_candles():
     assert count_nearer_pullbacks([], session_date="2026-07-20") == (0, 0)
+
+
+def test_i8a_buy_eligible_overrides_kavach_state():
+    """Pine kavachDirLong = buyEligible, not BULLISH_STATES alone."""
+    r = classify_kavach_readiness(
+        confidence_display="A",
+        trade_score=88,
+        panel_trend="Mixed",
+        kavach_state="BUY",
+        pct_from_open=1.0,
+        pullback_long=0,
+        pullback_short=0,
+        volume_ratio_for_enter=1.2,
+        vol_decel_3=False,
+        buy_eligible=False,
+        sell_eligible=False,
+    )
+    assert r["dir_long"] is False
+    assert r["dir_short"] is False
+    assert r["readiness"] == "WATCHING"
+
+    r2 = classify_kavach_readiness(
+        confidence_display="A",
+        trade_score=88,
+        panel_trend="Mixed",
+        kavach_state="SELL",
+        pct_from_open=1.0,
+        pullback_long=0,
+        pullback_short=0,
+        volume_ratio_for_enter=1.2,
+        vol_decel_3=False,
+        buy_eligible=True,
+        sell_eligible=False,
+    )
+    assert r2["dir_long"] is True
+    assert r2["readiness"] == "READY TO LONG"
+
+
+def test_pine_layer3_eligible_requires_vwap_streak():
+    from backend.services.kavach_readiness import pine_layer3_eligible
+
+    out = pine_layer3_eligible(
+        close=105.0,
+        vwap=100.0,
+        panel_ema=104.0,
+        prev_panel_ema=103.5,
+        prev_vwap=100.0,
+        macd=2.0,
+        macd_signal=1.0,
+        macd_histogram=1.0,
+        st_bullish=True,
+        closes_10m=[99.0, 105.0],
+        vwaps_at_10m=[100.0, 100.0],
+        vwap_confirm_bars=2,
+    )
+    assert out["buy_signal_count"] >= 2
+    assert out["buy_vwap_confirmed"] is False
+    assert out["buy_eligible"] is False
+
+    out2 = pine_layer3_eligible(
+        close=105.0,
+        vwap=100.0,
+        panel_ema=104.0,
+        prev_panel_ema=103.5,
+        prev_vwap=100.0,
+        macd=2.0,
+        macd_signal=1.0,
+        macd_histogram=1.0,
+        st_bullish=True,
+        closes_10m=[101.0, 105.0],
+        vwaps_at_10m=[100.0, 100.0],
+        vwap_confirm_bars=2,
+    )
+    assert out2["buy_vwap_confirmed"] is True
+    assert out2["buy_eligible"] is True

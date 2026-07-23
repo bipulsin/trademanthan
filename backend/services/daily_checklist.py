@@ -409,15 +409,15 @@ def _supertrend_label(st: Optional[float]) -> Optional[str]:
 def _macd_label(
     macd: Optional[float], sig: Optional[float], hist: Optional[float]
 ) -> Optional[str]:
-    """Kavach panel MACD: histogram green/red (checklist spec); Crossing near zero."""
+    """Pine Votes 3/3 MACD: line vs signal (macdLineAboveSignal / Below).
+
+    Histogram is fallback only when line/signal are missing (legacy rows).
+    """
+    if macd is not None and sig is not None:
+        return "Bullish" if float(macd) > float(sig) else "Bearish"
     if hist is not None:
-        ref = max(abs(macd or 0.0), abs(sig or 0.0), 1.0)
-        if abs(hist) < ref * 0.03:
-            return "Crossing"
-        return "Bullish" if hist > 0 else "Bearish"
-    if macd is None or sig is None:
-        return None
-    return "Bullish" if macd > sig else "Bearish"
+        return "Bullish" if float(hist) > 0 else "Bearish"
+    return None
 
 
 def _volume_label(ratio: Optional[float], label: Optional[str] = None) -> Optional[str]:

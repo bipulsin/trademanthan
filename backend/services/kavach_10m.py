@@ -368,6 +368,38 @@ def metrics_from_10m_candles(
     else:
         panel_trend = "Mixed"
 
+    # Session VWAP at each 10m bar end (for Layer-3 VWAP close streak).
+    vwaps_at_10m: List[float] = []
+    for b in bars_10m:
+        end_idx = int(b["end_5m_idx"])
+        if end_idx < first_today:
+            vwaps_at_10m.append(float(closes_10m[len(vwaps_at_10m)]) if closes_10m else closed_price)
+            continue
+        th = [_f(c.get("high")) for c in candles[first_today : end_idx + 1]]
+        tl = [_f(c.get("low")) for c in candles[first_today : end_idx + 1]]
+        tc = [_f(c.get("close")) for c in candles[first_today : end_idx + 1]]
+        tv = [_f(c.get("volume")) for c in candles[first_today : end_idx + 1]]
+        vs = cumulative_vwap(th, tl, tc, tv) if tc else [closed_price]
+        vwaps_at_10m.append(float(vs[-1]))
+
+    panel_ema_prev = panel_ema_s[-2] if len(panel_ema_s) >= 2 else panel_ema
+    vwap_at_prev_10m = vwaps_at_10m[-2] if len(vwaps_at_10m) >= 2 else vwap
+    from backend.services.kavach_readiness import pine_layer3_eligible
+
+    layer3 = pine_layer3_eligible(
+        close=closed_price,
+        vwap=float(vwap),
+        panel_ema=float(panel_ema),
+        prev_panel_ema=float(panel_ema_prev),
+        prev_vwap=float(vwap_at_prev_10m),
+        macd=float(macd),
+        macd_signal=float(macd_signal),
+        macd_histogram=float(macd_hist),
+        st_bullish=st_curr,
+        closes_10m=closes_10m,
+        vwaps_at_10m=vwaps_at_10m,
+    )
+
     return {
         "relative_strength": relative_strength,
         "trade_score": trade_score,
@@ -403,6 +435,10 @@ def metrics_from_10m_candles(
         "include_forming": bool(include_forming),
         "forming": bool(last_bar.get("forming")),
         "panel_trend": panel_trend,
+        "buy_eligible": layer3["buy_eligible"],
+        "sell_eligible": layer3["sell_eligible"],
+        "buy_signal_count": layer3["buy_signal_count"],
+        "sell_signal_count": layer3["sell_signal_count"],
         "pine_params": {
             "st_period": PINE_ST_PERIOD,
             "st_mult": PINE_ST_MULT,

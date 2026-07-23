@@ -19,6 +19,101 @@ PULLBACK_RESET_BARS = 3
 PANEL_EMA_LEN = 9
 EXIT_EMA_LEN = 10
 
+# Pine Layer 3 — Trade Eligibility (defaults match TWCTO_Kavach_v3_0 inputs).
+MIN_EMA_VWAP_CONFIRM_GAP_PCT = 0.15
+MAX_PREV_EMA_VWAP_GAP_PCT = 0.50
+VWAP_CLOSE_CONFIRM_BARS = 2
+
+
+def pine_layer3_eligible(
+    *,
+    close: float,
+    vwap: float,
+    panel_ema: float,
+    prev_panel_ema: float,
+    prev_vwap: float,
+    macd: float,
+    macd_signal: float,
+    macd_histogram: float,
+    st_bullish: Optional[bool],
+    closes_10m: List[float],
+    vwaps_at_10m: List[float],
+    min_gap_pct: float = MIN_EMA_VWAP_CONFIRM_GAP_PCT,
+    max_prev_gap_pct: float = MAX_PREV_EMA_VWAP_GAP_PCT,
+    vwap_confirm_bars: int = VWAP_CLOSE_CONFIRM_BARS,
+) -> Dict[str, Any]:
+    """Pine ``buyEligible`` / ``sellEligible`` (signal count ≥2 + VWAP close streak)."""
+    if vwap is None or not vwap:
+        return {
+            "buy_eligible": False,
+            "sell_eligible": False,
+            "buy_signal_count": 0,
+            "sell_signal_count": 0,
+            "buy_vwap_confirmed": False,
+            "sell_vwap_confirmed": False,
+        }
+
+    macd_hist_pos = float(macd_histogram) > 0
+    macd_hist_neg = float(macd_histogram) < 0
+    macd_line_above = float(macd) > float(macd_signal)
+    macd_line_below = float(macd) < float(macd_signal)
+    st_bull = st_bullish is True
+    st_bear = st_bullish is False
+
+    ema_gap_pct = (float(panel_ema) - float(vwap)) / float(vwap) * 100.0
+    prev_gap_pct = (
+        (float(prev_panel_ema) - float(prev_vwap)) / float(prev_vwap) * 100.0
+        if prev_vwap
+        else 0.0
+    )
+
+    buy_sign1 = macd_hist_pos and macd_line_above
+    buy_sign2 = st_bull
+    buy_sign3 = float(close) > float(panel_ema) and float(close) > float(vwap)
+    buy_sign4 = ema_gap_pct >= min_gap_pct and abs(prev_gap_pct) <= max_prev_gap_pct
+    buy_count = sum(1 for s in (buy_sign1, buy_sign2, buy_sign3, buy_sign4) if s)
+
+    sell_sign1 = macd_hist_neg and macd_line_below
+    sell_sign2 = st_bear
+    sell_sign3 = float(close) < float(panel_ema) and float(close) < float(vwap)
+    sell_sign4 = (-ema_gap_pct) >= min_gap_pct and abs(prev_gap_pct) <= max_prev_gap_pct
+    sell_count = sum(1 for s in (sell_sign1, sell_sign2, sell_sign3, sell_sign4) if s)
+
+    n = min(len(closes_10m), len(vwaps_at_10m))
+    buy_streak = 0
+    sell_streak = 0
+    if n > 0 and float(closes_10m[-1]) > float(vwaps_at_10m[-1]):
+        buy_streak = 1
+        for i in range(1, vwap_confirm_bars):
+            if n - 1 - i < 0:
+                break
+            if float(closes_10m[-1 - i]) > float(vwaps_at_10m[-1 - i]):
+                buy_streak += 1
+            else:
+                break
+    if n > 0 and float(closes_10m[-1]) < float(vwaps_at_10m[-1]):
+        sell_streak = 1
+        for i in range(1, vwap_confirm_bars):
+            if n - 1 - i < 0:
+                break
+            if float(closes_10m[-1 - i]) < float(vwaps_at_10m[-1 - i]):
+                sell_streak += 1
+            else:
+                break
+
+    buy_vwap_ok = buy_streak >= vwap_confirm_bars
+    sell_vwap_ok = sell_streak >= vwap_confirm_bars
+    return {
+        "buy_eligible": buy_count >= 2 and buy_vwap_ok,
+        "sell_eligible": sell_count >= 2 and sell_vwap_ok,
+        "buy_signal_count": buy_count,
+        "sell_signal_count": sell_count,
+        "buy_vwap_confirmed": buy_vwap_ok,
+        "sell_vwap_confirmed": sell_vwap_ok,
+        "buy_vwap_streak": buy_streak,
+        "sell_vwap_streak": sell_streak,
+    }
+
 
 def _grade_ready_level(confidence_display: str) -> int:
     """Pine gradeReadyLevel — stretch-marked A!/B! do not qualify (exact match)."""
@@ -172,16 +267,27 @@ def classify_kavach_readiness(
     pullback_short: int,
     volume_ratio_for_enter: Optional[float],
     vol_decel_3: bool,
+    buy_eligible: Optional[bool] = None,
+    sell_eligible: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """Return Pine v3.0 readiness text + gate flags."""
+    """Return Pine v3.0 readiness text + gate flags.
+
+    Direction mirrors Pine: ``kavachDirLong = buyEligible`` (Layer 3), with
+    ``trendReadBullish`` as OR fallback. When eligibility is not supplied,
+    falls back to ``kavach_state ∈ BULLISH/BEARISH`` (legacy).
+    """
     grade_lvl = _grade_ready_level(confidence_display)
     score = float(trade_score or 0)
 
     trend_bull = (panel_trend or "") == "Bullish"
     trend_bear = (panel_trend or "") == "Bearish"
     kav = (kavach_state or "").upper()
-    kavach_long = kav in BULLISH_STATES
-    kavach_short = kav in BEARISH_STATES
+    if buy_eligible is not None or sell_eligible is not None:
+        kavach_long = bool(buy_eligible)
+        kavach_short = bool(sell_eligible)
+    else:
+        kavach_long = kav in BULLISH_STATES
+        kavach_short = kav in BEARISH_STATES
     dir_long = kavach_long or trend_bull
     dir_short = kavach_short or trend_bear
 
@@ -212,6 +318,8 @@ def classify_kavach_readiness(
         "grade_ready_level": grade_lvl,
         "dir_long": dir_long,
         "dir_short": dir_short,
+        "buy_eligible": buy_eligible,
+        "sell_eligible": sell_eligible,
         "pct_from_open": pct,
         "pct_long_ok": pct_long_ok,
         "pct_short_ok": pct_short_ok,
@@ -302,6 +410,8 @@ def attach_readiness_to_stock(
         pullback_short=pb_short,
         volume_ratio_for_enter=vol_ratio,
         vol_decel_3=decel,
+        buy_eligible=(metrics or {}).get("buy_eligible"),
+        sell_eligible=(metrics or {}).get("sell_eligible"),
     )
     stock["pine_readiness"] = result["readiness"]
     stock["pine_readiness_detail"] = result
