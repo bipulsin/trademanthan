@@ -129,9 +129,10 @@ def persist_vwap_touch_reject(
         direction=lock_direction, high=high, low=low, close=close, vwap=vwap
     )
     # Log all lock bars (True and False) so absence ≠ not computed; filter True offline.
+    # Do NOT call ensure_vwap_touch_reject_table() here: DDL (CREATE INDEX) while
+    # ``db`` holds an open transaction deadlocks against itself on multi-bar writes.
     sd = bar_at.strftime("%Y-%m-%d")
     try:
-        ensure_vwap_touch_reject_table()
         db.execute(
             _INSERT,
             {
