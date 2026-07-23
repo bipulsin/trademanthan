@@ -2159,6 +2159,46 @@ def enrich_stocks_trade_state(
             logger.debug("vwap close-confirm shadow skipped: %s", exc)
             vwap_close_confirm_stats = {}
 
+        # Shadow-only: Watching∩Grade A/A+ appearance counter + leave-reason log.
+        watching_grade_a_stats: Dict[str, int] = {}
+        try:
+            from backend.services.kavach_watching_shadow import (
+                update_watching_grade_a_shadow,
+            )
+
+            watching_grade_a_stats = update_watching_grade_a_shadow(
+                db,
+                session_date=session_date,
+                stocks=stocks,
+                lock_map=lock_map if isinstance(lock_map, dict) else None,
+                source="live",
+            )
+            if any(int(watching_grade_a_stats.get(k) or 0) for k in ("started", "ended", "touched")):
+                db.commit()
+        except Exception as exc:
+            logger.debug("watching grade A shadow skipped: %s", exc)
+            watching_grade_a_stats = {}
+
+        # Shadow-only: READY episode exit PnL vs mechanical exit+4×10m.
+        ready_exit_plus4_stats: Dict[str, int] = {}
+        try:
+            from backend.services.kavach_ready_exit_plus4_shadow import (
+                update_ready_exit_plus4_shadow,
+            )
+
+            ready_exit_plus4_stats = update_ready_exit_plus4_shadow(
+                db,
+                session_date=session_date,
+                stocks=stocks,
+                candles_by_symbol=candle_cache,
+                source="live",
+            )
+            if any(int(ready_exit_plus4_stats.get(k) or 0) for k in ("started", "ended", "touched")):
+                db.commit()
+        except Exception as exc:
+            logger.debug("ready exit+4 shadow skipped: %s", exc)
+            ready_exit_plus4_stats = {}
+
         if consistency_rows:
             log_ready_consistency(db, consistency_rows)
 
@@ -2192,6 +2232,8 @@ def enrich_stocks_trade_state(
             "badge_input_logged": badge_logged,
             "dwell_entry_live": dwell_live_stats,
             "vwap_close_confirm_shadow": vwap_close_confirm_stats,
+            "watching_grade_a_shadow": watching_grade_a_stats,
+            "ready_exit_plus4_shadow": ready_exit_plus4_stats,
             **mkt,
             **zone1_early,
         }

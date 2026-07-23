@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     r_realized DOUBLE PRECISION,
     bars_held_10m INTEGER,
     exit_trigger TEXT,
+    exit_trigger_type TEXT,
     notes TEXT,
     source TEXT DEFAULT 'manual',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -63,6 +64,9 @@ CREATE INDEX IF NOT EXISTS idx_trade_log_session
 ON {TABLE} (session_date DESC, symbol)
 """
 
+# Permanent classifier for rule-driven vs manual exits (research / backtests).
+EXIT_TRIGGER_TYPES = ("rule_compliant", "discretionary")
+
 _UPSERT = text(
     f"""
     INSERT INTO {TABLE} (
@@ -74,7 +78,7 @@ _UPSERT = text(
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
         confidence_at_exit, trade_score_at_exit,
         mfe_r, mae_r, r_realized, bars_held_10m,
-        exit_trigger, notes, source, updated_at
+        exit_trigger, exit_trigger_type, notes, source, updated_at
     ) VALUES (
         CAST(:session_date AS date), :symbol, :contract, :direction, :qty,
         CAST(:entry_time AS time), :entry_price, CAST(:exit_time AS time),
@@ -85,7 +89,7 @@ _UPSERT = text(
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
         :confidence_at_exit, :trade_score_at_exit,
         :mfe_r, :mae_r, :r_realized, :bars_held_10m,
-        :exit_trigger, :notes, :source, NOW()
+        :exit_trigger, :exit_trigger_type, :notes, :source, NOW()
     )
     ON CONFLICT (session_date, symbol, direction, entry_time) DO UPDATE SET
         contract = EXCLUDED.contract,
@@ -113,6 +117,7 @@ _UPSERT = text(
         r_realized = COALESCE(EXCLUDED.r_realized, {TABLE}.r_realized),
         bars_held_10m = COALESCE(EXCLUDED.bars_held_10m, {TABLE}.bars_held_10m),
         exit_trigger = COALESCE(EXCLUDED.exit_trigger, {TABLE}.exit_trigger),
+        exit_trigger_type = COALESCE(EXCLUDED.exit_trigger_type, {TABLE}.exit_trigger_type),
         notes = COALESCE(EXCLUDED.notes, {TABLE}.notes),
         source = EXCLUDED.source,
         updated_at = NOW()
@@ -132,6 +137,26 @@ def ensure_trade_log_table() -> None:
                 "ADD COLUMN IF NOT EXISTS entry_to_ema10_buffer_pct DOUBLE PRECISION"
             )
         )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS exit_trigger_type TEXT"
+            )
+        )
+
+
+def normalize_exit_trigger_type(val: Any) -> Optional[str]:
+    if val is None or val == "":
+        return None
+    s = str(val).strip().lower().replace("-", "_").replace(" ", "_")
+    if s in ("rule", "rule_compliant", "compliant"):
+        return "rule_compliant"
+    if s in ("discretionary", "manual", "discretion"):
+        return "discretionary"
+    if s in EXIT_TRIGGER_TYPES:
+        return s
+    return s  # allow forward-compatible labels; callers should prefer the enum
+
 
 
 def compute_entry_to_ema10_buffer_pct(
@@ -236,6 +261,7 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         "r_realized": _f(payload.get("r_realized")),
         "bars_held_10m": int(payload["bars_held_10m"]) if payload.get("bars_held_10m") is not None else None,
         "exit_trigger": payload.get("exit_trigger"),
+        "exit_trigger_type": normalize_exit_trigger_type(payload.get("exit_trigger_type")),
         "notes": payload.get("notes"),
         "source": payload.get("source") or "manual",
     }

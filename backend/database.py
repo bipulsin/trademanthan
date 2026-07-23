@@ -1160,6 +1160,37 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 except Exception:
                     pass
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS exit_trigger_type TEXT"
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS trade_session_log (
+                                session_date DATE PRIMARY KEY,
+                                trades_taken_count INTEGER NOT NULL DEFAULT 0,
+                                last_exit_time TIME,
+                                entry_window_remaining_at_last_exit BOOLEAN,
+                                entry_window_remaining_minutes INTEGER,
+                                session_end_reason TEXT,
+                                net_pnl_at_session_end DOUBLE PRECISION,
+                                notes TEXT,
+                                source TEXT DEFAULT 'manual',
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                except Exception:
+                    pass
 
             # Shadow-only VWAP touch-reject candle log (research; no live gate).
             if db_engine.dialect.name == "postgresql":
@@ -1266,6 +1297,126 @@ def _run_startup_schema_migrations(db_engine):
                         text(
                             "CREATE INDEX IF NOT EXISTS idx_kavach_vwap_close_confirm_session "
                             "ON kavach_vwap_close_confirm_shadow (session_date DESC, symbol)"
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if "kavach_watching_grade_a_counter" not in table_names:
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS kavach_watching_grade_a_counter (
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                contract_month TEXT NOT NULL,
+                                appearance_seq INTEGER NOT NULL DEFAULT 0,
+                                cycle_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                first_seen_at TIMESTAMPTZ,
+                                last_seen_at TIMESTAMPTZ,
+                                last_session_date DATE,
+                                last_grade TEXT,
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                PRIMARY KEY (symbol, direction, contract_month)
+                            )
+                            """
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if "kavach_watching_grade_a_episode" not in table_names:
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS kavach_watching_grade_a_episode (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                contract_month TEXT NOT NULL,
+                                appearance_seq INTEGER NOT NULL,
+                                entered_at TIMESTAMPTZ NOT NULL,
+                                grade_at_enter TEXT,
+                                pine_readiness_at_enter TEXT,
+                                left_at TIMESTAMPTZ,
+                                leave_reason TEXT,
+                                grade_at_leave TEXT,
+                                pine_readiness_at_leave TEXT,
+                                trade_state_at_leave TEXT,
+                                in_lock_at_leave BOOLEAN,
+                                source TEXT DEFAULT 'live',
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_watching_grade_a_episode_open "
+                            "ON kavach_watching_grade_a_episode (session_date, symbol) "
+                            "WHERE left_at IS NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_watching_grade_a_episode_leave "
+                            "ON kavach_watching_grade_a_episode (session_date DESC, symbol) "
+                            "WHERE left_at IS NOT NULL"
+                        )
+                    )
+                except Exception:
+                    pass
+
+            if "kavach_ready_exit_plus4_shadow" not in table_names:
+                try:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS kavach_ready_exit_plus4_shadow (
+                                id BIGSERIAL PRIMARY KEY,
+                                session_date DATE NOT NULL,
+                                symbol TEXT NOT NULL,
+                                direction TEXT NOT NULL,
+                                contract_month TEXT,
+                                appearance_note TEXT,
+                                episode_started_at TIMESTAMPTZ NOT NULL,
+                                entry_price DOUBLE PRECISION,
+                                episode_ended_at TIMESTAMPTZ,
+                                exit_price DOUBLE PRECISION,
+                                exit_at TIMESTAMPTZ,
+                                pnl_pts_standard DOUBLE PRECISION,
+                                pnl_inr_standard DOUBLE PRECISION,
+                                lot_size INTEGER,
+                                extended_exit_price DOUBLE PRECISION,
+                                extended_exit_at TIMESTAMPTZ,
+                                plus4_candles_used INTEGER,
+                                pnl_pts_plus4 DOUBLE PRECISION,
+                                pnl_inr_plus4 DOUBLE PRECISION,
+                                delta_pts_plus4_vs_standard DOUBLE PRECISION,
+                                delta_inr_plus4_vs_standard DOUBLE PRECISION,
+                                episode_end_reason TEXT,
+                                was_traded BOOLEAN DEFAULT FALSE,
+                                trade_log_id BIGINT,
+                                source TEXT DEFAULT 'live',
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_ready_exit_plus4_open "
+                            "ON kavach_ready_exit_plus4_shadow (session_date, symbol) "
+                            "WHERE episode_ended_at IS NULL"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS idx_kavach_ready_exit_plus4_session "
+                            "ON kavach_ready_exit_plus4_shadow (session_date DESC, symbol)"
                         )
                     )
                 except Exception:
