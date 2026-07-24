@@ -185,6 +185,25 @@ def warning_stack_flags(gate_badges: Optional[List[Any]]) -> List[str]:
     return flags
 
 
+def pine_readiness_card_mismatch(
+    rendered_state: Optional[str],
+    pine_readiness: Optional[str],
+) -> bool:
+    """Shadow diagnostic: card shows READY-family but Pine v3.0 banner disagrees.
+
+    ``rendered_state`` is the FSM card state (READY / READY(RECHECK)); ``pine_readiness``
+    is :func:`kavach_readiness.classify_kavach_readiness` output (READY TO LONG/SHORT /
+    WATCHING / NOT READY). True flags the dashboard-vs-TradingView readiness gap
+    (e.g. FSM READY while Pine banner is WATCHING / NOT READY). No gating.
+    """
+    card_ready = "READY" in (rendered_state or "").upper()
+    pine_ready = (pine_readiness or "").strip().upper() in (
+        "READY TO LONG",
+        "READY TO SHORT",
+    )
+    return bool(card_ready and not pine_ready)
+
+
 def apply_warning_stack_downgrades(stocks: List[Dict[str, Any]]) -> int:
     """Downgrade READY when multiple warning badges stack (conservative heuristic).
 
@@ -2041,6 +2060,17 @@ def enrich_stocks_trade_state(
             inp["card_visible"] = s_final.get("card_visible")
             inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
             inp["ready_visible_since"] = s_final.get("ready_visible_since")
+            # Shadow-only (dash↔TradingView readiness parity): persist the backend's
+            # own Pine v3.0 readiness banner (classify_kavach_readiness) alongside the
+            # FSM card state so "card READY but Pine NOT READY/WATCHING" mismatches are
+            # queryable prospectively. Backend mirror of the TV banner (pct<3%,
+            # score≥65, pullback bands, grade level) — no live gating / display change.
+            pine_rdy = s_final.get("pine_readiness")
+            inp["pine_readiness"] = pine_rdy
+            inp["pine_readiness_detail"] = s_final.get("pine_readiness_detail")
+            inp["pine_readiness_mismatch"] = pine_readiness_card_mismatch(
+                row.get("rendered_state"), pine_rdy
+            )
             try:
                 shadow = build_dwell_entry_shadow(
                     s_final,

@@ -15,6 +15,7 @@ from backend.services.daily_checklist_trade_state import (
     direction_live_conflict,
     entry_off_live_ema5,
     entry_outside_session_range,
+    pine_readiness_card_mismatch,
     sort_stocks_by_trade_state,
 )
 
@@ -250,6 +251,18 @@ def test_entry_off_live_ema5_helper():
     assert not entry_off_live_ema5(1820.78, 1820.78)
     assert entry_off_live_ema5(None, 100.0)
     assert entry_off_live_ema5(100.0, None)
+
+
+def test_pine_readiness_card_mismatch_helper():
+    # ICICIGI/SONACOMS/SRF style: FSM card READY while Pine banner disagrees.
+    assert pine_readiness_card_mismatch("READY", "NOT READY")
+    assert pine_readiness_card_mismatch("READY(RECHECK)", "WATCHING")
+    # Aligned: both ready → no mismatch (direction-agnostic).
+    assert not pine_readiness_card_mismatch("READY", "READY TO LONG")
+    assert not pine_readiness_card_mismatch("READY(RECHECK)", "READY TO SHORT")
+    # Card not READY → never a readiness mismatch regardless of Pine banner.
+    assert not pine_readiness_card_mismatch("WAIT FOR PULLBACK", "NOT READY")
+    assert not pine_readiness_card_mismatch(None, None)
 
 
 def test_no_ready_without_sl_or_risk():
