@@ -46,6 +46,7 @@
         "READY": 0,
         "READY(RECHECK)": 1,
         "WAIT FOR PULLBACK": 2,
+        "WATCHING": 2,
         "SCANNING": 2,
         "EXPIRED": 3,
         "BLOCKED": 4

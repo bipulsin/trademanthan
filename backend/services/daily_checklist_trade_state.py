@@ -35,8 +35,9 @@ READY NOW note (2026-07-14 / 2026-07-15):
     votes track the TradingView panel, not only the last closed bucket.
     Root cause: sticky daily_snapshot direction (no swap after f11e1b7) vs live
     10m Kavach fields; READY historically ignored that disagreement.
-  - ATR consumed (from open + from opening range) logged for research only —
-    same atr14 used for 1.5× expiry; never gates READY.
+  - ATR consumed (from open + from opening range) logged for research; same atr14
+    used for 1.5× expiry. Display-only READY→WATCHING when atr ≥85% and not
+    progressing (``ATR_READY_SUPPRESS_LIVE``, default on) — ranking/lock untouched.
 """
 from __future__ import annotations
 
@@ -67,6 +68,7 @@ ENTRY_EMA5_TOL_PCT = 0.5
 STATE_READY = "READY"
 STATE_READY_RECHECK = "READY(RECHECK)"
 STATE_WAIT = "WAIT FOR PULLBACK"
+STATE_WATCHING = "WATCHING"  # display-only ATR suppress (see atr_ready_suppress)
 STATE_SCANNING = "SCANNING"
 STATE_EXPIRED = "EXPIRED"
 STATE_BLOCKED = "BLOCKED"
@@ -701,6 +703,7 @@ _STATE_SORT = {
     STATE_READY: 0,
     STATE_READY_RECHECK: 1,
     STATE_WAIT: 2,
+    STATE_WATCHING: 2,
     STATE_SCANNING: 2,
     STATE_EXPIRED: 3,
     STATE_BLOCKED: 4,
@@ -2033,6 +2036,51 @@ def enrich_stocks_trade_state(
             logger.debug("ready dwell/entry live apply skipped: %s", exc)
             dwell_live_stats = {}
 
+        # Part 2 shadow (no live gate): DI-only would_override before ATR display suppress.
+        # Part 1: ATR≥85% + not progressing → WATCHING (toggle ATR_READY_SUPPRESS_LIVE).
+        try:
+            from backend.services.atr_ready_suppress import (
+                evaluate_and_maybe_apply_for_stock,
+                evaluate_would_override_di,
+            )
+
+            for s in stocks:
+                sym_u = (s.get("symbol") or "").upper()
+                # Snapshot pre-ATR state for Part 2 (READY soft-held with DI).
+                di_shadow = evaluate_would_override_di(
+                    rendered_state=s.get("trade_state"),
+                    grade=s.get("confidence") or s.get("dashboard_kavach"),
+                    trade_take_enabled=bool(s.get("trade_take_enabled")),
+                    trade_take_disable_reason=s.get("trade_take_disable_reason"),
+                    trade_state_reason=s.get("trade_state_reason"),
+                    zone_downgrade=s.get("zone_downgrade"),
+                    dwell_soft_hold=s.get("dwell_soft_hold"),
+                    dist_would_block=(
+                        (s.get("dwell_entry_shadow") or {})
+                        .get("distance", {})
+                        .get("would_block")
+                        if isinstance(s.get("dwell_entry_shadow"), dict)
+                        else None
+                    ),
+                    check1_beyond_ema10=(
+                        (s.get("dwell_entry_shadow") or {})
+                        .get("distance", {})
+                        .get("check1_beyond_ema10")
+                        if isinstance(s.get("dwell_entry_shadow"), dict)
+                        else None
+                    ),
+                )
+                s["would_override_di_shadow"] = di_shadow
+                atr_dec = evaluate_and_maybe_apply_for_stock(
+                    s,
+                    candles=candle_cache.get(sym_u) or [],
+                    atr_pct=float(atr_pct_map.get(sym_u) or 0.0) or None,
+                    in_lock=bool(s.get("in_lock")),
+                )
+                s["atr_ready_suppress"] = atr_dec
+        except Exception as exc:
+            logger.debug("atr ready suppress / DI shadow skipped: %s", exc)
+
         # Finalize consistency log with post-stack UI state + take-enablement.
         # Shadow / live: 10-min dwell + entry distance (A/B/C sensitivity always).
         from backend.services.ready_dwell_entry_shadow import build_dwell_entry_shadow
@@ -2060,6 +2108,33 @@ def enrich_stocks_trade_state(
             inp["card_visible"] = s_final.get("card_visible")
             inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
             inp["ready_visible_since"] = s_final.get("ready_visible_since")
+            # Part 1 ATR READY suppress (live display + shadow) + Part 2 DI override shadow.
+            atr_dec = s_final.get("atr_ready_suppress")
+            if isinstance(atr_dec, dict):
+                for k in (
+                    "atr_ready_suppress",
+                    "atr_ready_suppress_fired",
+                    "atr_ready_suppress_would",
+                    "atr_ready_suppress_live_enabled",
+                    "atr_ready_suppress_threshold_pct",
+                    "atr_consumed_pct",
+                    "atr_progression_increasing",
+                    "atr_progression_hist",
+                    "atr_ready_suppress_skip",
+                ):
+                    if k in atr_dec:
+                        inp[k] = atr_dec[k]
+            di_shadow = s_final.get("would_override_di_shadow")
+            if isinstance(di_shadow, dict):
+                inp["would_override_di"] = bool(di_shadow.get("would_override_di"))
+                for k in (
+                    "would_override_di_eligible_ready",
+                    "would_override_di_skip",
+                    "would_override_di_hard",
+                    "would_override_di_soft",
+                ):
+                    if k in di_shadow:
+                        inp[k] = di_shadow[k]
             # Shadow-only (dash↔TradingView readiness parity): persist the backend's
             # own Pine v3.0 readiness banner (classify_kavach_readiness) alongside the
             # FSM card state so "card READY but Pine NOT READY/WATCHING" mismatches are

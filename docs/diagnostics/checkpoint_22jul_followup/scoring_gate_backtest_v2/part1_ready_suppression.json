@@ -1,0 +1,909 @@
+{
+  "note": "Primary results use all READY-family consistency-log rows (checklist path). Lock-set-only variant retained for sensitivity.",
+  "primary": {
+    "thr_75": {
+      "threshold_pct": 75.0,
+      "eligibility": "all_READY_family_renders (checklist path)",
+      "n_ready_family_total": 870,
+      "n_suppressed_renders": 148,
+      "n_suppressed_with_sim": 131,
+      "by_symbol_top20": {
+        "ICICIGI": 44,
+        "PGEL": 17,
+        "AUBANK": 15,
+        "BAJAJ-AUTO": 12,
+        "SBILIFE": 12,
+        "GODREJCP": 9,
+        "DLF": 9,
+        "OIL": 8,
+        "BAJAJHLDNG": 8,
+        "AMBER": 5,
+        "MARUTI": 4,
+        "DIXON": 3,
+        "AXISBANK": 2
+      },
+      "suppressed_all_renders_agg": {
+        "n": 131,
+        "wins": 56,
+        "losses": 75,
+        "win_rate_pct": 42.7,
+        "avg_r": -0.177,
+        "median_r": -0.393,
+        "total_r": -23.25,
+        "avg_win_r": 1.048,
+        "avg_loss_r": -1.092,
+        "total_pts": -360.31,
+        "total_pnl_inr": 6138.0,
+        "n_with_lot": 131,
+        "reached_1R": 46,
+        "exit_reasons": {
+          "ema10_close_before_1R": 17,
+          "ema5_close_after_1R": 34,
+          "squareoff_1515": 33,
+          "stop_hit": 47
+        }
+      },
+      "suppressed_first_per_symbol_session_agg": {
+        "n": 12,
+        "wins": 4,
+        "losses": 8,
+        "win_rate_pct": 33.3,
+        "avg_r": -0.189,
+        "median_r": -0.811,
+        "total_r": -2.27,
+        "avg_win_r": 1.185,
+        "avg_loss_r": -0.877,
+        "total_pts": -47.87,
+        "total_pnl_inr": -2379.0,
+        "n_with_lot": 12,
+        "reached_1R": 4,
+        "exit_reasons": {
+          "ema10_close_before_1R": 2,
+          "ema5_close_after_1R": 3,
+          "squareoff_1515": 2,
+          "stop_hit": 5
+        }
+      },
+      "separation": {
+        "suppressed_positive_r_n": 56,
+        "suppressed_negative_r_n": 75,
+        "suppressed_positive_total_r": 58.68,
+        "suppressed_negative_total_r": -81.93,
+        "separation_score": 23.25
+      },
+      "icicigi_20260724": {
+        "n_ready_total": 69,
+        "n_suppressed": 44,
+        "first_suppress_ist": "11:15:25",
+        "suppressed_agg": {
+          "n": 44,
+          "wins": 32,
+          "losses": 12,
+          "win_rate_pct": 72.7,
+          "avg_r": 0.287,
+          "median_r": 0.543,
+          "total_r": 12.61,
+          "avg_win_r": 0.693,
+          "avg_loss_r": -0.798,
+          "total_pts": 62.92,
+          "total_pnl_inr": 20450.0,
+          "n_with_lot": 44,
+          "reached_1R": 22,
+          "exit_reasons": {
+            "ema10_close_before_1R": 6,
+            "ema5_close_after_1R": 12,
+            "squareoff_1515": 20,
+            "stop_hit": 6
+          }
+        },
+        "sample": [
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "11:15:25",
+            "atr_consumed_pct": 78.63,
+            "progression": false,
+            "exit_reason": "ema5_close_after_1R",
+            "exit_at": "12:35:00",
+            "entry": 1662.41,
+            "exit_price": 1666.9,
+            "pts": 4.49,
+            "r_multiple": 0.9,
+            "risk_pts": 4.99,
+            "bars_held": 8,
+            "reached_1R": true,
+            "pnl_inr": 1459.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "11:15:44",
+            "atr_consumed_pct": 78.63,
+            "progression": false,
+            "exit_reason": "ema5_close_after_1R",
+            "exit_at": "12:35:00",
+            "entry": 1662.41,
+            "exit_price": 1666.9,
+            "pts": 4.49,
+            "r_multiple": 0.9,
+            "risk_pts": 4.99,
+            "bars_held": 8,
+            "reached_1R": true,
+            "pnl_inr": 1459.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "11:16:40",
+            "atr_consumed_pct": 78.63,
+            "progression": false,
+            "exit_reason": "ema5_close_after_1R",
+            "exit_at": "12:35:00",
+            "entry": 1662.41,
+            "exit_price": 1666.9,
+            "pts": 4.49,
+            "r_multiple": 0.9,
+            "risk_pts": 4.99,
+            "bars_held": 8,
+            "reached_1R": true,
+            "pnl_inr": 1459.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "11:17:39",
+            "atr_consumed_pct": 78.63,
+            "progression": false,
+            "exit_reason": "ema5_close_after_1R",
+            "exit_at": "12:35:00",
+            "entry": 1662.41,
+            "exit_price": 1666.9,
+            "pts": 4.49,
+            "r_multiple": 0.9,
+            "risk_pts": 4.99,
+            "bars_held": 8,
+            "reached_1R": true,
+            "pnl_inr": 1459.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "11:19:07",
+            "atr_consumed_pct": 78.63,
+            "progression": false,
+            "exit_reason": "ema5_close_after_1R",
+            "exit_at": "12:35:00",
+            "entry": 1662.41,
+            "exit_price": 1666.9,
+            "pts": 4.49,
+            "r_multiple": 0.9,
+            "risk_pts": 4.99,
+            "bars_held": 8,
+            "reached_1R": true,
+            "pnl_inr": 1459.0
+          }
+        ]
+      },
+      "false_neg_clean_trenders_0724": {
+        "symbols_checked": [
+          "COFORGE",
+          "MPHASIS",
+          "KPITTECH",
+          "TATAELXSI",
+          "ASTRAL"
+        ],
+        "n_suppressed_renders": 0,
+        "agg": {
+          "n": 0
+        },
+        "by_symbol": {
+          "COFORGE": 0,
+          "MPHASIS": 0,
+          "KPITTECH": 0,
+          "TATAELXSI": 0,
+          "ASTRAL": 0
+        }
+      }
+    },
+    "thr_80": {
+      "threshold_pct": 80.0,
+      "eligibility": "all_READY_family_renders (checklist path)",
+      "n_ready_family_total": 870,
+      "n_suppressed_renders": 133,
+      "n_suppressed_with_sim": 116,
+      "by_symbol_top20": {
+        "ICICIGI": 32,
+        "PGEL": 17,
+        "AUBANK": 15,
+        "BAJAJ-AUTO": 12,
+        "SBILIFE": 12,
+        "GODREJCP": 9,
+        "DLF": 9,
+        "OIL": 8,
+        "BAJAJHLDNG": 8,
+        "AMBER": 5,
+        "MARUTI": 4,
+        "DIXON": 2
+      },
+      "suppressed_all_renders_agg": {
+        "n": 116,
+        "wins": 44,
+        "losses": 72,
+        "win_rate_pct": 37.9,
+        "avg_r": -0.265,
+        "median_r": -0.596,
+        "total_r": -30.7,
+        "avg_win_r": 1.106,
+        "avg_loss_r": -1.102,
+        "total_pts": -378.63,
+        "total_pnl_inr": -4206.0,
+        "n_with_lot": 116,
+        "reached_1R": 34,
+        "exit_reasons": {
+          "ema10_close_before_1R": 17,
+          "ema5_close_after_1R": 22,
+          "squareoff_1515": 32,
+          "stop_hit": 45
+        }
+      },
+      "suppressed_first_per_symbol_session_agg": {
+        "n": 11,
+        "wins": 3,
+        "losses": 8,
+        "win_rate_pct": 27.3,
+        "avg_r": -0.252,
+        "median_r": -0.726,
+        "total_r": -2.77,
+        "avg_win_r": 1.281,
+        "avg_loss_r": -0.826,
+        "total_pts": -51.57,
+        "total_pnl_inr": -2450.0,
+        "n_with_lot": 11,
+        "reached_1R": 3,
+        "exit_reasons": {
+          "ema10_close_before_1R": 3,
+          "ema5_close_after_1R": 2,
+          "squareoff_1515": 2,
+          "stop_hit": 4
+        }
+      },
+      "separation": {
+        "suppressed_positive_r_n": 44,
+        "suppressed_negative_r_n": 72,
+        "suppressed_positive_total_r": 48.65,
+        "suppressed_negative_total_r": -79.35,
+        "separation_score": 30.7
+      },
+      "icicigi_20260724": {
+        "n_ready_total": 69,
+        "n_suppressed": 32,
+        "first_suppress_ist": "12:50:04",
+        "suppressed_agg": {
+          "n": 32,
+          "wins": 20,
+          "losses": 12,
+          "win_rate_pct": 62.5,
+          "avg_r": 0.08,
+          "median_r": 0.543,
+          "total_r": 2.57,
+          "avg_win_r": 0.608,
+          "avg_loss_r": -0.798,
+          "total_pts": 12.86,
+          "total_pnl_inr": 4184.0,
+          "n_with_lot": 32,
+          "reached_1R": 10,
+          "exit_reasons": {
+            "ema10_close_before_1R": 6,
+            "squareoff_1515": 20,
+            "stop_hit": 6
+          }
+        },
+        "sample": [
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:50:04",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:50:23",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:50:38",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:52:05",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:53:05",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          }
+        ]
+      },
+      "false_neg_clean_trenders_0724": {
+        "symbols_checked": [
+          "COFORGE",
+          "MPHASIS",
+          "KPITTECH",
+          "TATAELXSI",
+          "ASTRAL"
+        ],
+        "n_suppressed_renders": 0,
+        "agg": {
+          "n": 0
+        },
+        "by_symbol": {
+          "COFORGE": 0,
+          "MPHASIS": 0,
+          "KPITTECH": 0,
+          "TATAELXSI": 0,
+          "ASTRAL": 0
+        }
+      }
+    },
+    "thr_85": {
+      "threshold_pct": 85.0,
+      "eligibility": "all_READY_family_renders (checklist path)",
+      "n_ready_family_total": 870,
+      "n_suppressed_renders": 121,
+      "n_suppressed_with_sim": 109,
+      "by_symbol_top20": {
+        "ICICIGI": 32,
+        "PGEL": 17,
+        "AUBANK": 15,
+        "SBILIFE": 12,
+        "GODREJCP": 9,
+        "DLF": 9,
+        "OIL": 8,
+        "BAJAJHLDNG": 8,
+        "AMBER": 5,
+        "MARUTI": 4,
+        "BAJAJ-AUTO": 2
+      },
+      "suppressed_all_renders_agg": {
+        "n": 109,
+        "wins": 42,
+        "losses": 67,
+        "win_rate_pct": 38.5,
+        "avg_r": -0.301,
+        "median_r": -0.726,
+        "total_r": -32.85,
+        "avg_win_r": 1.1,
+        "avg_loss_r": -1.18,
+        "total_pts": -470.9,
+        "total_pnl_inr": -8583.0,
+        "n_with_lot": 109,
+        "reached_1R": 32,
+        "exit_reasons": {
+          "ema10_close_before_1R": 12,
+          "ema5_close_after_1R": 22,
+          "squareoff_1515": 30,
+          "stop_hit": 45
+        }
+      },
+      "suppressed_first_per_symbol_session_agg": {
+        "n": 10,
+        "wins": 2,
+        "losses": 8,
+        "win_rate_pct": 20.0,
+        "avg_r": -0.399,
+        "median_r": -0.811,
+        "total_r": -3.99,
+        "avg_win_r": 1.312,
+        "avg_loss_r": -0.826,
+        "total_pts": -102.48,
+        "total_pnl_inr": -4996.0,
+        "n_with_lot": 10,
+        "reached_1R": 2,
+        "exit_reasons": {
+          "ema10_close_before_1R": 3,
+          "ema5_close_after_1R": 2,
+          "squareoff_1515": 1,
+          "stop_hit": 4
+        }
+      },
+      "separation": {
+        "suppressed_positive_r_n": 42,
+        "suppressed_negative_r_n": 67,
+        "suppressed_positive_total_r": 46.21,
+        "suppressed_negative_total_r": -79.07,
+        "separation_score": 32.86
+      },
+      "icicigi_20260724": {
+        "n_ready_total": 69,
+        "n_suppressed": 32,
+        "first_suppress_ist": "12:50:04",
+        "suppressed_agg": {
+          "n": 32,
+          "wins": 20,
+          "losses": 12,
+          "win_rate_pct": 62.5,
+          "avg_r": 0.08,
+          "median_r": 0.543,
+          "total_r": 2.57,
+          "avg_win_r": 0.608,
+          "avg_loss_r": -0.798,
+          "total_pts": 12.86,
+          "total_pnl_inr": 4184.0,
+          "n_with_lot": 32,
+          "reached_1R": 10,
+          "exit_reasons": {
+            "ema10_close_before_1R": 6,
+            "squareoff_1515": 20,
+            "stop_hit": 6
+          }
+        },
+        "sample": [
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:50:04",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:50:23",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:50:38",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:52:05",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          },
+          {
+            "session": "2026-07-24",
+            "symbol": "ICICIGI",
+            "direction": "LONG",
+            "grade": "B",
+            "signal_ist": "12:53:05",
+            "atr_consumed_pct": 85.11,
+            "progression": false,
+            "exit_reason": "ema10_close_before_1R",
+            "exit_at": "13:25:00",
+            "entry": 1667.18,
+            "exit_price": 1664.2,
+            "pts": -2.98,
+            "r_multiple": -0.596,
+            "risk_pts": 5.0,
+            "bars_held": 4,
+            "reached_1R": false,
+            "pnl_inr": -968.0
+          }
+        ]
+      },
+      "false_neg_clean_trenders_0724": {
+        "symbols_checked": [
+          "COFORGE",
+          "MPHASIS",
+          "KPITTECH",
+          "TATAELXSI",
+          "ASTRAL"
+        ],
+        "n_suppressed_renders": 0,
+        "agg": {
+          "n": 0
+        },
+        "by_symbol": {
+          "COFORGE": 0,
+          "MPHASIS": 0,
+          "KPITTECH": 0,
+          "TATAELXSI": 0,
+          "ASTRAL": 0
+        }
+      }
+    }
+  },
+  "lock_set_only": {
+    "thr_75": {
+      "threshold_pct": 75.0,
+      "n_ready_locked_eligible": 870,
+      "n_ready_family_total": 870,
+      "n_suppressed": 129,
+      "n_suppressed_with_sim": 129,
+      "by_symbol": {
+        "ICICIGI": 44,
+        "PGEL": 17,
+        "AUBANK": 15,
+        "BAJAJ-AUTO": 12,
+        "SBILIFE": 12,
+        "GODREJCP": 9,
+        "DLF": 9,
+        "OIL": 8,
+        "BAJAJHLDNG": 8,
+        "AMBER": 5,
+        "MARUTI": 4,
+        "AXISBANK": 2,
+        "DIXON": 1
+      },
+      "suppressed_agg": {
+        "n": 129,
+        "wins": 54,
+        "losses": 75,
+        "win_rate_pct": 41.9,
+        "avg_r": -0.199,
+        "median_r": -0.581,
+        "total_r": -25.68,
+        "avg_win_r": 1.042,
+        "avg_loss_r": -1.092,
+        "total_pts": -462.13,
+        "total_pnl_inr": 1046.0,
+        "n_with_lot": 129,
+        "reached_1R": 44,
+        "exit_reasons": {
+          "ema10_close_before_1R": 17,
+          "ema5_close_after_1R": 34,
+          "squareoff_1515": 31,
+          "stop_hit": 47
+        }
+      },
+      "separation": {
+        "suppressed_positive_r_n": 54,
+        "suppressed_negative_r_n": 75,
+        "suppressed_positive_total_r": 56.25,
+        "suppressed_negative_total_r": -81.93,
+        "separation_score": 25.68
+      },
+      "icicigi_20260724": {
+        "n_ready_total": 69,
+        "n_suppressed": 44,
+        "first_suppress_ist": "11:15:25",
+        "suppressed_agg": {
+          "n": 44,
+          "wins": 32,
+          "losses": 12,
+          "win_rate_pct": 72.7,
+          "avg_r": 0.287,
+          "median_r": 0.543,
+          "total_r": 12.61,
+          "avg_win_r": 0.693,
+          "avg_loss_r": -0.798,
+          "total_pts": 62.92,
+          "total_pnl_inr": 20450.0,
+          "n_with_lot": 44,
+          "reached_1R": 22,
+          "exit_reasons": {
+            "ema10_close_before_1R": 6,
+            "ema5_close_after_1R": 12,
+            "squareoff_1515": 20,
+            "stop_hit": 6
+          }
+        }
+      },
+      "false_neg_clean_trenders_0724": {
+        "symbols_checked": [
+          "COFORGE",
+          "MPHASIS",
+          "KPITTECH",
+          "TATAELXSI",
+          "ASTRAL"
+        ],
+        "n_suppressed_renders": 0,
+        "rows": [],
+        "agg": {
+          "n": 0
+        }
+      }
+    },
+    "thr_80": {
+      "threshold_pct": 80.0,
+      "n_ready_locked_eligible": 870,
+      "n_ready_family_total": 870,
+      "n_suppressed": 114,
+      "n_suppressed_with_sim": 114,
+      "by_symbol": {
+        "ICICIGI": 32,
+        "PGEL": 17,
+        "AUBANK": 15,
+        "BAJAJ-AUTO": 12,
+        "SBILIFE": 12,
+        "GODREJCP": 9,
+        "DLF": 9,
+        "OIL": 8,
+        "BAJAJHLDNG": 8,
+        "AMBER": 5,
+        "MARUTI": 4
+      },
+      "suppressed_agg": {
+        "n": 114,
+        "wins": 42,
+        "losses": 72,
+        "win_rate_pct": 36.8,
+        "avg_r": -0.291,
+        "median_r": -0.596,
+        "total_r": -33.13,
+        "avg_win_r": 1.1,
+        "avg_loss_r": -1.102,
+        "total_pts": -480.45,
+        "total_pnl_inr": -9298.0,
+        "n_with_lot": 114,
+        "reached_1R": 32,
+        "exit_reasons": {
+          "ema10_close_before_1R": 17,
+          "ema5_close_after_1R": 22,
+          "squareoff_1515": 30,
+          "stop_hit": 45
+        }
+      },
+      "separation": {
+        "suppressed_positive_r_n": 42,
+        "suppressed_negative_r_n": 72,
+        "suppressed_positive_total_r": 46.21,
+        "suppressed_negative_total_r": -79.35,
+        "separation_score": 33.14
+      },
+      "icicigi_20260724": {
+        "n_ready_total": 69,
+        "n_suppressed": 32,
+        "first_suppress_ist": "12:50:04",
+        "suppressed_agg": {
+          "n": 32,
+          "wins": 20,
+          "losses": 12,
+          "win_rate_pct": 62.5,
+          "avg_r": 0.08,
+          "median_r": 0.543,
+          "total_r": 2.57,
+          "avg_win_r": 0.608,
+          "avg_loss_r": -0.798,
+          "total_pts": 12.86,
+          "total_pnl_inr": 4184.0,
+          "n_with_lot": 32,
+          "reached_1R": 10,
+          "exit_reasons": {
+            "ema10_close_before_1R": 6,
+            "squareoff_1515": 20,
+            "stop_hit": 6
+          }
+        }
+      },
+      "false_neg_clean_trenders_0724": {
+        "symbols_checked": [
+          "COFORGE",
+          "MPHASIS",
+          "KPITTECH",
+          "TATAELXSI",
+          "ASTRAL"
+        ],
+        "n_suppressed_renders": 0,
+        "rows": [],
+        "agg": {
+          "n": 0
+        }
+      }
+    },
+    "thr_85": {
+      "threshold_pct": 85.0,
+      "n_ready_locked_eligible": 870,
+      "n_ready_family_total": 870,
+      "n_suppressed": 109,
+      "n_suppressed_with_sim": 109,
+      "by_symbol": {
+        "ICICIGI": 32,
+        "PGEL": 17,
+        "AUBANK": 15,
+        "SBILIFE": 12,
+        "GODREJCP": 9,
+        "DLF": 9,
+        "OIL": 8,
+        "BAJAJHLDNG": 8,
+        "AMBER": 5,
+        "MARUTI": 4,
+        "BAJAJ-AUTO": 2
+      },
+      "suppressed_agg": {
+        "n": 109,
+        "wins": 42,
+        "losses": 67,
+        "win_rate_pct": 38.5,
+        "avg_r": -0.301,
+        "median_r": -0.726,
+        "total_r": -32.85,
+        "avg_win_r": 1.1,
+        "avg_loss_r": -1.18,
+        "total_pts": -470.9,
+        "total_pnl_inr": -8583.0,
+        "n_with_lot": 109,
+        "reached_1R": 32,
+        "exit_reasons": {
+          "ema10_close_before_1R": 12,
+          "ema5_close_after_1R": 22,
+          "squareoff_1515": 30,
+          "stop_hit": 45
+        }
+      },
+      "separation": {
+        "suppressed_positive_r_n": 42,
+        "suppressed_negative_r_n": 67,
+        "suppressed_positive_total_r": 46.21,
+        "suppressed_negative_total_r": -79.07,
+        "separation_score": 32.86
+      },
+      "icicigi_20260724": {
+        "n_ready_total": 69,
+        "n_suppressed": 32,
+        "first_suppress_ist": "12:50:04",
+        "suppressed_agg": {
+          "n": 32,
+          "wins": 20,
+          "losses": 12,
+          "win_rate_pct": 62.5,
+          "avg_r": 0.08,
+          "median_r": 0.543,
+          "total_r": 2.57,
+          "avg_win_r": 0.608,
+          "avg_loss_r": -0.798,
+          "total_pts": 12.86,
+          "total_pnl_inr": 4184.0,
+          "n_with_lot": 32,
+          "reached_1R": 10,
+          "exit_reasons": {
+            "ema10_close_before_1R": 6,
+            "squareoff_1515": 20,
+            "stop_hit": 6
+          }
+        }
+      },
+      "false_neg_clean_trenders_0724": {
+        "symbols_checked": [
+          "COFORGE",
+          "MPHASIS",
+          "KPITTECH",
+          "TATAELXSI",
+          "ASTRAL"
+        ],
+        "n_suppressed_renders": 0,
+        "rows": [],
+        "agg": {
+          "n": 0
+        }
+      }
+    }
+  },
+  "best_threshold_by_separation_score": "thr_85"
+}
