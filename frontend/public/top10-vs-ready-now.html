@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>Top-10 vs READY NOW · TradeWithCTO</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --panel-2: #232d3a;
+      --border: #334155;
+      --text: #e8eef4;
+      --muted: #94a3b8;
+      --accent: #0d9488;
+      --warn: #f59e0b;
+      --danger: #f87171;
+      --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.4;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a32 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1480px; margin: 0 auto; padding: 16px 18px 48px; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; max-width: 78ch; }
+    .meta { color: var(--muted); font-size: 12px; text-align: right; }
+    .meta a { color: #5eead4; }
+    .agg { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .agg-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .agg-card .k { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .agg-card .v { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .agg-card .s { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .filters {
+      display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: end;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 12px;
+    }
+    .filters label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); font-weight: 600; }
+    .filters input, .filters select {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 8px; font: inherit; min-width: 110px;
+    }
+    .filters input[type="search"] { min-width: 180px; }
+    .filters .chk { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 6px; }
+    .filters button {
+      background: rgba(13, 148, 136, 0.25); color: #5eead4; border: 1px solid rgba(13, 148, 136, 0.45);
+      border-radius: 6px; padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer;
+    }
+    .filters button:hover { background: rgba(13, 148, 136, 0.4); }
+    .filters button.secondary {
+      background: transparent; color: var(--muted); border-color: var(--border);
+    }
+    .analyze {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;
+    }
+    @media (max-width: 900px) { .analyze { grid-template-columns: 1fr; } }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    }
+    .panel h2 { margin: 0 0 8px; font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .panel ul { margin: 0; padding-left: 18px; }
+    .panel li { margin: 2px 0; }
+    .mono { font-family: var(--mono); font-size: 12px; }
+    .warn {
+      background: rgba(217, 119, 6, 0.15); border: 1px solid rgba(217, 119, 6, 0.4);
+      color: #fde68a; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; font-size: 12px;
+    }
+    .err {
+      background: rgba(220, 38, 38, 0.12); border: 1px solid rgba(220, 38, 38, 0.4);
+      color: #fecaca; padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;
+    }
+    .table-wrap {
+      overflow: auto; max-height: calc(100vh - 280px); border: 1px solid var(--border);
+      border-radius: 8px; background: var(--panel);
+    }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th {
+      position: sticky; top: 0; z-index: 1;
+      background: #16202a; color: var(--muted); font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; user-select: none;
+      white-space: nowrap;
+    }
+    th:hover { color: #5eead4; }
+    th .arrow { opacity: 0.35; margin-left: 3px; }
+    th.sorted .arrow { opacity: 1; color: #5eead4; }
+    tr:hover td { background: rgba(13, 148, 136, 0.06); }
+    tr.zero td { opacity: 0.85; }
+    .pill {
+      display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+      font-weight: 700; letter-spacing: 0.03em;
+      background: rgba(248, 113, 113, 0.18); color: #fecaca;
+    }
+    .pill-ok { background: rgba(13, 148, 136, 0.22); color: #5eead4; }
+    .times { max-width: 280px; word-break: break-word; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+    .status { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+    .num { text-align: right; font-family: var(--mono); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Top-10 vs READY NOW</h1>
+      <p class="sub">
+        Per (date, symbol): how often a RS Top-10 name also rendered READY-family on the checklist
+        (±5&nbsp;min match). Research diagnostic only — does not change live ranking or gating.
+      </p>
+    </div>
+    <div class="meta">
+      <div id="metaSource">Loading…</div>
+      <div><a href="/dailyRSchecklist.html">Daily Checklist</a> · <a href="/dashboard.html">Dashboard</a></div>
+    </div>
+  </header>
+
+  <div class="warn" id="matchNote">
+    Matching: a Top-10 scan at T is covered if any READY / READY(RECHECK) render for that symbol-day
+    has |logged_at − T| ≤ 5 minutes. Uncovered Top-10 minutes are listed in <span class="mono">top10_not_ready_times</span>.
+  </div>
+  <div class="err" id="errBox" hidden></div>
+
+  <div class="filters" id="filters">
+    <label>Date from
+      <input type="date" id="fDateFrom">
+    </label>
+    <label>Date to
+      <input type="date" id="fDateTo">
+    </label>
+    <label>Symbol
+      <input type="text" id="fSymbol" placeholder="e.g. JSWENERGY" autocomplete="off">
+    </label>
+    <label>Zero-READY
+      <select id="fZero">
+        <option value="all">All</option>
+        <option value="Y">Zero-READY only (Y)</option>
+        <option value="N">Had READY (not Y)</option>
+      </select>
+    </label>
+    <label>Min READY count
+      <input type="number" id="fMinReady" min="0" step="1" placeholder="0" value="">
+    </label>
+    <label>Search
+      <input type="search" id="fSearch" placeholder="times / symbol / date…">
+    </label>
+    <label class="chk"><input type="checkbox" id="fLiveDb" checked> Prefer live DB</label>
+    <button type="button" id="btnApply">Apply / Reload</button>
+    <button type="button" class="secondary" id="btnReset">Reset filters</button>
+  </div>
+
+  <div class="agg" id="agg"></div>
+
+  <div class="analyze">
+    <div class="panel">
+      <h2>Per-day counts (filtered)</h2>
+      <ul id="perDayList"><li class="muted">—</li></ul>
+    </div>
+    <div class="panel">
+      <h2>Top READY symbols (filtered)</h2>
+      <ul id="topSymList"><li class="muted">—</li></ul>
+    </div>
+  </div>
+
+  <div class="status" id="status">Loading data…</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-col="date">Date <span class="arrow">↕</span></th>
+          <th data-col="symbol">Symbol <span class="arrow">↕</span></th>
+          <th data-col="n_ready_now" class="num">READY n <span class="arrow">↕</span></th>
+          <th data-col="ready_now_times">READY times <span class="arrow">↕</span></th>
+          <th data-col="n_top10_not_ready" class="num">Top10≠READY n <span class="arrow">↕</span></th>
+          <th data-col="top10_not_ready_times">Top10 not-READY times <span class="arrow">↕</span></th>
+          <th data-col="zero_ready_top10">Zero READY <span class="arrow">↕</span></th>
+          <th data-col="n_top10_scans" class="num">Top10 scans <span class="arrow">↕</span></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+(function () {
+  const API_CANDIDATES = [
+    '/scan/diagnostics/top10-vs-ready-now',
+    '/api/diagnostics/top10-vs-ready-now',
+    '/diagnostics/top10-vs-ready-now',
+  ];
+  const SEED_URL = '/data/top10-vs-ready-now.json';
+
+  let allRows = [];
+  let viewRows = [];
+  let sortCol = 'date';
+  let sortDir = 1; // 1 asc, -1 desc
+  let meta = {};
+
+  const $ = (id) => document.getElementById(id);
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status + ' ' + url);
+    return res.json();
+  }
+
+  async function loadData() {
+    $('errBox').hidden = true;
+    $('status').textContent = 'Loading…';
+    const from = $('fDateFrom').value || '';
+    const to = $('fDateTo').value || '';
+    const preferDb = $('fLiveDb').checked;
+    const qs = new URLSearchParams();
+    if (from) qs.set('start', from);
+    if (to) qs.set('end', to);
+    qs.set('source', preferDb ? 'db' : 'seed');
+    qs.set('refresh', '1');
+
+    let data = null;
+    let err = null;
+    if (preferDb) {
+      for (const base of API_CANDIDATES) {
+        try {
+          data = await fetchJson(base + '?' + qs.toString());
+          if (data && data.ok !== false) break;
+          err = (data && data.error) || 'API returned not ok';
+          data = null;
+        } catch (e) {
+          err = e.message || String(e);
+        }
+      }
+    }
+    if (!data) {
+      try {
+        data = await fetchJson(SEED_URL);
+        if (from || to) {
+          const rows = (data.rows || []).filter((r) => {
+            const d = r.date || '';
+            if (from && d < from) return false;
+            if (to && d > to) return false;
+            return true;
+          });
+          data = Object.assign({}, data, { rows: rows, source: data.source || 'seed', note: err ? ('API unavailable (' + err + '); seed') : data.note });
+        } else if (err) {
+          data.note = 'API unavailable (' + err + '); seed';
+        }
+      } catch (e) {
+        $('errBox').hidden = false;
+        $('errBox').textContent = 'Failed to load data: ' + (err || e.message);
+        $('status').textContent = 'Load failed';
+        return;
+      }
+    }
+
+    meta = data || {};
+    allRows = (data.rows || []).map((r) => ({
+      date: r.date || '',
+      symbol: (r.symbol || '').toUpperCase(),
+      n_ready_now: +r.n_ready_now || 0,
+      ready_now_times: r.ready_now_times || '',
+      top10_not_ready_times: r.top10_not_ready_times || '',
+      n_top10_not_ready: +r.n_top10_not_ready || 0,
+      zero_ready_top10: !!(r.zero_ready_top10 === true || String(r.zero_ready_top10).toUpperCase() === 'Y'),
+      n_top10_scans: +r.n_top10_scans || 0,
+    }));
+
+    // Default date bounds from data if empty
+    if (allRows.length) {
+      const dates = allRows.map((r) => r.date).sort();
+      if (!$('fDateFrom').value) $('fDateFrom').value = dates[0];
+      if (!$('fDateTo').value) $('fDateTo').value = dates[dates.length - 1];
+    }
+
+    const src = meta.source || 'unknown';
+    const gen = meta.generated_at_ist || '—';
+    const note = meta.note ? ' · ' + meta.note : '';
+    $('metaSource').innerHTML = 'Source: <b>' + esc(src) + '</b><br>Generated ' + esc(gen) + esc(note);
+    if (meta.matching_definition) {
+      $('matchNote').textContent = meta.matching_definition;
+    }
+
+    // Default sort matches artifact: date asc, n_ready desc
+    sortCol = 'date';
+    sortDir = 1;
+    applyFilters();
+  }
+
+  function applyFilters() {
+    const sym = ($('fSymbol').value || '').trim().toUpperCase();
+    const zero = $('fZero').value;
+    const minReady = $('fMinReady').value === '' ? null : Number($('fMinReady').value);
+    const q = ($('fSearch').value || '').trim().toLowerCase();
+    const from = $('fDateFrom').value || '';
+    const to = $('fDateTo').value || '';
+
+    viewRows = allRows.filter((r) => {
+      if (from && r.date < from) return false;
+      if (to && r.date > to) return false;
+      if (sym && !r.symbol.includes(sym)) return false;
+      if (zero === 'Y' && !r.zero_ready_top10) return false;
+      if (zero === 'N' && r.zero_ready_top10) return false;
+      if (minReady != null && !Number.isNaN(minReady) && r.n_ready_now < minReady) return false;
+      if (q) {
+        const hay = [r.date, r.symbol, r.ready_now_times, r.top10_not_ready_times,
+          r.zero_ready_top10 ? 'Y' : '', String(r.n_ready_now), String(r.n_top10_scans)].join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    sortView();
+    render();
+  }
+
+  function sortView() {
+    const col = sortCol;
+    const dir = sortDir;
+    viewRows.sort((a, b) => {
+      let va = a[col], vb = b[col];
+      if (typeof va === 'boolean') { va = va ? 1 : 0; vb = vb ? 1 : 0; }
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      va = String(va ?? ''); vb = String(vb ?? '');
+      return va < vb ? -dir : va > vb ? dir : 0;
+    });
+    document.querySelectorAll('th[data-col]').forEach((th) => {
+      th.classList.toggle('sorted', th.dataset.col === col);
+      const arrow = th.querySelector('.arrow');
+      if (arrow) arrow.textContent = th.dataset.col === col ? (dir > 0 ? '↑' : '↓') : '↕';
+    });
+  }
+
+  function renderAnalyze() {
+    const perDay = {};
+    const perDayZero = {};
+    const readyBySym = {};
+    let zeroN = 0;
+    for (const r of viewRows) {
+      perDay[r.date] = (perDay[r.date] || 0) + 1;
+      if (r.zero_ready_top10) {
+        zeroN += 1;
+        perDayZero[r.date] = (perDayZero[r.date] || 0) + 1;
+      }
+      if (r.n_ready_now > 0) {
+        readyBySym[r.symbol] = (readyBySym[r.symbol] || 0) + r.n_ready_now;
+      }
+    }
+    const days = Object.keys(perDay).sort();
+    $('perDayList').innerHTML = days.length
+      ? days.map((d) => '<li><span class="mono">' + esc(d) + '</span>: ' + perDay[d] +
+          ' rows · zero-READY ' + (perDayZero[d] || 0) + '</li>').join('')
+      : '<li>—</li>';
+
+    const top = Object.entries(readyBySym).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    $('topSymList').innerHTML = top.length
+      ? top.map(([s, n]) => '<li><strong>' + esc(s) + '</strong>: ' + n + ' READY renders</li>').join('')
+      : '<li>No READY rows in filter</li>';
+
+    const sessions = days.length;
+    $('agg').innerHTML = [
+      ['Rows', viewRows.length, 'of ' + allRows.length + ' loaded'],
+      ['Zero-READY', zeroN, sessions ? Math.round(100 * zeroN / Math.max(viewRows.length, 1)) + '% of filtered' : '—'],
+      ['Sessions', sessions, days[0] && days[days.length - 1] ? days[0] + ' → ' + days[days.length - 1] : '—'],
+      ['With READY', viewRows.length - zeroN, 'symbol-days'],
+    ].map(([k, v, s]) =>
+      '<div class="agg-card"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) +
+      '</div><div class="s">' + esc(s) + '</div></div>'
+    ).join('');
+
+    $('status').textContent = 'Showing ' + viewRows.length + ' rows · sort ' + sortCol +
+      (sortDir > 0 ? ' ↑' : ' ↓');
+  }
+
+  function render() {
+    renderAnalyze();
+    const tb = $('tbody');
+    if (!viewRows.length) {
+      tb.innerHTML = '<tr><td colspan="8" style="color:var(--muted);padding:16px">No rows match filters.</td></tr>';
+      return;
+    }
+    // Cap DOM for very large filters; still analyze all viewRows
+    const MAX = 2000;
+    const slice = viewRows.slice(0, MAX);
+    tb.innerHTML = slice.map((r) => {
+      const z = r.zero_ready_top10;
+      return '<tr class="' + (z ? 'zero' : '') + '">' +
+        '<td class="mono">' + esc(r.date) + '</td>' +
+        '<td><strong>' + esc(r.symbol) + '</strong></td>' +
+        '<td class="num">' + r.n_ready_now + '</td>' +
+        '<td class="times">' + esc(r.ready_now_times || '—') + '</td>' +
+        '<td class="num">' + r.n_top10_not_ready + '</td>' +
+        '<td class="times">' + esc(r.top10_not_ready_times || '—') + '</td>' +
+        '<td>' + (z ? '<span class="pill">Y</span>' : '<span class="pill pill-ok">—</span>') + '</td>' +
+        '<td class="num">' + r.n_top10_scans + '</td>' +
+        '</tr>';
+    }).join('');
+    if (viewRows.length > MAX) {
+      tb.innerHTML += '<tr><td colspan="8" style="color:var(--muted)">Showing first ' + MAX +
+        ' of ' + viewRows.length + ' (narrow filters to see the rest).</td></tr>';
+    }
+  }
+
+  document.querySelectorAll('th[data-col]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) sortDir = -sortDir;
+      else {
+        sortCol = col;
+        sortDir = (col === 'n_ready_now' || col === 'n_top10_not_ready' || col === 'n_top10_scans') ? -1 : 1;
+      }
+      sortView();
+      render();
+    });
+  });
+
+  ['fSymbol', 'fZero', 'fMinReady', 'fSearch', 'fDateFrom', 'fDateTo'].forEach((id) => {
+    $(id).addEventListener('input', applyFilters);
+    $(id).addEventListener('change', applyFilters);
+  });
+
+  $('btnApply').addEventListener('click', loadData);
+  $('btnReset').addEventListener('click', () => {
+    $('fSymbol').value = '';
+    $('fZero').value = 'all';
+    $('fMinReady').value = '';
+    $('fSearch').value = '';
+    if (allRows.length) {
+      const dates = allRows.map((r) => r.date).sort();
+      $('fDateFrom').value = dates[0];
+      $('fDateTo').value = dates[dates.length - 1];
+    }
+    applyFilters();
+  });
+
+  loadData();
+})();
+</script>
+</body>
+</html>
