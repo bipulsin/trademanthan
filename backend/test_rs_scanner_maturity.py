@@ -56,6 +56,23 @@ def test_build_maturity_record_first_day_no_history():
     )
     assert rec["consecutive_days_on_list"] == 1
     assert rec["maturity_tag"] == MATURITY_FRESH
+    assert rec["atr14_pct"] == 1.0
+
+
+def test_build_maturity_record_null_atr_skips_sentinel():
+    rec = build_maturity_record(
+        symbol="WIPRO",
+        direction="bullish",
+        rs_pct=1.28,
+        yesterday_row={"direction": "bullish", "consecutive_days_on_list": 1},
+        daily_range_pct=None,
+        atr14_pct=None,
+        range_vs_atr_ratio=None,
+        session_date="2026-07-24",
+    )
+    assert rec["atr14_pct"] is None
+    assert rec["daily_range_pct"] is None
+    assert rec["consecutive_days_on_list"] == 2
 
 
 def test_build_maturity_record_increments_from_yesterday():

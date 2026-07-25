@@ -173,25 +173,52 @@ def build_maturity_record(
     direction: str,
     rs_pct: float,
     yesterday_row: Optional[Dict[str, Any]],
-    daily_range_pct: float,
-    atr14_pct: float,
-    range_vs_atr_ratio: float,
+    daily_range_pct: Optional[float],
+    atr14_pct: Optional[float],
+    range_vs_atr_ratio: Optional[float],
     session_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Build one rs_scanner_history row dict for persistence."""
+    """Build one rs_scanner_history row dict for persistence.
+
+    ATR metric fields may be None when precompute/live fetch failed — never
+    coerce missing ATR to sentinel 0.0 (consumers treat 0 as unusable).
+    """
     y_dir = (yesterday_row or {}).get("direction")
     y_consec = int((yesterday_row or {}).get("consecutive_days_on_list") or 0)
     same_dir = bool(yesterday_row) and y_dir == direction
     consecutive = compute_consecutive_days(same_dir, y_consec)
-    maturity_tag = classify_maturity_tag(consecutive, range_vs_atr_ratio)
+    ratio_for_tag = float(range_vs_atr_ratio) if range_vs_atr_ratio is not None else 0.0
+    maturity_tag = classify_maturity_tag(consecutive, ratio_for_tag)
+
+    def _round_or_none(v: Optional[float], nd: int) -> Optional[float]:
+        if v is None:
+            return None
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return None
+        # Reject non-positive ATR% (and matching range metrics) — do not persist 0.0.
+        if nd == 4 and fv <= 0:
+            return None
+        return round(fv, nd)
+
+    atr_out = _round_or_none(atr14_pct, 4)
+    # If ATR missing, also leave range fields NULL rather than writing 0.0 sentinels.
+    if atr_out is None:
+        dr_out: Optional[float] = None
+        ratio_out: Optional[float] = None
+    else:
+        dr_out = _round_or_none(daily_range_pct, 4)
+        ratio_out = round(ratio_for_tag, 2) if range_vs_atr_ratio is not None else None
+
     return {
         "date": session_date or today_ist(),
         "symbol": symbol,
         "direction": direction,
         "rs_pct": round(rs_pct, 2),
-        "daily_range_pct": round(daily_range_pct, 4),
-        "atr14_pct": round(atr14_pct, 4),
-        "range_vs_atr_ratio": round(range_vs_atr_ratio, 2),
+        "daily_range_pct": dr_out,
+        "atr14_pct": atr_out,
+        "range_vs_atr_ratio": ratio_out,
         "consecutive_days_on_list": consecutive,
         "maturity_tag": maturity_tag,
     }
@@ -223,9 +250,17 @@ _UPSERT_HISTORY_SQL = text(
     ON CONFLICT (date, symbol) DO UPDATE SET
         direction = EXCLUDED.direction,
         rs_pct = EXCLUDED.rs_pct,
-        daily_range_pct = EXCLUDED.daily_range_pct,
-        atr14_pct = EXCLUDED.atr14_pct,
-        range_vs_atr_ratio = EXCLUDED.range_vs_atr_ratio,
+        daily_range_pct = COALESCE(EXCLUDED.daily_range_pct, rs_scanner_history.daily_range_pct),
+        atr14_pct = CASE
+            WHEN EXCLUDED.atr14_pct IS NOT NULL AND EXCLUDED.atr14_pct > 0
+                THEN EXCLUDED.atr14_pct
+            WHEN rs_scanner_history.atr14_pct IS NOT NULL AND rs_scanner_history.atr14_pct > 0
+                THEN rs_scanner_history.atr14_pct
+            ELSE NULL
+        END,
+        range_vs_atr_ratio = COALESCE(
+            EXCLUDED.range_vs_atr_ratio, rs_scanner_history.range_vs_atr_ratio
+        ),
         consecutive_days_on_list = EXCLUDED.consecutive_days_on_list,
         maturity_tag = EXCLUDED.maturity_tag
     """
@@ -247,7 +282,11 @@ def enrich_ranked_with_maturity(
     *,
     session_date: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Compute maturity fields for Top-5 rows and persist to rs_scanner_history."""
+    """Compute maturity fields for Top-5 rows and persist to rs_scanner_history.
+
+    Prefers nightly ``atr_daily_precomputed`` rows; live Upstox daily fetch is a
+    logged fallback only when precompute is missing.
+    """
     sd = session_date or today_ist()
     yd = _yesterday_date(sd)
     db = SessionLocal()
@@ -255,6 +294,17 @@ def enrich_ranked_with_maturity(
     daily_cache: Dict[str, List[Dict]] = {}
 
     try:
+        from backend.services.atr_daily_precompute import (
+            ensure_atr_daily_precompute_tables,
+            get_precomputed_atr,
+            try_compute_yesterday_range_metrics,
+        )
+
+        try:
+            ensure_atr_daily_precompute_tables()
+        except Exception as exc:
+            logger.debug("atr_daily_precompute ensure tables: %s", exc)
+
         by_dir: Dict[str, List[Dict[str, Any]]] = {_DIRECTION_BULLISH: [], _DIRECTION_BEARISH: []}
         for row in ranked:
             by_dir[direction_from_ranking(row.get("ranking_type"))].append(row)
@@ -274,18 +324,64 @@ def enrich_ranked_with_maturity(
                         "maturity_tag": prev.maturity_tag,
                     }
 
-            daily_range_pct = atr14_pct = range_vs_atr_ratio = 0.0
-            if instrument_key:
+            daily_range_pct: Optional[float] = None
+            atr14_pct: Optional[float] = None
+            range_vs_atr_ratio: Optional[float] = None
+            atr_source = "missing"
+
+            pre = get_precomputed_atr(symbol, sd, db=db) if symbol else None
+            if pre and pre.get("atr14_pct") is not None and float(pre["atr14_pct"]) > 0:
+                atr14_pct = float(pre["atr14_pct"])
+                daily_range_pct = (
+                    float(pre["daily_range_pct"])
+                    if pre.get("daily_range_pct") is not None
+                    else None
+                )
+                range_vs_atr_ratio = (
+                    float(pre["range_vs_atr_ratio"])
+                    if pre.get("range_vs_atr_ratio") is not None
+                    else None
+                )
+                atr_source = "precomputed"
+            elif instrument_key:
+                logger.info(
+                    "atr14_pct live fallback for %s as_of=%s (precomputed miss)",
+                    symbol,
+                    sd,
+                )
                 if instrument_key not in daily_cache:
                     try:
-                        daily_cache[instrument_key] = upstox.get_historical_candles_by_instrument_key(
-                            instrument_key, interval="days/1", days_back=30
-                        ) or []
+                        daily_cache[instrument_key] = (
+                            upstox.get_historical_candles_by_instrument_key(
+                                instrument_key, interval="days/1", days_back=30
+                            )
+                            or []
+                        )
                     except Exception as exc:
-                        logger.debug("daily candles for %s failed: %s", symbol, exc)
+                        logger.warning(
+                            "daily candles live fallback for %s failed: %s", symbol, exc
+                        )
                         daily_cache[instrument_key] = []
-                daily_range_pct, atr14_pct, range_vs_atr_ratio = compute_yesterday_range_metrics(
+                metrics = try_compute_yesterday_range_metrics(
                     daily_cache[instrument_key], as_of_date=sd
+                )
+                if metrics is not None:
+                    daily_range_pct, atr14_pct, range_vs_atr_ratio = metrics
+                    atr_source = "live_fallback"
+                else:
+                    logger.warning(
+                        "atr14_pct unavailable for %s as_of=%s "
+                        "(precomputed miss + live fallback failed; not writing 0.0)",
+                        symbol,
+                        sd,
+                    )
+                    atr_source = "failed"
+            else:
+                logger.warning(
+                    "atr14_pct unavailable for %s as_of=%s "
+                    "(no precomputed row and no instrument_key; not writing 0.0)",
+                    symbol,
+                    sd,
                 )
 
             record = build_maturity_record(
@@ -303,9 +399,12 @@ def enrich_ranked_with_maturity(
                 for r in by_dir.get(direction, [])
                 if (r.get("symbol") or "") != symbol
             ]
+            ratio_for_climactic = (
+                float(range_vs_atr_ratio) if range_vs_atr_ratio is not None else 0.0
+            )
             if is_climactic(
                 record["consecutive_days_on_list"],
-                range_vs_atr_ratio,
+                ratio_for_climactic,
                 _f(row.get("relative_strength")),
                 peers,
             ):
@@ -318,6 +417,8 @@ def enrich_ranked_with_maturity(
                     "maturity_tag": record["maturity_tag"],
                     "consecutive_days_on_list": record["consecutive_days_on_list"],
                     "range_vs_atr_ratio": record["range_vs_atr_ratio"],
+                    "atr14_pct": record["atr14_pct"],
+                    "atr14_pct_source": atr_source,
                 }
             )
             enriched.append(out)

@@ -63,6 +63,10 @@ from backend.services.iron_condor_snapshot_scheduler import (
     start_iron_condor_snapshot_scheduler,
     stop_iron_condor_snapshot_scheduler,
 )
+from backend.services.atr_daily_precompute_scheduler import (
+    start_atr_daily_precompute_scheduler,
+    stop_atr_daily_precompute_scheduler,
+)
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -179,6 +183,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Iron Condor snapshot scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Iron Condor snapshot scheduler")
 
+        try:
+            logger.info("Starting ATR(14)% nightly precompute scheduler...")
+            start_atr_daily_precompute_scheduler()
+            logger.info("✅ ATR daily precompute scheduler: STARTED (19:00 IST weekdays)")
+        except Exception as e:
+            logger.error(f"❌ ATR daily precompute scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without ATR daily precompute scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -251,6 +263,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Iron Condor snapshot scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping Iron Condor snapshot scheduler: {e}", exc_info=True)
+
+    try:
+        stop_atr_daily_precompute_scheduler()
+        logger.info("✅ ATR daily precompute scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping ATR daily precompute scheduler: {e}", exc_info=True)
 
     logger.info("✅ Shutdown complete")
 

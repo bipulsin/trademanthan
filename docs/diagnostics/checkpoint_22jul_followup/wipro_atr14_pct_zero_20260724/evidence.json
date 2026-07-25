@@ -1,0 +1,266 @@
+{
+  "title": "WIPRO atr14_pct=0.0 on 2026-07-24 root cause",
+  "status": "complete_readonly",
+  "priority": "HIGH",
+  "session_focus": "2026-07-24",
+  "window": ["2026-07-20", "2026-07-24"],
+  "verdict": {
+    "a_classification": "persistence_fetch_failure_false_zero",
+    "a_not": [
+      "genuine_atr_near_zero",
+      "integer_truncation_or_cast",
+      "NULL_coalesced_by_backtest"
+    ],
+    "b_mechanism_summary": "enrich_ranked_with_maturity defaults atr metrics to 0.0; Upstox days/1 fetch failure or empty candles → compute_yesterday_range_metrics early-returns (0,0,0); upsert stores sentinel 0.0 in double precision",
+    "b_file_lines": [
+      {
+        "file": "backend/services/rs_scanner_maturity.py",
+        "lines": "277",
+        "role": "default daily_range_pct=atr14_pct=range_vs_atr_ratio=0.0 (also when instrument_key missing)"
+      },
+      {
+        "file": "backend/services/rs_scanner_maturity.py",
+        "lines": "280-286",
+        "role": "get_historical_candles_by_instrument_key days/1 days_back=30; exception → debug log → empty list"
+      },
+      {
+        "file": "backend/services/rs_scanner_maturity.py",
+        "lines": "132-133,141-142,150-151",
+        "role": "compute_yesterday_range_metrics early return (0.0,0.0,0.0) on insufficient/invalid candles"
+      },
+      {
+        "file": "backend/services/rs_scanner_maturity.py",
+        "lines": "159-164",
+        "role": "ATR None/<=0 returns (daily_range_pct, 0.0, 0.0) — NOT observed in window (atr0_but_range_pos=0)"
+      },
+      {
+        "file": "backend/services/rs_scanner_maturity.py",
+        "lines": "193,214-231",
+        "role": "round(atr14_pct,4) then UPSERT atr14_pct (persists sentinel 0.0 not NULL)"
+      },
+      {
+        "file": "backend/services/relative_strength_scanner.py",
+        "lines": "687-689",
+        "role": "caller: enrich_ranked_with_maturity(ranked, upstox) after Top-10 rank"
+      },
+      {
+        "file": "backend/database.py",
+        "lines": "881",
+        "role": "column type DOUBLE PRECISION — rules out int column truncation"
+      }
+    ],
+    "c_affected_symbol_days_20260720_24": {
+      "total_rows": 792,
+      "null_atr": 0,
+      "zero_atr": 458,
+      "positive_atr": 334,
+      "pct_zero": 57.8,
+      "zero_with_all_three_metrics_zero": 458,
+      "atr0_but_daily_range_positive": 0,
+      "zero_rows_where_symbol_had_positive_atr_in_july": 458,
+      "positive_with_fractional_part": 334,
+      "positive_integer_looking": 0,
+      "min_positive_atr14_pct": 1.3173,
+      "max_atr14_pct": 5.9317,
+      "avg_positive_atr14_pct": 2.5050422155688628,
+      "by_day": [
+        {"date": "2026-07-20", "n": 167, "zero_or_null": 96, "positive": 71, "pct_bad": 57.5},
+        {"date": "2026-07-21", "n": 145, "zero_or_null": 92, "positive": 53, "pct_bad": 63.4},
+        {"date": "2026-07-22", "n": 164, "zero_or_null": 100, "positive": 64, "pct_bad": 61.0},
+        {"date": "2026-07-23", "n": 154, "zero_or_null": 67, "positive": 87, "pct_bad": 43.5},
+        {"date": "2026-07-24", "n": 162, "zero_or_null": 103, "positive": 59, "pct_bad": 63.6}
+      ]
+    },
+    "d_prior_backtests_may_need_rerun": [
+      {
+        "path": "docs/diagnostics/checkpoint_22jul_followup/atr_progression_promote_backtest_20260720_24/",
+        "script": "scripts/backtest_atr_progression_promote_20260720_24.py",
+        "note": "WIPRO atr_consumed undefined; filters atr14_pct>0"
+      },
+      {
+        "path": "docs/diagnostics/checkpoint_22jul_followup/scoring_gate_backtest_20260720_24/",
+        "script": "scripts/backtest_scoring_gate_20260720_24.py",
+        "note": "Part 1 ATR suppress / atr_consumed replay from atr14_pct"
+      },
+      {
+        "path": "docs/diagnostics/checkpoint_22jul_followup/scoring_gate_backtest_v2/",
+        "script": "scripts/backtest_scoring_gate_v2.py",
+        "note": "same atr_consumed approx"
+      },
+      {
+        "path": "docs/diagnostics/checkpoint_22jul_followup/never_ready_fsm_gates_20260720_24/",
+        "script": "scripts/never_ready_fsm_gates_20260720_24.py",
+        "note": "already documented 458/792 zeros; EMA5 distance ATR fallback"
+      },
+      {
+        "path": "docs/diagnostics/checkpoint_22jul_followup/daily_symbol_audit_20260720_24/",
+        "script": "scripts/daily_symbol_audit_20260720_24.py",
+        "note": "ATR-consumed replay prefers production field else atr14_pct"
+      },
+      {
+        "path": null,
+        "script": "scripts/analyze_rs_selection_quality.py",
+        "note": "float(row['atr14_pct'] or 1.2) — 0.0 triggers 1.2% fallback"
+      },
+      {
+        "path": null,
+        "script": "scripts/analyze_rs_feature_profile.py",
+        "note": "atr14_pct or 1.2"
+      },
+      {
+        "path": null,
+        "script": "scripts/analyze_rs_early_move_hypothesis.py",
+        "note": "uses maturity atr14_pct"
+      },
+      {
+        "path": null,
+        "script": "scripts/analyze_rs_vwap_gate_backtest.py",
+        "note": "atr14_pct or 1.2"
+      },
+      {
+        "path": null,
+        "script": "backend/services/oi_heatmap_buildup_backtest.py",
+        "note": "DEFAULT_ATR_PCT=1.2 on falsy atr"
+      },
+      {
+        "path": null,
+        "script": "scripts/backtest_go_board_validation.py",
+        "note": "joins rs_scanner_history.atr14_pct"
+      },
+      {
+        "path": null,
+        "script": "scripts/diagnose_plus4_extension_outliers.py",
+        "note": "reads atr14_pct per symbol-day"
+      }
+    ]
+  },
+  "wipro_raw_20260724": {
+    "date": "2026-07-24",
+    "symbol": "WIPRO",
+    "direction": "bullish",
+    "rs_pct": 1.28,
+    "daily_range_pct": 0.0,
+    "atr14_pct": 0.0,
+    "range_vs_atr_ratio": 0.0,
+    "consecutive_days_on_list": 2,
+    "maturity_tag": "CONTINUING",
+    "pg_typeof": "double precision",
+    "is_null": false,
+    "is_zero": true,
+    "atr_text": "0"
+  },
+  "column_schema": {
+    "table": "rs_scanner_history",
+    "column": "atr14_pct",
+    "data_type": "double precision",
+    "numeric_precision": 53,
+    "numeric_scale": null
+  },
+  "wipro_history_jul2026": [
+    {"date": "2026-07-02", "atr14_pct": 0.0, "daily_range_pct": 0.0, "maturity_tag": "FRESH"},
+    {"date": "2026-07-03", "atr14_pct": 2.3692, "daily_range_pct": 3.9881, "maturity_tag": "EXTENDED"},
+    {"date": "2026-07-13", "atr14_pct": 2.2378, "daily_range_pct": 1.6286, "maturity_tag": "FRESH"},
+    {"date": "2026-07-15", "atr14_pct": 2.3339, "daily_range_pct": 2.5729, "maturity_tag": "FRESH"},
+    {"date": "2026-07-16", "atr14_pct": 2.3544, "daily_range_pct": 1.5489, "maturity_tag": "CONTINUING"},
+    {"date": "2026-07-20", "atr14_pct": 0.0, "daily_range_pct": 0.0, "maturity_tag": "FRESH"},
+    {"date": "2026-07-21", "atr14_pct": 0.0, "daily_range_pct": 0.0, "maturity_tag": "CONTINUING"},
+    {"date": "2026-07-23", "atr14_pct": 0.0, "daily_range_pct": 0.0, "maturity_tag": "FRESH"},
+    {"date": "2026-07-24", "atr14_pct": 0.0, "daily_range_pct": 0.0, "maturity_tag": "CONTINUING"}
+  ],
+  "peers_20260724": [
+    {"symbol": "COFORGE", "atr14_pct": 0.0, "daily_range_pct": 0.0},
+    {"symbol": "ICICIGI", "atr14_pct": 2.8465, "daily_range_pct": 3.1401},
+    {"symbol": "INFY", "atr14_pct": 0.0, "daily_range_pct": 0.0},
+    {"symbol": "LTM", "atr14_pct": 0.0, "daily_range_pct": 0.0},
+    {"symbol": "MPHASIS", "atr14_pct": 0.0, "daily_range_pct": 0.0},
+    {"symbol": "PRESTIGE", "atr14_pct": 2.8013, "daily_range_pct": 3.5913},
+    {"symbol": "RBLBANK", "atr14_pct": 0.0, "daily_range_pct": 0.0},
+    {"symbol": "TCS", "atr14_pct": 0.0, "daily_range_pct": 0.0},
+    {"symbol": "WIPRO", "atr14_pct": 0.0, "daily_range_pct": 0.0}
+  ],
+  "instrument": {
+    "stock": "WIPRO",
+    "stock_instrument_key": "NSE_EQ|INE075A01022",
+    "currmth_future_instrument_key": "NSE_FO|58419"
+  },
+  "rs_snapshots_20260724": [
+    {
+      "scan_time_utc": "2026-07-24 07:20:07.923294+00",
+      "rank_position": 7,
+      "ranking_type": "BULLISH",
+      "relative_strength": 1.1018256222027643,
+      "current_price": 172.04
+    },
+    {
+      "scan_time_utc": "2026-07-24 07:50:02.971271+00",
+      "rank_position": 7,
+      "ranking_type": "BULLISH",
+      "relative_strength": 1.2849395966076371,
+      "current_price": 172.26
+    }
+  ],
+  "recompute": {
+    "method": "UpstoxService.get_historical_candles_by_instrument_key(days/1, days_back=40) + compute_yesterday_range_metrics / wilder_atr_14",
+    "run_at": "2026-07-25T approx via paperclip app container",
+    "fo": {
+      "instrument_key": "NSE_FO|58419",
+      "n_daily_candles": 29,
+      "as_of_2026-07-24": {
+        "bars_after_strip_today": 28,
+        "atr14": 3.3634,
+        "y_close": 170.45,
+        "y_date": "2026-07-23",
+        "atr14_pct": 1.9732,
+        "daily_range_pct": 1.6492,
+        "range_vs_atr_ratio": 0.8358,
+        "formula": "atr14 / y_close * 100"
+      }
+    },
+    "eq": {
+      "instrument_key": "NSE_EQ|INE075A01022",
+      "n_daily_candles": 29,
+      "as_of_2026-07-24": {
+        "bars_after_strip_today": 28,
+        "atr14": 3.4065,
+        "y_close": 174.82,
+        "atr14_pct": 1.9486
+      }
+    },
+    "stored_vs_recomputed": {
+      "stored_atr14_pct": 0.0,
+      "recomputed_fo_atr14_pct": 1.9732,
+      "delta_pp": 1.9732
+    }
+  },
+  "truncation_checks": {
+    "integer_column": false,
+    "int_cast_on_write": false,
+    "round_digits_on_write": 4,
+    "window_positive_all_fractional": true,
+    "window_values_in_0_to_1": 0,
+    "conclusion": "0.45→0 truncation impossible given schema, write path, and empirical distribution"
+  },
+  "script_treatment": {
+    "backtest_atr_progression_promote": "MAX(atr14_pct) WHERE atr14_pct IS NOT NULL AND atr14_pct > 0 — drops literal 0.0",
+    "backtest_scoring_gate_v2": "same filter atr14_pct > 0",
+    "analyze_rs_selection_quality": "float(row['atr14_pct'] or 1.2) — 0.0 is falsy → 1.2% fallback"
+  },
+  "zero_on_0724_had_prior_positive": {
+    "zero_on_0724": 103,
+    "had_prior_positive_atr": 103
+  },
+  "local_1m_fo_coverage": {
+    "instrument_key": "NSE_FO|58419",
+    "min_t": "2026-07-21 08:52:00+00",
+    "max_t": "2026-07-24 09:33:00+00",
+    "n_bars": 751,
+    "n_days": 4,
+    "note": "insufficient for ATR(14) rebuild from DB alone; used live Upstox daily"
+  },
+  "caveats": [
+    "Scan-time empty candle response inferred from (0,0,0) fingerprint + successful recompute; no archived Upstox payload for 2026-07-24",
+    "Plausible trigger: Upstox 429 / rate limit during RS scan maturity enrichment (silent exception → [])",
+    "compute_yesterday_range_metrics does not drop bars after as_of when replaying historical as_of with a full series; live path uses as_of=today",
+    "No live code fix in this investigation"
+  ]
+}

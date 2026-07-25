@@ -1,0 +1,20 @@
+{
+  "id": "wipro_atr14_pct_zero_20260724",
+  "status": "complete_readonly",
+  "priority": "HIGH",
+  "readme": "docs/diagnostics/checkpoint_22jul_followup/wipro_atr14_pct_zero_20260724/README.md",
+  "evidence": "docs/diagnostics/checkpoint_22jul_followup/wipro_atr14_pct_zero_20260724/evidence.json",
+  "verdict_a": "persistence_fetch_failure_false_zero (not genuine missing ATR, not truncation)",
+  "mechanism_b": "backend/services/rs_scanner_maturity.py:277,280-286,132-151,193 + upsert — sentinel 0.0 on empty daily candles",
+  "affected_c": 458,
+  "affected_denom": 792,
+  "wipro_recomputed_atr14_pct_fo": 1.9732,
+  "stored_atr14_pct": 0.0,
+  "rerun_d_top": [
+    "atr_progression_promote_backtest_20260720_24",
+    "scoring_gate_backtest_20260720_24",
+    "scoring_gate_backtest_v2",
+    "never_ready_fsm_gates_20260720_24",
+    "daily_symbol_audit_20260720_24"
+  ]
+}

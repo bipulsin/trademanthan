@@ -172,3 +172,83 @@ def relative_strength_anchors(
     except Exception as exc:
         logger.warning("relative-strength anchors failed: %s", exc)
         return {"rows": [], "error": str(exc)}
+
+
+@router.get("/relative-strength/atr-precompute/status")
+def atr_precompute_status(date: Optional[str] = None):
+    """Nightly ATR(14)% job status + coverage vs arbitrage_master for as_of_date."""
+    try:
+        from backend.services.atr_daily_precompute import get_nightly_status
+
+        return get_nightly_status(as_of_date=date)
+    except Exception as exc:
+        logger.warning("atr-precompute status failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@router.get("/relative-strength/atr-precompute/latest")
+def atr_precompute_latest(symbol: str = Query(..., min_length=1)):
+    """Latest successful precomputed ATR(14)% for a symbol."""
+    try:
+        from backend.services.atr_daily_precompute import (
+            ensure_atr_daily_precompute_tables,
+            get_latest_precomputed_atr,
+            get_precomputed_atr,
+        )
+        from backend.services.rs_scanner_maturity import today_ist
+
+        ensure_atr_daily_precompute_tables()
+        today = get_precomputed_atr(symbol, today_ist())
+        latest = get_latest_precomputed_atr(symbol)
+        return {"ok": True, "symbol": symbol.upper(), "today": today, "latest": latest}
+    except Exception as exc:
+        logger.warning("atr-precompute latest failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/relative-strength/atr-precompute/run")
+def atr_precompute_run_now(
+    as_of_date: Optional[str] = Query(
+        None,
+        description="Session/as-of date YYYY-MM-DD; default = next NSE session after today IST",
+    ),
+):
+    """On-demand ATR precompute (same workload as 19:00 IST nightly job)."""
+    try:
+        from backend.services.atr_daily_precompute import (
+            ensure_atr_daily_precompute_tables,
+            run_atr_daily_precompute_job,
+        )
+
+        ensure_atr_daily_precompute_tables()
+        result = run_atr_daily_precompute_job(as_of_date=as_of_date, trigger="manual_api")
+        status = 200 if result.get("ok") else 503
+        return JSONResponse(status_code=status, content=result)
+    except Exception as exc:
+        logger.exception("atr-precompute run failed: %s", exc)
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@router.post("/relative-strength/atr-precompute/backfill")
+def atr_precompute_backfill(
+    start_date: str = Query(..., description="YYYY-MM-DD"),
+    end_date: str = Query(..., description="YYYY-MM-DD"),
+    patch_history: bool = Query(
+        True,
+        description="Also patch rs_scanner_history zero/NULL atr14_pct from precomputed",
+    ),
+):
+    """Backfill atr_daily_precomputed for a date range (and optionally patch history zeros)."""
+    try:
+        from backend.services.atr_daily_precompute import run_atr_daily_precompute_backfill
+
+        result = run_atr_daily_precompute_backfill(
+            start_date,
+            end_date,
+            trigger="manual_backfill",
+            patch_rs_scanner_history=patch_history,
+        )
+        return result
+    except Exception as exc:
+        logger.exception("atr-precompute backfill failed: %s", exc)
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
