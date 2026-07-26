@@ -1,10 +1,32 @@
 # FIX: Variant A grade-C → READY(RECHECK) LIVE
 
 **Shipped:** 2026-07-26  
-**Status:** LIVE (trader go-live override)  
+**Status:** ROLLED BACK (live off) — 2026-07-26  
 **Backtest basis:** week 2026-07-20→24 · n=69 · WR 49.3% · total **+22.52R** · verdict was `PROMISING_SHADOW_FIRST`
 
-## Explicit decision
+## Follow-up: live rollback (2026-07-26)
+
+Trader requested restore of **pre-change / EOD 2026-07-24** grade-C behavior after chart-verified backtest errors:
+
+| Symbol | Issue |
+|---|---|
+| MAZDOCK | Wrong direction |
+| HCLTECH | Mistimed |
+| PRESTIGE | Mistimed |
+
+**Action:** set `GRADE_C_RECHECK_LIVE=0` on paperclip `.env` + `docker compose up -d --force-recreate app` (env-only; code path kept).
+
+| Still true after rollback | Detail |
+|---|---|
+| Live gating | Plain non-stretch `C` hard-blocked from READY-family (not `READY(RECHECK)`) |
+| Shadow logging | `grade_c_recheck_would_apply` / related `inputs` keys still populate when plain C would have been the path |
+| Stretch / D | `C!` / `D` still blocked |
+| A/B | Still can reach READY when other gates pass |
+| Part 1 ATR-suppress | `ATR_READY_SUPPRESS_LIVE` unchanged (default on) |
+
+Historical go-live record below is retained for audit.
+
+## Explicit decision (historical go-live)
 
 Backtest recommended **shadow-first**. Trader explicitly chose **go-live without further shadow** for Variant A only (plain non-stretch `C` → `READY(RECHECK)`). Variant B (stretch softening) remains **NO_GO** and was not shipped.
 
@@ -51,7 +73,7 @@ Re-enable: `GRADE_C_RECHECK_LIVE=1` (or unset — default is on).
 
 Confirmed: Part 1 `ATR_READY_SUPPRESS_LIVE` still runs **after** FSM on READY-family (including grade-C `READY(RECHECK)`). ATR≥85% + not progressing → display `WATCHING` as before.
 
-## Checklist
+## Checklist (go-live)
 
 - [x] Plain C → READY(RECHECK); C! / D still BLOCKED
 - [x] Feature flag default on; flip-off via env
@@ -60,6 +82,14 @@ Confirmed: Part 1 `ATR_READY_SUPPRESS_LIVE` still runs **after** FSM on READY-fa
 - [x] ATR-suppress still layers
 - [x] Commit + push + paperclip rebuild deploy
 - [x] Health check
+
+## Checklist (rollback 2026-07-26)
+
+- [x] `GRADE_C_RECHECK_LIVE=0` on paperclip `.env` + app recreate
+- [x] Plain C → BLOCKED (not READY(RECHECK)); shadow `would_apply=true`
+- [x] C! / D still BLOCKED; B/A still READY when gates pass
+- [x] `ATR_READY_SUPPRESS_LIVE` still on (default); suppress probe → WATCHING
+- [x] Health OK; no code redeploy required for flag-off
 
 ## Code
 
