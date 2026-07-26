@@ -1402,6 +1402,52 @@ def take_trade(
             },
         )
         db.commit()
+        # Shadow journal: capture Garuda confluence at entry (read-only; never gates).
+        try:
+            from backend.services.rule27_trade_log import ensure_trade_log_table, upsert_trade
+            from backend.services.garuda_screener.job import lookup_garuda_confluence
+
+            ensure_trade_log_table()
+            g = lookup_garuda_confluence(sym, direction, et, session_date=sd)
+            upsert_trade(
+                db,
+                {
+                    "session_date": sd,
+                    "symbol": sym,
+                    "direction": direction,
+                    "qty": lot,
+                    "entry_time": et,
+                    "entry_price": px,
+                    "ema10_at_entry": ema10,
+                    "ema5_at_entry": ema5,
+                    "planned_risk_pts": abs(px - ema10) if ema10 is not None else None,
+                    "planned_risk_inr": initial_sl,
+                    "confidence_at_entry": levels.get("confidence_grade"),
+                    "source": "kavach_checklist",
+                    "garuda_confluence": g.get("garuda_confluence"),
+                    "garuda_rank": g.get("garuda_rank"),
+                    "garuda_direction": g.get("garuda_direction"),
+                },
+            )
+            db.commit()
+            provenance["garuda_confluence"] = g
+            db.execute(
+                text(
+                    """
+                    UPDATE kavach_checklist_trades
+                    SET provenance = CAST(:prov AS jsonb)
+                    WHERE id = :id
+                    """
+                ),
+                {"prov": json.dumps(provenance), "id": tid},
+            )
+            db.commit()
+        except Exception as gexc:
+            logger.debug("garuda confluence trade_log write skipped: %s", gexc)
+            try:
+                db.rollback()
+            except Exception:
+                pass
         trade = get_trade(tid)
         if reval.get("warning"):
             trade["take_warning"] = reval["warning"]

@@ -78,7 +78,8 @@ _UPSERT = text(
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
         confidence_at_exit, trade_score_at_exit,
         mfe_r, mae_r, r_realized, bars_held_10m,
-        exit_trigger, exit_trigger_type, notes, source, updated_at
+        exit_trigger, exit_trigger_type, notes, source,
+        garuda_confluence, garuda_rank, garuda_direction, updated_at
     ) VALUES (
         CAST(:session_date AS date), :symbol, :contract, :direction, :qty,
         CAST(:entry_time AS time), :entry_price, CAST(:exit_time AS time),
@@ -89,7 +90,8 @@ _UPSERT = text(
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
         :confidence_at_exit, :trade_score_at_exit,
         :mfe_r, :mae_r, :r_realized, :bars_held_10m,
-        :exit_trigger, :exit_trigger_type, :notes, :source, NOW()
+        :exit_trigger, :exit_trigger_type, :notes, :source,
+        :garuda_confluence, :garuda_rank, :garuda_direction, NOW()
     )
     ON CONFLICT (session_date, symbol, direction, entry_time) DO UPDATE SET
         contract = EXCLUDED.contract,
@@ -120,6 +122,9 @@ _UPSERT = text(
         exit_trigger_type = COALESCE(EXCLUDED.exit_trigger_type, {TABLE}.exit_trigger_type),
         notes = COALESCE(EXCLUDED.notes, {TABLE}.notes),
         source = EXCLUDED.source,
+        garuda_confluence = COALESCE(EXCLUDED.garuda_confluence, {TABLE}.garuda_confluence),
+        garuda_rank = COALESCE(EXCLUDED.garuda_rank, {TABLE}.garuda_rank),
+        garuda_direction = COALESCE(EXCLUDED.garuda_direction, {TABLE}.garuda_direction),
         updated_at = NOW()
     RETURNING id
     """
@@ -141,6 +146,25 @@ def ensure_trade_log_table() -> None:
             text(
                 f"ALTER TABLE {TABLE} "
                 "ADD COLUMN IF NOT EXISTS exit_trigger_type TEXT"
+            )
+        )
+        # Garuda confluence at entry — read-only lookup, never gates.
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS garuda_confluence TEXT"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS garuda_rank INTEGER"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS garuda_direction TEXT"
             )
         )
 
@@ -228,8 +252,31 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         points = _points(direction, entry, exit_px)
     et = _as_time(payload["entry_time"])
     xt = _as_time(payload.get("exit_time"))
+    sd = _as_date(payload["session_date"])
+    garuda_confluence = payload.get("garuda_confluence")
+    garuda_rank = payload.get("garuda_rank")
+    garuda_direction = payload.get("garuda_direction")
+    # Auto-lookup at entry when caller did not supply confluence (shadow only).
+    if garuda_confluence is None and sd is not None and et is not None:
+        try:
+            from backend.services.garuda_screener.job import lookup_garuda_confluence
+
+            entry_dt = IST.localize(datetime.combine(sd, et))
+            g = lookup_garuda_confluence(
+                str(payload.get("symbol") or ""),
+                direction,
+                entry_dt,
+                session_date=str(sd),
+            )
+            garuda_confluence = g.get("garuda_confluence")
+            if garuda_rank is None:
+                garuda_rank = g.get("garuda_rank")
+            if garuda_direction is None:
+                garuda_direction = g.get("garuda_direction")
+        except Exception:
+            garuda_confluence = garuda_confluence or "NOT_AVAILABLE"
     return {
-        "session_date": str(_as_date(payload["session_date"])),
+        "session_date": str(sd),
         "symbol": str(payload["symbol"]).strip().upper(),
         "contract": payload.get("contract"),
         "direction": direction,
@@ -264,6 +311,9 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         "exit_trigger_type": normalize_exit_trigger_type(payload.get("exit_trigger_type")),
         "notes": payload.get("notes"),
         "source": payload.get("source") or "manual",
+        "garuda_confluence": garuda_confluence,
+        "garuda_rank": int(garuda_rank) if garuda_rank is not None else None,
+        "garuda_direction": garuda_direction,
     }
 
 

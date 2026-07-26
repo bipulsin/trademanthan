@@ -1324,6 +1324,48 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Universe VWAP slope scan (Mon–Fri :01/:06… IST, research)"
             )
 
+            def _run_garuda_screener():
+                """Shadow-only: Garuda Top-6 on 10m candle close (cache-only, no gating)."""
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("Garuda screener", now):
+                    return
+                # 10m bars close at :05/:15/:25/…; first usable close is 09:25 → run from 09:26.
+                if now.hour == 9 and now.minute < 26:
+                    return
+                if now.hour >= 15 and now.minute > 26:
+                    return
+                try:
+                    from backend.services.garuda_screener.job import run_live_garuda_screener
+
+                    out = run_live_garuda_screener()
+                    if out.get("skipped"):
+                        logger.debug("Garuda screener skipped: %s", out.get("reason"))
+                    else:
+                        logger.info("✅ Garuda screener: %s", out)
+                except Exception as e:
+                    logger.error("❌ Garuda screener failed: %s", e, exc_info=True)
+
+            # After 10m close (:05/:15/:25/…) +1m once shared 5m candle_cache is warm.
+            self.scheduler.add_job(
+                _run_garuda_screener,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="6,16,26,36,46,56",
+                    timezone="Asia/Kolkata",
+                ),
+                id="garuda_screener_10m",
+                name="Garuda screener shadow (research, every 10m)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=180,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Garuda screener shadow (Mon–Fri :06/:16… IST, research)"
+            )
+
             def _run_expansion_watch_shadow():
                 """Research-only: persist Expansion Watch hits without live alerts."""
                 ist = pytz.timezone("Asia/Kolkata")

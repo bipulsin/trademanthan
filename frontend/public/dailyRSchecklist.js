@@ -1731,6 +1731,7 @@
         renderOpenTrades();
         renderGoBoard();
         renderFastWatch();
+        renderGaruda();
         checkGoAlerts(stocks);
         checkReadyNowAlerts(stocks);
 
@@ -1741,6 +1742,88 @@
         if (!stackEl) return;
         stackEl.innerHTML = "";
         (items || []).forEach(function (item) { stackEl.appendChild(buildFastWatchCard(item)); });
+    }
+
+    var GARUDA_API = "/api/dashboard/garuda";
+    var garudaState = null;
+
+    function fmtGarudaNum(v, digits) {
+        if (v == null || v === "") return "—";
+        var n = Number(v);
+        if (isNaN(n)) return "—";
+        return n.toFixed(digits == null ? 1 : digits);
+    }
+
+    function buildGarudaCard(item) {
+        var side = (item.side || item.imbalance_side || "LONG").toUpperCase();
+        var card = el("div", "dc-garuda-card dc-garuda-card--" + (side === "SHORT" ? "short" : "long"));
+        var dir = item.direction || {};
+        var strength = item.strength || {};
+        var trend = item.trend || {};
+        var mom = item.momentum || {};
+        var hits = item.imbalance_hits || [];
+        card.innerHTML =
+            "<span class=\"dc-garuda-rank\">#" + (item.rank != null ? item.rank : "?") + "</span> " +
+            "<strong>" + (item.symbol || "?") + "</strong> · " + side +
+            (item.price != null ? " · " + fmtGarudaNum(item.price, 2) : "") +
+            "<div class=\"dc-garuda-parts\">" +
+            "<b>Part1</b> imb=" + (item.imbalance_confirmed ? "Y" : "N") +
+            " hits=[" + (hits.length ? hits.join(", ") : "—") + "] · " +
+            "<b>Dir</b> " + (dir.side || "—") +
+            (dir.agreement ? " agree" : " diverge") + " · " +
+            "<b>Str</b> dayRS=" + fmtGarudaNum(strength.day_rs, 2) +
+            " pct=" + fmtGarudaNum(strength.percentile, 0) + " · " +
+            "<b>Trend</b> ADX=" + fmtGarudaNum(trend.adx, 1) +
+            " slope=" + fmtGarudaNum(trend.adx_slope, 2) +
+            " ER=" + fmtGarudaNum(trend.efficiency_ratio, 2) + " · " +
+            "<b>Mom</b> pct=" + fmtGarudaNum(mom.percentile_roc3 != null ? mom.percentile_roc3 : item.momentum_percentile, 0) +
+            "</div>";
+        return card;
+    }
+
+    function renderGaruda() {
+        var wrap = $("dcGaruda");
+        var stack = $("dcGarudaStack");
+        var empty = $("dcGarudaEmpty");
+        var asof = $("dcGarudaAsof");
+        var warn = $("dcGarudaWarning");
+        if (!wrap || !stack) return;
+        // Banner is permanent — never hide / dismiss / collapse.
+        if (warn) {
+            warn.hidden = false;
+            warn.textContent =
+                "⚠️ TESTING IN PROGRESS — Garuda is unvalidated. Forward-performance testing has not been completed. Do not use for trade decisions.";
+        }
+        var g = garudaState || {};
+        var items = g.top_n || [];
+        if (asof) {
+            asof.textContent = g.bar_end
+                ? ("as of " + String(g.bar_end).replace("T", " ").slice(0, 16) + " IST")
+                : "";
+        }
+        stack.innerHTML = "";
+        if (!items.length) {
+            if (empty) empty.hidden = false;
+            return;
+        }
+        if (empty) empty.hidden = true;
+        items.forEach(function (item) {
+            stack.appendChild(buildGarudaCard(item));
+        });
+    }
+
+    function fetchGaruda() {
+        var q = state && state.session_date ? ("?date=" + encodeURIComponent(state.session_date)) : "";
+        return fetch(GARUDA_API + "/latest" + q, { credentials: "same-origin" })
+            .then(function (r) { return r.json(); })
+            .then(function (payload) {
+                garudaState = payload || {};
+                renderGaruda();
+                return garudaState;
+            })
+            .catch(function () {
+                renderGaruda();
+            });
     }
 
     function renderGoBoard() {
@@ -2705,6 +2788,8 @@
         setInterval(function () {
             api("/data").then(applyState).catch(function () {});
         }, 60000);
+        fetchGaruda();
+        setInterval(fetchGaruda, 10 * 60 * 1000);
         // Live LTP / PnL for open trades (state machine still candle-close gated server-side)
         setInterval(function () {
             if (!state || !state.open_trades_panel || !(state.open_trades_panel.open_trades || []).length) return;

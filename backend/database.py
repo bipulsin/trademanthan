@@ -1172,6 +1172,33 @@ def _run_startup_schema_migrations(db_engine):
                 try:
                     conn.execute(
                         text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS garuda_confluence TEXT"
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS garuda_rank INTEGER"
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS garuda_direction TEXT"
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        text(
                             """
                             CREATE TABLE IF NOT EXISTS trade_session_log (
                                 session_date DATE PRIMARY KEY,
