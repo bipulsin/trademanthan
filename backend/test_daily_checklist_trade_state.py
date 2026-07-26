@@ -617,6 +617,79 @@ def test_i8b_stretch_bang_grade_not_ready_eligible():
     assert "conf" in reason
 
 
+def test_variant_a_plain_c_ready_recheck_live(monkeypatch):
+    """Plain C → READY(RECHECK) only (not full READY); C! and D still block."""
+    from backend.services.daily_checklist_trade_state import grade_c_recheck_live_enabled
+
+    monkeypatch.setenv("GRADE_C_RECHECK_LIVE", "1")
+    assert grade_c_recheck_live_enabled() is True
+
+    # ADX ≥25 would be full READY for B; plain C must stay RECHECK.
+    out = _compute(levels={"confidence_grade": "C", "adx": 28.0})
+    assert out["trade_state"] == STATE_READY_RECHECK
+    assert out["trade_take_enabled"] is True
+    assert out["grade_c_recheck_path"] is True
+    assert out["grade_c_recheck_would_apply"] is True
+    assert out["grade_c_recheck_live_enabled"] is True
+    assert out["grade_c_recheck_grade"] == "C"
+
+    # ADX band + plain C still RECHECK.
+    out_band = _compute(levels={"confidence_grade": "C", "adx": 22.0})
+    assert out_band["trade_state"] == STATE_READY_RECHECK
+
+    # Stretch C! hard-blocked.
+    out_bang = _compute(levels={"confidence_grade": "C!", "adx": 30.0})
+    assert out_bang["trade_state"] == STATE_BLOCKED
+    assert "conf C!" in (out_bang["trade_state_reason"] or "")
+    assert out_bang["grade_c_recheck_path"] is False
+    assert out_bang["grade_c_recheck_would_apply"] is False
+
+    # D still hard-blocked.
+    out_d = _compute(levels={"confidence_grade": "D", "adx": 30.0})
+    assert out_d["trade_state"] == STATE_BLOCKED
+    assert "conf D" in (out_d["trade_state_reason"] or "")
+
+    # B with ADX≥25 still full READY (floor unchanged for A+/A/B).
+    out_b = _compute(levels={"confidence_grade": "B", "adx": 28.0})
+    assert out_b["trade_state"] == STATE_READY
+    assert out_b["grade_c_recheck_path"] is False
+
+
+def test_variant_a_plain_c_flag_off_blocks(monkeypatch):
+    monkeypatch.setenv("GRADE_C_RECHECK_LIVE", "0")
+    out = _compute(levels={"confidence_grade": "C", "adx": 28.0})
+    assert out["trade_state"] == STATE_BLOCKED
+    assert "conf C" in (out["trade_state_reason"] or "")
+    assert out["grade_c_recheck_live_enabled"] is False
+    assert out["grade_c_recheck_would_apply"] is True  # candidate still logged
+    assert out["grade_c_recheck_path"] is False
+
+
+def test_variant_a_atr_suppress_layers_on_grade_c_recheck(monkeypatch):
+    """ATR≥85% + not progressing still demotes grade-C READY(RECHECK) → WATCHING."""
+    from backend.services.atr_ready_suppress import (
+        STATE_WATCHING,
+        apply_atr_ready_suppress_display,
+    )
+
+    monkeypatch.setenv("GRADE_C_RECHECK_LIVE", "1")
+    monkeypatch.setenv("ATR_READY_SUPPRESS_LIVE", "1")
+    out = _compute(levels={"confidence_grade": "C", "adx": 28.0})
+    assert out["trade_state"] == STATE_READY_RECHECK
+
+    stock = dict(out)
+    stock["trade_state"] = out["trade_state"]
+    stock["trade_take_enabled"] = True
+    decision = {
+        "atr_ready_suppress_would": True,
+        "atr_consumed_pct": 90.0,
+        "atr_ready_suppress_threshold_pct": 85.0,
+    }
+    assert apply_atr_ready_suppress_display(stock, decision) is True
+    assert stock["trade_state"] == STATE_WATCHING
+    assert stock["trade_take_enabled"] is False
+
+
 def test_i8c_macd_label_uses_line_vs_signal():
     """DIR CONFLICT / panel MACD follows Pine Votes (line vs signal), not histogram."""
     from backend.services.daily_checklist import _macd_label

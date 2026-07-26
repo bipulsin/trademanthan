@@ -5,7 +5,9 @@ Uses existing thresholds only:
   - Pullback expiry = ``expiry_atr`` (1.5 ATR) from intended entry (EMA5)
   - Max INR risk = ₹3,000 / lot (runbook)
   - ADX ready ≥ 25, recheck 20–25, blocked < 20
-  - Confidence ≥ B; regime TREND or TRANSITION
+  - Confidence ≥ B (A+/A/B); plain C → READY(RECHECK) when
+    ``GRADE_C_RECHECK_LIVE`` (default on); D / stretch ``!`` still blocked
+  - Regime TREND or TRANSITION
 
 READY NOW note (2026-07-14 / 2026-07-15):
   ``compute_trade_state_for_stock`` historically set READY from live levels /
@@ -38,11 +40,17 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - ATR consumed (from open + from opening range) logged for research; same atr14
     used for 1.5× expiry. Display-only READY→WATCHING when atr ≥85% and not
     progressing (``ATR_READY_SUPPRESS_LIVE``, default on) — ranking/lock untouched.
+
+  2026-07-26 Variant A go-live (trader override of PROMISING_SHADOW_FIRST):
+  Plain non-stretch ``C`` qualifies for READY(RECHECK) only — same tier as
+  ADX 20–25. Does not unlock full READY. Toggle ``GRADE_C_RECHECK_LIVE``
+  (default on; set 0/false/off to disable without code redeploy).
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -752,6 +760,28 @@ def _grade_ok(grade: str) -> bool:
     return base in ("A+", "A", "B")
 
 
+_TRUE_ENV = ("1", "true", "yes", "on")
+
+
+def grade_c_recheck_live_enabled() -> bool:
+    """When True, plain non-stretch C unlocks READY(RECHECK) only (Variant A).
+
+    Default on after trader go-live. Set ``GRADE_C_RECHECK_LIVE=0`` to disable
+    instantly (shadow fields still log). Does not unlock full READY; D and
+    stretch ``!`` remain hard-blocked.
+    """
+    return os.environ.get("GRADE_C_RECHECK_LIVE", "1").strip().lower() in _TRUE_ENV
+
+
+def _is_plain_c_grade(grade: str) -> bool:
+    """True for non-stretch plain C (Variant A floor). C! / C* bang excluded."""
+    g = (grade or "").strip().upper()
+    if "!" in g:
+        return False
+    base = g.replace("*", "").replace("⋆", "")
+    return base == "C"
+
+
 def _regime_ok(regime: Optional[str]) -> bool:
     r = (regime or "").strip().upper()
     return r in ("TREND", "TRANSITION")
@@ -1188,8 +1218,14 @@ def compute_trade_state_for_stock(
         risk_inr_pb = round(risk_pts_pb * max(lot, 1), 0)
 
     block_reasons: List[str] = []
+    plain_c = _is_plain_c_grade(grade)
+    grade_c_live = grade_c_recheck_live_enabled()
+    # Variant A: plain C is a RECHECK-only unlock when live; still shadow-log candidates.
+    grade_c_would_apply = bool(plain_c)
+    grade_c_path = bool(plain_c and grade_c_live)
     if not _grade_ok(grade):
-        block_reasons.append(f"conf {grade or '—'}")
+        if not grade_c_path:
+            block_reasons.append(f"conf {grade or '—'}")
     if not _regime_ok(regime):
         block_reasons.append(f"regime {(regime or '—')}")
     if adx is not None and adx < ADX_MIN:
@@ -1220,7 +1256,8 @@ def compute_trade_state_for_stock(
         entry_price = round(intended, 2) if intended is not None else None
         display_risk = risk_inr_ready if risk_inr_ready is not None else risk_inr_pb
     elif near_ema5 and entry_ready is not None:
-        if adx is not None and ADX_MIN <= adx < ADX_READY:
+        # Plain C always READY(RECHECK); ADX 20–25 also RECHECK; else full READY.
+        if grade_c_path or (adx is not None and ADX_MIN <= adx < ADX_READY):
             state = STATE_READY_RECHECK
         else:
             state = STATE_READY
@@ -1567,6 +1604,13 @@ def compute_trade_state_for_stock(
         },
         "atr_consumed": atr_consumed,
         "stopped_out_today": bool(stopped and stopped.get("blocked")),
+        # Variant A grade-C RECHECK shadow / live telemetry (consistency_log.inputs).
+        "grade_c_recheck_path": bool(
+            grade_c_path and state in (STATE_READY, STATE_READY_RECHECK)
+        ),
+        "grade_c_recheck_would_apply": grade_c_would_apply,
+        "grade_c_recheck_live_enabled": bool(grade_c_live),
+        "grade_c_recheck_grade": grade or None,
     }
 
 
@@ -1951,6 +1995,15 @@ def enrich_stocks_trade_state(
                             "confidence": s.get("confidence") or s.get("dashboard_kavach"),
                             "trade_entry": s.get("trade_entry"),
                             "trade_sl": s.get("trade_sl"),
+                            # Variant A: plain-C → READY(RECHECK) telemetry.
+                            "grade_c_recheck_path": bool(s.get("grade_c_recheck_path")),
+                            "grade_c_recheck_would_apply": bool(
+                                s.get("grade_c_recheck_would_apply")
+                            ),
+                            "grade_c_recheck_live_enabled": bool(
+                                s.get("grade_c_recheck_live_enabled")
+                            ),
+                            "grade_c_recheck_grade": s.get("grade_c_recheck_grade"),
                         },
                     }
                 )
@@ -2124,6 +2177,15 @@ def enrich_stocks_trade_state(
                 ):
                     if k in atr_dec:
                         inp[k] = atr_dec[k]
+            # Variant A grade-C RECHECK: refresh from final stock (ATR may have mutated state).
+            for k in (
+                "grade_c_recheck_path",
+                "grade_c_recheck_would_apply",
+                "grade_c_recheck_live_enabled",
+                "grade_c_recheck_grade",
+            ):
+                if k in s_final:
+                    inp[k] = s_final[k]
             di_shadow = s_final.get("would_override_di_shadow")
             if isinstance(di_shadow, dict):
                 inp["would_override_di"] = bool(di_shadow.get("would_override_di"))
