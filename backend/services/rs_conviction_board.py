@@ -598,7 +598,7 @@ def get_conviction_board_payload() -> Dict[str, Any]:
             })
         return out
 
-    fast_watch: List[Dict[str, Any]] = []
+    fast_watch: Any = []
     checklist_cfg: Dict[str, Any] = {}
     if cfg.get("fast_watch_ui_enabled"):
         try:
@@ -609,25 +609,70 @@ def get_conviction_board_payload() -> Dict[str, Any]:
         except Exception as exc:
             logger.debug("conviction board fast_watch: %s", exc)
 
+    live_setups = get_live_setups()
+    bullish_core_out = enrich_core(bull_core, SIDE_BULL)
+    bearish_core_out = enrich_core(bear_core, SIDE_BEAR)
+    promotion_events = [
+        {
+            "time": e.event_time.isoformat() if e.event_time else "",
+            "side": e.side,
+            "type": e.event_type,
+            "symbol": e.symbol,
+            "replaced": e.replaced_symbol,
+        }
+        for e in events
+    ]
+
+    try:
+        from backend.services.fo_display_symbol import (
+            attach_future_symbols,
+            load_currmth_future_symbol_map,
+            ui_display_symbol,
+        )
+        from backend.database import SessionLocal as _SL
+
+        fo_items: List[Dict[str, Any]] = []
+        fo_items.extend(bullish_core_out)
+        fo_items.extend(bearish_core_out)
+        fo_items.extend(bull_bench)
+        fo_items.extend(bear_bench)
+        fo_items.extend(live_setups)
+        fo_items.extend(promotion_events)
+        if isinstance(fast_watch, dict):
+            fo_items.extend(fast_watch.get("all") or [])
+            feat = fast_watch.get("featured") if isinstance(fast_watch.get("featured"), dict) else {}
+            fo_items.extend(feat.get("long") or [])
+            fo_items.extend(feat.get("short") or [])
+        elif isinstance(fast_watch, list):
+            fo_items.extend(fast_watch)
+        _db = _SL()
+        try:
+            fmap = load_currmth_future_symbol_map(_db)
+            attach_future_symbols(fo_items, fmap=fmap)
+            for e in promotion_events:
+                rep = str(e.get("replaced") or "").strip()
+                if rep:
+                    e["replaced_display"] = ui_display_symbol(rep, fmap.get(rep.upper(), ""))
+        finally:
+            _db.close()
+    except Exception as exc:
+        logger.debug("conviction board FO display enrichment failed: %s", exc)
+
     return {
         "session_date": sd,
         "last_board_cycle": rs_snap.get("last_updated"),
-        "bullish_core": enrich_core(bull_core, SIDE_BULL),
-        "bearish_core": enrich_core(bear_core, SIDE_BEAR),
+        "bullish_core": bullish_core_out,
+        "bearish_core": bearish_core_out,
         "bullish_bench": bull_bench,
         "bearish_bench": bear_bench,
         "bullish_pending": bull_pending,
         "bearish_pending": bear_pending,
-        "promotion_events": [
-            {"time": e.event_time.isoformat() if e.event_time else "", "side": e.side,
-             "type": e.event_type, "symbol": e.symbol, "replaced": e.replaced_symbol}
-            for e in events
-        ],
-        "live_setups": get_live_setups(),
+        "promotion_events": promotion_events,
+        "live_setups": live_setups,
         "fast_watch": fast_watch,
         "checklist_config": checklist_cfg,
-        "bullish": enrich_core(bull_core, SIDE_BULL),
-        "bearish": enrich_core(bear_core, SIDE_BEAR),
+        "bullish": bullish_core_out,
+        "bearish": bearish_core_out,
         "last_updated": rs_snap.get("last_updated"),
     }
 

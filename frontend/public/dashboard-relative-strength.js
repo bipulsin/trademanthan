@@ -23,6 +23,13 @@
     let rsCfg = { show_ema10_passive: true, alert_sound_enabled: false };
     let seenTriggered = new Set();
 
+    /** UI label: currmth future contract; fall back to underlying when FO is null. */
+    function displaySym(r) {
+        if (!r) return "";
+        if (typeof r === "string") return r;
+        return r.display_symbol || r.future_symbol || r.symbol || "";
+    }
+
     function getAuthHeaders() {
         const headers = { Accept: "application/json" };
         try {
@@ -95,7 +102,7 @@
             if (typeof Notification !== "undefined") {
                 if (Notification.permission === "granted") {
                     new Notification("RS Setup TRIGGERED", {
-                        body: s.symbol + " · " + s.side + " · SL " + fmtNum(s.sl_pct, 2) + "%",
+                        body: displaySym(s) + " · " + s.side + " · SL " + fmtNum(s.sl_pct, 2) + "%",
                     });
                 } else if (Notification.permission !== "denied") {
                     Notification.requestPermission();
@@ -227,10 +234,10 @@
             `<tr class="${rowClass(matTag)}" tabindex="0" role="button"` +
             ` data-symbol="${escapeAttr(r.symbol)}"` +
             ` data-instrument-key="${escapeAttr(r.instrument_key)}"` +
-            ` data-label="${escapeAttr(r.future_symbol || r.symbol)}"` +
-            ` title="Open chart for ${escapeAttr(r.symbol)}">` +
+            ` data-label="${escapeAttr(displaySym(r))}"` +
+            ` title="Open chart for ${escapeAttr(displaySym(r))}">` +
             `<td class="rs-rank">${escapeHtml(r.rank)}</td>` +
-            `<td class="rs-sym">${escapeHtml(r.symbol)} ${convictionChips(r)}</td>` +
+            `<td class="rs-sym">${escapeHtml(displaySym(r))} ${convictionChips(r)}</td>` +
             `<td class="num rs-conv">${conv}</td>` +
             `<td class="num ${rsCls}">${fmtSignedPct(r.rs_percent)}</td>` +
             `<td class="num"><span class="rs-score ${tradeScoreClass(r.trade_score)}">${escapeHtml(r.trade_score)}</span></td>` +
@@ -252,7 +259,7 @@
     function benchRowHtml(r) {
         return (
             `<tr class="rs-scanner-row rs-scanner-row--bench">` +
-            `<td class="rs-sym">${escapeHtml(r.symbol)}</td>` +
+            `<td class="rs-sym">${escapeHtml(displaySym(r))}</td>` +
             `<td class="num">${fmtNum(r.conviction_score, 0)}</td>` +
             `<td class="num">${fmtNum(r.persistence_credit, 0)}</td>` +
             `<td>${setupBadge(r)}</td>` +
@@ -391,7 +398,7 @@
         chips.innerHTML = setups.map(function (s) {
             return (
                 '<span class="rs-setup-chip rs-setup-chip--' + escapeAttr((s.state || "").toLowerCase()) + '">' +
-                escapeHtml(s.symbol) + " · " + escapeHtml(s.side) + " · " + escapeHtml(s.state) +
+                escapeHtml(displaySym(s)) + " · " + escapeHtml(s.side) + " · " + escapeHtml(s.state) +
                 (s.sl_pct != null ? " · SL " + fmtNum(s.sl_pct, 2) + "%" : "") +
                 "</span>"
             );
@@ -410,10 +417,12 @@
         el.innerHTML = events.map(function (e) {
             const t = e.time ? new Date(e.time).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "—";
             if (e.type === "promote") {
-                return '<div class="rs-promo-banner">' + t + " — " + escapeHtml(e.symbol) +
-                    " promoted to " + escapeHtml(e.side) + " Core (replaced " + escapeHtml(e.replaced || "—") + ")</div>";
+                return '<div class="rs-promo-banner">' + t + " — " + escapeHtml(displaySym(e)) +
+                    " promoted to " + escapeHtml(e.side) + " Core (replaced " +
+                    escapeHtml(e.replaced_display || e.replaced || "—") + ")</div>";
             }
-            return '<div class="rs-promo-banner rs-promo-banner--eject">' + t + " — " + escapeHtml(e.symbol) + " ejected</div>";
+            return '<div class="rs-promo-banner rs-promo-banner--eject">' + t + " — " +
+                escapeHtml(displaySym(e)) + " ejected</div>";
         }).join("");
     }
 
@@ -477,7 +486,7 @@
         const score = fw.trade_score != null ? " · Score " + escapeHtml(fw.trade_score) : "";
         const kav = escapeHtml(fw.kavach_state || fw.live_kavach || "?");
         return '<div class="rs-fast-watch-card rs-fast-watch-card--' + side + '">' +
-            "<strong>" + escapeHtml(fw.symbol) + "</strong>" + fwMomentumHtml(fw.momentum) +
+            "<strong>" + escapeHtml(displaySym(fw)) + "</strong>" + fwMomentumHtml(fw.momentum) +
             " · " + kav + grade + score +
             ' <span class="rs-fw-meta">· ' + escapeHtml(fmtFwElapsed(fw)) + "</span></div>";
     }

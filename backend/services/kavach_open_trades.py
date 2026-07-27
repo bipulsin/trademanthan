@@ -1505,6 +1505,12 @@ def list_session_trades(session_date: Optional[str] = None) -> Dict[str, Any]:
         ).fetchall()
         open_list = [enrich_trade_live(_row_to_dict(r), db) for r in opens]
         closed_list = [_row_to_dict(r) for r in closed]
+        try:
+            from backend.services.fo_display_symbol import attach_future_symbols
+
+            attach_future_symbols(open_list + closed_list, db=db)
+        except Exception as exc:
+            logger.debug("open trades FO display enrichment failed: %s", exc)
         return {
             "session_date": sd,
             "open_trades": open_list,

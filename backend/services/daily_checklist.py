@@ -930,6 +930,25 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("checklist open-trades enrichment failed: %s", exc)
 
+    try:
+        from backend.services.fo_display_symbol import attach_future_symbols
+
+        fo_items: List[Dict[str, Any]] = []
+        for lst in (today_stocks, carryover_stocks, preview_stocks, display_stocks, live_setups):
+            fo_items.extend(lst or [])
+        fo_items.extend((go_board or {}).get("symbols") or [])
+        fw = fast_watch if isinstance(fast_watch, dict) else {}
+        fo_items.extend(fw.get("all") or [])
+        feat = fw.get("featured") if isinstance(fw.get("featured"), dict) else {}
+        fo_items.extend(feat.get("long") or [])
+        fo_items.extend(feat.get("short") or [])
+        otp = open_trades_payload if isinstance(open_trades_payload, dict) else {}
+        fo_items.extend(otp.get("open_trades") or [])
+        fo_items.extend(otp.get("closed_trades") or [])
+        attach_future_symbols(fo_items)
+    except Exception as exc:
+        logger.debug("checklist FO display enrichment failed: %s", exc)
+
     return {
         "session_date": sd,
         "locked": locked,

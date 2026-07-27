@@ -741,11 +741,17 @@ def _row_to_dict(r, maturity: Optional[Dict[str, Any]] = None) -> Dict[str, Any]
     price = _f(r.current_price)
     vwap = _f(r.vwap)
     mat = maturity or default_maturity_fields()
+    from backend.services.fo_display_symbol import ui_display_symbol
+
+    underlying = r.symbol or ""
+    fut = (r.future_symbol or "") if hasattr(r, "future_symbol") else ""
+    fut = (fut or "").strip()
     return {
         "rank": int(r.rank_position),
-        "symbol": r.symbol,
+        "symbol": underlying,
         "instrument_key": r.instrument_key or "",
-        "future_symbol": r.future_symbol or "",
+        "future_symbol": fut,
+        "display_symbol": ui_display_symbol(underlying, fut),
         "price": round(price, 2),
         "rs_percent": round(_f(r.relative_strength), 2),
         "stock_percent": round(_f(r.stock_percent), 2),

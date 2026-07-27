@@ -638,6 +638,12 @@ def get_latest_top6(session_date: Optional[str] = None) -> Dict[str, Any]:
                     "price": r.price,
                 }
             )
+        try:
+            from backend.services.fo_display_symbol import attach_future_symbols
+
+            attach_future_symbols(top_n, db=db)
+        except Exception as exc:
+            logger.debug("garuda FO display enrichment failed: %s", exc)
         return {
             "session_date": sd,
             "bar_end": bar_end.isoformat() if hasattr(bar_end, "isoformat") else str(bar_end),

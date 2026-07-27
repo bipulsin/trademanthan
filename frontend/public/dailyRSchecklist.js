@@ -56,6 +56,13 @@
 
     function $(id) { return document.getElementById(id); }
 
+    /** UI label: currmth future contract; fall back to underlying when FO is null. */
+    function displaySym(obj) {
+        if (!obj) return "";
+        if (typeof obj === "string") return obj;
+        return obj.display_symbol || obj.future_symbol || obj.symbol || "";
+    }
+
     function ensureChartEngine() {
         if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
         if (_chartEngineLoadPromise) return _chartEngineLoadPromise;
@@ -175,7 +182,7 @@
                     symbol: sym,
                     instrumentType: "FUT",
                     instrumentKey: ik,
-                    displaySymbol: opts.displaySymbol || stock.future_symbol || sym,
+                    displaySymbol: opts.displaySymbol || displaySym(stock) || sym,
                     exchange: "NSE",
                     timeframe: "5m",
                     direction: direction,
@@ -268,7 +275,7 @@
             (fw.direction === "SHORT" ? "short" : "long"));
         card.title = "Open current-month future chart + Kavach panel";
         var title = el("strong", "dc-symbol-link");
-        title.textContent = fw.symbol || "?";
+        title.textContent = displaySym(fw) || "?";
         card.appendChild(title);
         if (fw.is_reversal) {
             var rev = el("span", "dc-fw-reversal");
@@ -602,7 +609,7 @@
         else card.classList.remove("dc-card--carryover");
         if ((stock.decision || "").indexOf("CHART REVERSED") >= 0) card.classList.add("dc-card--reversed");
         else card.classList.remove("dc-card--reversed");
-        card.querySelector(".dc-symbol").textContent = stock.symbol;
+        card.querySelector(".dc-symbol").textContent = displaySym(stock);
         var persEl = card.querySelector(".dc-persist");
         if (persEl) {
             var frac = stock.persistence_top5_frac;
@@ -998,7 +1005,7 @@
             }
             return '<span class="dc-removal-chip dc-removal-chip--' +
                 String(r.rule_tag || "").toLowerCase() + '">' +
-                r.symbol + " · " + (r.rule_tag || "—") + (t ? " @" + t : "") + "</span>";
+                (displaySym(r) || r.symbol) + " · " + (r.rule_tag || "—") + (t ? " @" + t : "") + "</span>";
         }).join("");
         strip.hidden = false;
         if (emptyEl) emptyEl.hidden = true;
@@ -1251,7 +1258,7 @@
     function patchReadyCard(card, stock) {
         var sym = stock.symbol;
         card.dataset.symbol = sym;
-        card.querySelector(".dc-ready-symbol").textContent = sym;
+        card.querySelector(".dc-ready-symbol").textContent = displaySym(stock);
         var dir = (stock.direction || "LONG").toUpperCase();
         var dirEl = card.querySelector(".dc-ready-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
@@ -1398,7 +1405,7 @@
     function patchWatchRow(row, stock) {
         row.dataset.symbol = stock.symbol;
         var symEl = row.querySelector(".dc-watch-sym");
-        symEl.textContent = stock.symbol;
+        symEl.textContent = displaySym(stock);
         symEl.classList.toggle("dc-watch-sym--expired", stock.trade_state === "EXPIRED");
         var dir = (stock.direction || "LONG").toUpperCase();
         var dirEl = row.querySelector(".dc-watch-dir");
@@ -1592,7 +1599,7 @@
         wrap.hidden = false;
         chips.innerHTML = setups.map(function (s) {
             var cls = "dc-live-chip dc-live-chip--" + String(s.state || "").toLowerCase();
-            return '<span class="' + cls + '">' + s.symbol + " · " + s.side + " · " + s.state +
+            return '<span class="' + cls + '">' + displaySym(s) + " · " + s.side + " · " + s.state +
                 (s.sl_pct != null ? " · SL " + Number(s.sl_pct).toFixed(2) + "%" : "") + "</span>";
         }).join("");
     }
@@ -1706,7 +1713,7 @@
                 row.onclick = function () {
                     openSymbolChart(stock.symbol, { stock: stock, direction: stock.direction });
                 };
-                row.querySelector(".dc-carry-sym").textContent = stock.symbol + " · " + stock.direction;
+                row.querySelector(".dc-carry-sym").textContent = displaySym(stock) + " · " + stock.direction;
                 var rsv = stock.rs_pct;
                 row.querySelector(".dc-carry-rs").textContent = rsv == null ? "—" :
                     "RS " + (rsv > 0 ? "+" : "") + Number(rsv).toFixed(2) + "%";
@@ -1764,7 +1771,7 @@
         var hits = item.imbalance_hits || [];
         card.innerHTML =
             "<span class=\"dc-garuda-rank\">#" + (item.rank != null ? item.rank : "?") + "</span> " +
-            "<strong>" + (item.symbol || "?") + "</strong> · " + side +
+            "<strong>" + (displaySym(item) || "?") + "</strong> · " + side +
             (item.price != null ? " · " + fmtGarudaNum(item.price, 2) : "") +
             "<div class=\"dc-garuda-parts\">" +
             "<b>Part1</b> imb=" + (item.imbalance_confirmed ? "Y" : "N") +
@@ -1851,7 +1858,7 @@
         items.forEach(function (item) {
             var card = el("div", "dc-go-board-card dc-go-board-card--" + (item.side === "SHORT" ? "short" : "long"));
             card.title = "Open current-month future chart + Kavach panel";
-            card.innerHTML = "<strong class=\"dc-symbol-link\">" + (item.symbol || "?") + "</strong>" +
+            card.innerHTML = "<strong class=\"dc-symbol-link\">" + (displaySym(item) || "?") + "</strong>" +
                 (item.is_reversal ? " <span class=\"dc-fw-reversal\">REVERSAL</span>" : "") +
                 " · " + (item.kavach_state || "?") +
                 " · Stop " + (item.stop_pct != null ? item.stop_pct + "%" : "—") +
@@ -1862,6 +1869,7 @@
                     direction: item.side === "SHORT" ? "SHORT" : "LONG",
                     instrumentKey: item.instrument_key,
                     extra: item,
+                    displaySymbol: displaySym(item),
                 });
             });
             stack.appendChild(card);
@@ -1974,7 +1982,7 @@
                 var ban = $("dcExitAckBanner");
                 var txt = $("dcExitAckText");
                 if (ban) ban.hidden = false;
-                if (txt) txt.textContent = "Audio blocked — click to play alarm for " + trade.symbol;
+                if (txt) txt.textContent = "Audio blocked — click to play alarm for " + displaySym(trade);
             });
         } else {
             try { sessionStorage.setItem(alarmPlayedKey(trade), "1"); } catch (e) {}
@@ -2096,7 +2104,7 @@
         card.dataset.tradeId = t.id;
 
         var row1 = el("div", "dc-ot-row dc-ot-row--head");
-        var symEl = el("button", "dc-ot-sym dc-symbol-link", t.symbol);
+        var symEl = el("button", "dc-ot-sym dc-symbol-link", displaySym(t));
         symEl.type = "button";
         symEl.title = "Open current-month future chart + Kavach panel";
         symEl.addEventListener("click", function (ev) {
@@ -2107,7 +2115,7 @@
                 direction: t.direction,
                 instrumentKey: t.instrument_key || linked.instrument_key,
                 extra: t,
-                displaySymbol: t.symbol,
+                displaySymbol: displaySym(t) || displaySym(linked),
             });
         });
         row1.appendChild(symEl);
@@ -2419,7 +2427,7 @@
 
     function renderModal(stock) {
         if (!stock) return;
-        $("dcModalTitle").textContent = stock.symbol + " · " + stock.direction;
+        $("dcModalTitle").textContent = displaySym(stock) + " · " + stock.direction;
         var sub = [];
         if (stock.rs_pct != null) sub.push("RS " + (stock.rs_pct > 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%");
         if (stock.dashboard_score != null) sub.push("Score " + stock.dashboard_score);
