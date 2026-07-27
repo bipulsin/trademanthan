@@ -910,6 +910,12 @@ body[data-theme="light"] .dc-modal-panel {
 .dc-rotation--continuation { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
 .dc-rotation--rotation { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
 .dc-rotation--mixed { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
+.dc-rotation--chop {
+    background: #422006; color: #fef08a; border: 1px solid #a16207;
+}
+body[data-theme="dark"] .dc-rotation--chop {
+    background: #1c1917; color: #fde68a; border: 1px solid #a16207;
+}
 
 .dc-sector-badge {
     display: inline-flex; align-items: center; justify-content: center;

@@ -934,18 +934,30 @@
         var regimeEl = $("dcMktRegime");
         var exitEl = $("dcExitRule");
         var sessEl = $("dcSessionWindow");
+        // Zone1 regime chip: only TREND/TRANSITION after 09:45 when no warning banner.
+        // CHOP / ROTATION / MIXED / CONTINUATION use the single top banner instead.
+        var flag = resolveDayRegimeFlag(state);
         if (regimeEl) {
-            var reg = obs.market_regime || "—";
-            var label = obs.market_regime_label || "";
-            if (label && label.toUpperCase().indexOf(String(reg).toUpperCase()) === 0) {
-                regimeEl.textContent = label;
-            } else if (label) {
-                regimeEl.textContent = reg + " · " + label;
+            if (flag && flag.surface === "chip") {
+                var reg = flag.regime;
+                var label = flag.label || "";
+                if (label && label.toUpperCase().indexOf(String(reg).toUpperCase()) === 0) {
+                    regimeEl.textContent = label;
+                } else if (label) {
+                    regimeEl.textContent = reg + " · " + label;
+                } else {
+                    regimeEl.textContent = reg;
+                }
+                regimeEl.className = "dc-mkt-regime dc-mkt-regime--" + String(reg).toLowerCase();
+                regimeEl.title = flag.title || "";
+                regimeEl.hidden = false;
             } else {
-                regimeEl.textContent = reg;
+                regimeEl.textContent = "—";
+                regimeEl.className = "dc-mkt-regime";
+                regimeEl.title = "";
+                // Banner owns the flag (or pre-09:45 plain) — no second regime chip.
+                regimeEl.hidden = !!(flag && flag.surface === "banner");
             }
-            regimeEl.className = "dc-mkt-regime dc-mkt-regime--" + String(reg).toLowerCase();
-            regimeEl.title = (obs.chop_reasons || []).join("; ") || label || "";
         }
         if (exitEl) {
             exitEl.textContent = obs.exit_rule_reminder ||
@@ -954,14 +966,10 @@
         if (sessEl) {
             sessEl.textContent = obs.session_window_text || "Entry 09:45–14:30 · Square-off 15:15";
         }
+        // Rotation chip removed as a second surface — ROTATION is the top banner only.
         var rotChip = $("dcRotationChip");
         if (rotChip) {
-            var rc = obs.rotation_chip;
-            rotChip.hidden = !(rc && rc.active);
-            if (rc && rc.active) {
-                rotChip.textContent = rc.label || "ROTATION DAY";
-                rotChip.title = rc.subtitle || "";
-            }
+            rotChip.hidden = true;
         }
         var imbChip = $("dcImbalanceChip");
         if (imbChip) {
@@ -1073,10 +1081,84 @@
         return st === "EXPIRED";
     }
 
+    /** Entry window open minute (09:45 IST) — shared with Take Trade / regime banners. */
+    var ENTRY_START_MIN_IST = 9 * 60 + 45;
+
     /** Entry window 09:45–14:30 IST (matches backend ENTRY_START/END). */
     function entryWindowOpenIST() {
         var m = nowIST().minutes;
-        return m >= (9 * 60 + 45) && m <= (14 * 60 + 30);
+        return m >= ENTRY_START_MIN_IST && m <= (14 * 60 + 30);
+    }
+
+    /**
+     * Day-regime banners/chips stay plain until entry window (≥09:45 IST).
+     * Early session CHOP is unreliable (intraday range still tiny vs lookback avg).
+     */
+    function regimeFlagsAllowedIST() {
+        return nowIST().minutes >= ENTRY_START_MIN_IST;
+    }
+
+    /**
+     * Single day-regime flag for UI — never CHOP + ROTATION (or chip + banner) together.
+     * Priority (first wins), only when regimeFlagsAllowedIST():
+     *   1. CHOP (market_regime) — highest risk warning → banner
+     *   2. ROTATION day type → banner
+     *   3. MIXED / CONTINUATION → banner
+     *   4. TRANSITION / TREND → zone1 chip only (no top banner)
+     * Before 09:45: null (plain / no status).
+     */
+    function resolveDayRegimeFlag(st) {
+        if (!regimeFlagsAllowedIST()) return null;
+        var obs = (st && st.trade_state_obs) || {};
+        var reg = String(obs.market_regime || "").toUpperCase();
+        var label = obs.market_regime_label || "";
+        var reasons = (obs.chop_reasons || []).join("; ") || "";
+        var rot = (st && st.rotation_day) || {};
+        var rtype = String(rot.rotation_day_type || "").toUpperCase();
+
+        if (reg === "CHOP") {
+            return {
+                surface: "banner",
+                className: "dc-rotation-banner dc-rotation--chop",
+                text: label || "CHOP DAY — setup win rate historically lower, criteria tightened",
+                title: reasons
+            };
+        }
+        if (rtype === "ROTATION") {
+            return {
+                surface: "banner",
+                className: "dc-rotation-banner dc-rotation--rotation",
+                text: "ROTATION day — fresh scan is primary. Yesterday carryover names may mean-revert.",
+                title: ""
+            };
+        }
+        if (rtype === "MIXED") {
+            return {
+                surface: "banner",
+                className: "dc-rotation-banner dc-rotation--mixed",
+                text: "MIXED day — overlap names (" + (rot.bull_overlap || 0) + " bull / " +
+                    (rot.bear_overlap || 0) + " bear) are highest conviction.",
+                title: ""
+            };
+        }
+        if (rtype === "CONTINUATION") {
+            return {
+                surface: "banner",
+                className: "dc-rotation-banner dc-rotation--continuation",
+                text: "CONTINUATION day — " + (rot.bull_overlap || 0) + " bull / " +
+                    (rot.bear_overlap || 0) + " bear overlap with yesterday. Dual-scan rules apply.",
+                title: ""
+            };
+        }
+        if (reg === "TRANSITION" || reg === "TREND") {
+            return {
+                surface: "chip",
+                regime: reg,
+                label: label,
+                title: reasons || label || ""
+            };
+        }
+        return null;
     }
 
     /** After square-off 15:15 IST — no live READY NOW activity. */
@@ -1626,24 +1708,20 @@
         if (fiiSel && document.activeElement !== fiiSel) fiiSel.value = state.fii_dii_flow || "";
         $("dcGapWarn").classList.toggle("show", (state.nifty_open_direction || "") === "Gap reversed");
 
-        var rot = state.rotation_day || {};
+        // Single day-regime banner (CHOP / ROTATION / MIXED / CONTINUATION); gated ≥09:45 IST.
         var rotEl = $("dcRotationBanner");
-        if (rot.rotation_day_type === "CONTINUATION") {
-            rotEl.hidden = false;
-            rotEl.className = "dc-rotation-banner dc-rotation--continuation";
-            rotEl.textContent = "CONTINUATION day — " + (rot.bull_overlap || 0) + " bull / " +
-                (rot.bear_overlap || 0) + " bear overlap with yesterday. Dual-scan rules apply.";
-        } else if (rot.rotation_day_type === "ROTATION") {
-            rotEl.hidden = false;
-            rotEl.className = "dc-rotation-banner dc-rotation--rotation";
-            rotEl.textContent = "ROTATION day — fresh scan is primary. Yesterday carryover names may mean-revert.";
-        } else if (rot.rotation_day_type === "MIXED") {
-            rotEl.hidden = false;
-            rotEl.className = "dc-rotation-banner dc-rotation--mixed";
-            rotEl.textContent = "MIXED day — overlap names (" + (rot.bull_overlap || 0) + " bull / " +
-                (rot.bear_overlap || 0) + " bear) are highest conviction.";
-        } else {
-            rotEl.hidden = true;
+        var dayFlag = resolveDayRegimeFlag(state);
+        if (rotEl) {
+            if (dayFlag && dayFlag.surface === "banner") {
+                rotEl.hidden = false;
+                rotEl.className = dayFlag.className;
+                rotEl.textContent = dayFlag.text;
+                rotEl.title = dayFlag.title || "";
+            } else {
+                rotEl.hidden = true;
+                rotEl.textContent = "";
+                rotEl.title = "";
+            }
         }
 
         var asofEl = $("dcDataAsOf");
