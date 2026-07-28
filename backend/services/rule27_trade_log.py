@@ -67,6 +67,9 @@ ON {TABLE} (session_date DESC, symbol)
 # Permanent classifier for rule-driven vs manual exits (research / backtests).
 EXIT_TRIGGER_TYPES = ("rule_compliant", "discretionary")
 
+# How the trade was entered vs intended pullback profile (journal only — no gate).
+ENTRY_TRIGGER_TYPES = ("pullback_entry", "ignition_leg", "discretionary", "re_entry")
+
 _UPSERT = text(
     f"""
     INSERT INTO {TABLE} (
@@ -78,7 +81,9 @@ _UPSERT = text(
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
         confidence_at_exit, trade_score_at_exit,
         mfe_r, mae_r, r_realized, bars_held_10m,
-        exit_trigger, exit_trigger_type, notes, source,
+        exit_trigger, exit_trigger_type,
+        entry_trigger_type, pullback_number_at_entry,
+        notes, source,
         garuda_confluence, garuda_rank, garuda_direction, updated_at
     ) VALUES (
         CAST(:session_date AS date), :symbol, :contract, :direction, :qty,
@@ -90,7 +95,9 @@ _UPSERT = text(
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
         :confidence_at_exit, :trade_score_at_exit,
         :mfe_r, :mae_r, :r_realized, :bars_held_10m,
-        :exit_trigger, :exit_trigger_type, :notes, :source,
+        :exit_trigger, :exit_trigger_type,
+        :entry_trigger_type, :pullback_number_at_entry,
+        :notes, :source,
         :garuda_confluence, :garuda_rank, :garuda_direction, NOW()
     )
     ON CONFLICT (session_date, symbol, direction, entry_time) DO UPDATE SET
@@ -120,6 +127,10 @@ _UPSERT = text(
         bars_held_10m = COALESCE(EXCLUDED.bars_held_10m, {TABLE}.bars_held_10m),
         exit_trigger = COALESCE(EXCLUDED.exit_trigger, {TABLE}.exit_trigger),
         exit_trigger_type = COALESCE(EXCLUDED.exit_trigger_type, {TABLE}.exit_trigger_type),
+        entry_trigger_type = COALESCE(EXCLUDED.entry_trigger_type, {TABLE}.entry_trigger_type),
+        pullback_number_at_entry = COALESCE(
+            EXCLUDED.pullback_number_at_entry, {TABLE}.pullback_number_at_entry
+        ),
         notes = COALESCE(EXCLUDED.notes, {TABLE}.notes),
         source = EXCLUDED.source,
         garuda_confluence = COALESCE(EXCLUDED.garuda_confluence, {TABLE}.garuda_confluence),
@@ -167,6 +178,19 @@ def ensure_trade_log_table() -> None:
                 "ADD COLUMN IF NOT EXISTS garuda_direction TEXT"
             )
         )
+        # Entry tagging — journal only, never gates. No backfill; historical NULL ok.
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS entry_trigger_type TEXT"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS pullback_number_at_entry INTEGER"
+            )
+        )
 
 
 def normalize_exit_trigger_type(val: Any) -> Optional[str]:
@@ -180,6 +204,25 @@ def normalize_exit_trigger_type(val: Any) -> Optional[str]:
     if s in EXIT_TRIGGER_TYPES:
         return s
     return s  # allow forward-compatible labels; callers should prefer the enum
+
+
+def normalize_entry_trigger_type(val: Any) -> Optional[str]:
+    """App-level enum for entry style (no DB CHECK — matches exit_trigger_type pattern)."""
+    if val is None or val == "":
+        return None
+    s = str(val).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "pullback": "pullback_entry",
+        "pullback_to_ema5": "pullback_entry",
+        "ignition": "ignition_leg",
+        "discretionary_ignition_leg": "ignition_leg",
+        "reentry": "re_entry",
+        "manual": "discretionary",
+    }
+    s = aliases.get(s, s)
+    if s in ENTRY_TRIGGER_TYPES:
+        return s
+    return s  # forward-compatible; callers should prefer ENTRY_TRIGGER_TYPES
 
 
 
@@ -309,6 +352,12 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         "bars_held_10m": int(payload["bars_held_10m"]) if payload.get("bars_held_10m") is not None else None,
         "exit_trigger": payload.get("exit_trigger"),
         "exit_trigger_type": normalize_exit_trigger_type(payload.get("exit_trigger_type")),
+        "entry_trigger_type": normalize_entry_trigger_type(payload.get("entry_trigger_type")),
+        "pullback_number_at_entry": (
+            int(payload["pullback_number_at_entry"])
+            if payload.get("pullback_number_at_entry") is not None
+            else None
+        ),
         "notes": payload.get("notes"),
         "source": payload.get("source") or "manual",
         "garuda_confluence": garuda_confluence,

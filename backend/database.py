@@ -1196,6 +1196,25 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 except Exception:
                     pass
+                # Journal-only entry tagging (no gate). Historical rows stay NULL.
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS entry_trigger_type TEXT"
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS pullback_number_at_entry INTEGER"
+                        )
+                    )
+                except Exception:
+                    pass
                 try:
                     conn.execute(
                         text(
