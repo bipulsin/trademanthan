@@ -1,0 +1,224 @@
+{
+  "generated_at": "2026-07-29T10:51:37.406779+05:30",
+  "coverage": {
+    "min": "2026-07-15 03:53:20.190516+00:00",
+    "max": "2026-07-29 05:21:04.420310+00:00",
+    "n": 2140,
+    "n_backfill": 2137,
+    "n_live": 3,
+    "days": 11,
+    "symbols": 104
+  },
+  "counts": {
+    "initial_promotion": 259,
+    "recheck": 1881,
+    "recheck_attempt_ge_2": 498
+  },
+  "gap_pct_distribution": {
+    "all": {
+      "n": 1266,
+      "p50": 0.111,
+      "p75": 0.201,
+      "p90": 0.443,
+      "p95": 0.585,
+      "max": 5.721,
+      "ge_1pct": {
+        "count": 35,
+        "n": 1266,
+        "pct": 2.8,
+        "wilson95": [
+          2.0,
+          3.8
+        ]
+      },
+      "ge_2pct": {
+        "count": 19,
+        "n": 1266,
+        "pct": 1.5,
+        "wilson95": [
+          1.0,
+          2.3
+        ]
+      },
+      "ge_5pct": {
+        "count": 14,
+        "n": 1266,
+        "pct": 1.1,
+        "wilson95": [
+          0.7,
+          1.8
+        ]
+      }
+    },
+    "recheck": {
+      "n": 1099,
+      "p50": 0.113,
+      "p75": 0.227,
+      "p90": 0.482,
+      "p95": 0.608,
+      "max": 5.721,
+      "ge_1pct": {
+        "count": 34,
+        "n": 1099,
+        "pct": 3.1,
+        "wilson95": [
+          2.2,
+          4.3
+        ]
+      },
+      "ge_2pct": {
+        "count": 18,
+        "n": 1099,
+        "pct": 1.6,
+        "wilson95": [
+          1.0,
+          2.6
+        ]
+      },
+      "ge_5pct": {
+        "count": 13,
+        "n": 1099,
+        "pct": 1.2,
+        "wilson95": [
+          0.7,
+          2.0
+        ]
+      }
+    },
+    "recheck_attempt_ge_2": {
+      "n": 493,
+      "p50": 0.119,
+      "p75": 0.284,
+      "p90": 0.526,
+      "p95": 0.644,
+      "max": 5.465,
+      "ge_1pct": {
+        "count": 20,
+        "n": 493,
+        "pct": 4.1,
+        "wilson95": [
+          2.6,
+          6.2
+        ]
+      },
+      "ge_2pct": {
+        "count": 10,
+        "n": 493,
+        "pct": 2.0,
+        "wilson95": [
+          1.1,
+          3.7
+        ]
+      },
+      "ge_5pct": {
+        "count": 5,
+        "n": 493,
+        "pct": 1.0,
+        "wilson95": [
+          0.4,
+          2.4
+        ]
+      }
+    },
+    "initial_promotion": {
+      "n": 167,
+      "p50": 0.087,
+      "p75": 0.147,
+      "p90": 0.21,
+      "p95": 0.315,
+      "max": 5.721,
+      "ge_1pct": {
+        "count": 1,
+        "n": 167,
+        "pct": 0.6,
+        "wilson95": [
+          0.1,
+          3.3
+        ]
+      },
+      "ge_2pct": {
+        "count": 1,
+        "n": 167,
+        "pct": 0.6,
+        "wilson95": [
+          0.1,
+          3.3
+        ]
+      },
+      "ge_5pct": {
+        "count": 1,
+        "n": 167,
+        "pct": 0.6,
+        "wilson95": [
+          0.1,
+          3.3
+        ]
+      }
+    }
+  },
+  "entry_not_recalculated_on_recheck": {
+    "count": 828,
+    "n": 1881,
+    "pct": 44.0,
+    "wilson95": [
+      41.8,
+      46.3
+    ]
+  },
+  "entry_not_matching_ema5_ready": {
+    "count": 474,
+    "n_ready_with_ema": 1262
+  },
+  "flagged_symbol_days_gap_ge_2pct": [
+    {
+      "d": "2026-07-29",
+      "symbol": "KAYNES",
+      "max_abs_gap_pct": 5.721,
+      "at": "2026-07-29 04:48:20.724702+00:00",
+      "entry": 3245.71,
+      "ltp": 3431.4,
+      "ema5": 3365.0257,
+      "entry_matches_ema5": false,
+      "attempt": 1,
+      "event_type": "initial_promotion",
+      "grade": "A+",
+      "score": 100.0,
+      "take_enabled": false,
+      "state": "READY",
+      "n_flagged_events": 14
+    },
+    {
+      "d": "2026-07-28",
+      "symbol": "SUZLON",
+      "max_abs_gap_pct": 4.157,
+      "at": "2026-07-28 08:40:17.150407+00:00",
+      "entry": 51.96,
+      "ltp": 49.8,
+      "ema5": 50.778,
+      "entry_matches_ema5": false,
+      "attempt": 2,
+      "event_type": "recheck",
+      "grade": "D!",
+      "score": 50.0,
+      "take_enabled": false,
+      "state": "READY",
+      "n_flagged_events": 5
+    }
+  ],
+  "flagged_count": 2,
+  "definitions": {
+    "gap_pct": "(ltp - entry_price) / entry_price \u00d7 100",
+    "entry_price_last_computed_ts": "set to event time when entry\u2248EMA5 (\u00b10.02); else carried from prior same entry value (sticky)",
+    "attempt_number": "1 + 10m IST slots crossed since ready_visible_since (frontend Enter-within attempt proxy)",
+    "event_type": "initial_promotion | recheck",
+    "flag_threshold_pct": 2.0,
+    "note": "Frontend 'Recheck confirmed \u00b7 attempt N' is sessionStorage-based; backend attempt_number approximates that via 10m slot crossings. Live dwell overrides trade_entry to live EMA5 when available \u2014 large gap with entry_matches_ema5=true means price ran away from EMA5 while card still READY/soft-held."
+  },
+  "backfill": {
+    "skipped": false,
+    "inserted": 2137,
+    "row_skipped": 0,
+    "errors": 0,
+    "source_rows": 2137
+  }
+}

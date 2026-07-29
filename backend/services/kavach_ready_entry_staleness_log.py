@@ -254,6 +254,16 @@ def build_staleness_row(
         "confidence_grade"
     )
     score = _f(stock.get("trade_score") or stock.get("dashboard_score") or levels.get("trade_score"))
+    pine_raw = stock.get("pine_readiness")
+    if isinstance(pine_raw, dict):
+        pine_val = (
+            pine_raw.get("state")
+            or pine_raw.get("label")
+            or pine_raw.get("readiness")
+            or json.dumps(pine_raw, default=str)[:120]
+        )
+    else:
+        pine_val = str(pine_raw) if pine_raw is not None else None
 
     return {
         "session_date": session_date,
@@ -276,7 +286,7 @@ def build_staleness_row(
         "ema10_value": round(ema10, 4) if ema10 is not None else None,
         "confidence_grade": str(grade) if grade is not None else None,
         "trade_score": score,
-        "pine_readiness": stock.get("pine_readiness"),
+        "pine_readiness": pine_val,
         "atr_pct": _f(stock.get("atr_pct") or (stock.get("atr_consumed") or {}).get("atr_pct")),
         "source": source,
         "inputs": {
@@ -316,7 +326,7 @@ def _should_skip_dedup(prev: Optional[Dict[str, Any]], row: Dict[str, Any], now:
     return same_entry and same_attempt and same_event
 
 
-def insert_staleness_row(db, row: Dict[str, Any]) -> Optional[int]:
+def insert_staleness_row(db, row: Dict[str, Any], *, commit: bool = False) -> Optional[int]:
     ensure_ready_entry_staleness_log()
     try:
         rid = db.execute(
@@ -345,6 +355,8 @@ def insert_staleness_row(db, row: Dict[str, Any]) -> Optional[int]:
                 "inputs": json.dumps(row.get("inputs") or {}),
             },
         ).scalar()
+        if commit:
+            db.commit()
         return int(rid) if rid is not None else None
     except Exception as exc:
         logger.debug("ready entry staleness insert skipped: %s", exc)
@@ -399,17 +411,8 @@ def log_ready_entry_staleness_for_stocks(
                 continue
             if _should_skip_dedup(prev, row, clock):
                 continue
-            if insert_staleness_row(db, row):
+            if insert_staleness_row(db, row, commit=True):
                 n += 1
         except Exception as exc:
             logger.debug("ready entry staleness row skipped %s: %s", sym, exc)
-    if n:
-        try:
-            db.commit()
-        except Exception as exc:
-            logger.debug("ready entry staleness commit skipped: %s", exc)
-            try:
-                db.rollback()
-            except Exception:
-                pass
     return n

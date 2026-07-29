@@ -68,14 +68,16 @@ def _rate(s: int, n: int) -> Dict[str, Any]:
     }
 
 
-def backfill(db) -> Dict[str, Any]:
+def backfill(db, *, force: bool = False) -> Dict[str, Any]:
     ensure_ready_entry_staleness_log()
-    # Skip if already backfilled recently for same clog ids via source marker.
     existing = db.execute(
         text(f"SELECT COUNT(*) FROM {TABLE} WHERE source = 'backfill'")
     ).scalar()
-    if int(existing or 0) > 0:
+    if int(existing or 0) > 0 and not force:
         return {"skipped": True, "reason": "backfill already present", "existing": int(existing)}
+    if force and int(existing or 0) > 0:
+        db.execute(text(f"DELETE FROM {TABLE} WHERE source = 'backfill'"))
+        db.commit()
 
     rows = db.execute(
         text(
@@ -92,7 +94,7 @@ def backfill(db) -> Dict[str, Any]:
 
     inserted = 0
     skipped = 0
-    # Track per (day,sym) for event_type / sticky computed_ts
+    errors = 0
     last_by: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     for r in rows:
@@ -108,26 +110,44 @@ def backfill(db) -> Dict[str, Any]:
             skipped += 1
             continue
 
-        # Prefer audit nearest for LTP/EMA
-        audit = db.execute(
-            text(
-                """
-                SELECT price, ema5, ema10, confidence_grade, trade_score,
-                       ABS(EXTRACT(EPOCH FROM (computed_at - CAST(:at AS timestamptz)))) AS dt
-                FROM rs_live_kavach_audit
-                WHERE session_date = CAST(:d AS date) AND UPPER(symbol) = :sym
-                ORDER BY ABS(EXTRACT(EPOCH FROM (computed_at - CAST(:at AS timestamptz)))) ASC
-                LIMIT 1
-                """
-            ),
-            {"d": r["d"], "sym": r["symbol"], "at": logged_at.isoformat()},
-        ).mappings().fetchone()
+        audit = None
+        try:
+            audit = db.execute(
+                text(
+                    """
+                    SELECT price, ema5, ema10, confidence_grade, trade_score,
+                           ABS(EXTRACT(EPOCH FROM (computed_at - CAST(:at AS timestamptz)))) AS dt
+                    FROM rs_live_kavach_audit
+                    WHERE session_date = CAST(:d AS date) AND UPPER(symbol) = :sym
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (computed_at - CAST(:at AS timestamptz)))) ASC
+                    LIMIT 1
+                    """
+                ),
+                {"d": r["d"], "sym": r["symbol"], "at": logged_at.isoformat()},
+            ).mappings().fetchone()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            audit = None
 
         ltp = _f((audit or {}).get("price"))
         ema5 = _f((audit or {}).get("ema5"))
         ema10 = _f((audit or {}).get("ema10"))
         grade = (audit or {}).get("confidence_grade") or inp.get("confidence")
         score = _f((audit or {}).get("trade_score") or inp.get("trade_score"))
+
+        pine_raw = inp.get("pine_readiness")
+        if isinstance(pine_raw, dict):
+            pine_val = (
+                pine_raw.get("state")
+                or pine_raw.get("label")
+                or pine_raw.get("readiness")
+                or json.dumps(pine_raw, default=str)[:120]
+            )
+        else:
+            pine_val = str(pine_raw) if pine_raw is not None else None
 
         key = (r["d"], r["symbol"])
         prev = last_by.get(key)
@@ -179,27 +199,30 @@ def backfill(db) -> Dict[str, Any]:
             "ema10_value": round(ema10, 4) if ema10 is not None else None,
             "confidence_grade": str(grade) if grade is not None else None,
             "trade_score": score,
-            "pine_readiness": inp.get("pine_readiness"),
+            "pine_readiness": pine_val,
             "atr_pct": _f(inp.get("atr_pct")),
             "source": "backfill",
             "inputs": {
                 "consistency_log_id": r["id"],
-                "audit_dt_sec": (audit or {}).get("dt"),
+                "audit_dt_sec": float((audit or {}).get("dt")) if audit and (audit or {}).get("dt") is not None else None,
                 "ready_visible_since": since_raw,
             },
         }
-        rid = insert_staleness_row(db, row)
+        rid = insert_staleness_row(db, row, commit=True)
         if rid:
             inserted += 1
             last_by[key] = row
         else:
+            errors += 1
             skipped += 1
 
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-    return {"skipped": False, "inserted": inserted, "row_skipped": skipped, "source_rows": len(rows)}
+    return {
+        "skipped": False,
+        "inserted": inserted,
+        "row_skipped": skipped,
+        "errors": errors,
+        "source_rows": len(rows),
+    }
 
 
 def summarize(db) -> Dict[str, Any]:
@@ -486,6 +509,7 @@ def write_md(summary: Dict[str, Any]) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-backfill", action="store_true")
+    ap.add_argument("--force-backfill", action="store_true")
     args = ap.parse_args()
     db = SessionLocal()
     try:
@@ -493,7 +517,7 @@ def main() -> int:
         bf = {"skipped": True, "reason": "--no-backfill"}
         if not args.no_backfill:
             print("BACKFILL…")
-            bf = backfill(db)
+            bf = backfill(db, force=bool(args.force_backfill))
             print("BACKFILL", json.dumps(bf, default=str))
         print("SUMMARIZE…")
         summary = summarize(db)
