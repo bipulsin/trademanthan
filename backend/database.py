@@ -1215,6 +1215,16 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 except Exception:
                     pass
+                # Execution-quality: intended vs fill in INR (journal only).
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS slippage_inr DOUBLE PRECISION"
+                        )
+                    )
+                except Exception:
+                    pass
                 try:
                     conn.execute(
                         text(

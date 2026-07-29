@@ -75,7 +75,7 @@ _UPSERT = text(
     INSERT INTO {TABLE} (
         session_date, symbol, contract, direction, qty,
         entry_time, entry_price, exit_time, exit_price, exit_price_intended,
-        slippage_pts, points_captured,
+        slippage_pts, slippage_inr, points_captured,
         ema10_at_entry, ema5_at_entry, vwap_at_entry, entry_to_ema10_buffer_pct,
         planned_risk_pts, planned_risk_inr,
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
@@ -89,7 +89,7 @@ _UPSERT = text(
         CAST(:session_date AS date), :symbol, :contract, :direction, :qty,
         CAST(:entry_time AS time), :entry_price, CAST(:exit_time AS time),
         :exit_price, :exit_price_intended,
-        :slippage_pts, :points_captured,
+        :slippage_pts, :slippage_inr, :points_captured,
         :ema10_at_entry, :ema5_at_entry, :vwap_at_entry, :entry_to_ema10_buffer_pct,
         :planned_risk_pts, :planned_risk_inr,
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
@@ -107,6 +107,7 @@ _UPSERT = text(
         exit_price = COALESCE(EXCLUDED.exit_price, {TABLE}.exit_price),
         exit_price_intended = COALESCE(EXCLUDED.exit_price_intended, {TABLE}.exit_price_intended),
         slippage_pts = COALESCE(EXCLUDED.slippage_pts, {TABLE}.slippage_pts),
+        slippage_inr = COALESCE(EXCLUDED.slippage_inr, {TABLE}.slippage_inr),
         points_captured = COALESCE(EXCLUDED.points_captured, {TABLE}.points_captured),
         ema10_at_entry = COALESCE(EXCLUDED.ema10_at_entry, {TABLE}.ema10_at_entry),
         ema5_at_entry = COALESCE(EXCLUDED.ema5_at_entry, {TABLE}.ema5_at_entry),
@@ -189,6 +190,13 @@ def ensure_trade_log_table() -> None:
             text(
                 f"ALTER TABLE {TABLE} "
                 "ADD COLUMN IF NOT EXISTS pullback_number_at_entry INTEGER"
+            )
+        )
+        # Execution-quality (journal only): fill vs intended exit, in INR.
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS slippage_inr DOUBLE PRECISION"
             )
         )
 
@@ -318,18 +326,34 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
                 garuda_direction = g.get("garuda_direction")
         except Exception:
             garuda_confluence = garuda_confluence or "NOT_AVAILABLE"
+    qty = int(payload["qty"]) if payload.get("qty") is not None else None
+    # Aliases: intended_exit_price → exit_price_intended; slippage_points → slippage_pts
+    exit_intended = _f(
+        payload.get("exit_price_intended")
+        if payload.get("exit_price_intended") is not None
+        else payload.get("intended_exit_price")
+    )
+    slip_pts = _f(
+        payload.get("slippage_pts")
+        if payload.get("slippage_pts") is not None
+        else payload.get("slippage_points")
+    )
+    slip_inr = _f(payload.get("slippage_inr"))
+    if slip_inr is None and slip_pts is not None and qty is not None:
+        slip_inr = round(float(slip_pts) * int(qty), 2)
     return {
         "session_date": str(sd),
         "symbol": str(payload["symbol"]).strip().upper(),
         "contract": payload.get("contract"),
         "direction": direction,
-        "qty": int(payload["qty"]) if payload.get("qty") is not None else None,
+        "qty": qty,
         "entry_time": et.strftime("%H:%M:%S") if et else None,
         "entry_price": entry,
         "exit_time": xt.strftime("%H:%M:%S") if xt else None,
         "exit_price": exit_px,
-        "exit_price_intended": _f(payload.get("exit_price_intended")),
-        "slippage_pts": _f(payload.get("slippage_pts")),
+        "exit_price_intended": exit_intended,
+        "slippage_pts": slip_pts,
+        "slippage_inr": slip_inr,
         "points_captured": _f(points),
         "ema10_at_entry": _f(payload.get("ema10_at_entry")),
         "ema5_at_entry": _f(payload.get("ema5_at_entry")),
