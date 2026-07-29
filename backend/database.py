@@ -1468,6 +1468,56 @@ def _run_startup_schema_migrations(db_engine):
                 except Exception:
                     pass
 
+            # Shadow-only: READY entry vs LTP gap (no gate / no pricing change).
+            try:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS kavach_ready_entry_staleness_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            session_date DATE NOT NULL,
+                            symbol VARCHAR(32) NOT NULL,
+                            direction VARCHAR(8),
+                            logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            event_type VARCHAR(32) NOT NULL,
+                            attempt_number INTEGER,
+                            rendered_state VARCHAR(32),
+                            card_visible BOOLEAN,
+                            dwell_soft_hold BOOLEAN,
+                            trade_take_enabled BOOLEAN,
+                            entry_price DOUBLE PRECISION,
+                            entry_price_last_computed_ts TIMESTAMPTZ,
+                            entry_matches_ema5 BOOLEAN,
+                            current_ltp DOUBLE PRECISION,
+                            gap_pct DOUBLE PRECISION,
+                            gap_pts DOUBLE PRECISION,
+                            ema5_value DOUBLE PRECISION,
+                            ema10_value DOUBLE PRECISION,
+                            confidence_grade TEXT,
+                            trade_score DOUBLE PRECISION,
+                            pine_readiness TEXT,
+                            atr_pct DOUBLE PRECISION,
+                            source VARCHAR(32) NOT NULL DEFAULT 'live',
+                            inputs JSONB NOT NULL DEFAULT '{}'::jsonb
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_ready_entry_staleness_sess_sym "
+                        "ON kavach_ready_entry_staleness_log (session_date, symbol, logged_at)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS idx_ready_entry_staleness_event "
+                        "ON kavach_ready_entry_staleness_log (session_date, event_type, gap_pct)"
+                    )
+                )
+            except Exception:
+                pass
+
             if "rs_go_board_shadow_log" not in table_names:
                 if db_engine.dialect.name == "postgresql":
                     conn.execute(

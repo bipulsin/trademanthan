@@ -2387,6 +2387,30 @@ def enrich_stocks_trade_state(
                 db.commit()
         except Exception as exc:
             logger.debug("badge input audit skipped: %s", exc)
+
+        # Shadow-only: READY entry vs LTP gap / whether entry re-anchored to EMA5.
+        # No change to entry calc, promotion, countdown, or Take Trade.
+        entry_staleness_logged = 0
+        try:
+            from backend.services.kavach_ready_entry_staleness_log import (
+                log_ready_entry_staleness_for_stocks,
+            )
+
+            # Stash atr_pct on stock for the logger when available.
+            for s in stocks:
+                su = (s.get("symbol") or "").upper()
+                if su and s.get("atr_pct") is None and atr_pct_map.get(su) is not None:
+                    s["atr_pct"] = atr_pct_map.get(su)
+            entry_staleness_logged = log_ready_entry_staleness_for_stocks(
+                db,
+                session_date=session_date,
+                stocks=stocks,
+                levels_map=levels_map,
+                source="live",
+            )
+        except Exception as exc:
+            logger.debug("ready entry staleness shadow skipped: %s", exc)
+
         return {
             "churn_warning": len(churn_syms) >= 3,
             "churn_symbols": churn_syms,
@@ -2397,6 +2421,7 @@ def enrich_stocks_trade_state(
             "vwap_raw_logged": vwap_raw_n,
             "warning_stack_downgraded": stack_n,
             "badge_input_logged": badge_logged,
+            "ready_entry_staleness_logged": entry_staleness_logged,
             "dwell_entry_live": dwell_live_stats,
             "vwap_close_confirm_shadow": vwap_close_confirm_stats,
             "watching_grade_a_shadow": watching_grade_a_stats,
