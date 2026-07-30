@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=43">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=44">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -40,10 +40,8 @@
                         </div>
                         <div class="dc-toolbar-nifty" id="dcNifty"></div>
                         <div class="dc-toolbar-meta">
-                            <span class="dc-date" id="dcDate">—</span>
-                            <span class="dc-clock" id="dcClock">--:--:--</span>
-                            <span class="dc-data-asof" id="dcDataAsOf">Data as of —</span>
-                            <span class="dc-window pre" id="dcWindow">Entry window —</span>
+                            <span class="dc-session-now" id="dcSessionNow">—</span>
+                            <span class="dc-window pre" id="dcWindow">—</span>
                         </div>
                     </div>
                     <div class="dc-toolbar-line2">
@@ -57,14 +55,12 @@
                         </div>
                     </div>
                     <div class="dc-rotation-banner" id="dcRotationBanner" hidden></div>
-                    <!-- Zone 1 — session status bar (~60px) -->
+                    <!-- Zone 1 — market regime / imbalance chips -->
                     <div class="dc-zone1" id="dcZone1">
                         <span class="dc-mkt-regime" id="dcMktRegime">—</span>
                         <span class="dc-z1-chip" id="dcRotationChip" hidden>ROTATION DAY</span>
                         <span class="dc-z1-chip dc-z1-chip--warn" id="dcImbalanceChip" hidden></span>
                         <span class="dc-z1-chip dc-z1-chip--caution" id="dcCompromisedChip" hidden></span>
-                        <span class="dc-z1-session" id="dcSessionWindow">Entry 09:45–14:30 · Square-off 15:15</span>
-                        <span class="dc-exit-rule" id="dcExitRule">Exit rule: 10m close beyond EMA10 reverse — not VWAP break</span>
                     </div>
                 </div>
 
@@ -88,8 +84,6 @@
                     </div>
                 </section>
 
-                <!-- Hard rules moved into Zone 1 session_window_text -->
-
                 <!-- Live setup radar strip -->
                 <div class="dc-live-setups" id="dcLiveSetups" hidden>
                     <span class="dc-live-setups-label"><i class="fas fa-radar"></i> Live setups</span>
@@ -100,11 +94,6 @@
                     Lock churn elevated — multiple symbols re-cycled today. Check promotion / R1·R2 behaviour.
                 </div>
 
-                <!-- Pre-9:25 pending lock -->
-                <div class="dc-pending-lock-banner" id="dcPendingLock" hidden>
-                    Waiting for 09:25 scan to lock today's watchlist… Entry opens in <span id="dcLockCountdown">—</span>
-                </div>
-
                 <!-- Bullish | Bearish columns (today's locked or preview) -->
                 <div class="dc-empty dc-card" id="dcEmpty">
                     <p>Loading checklist…</p>
@@ -112,19 +101,15 @@
 
                 <div class="dc-columns" id="dcColumns" hidden>
                     <div class="dc-locked-header" id="dcLockedHeader">
-                        <h2 class="dc-section-title" id="dcLockedTitle"><i class="fas fa-lock"></i> Today's Kavach List</h2>
-                        <span class="dc-locked-at" id="dcLockedAt"></span>
+                        <h2 class="dc-section-title" id="dcLockedTitle"><i class="fas fa-list"></i> Today's Kavach List</h2>
+                        <span class="dc-locked-at" id="dcLockedAt" hidden></span>
                     </div>
 
                     <!-- Tier 1 — READY NOW (actionable only; entry window 09:45–14:30) -->
                     <section class="dc-zone3" id="dcZone3" aria-label="Ready now">
                         <h3 class="dc-zone-title"><i class="fas fa-bolt"></i> READY NOW</h3>
-                        <p class="dc-zone3-auth-note" id="dcZone3AuthNote">
-                            Take Trade authority lives here only. Watching “READY TO …” is chart readiness — not entry.
-                        </p>
-                        <p class="dc-zone3-window-note" id="dcZone3WindowNote" hidden></p>
                         <div class="dc-zone3-empty" id="dcZone3Empty">
-                            No READY setups right now. Rechecks at :05, :15, :25, :35, :45, :55 past every hour.
+                            No READY setups right now.
                         </div>
                         <div class="dc-zone3-grid" id="dcZone3Grid"></div>
                     </section>
@@ -360,6 +345,6 @@
     </template>
 
     <script src="left-menu.js?v=3.26"></script>
-    <script src="dailyRSchecklist.js?v=44"></script>
+    <script src="dailyRSchecklist.js?v=45"></script>
 </body>
 </html>

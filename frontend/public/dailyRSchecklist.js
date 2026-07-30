@@ -547,6 +547,67 @@
             "-" + d.getFullYear();
     }
 
+    function pad2(n) {
+        return ("0" + n).slice(-2);
+    }
+
+    function fmtHmsFromSecs(totalSecs) {
+        var s = Math.max(0, Math.floor(totalSecs));
+        var h = Math.floor(s / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var sec = s % 60;
+        if (h > 0) return pad2(h) + ":" + pad2(m) + ":" + pad2(sec);
+        return pad2(m) + ":" + pad2(sec);
+    }
+
+    /** Single top-right clock: dd-mmm-yyyy hh:mm:ss (IST). */
+    function fmtSessionNowLabel() {
+        var datePart = (state && state.session_date) ? fmtDate(state.session_date) : null;
+        if (!datePart || datePart === "—") {
+            var parts = new Intl.DateTimeFormat("en-GB", {
+                timeZone: "Asia/Kolkata",
+                day: "2-digit", month: "short", year: "numeric"
+            }).formatToParts(new Date());
+            var o = {};
+            parts.forEach(function (p) { if (p.type !== "literal") o[p.type] = p.value; });
+            datePart = o.day + "-" + o.month + "-" + o.year;
+        }
+        return datePart + " " + nowIST().str;
+    }
+
+    /**
+     * Trading-window chip (entry 09:45–14:30 IST):
+     * - before open → Entry opens in hh:mm:ss
+     * - open, >1h left → Trading Window open
+     * - open, ≤1h left → Closing in mm:ss
+     * - after 14:30 → Entry closed
+     */
+    function updateSessionWindowChip() {
+        var nowEl = $("dcSessionNow");
+        var w = $("dcWindow");
+        if (nowEl) nowEl.textContent = fmtSessionNowLabel();
+        if (!w) return;
+        var t = nowIST();
+        var start = 9 * 60 + 45;
+        var end = 14 * 60 + 30;
+        var closingStart = end - 60; // last hour before entry close
+        if (t.minutes < start) {
+            w.textContent = "Entry opens in " + fmtHmsFromSecs((start * 60) - t.secs);
+            w.className = "dc-window pre";
+        } else if (t.minutes <= end) {
+            if (t.minutes >= closingStart) {
+                w.textContent = "Closing in " + fmtHmsFromSecs((end * 60) - t.secs);
+                w.className = "dc-window closing";
+            } else {
+                w.textContent = "Trading Window open";
+                w.className = "dc-window open";
+            }
+        } else {
+            w.textContent = "Entry closed";
+            w.className = "dc-window closed";
+        }
+    }
+
     function decisionClass(stock) {
         if (!stock.decision || stock.decision.indexOf("⬜") === 0) return "NONE";
         return stock.section || "WATCH";
@@ -1016,8 +1077,6 @@
         var remCount = $("dcRemovalsCount");
         var obs = (state && state.trade_state_obs) || {};
         var regimeEl = $("dcMktRegime");
-        var exitEl = $("dcExitRule");
-        var sessEl = $("dcSessionWindow");
         // Zone1 regime chip: only TREND/TRANSITION after 09:45 when no warning banner.
         // CHOP / ROTATION / MIXED / CONTINUATION use the single top banner instead.
         var flag = resolveDayRegimeFlag(state);
@@ -1042,13 +1101,6 @@
                 // Banner owns the flag (or pre-09:45 plain) — no second regime chip.
                 regimeEl.hidden = !!(flag && flag.surface === "banner");
             }
-        }
-        if (exitEl) {
-            exitEl.textContent = obs.exit_rule_reminder ||
-                "Exit rule: 10m close beyond EMA10 reverse — not VWAP break";
-        }
-        if (sessEl) {
-            sessEl.textContent = obs.session_window_text || "Entry 09:45–14:30 · Square-off 15:15";
         }
         // Rotation chip removed as a second surface — ROTATION is the top banner only.
         var rotChip = $("dcRotationChip");
@@ -1691,33 +1743,13 @@
 
         var z3 = $("dcZone3Grid");
         var z3empty = $("dcZone3Empty");
-        var z3note = $("dcZone3WindowNote");
         var z4 = $("dcZone4List");
         if (!z3 || !z4) return;
-
-        if (z3note) {
-            if (afterClose) {
-                z3note.hidden = false;
-                z3note.textContent = "Session closed (square-off 15:15) — no live READY NOW entries.";
-            } else if (!windowOpen) {
-                z3note.hidden = false;
-                z3note.textContent = "Entry window closed (14:30 IST) — Take Trade disabled. Prior READY cards are listed below if still on the list.";
-            } else {
-                z3note.hidden = true;
-                z3note.textContent = "";
-            }
-        }
 
         _syncReadyGrid(z3, readyLive);
         if (z3empty) {
             z3empty.hidden = readyLive.length > 0;
-            if (afterClose) {
-                z3empty.textContent = "Session closed. Rechecks resume next trading day.";
-            } else if (!windowOpen) {
-                z3empty.textContent = "Entry window closed (14:30). No actionable READY NOW setups.";
-            } else {
-                z3empty.textContent = "No READY setups right now. Rechecks at :05, :15, :25, :35, :45, :55 past every hour.";
-            }
+            z3empty.textContent = "No READY setups right now.";
         }
 
         var pastSec = $("dcZone3Past");
@@ -1776,7 +1808,7 @@
 
     function render() {
         if (!state) return;
-        $("dcDate").textContent = fmtDate(state.session_date);
+        updateSessionWindowChip();
         var nifty = "";
         if (state.nifty50 != null) nifty += "NIFTY <b>" + state.nifty50 + "</b>";
         if (state.banknifty != null) nifty += (nifty ? " · " : "") + "BANKNIFTY <b>" + state.banknifty + "</b>";
@@ -1806,42 +1838,19 @@
             }
         }
 
-        var asofEl = $("dcDataAsOf");
-        var asofIso = state.data_refreshed_at || null;
-        asofEl.textContent = "Data as of " + fmtDataAsOf(asofIso);
-        asofEl.classList.toggle("dc-data-asof--stale", dataAgeMinutes(asofIso) > 6);
-
         var stocks = state.stocks || state.today || state.preview || [];
         var carry = state.carryover || [];
         var locked = !!state.locked;
         var preview = !locked && (state.preview || []).length > 0;
 
-        $("dcPendingLock").hidden = locked;
-        if (!locked) {
-            var start = 9 * 60 + 25;
-            var t = nowIST();
-            if (t.minutes < start) {
-                var rem = (start * 60) - t.secs;
-                $("dcLockCountdown").textContent =
-                    ("0" + Math.floor(rem / 60)).slice(-2) + ":" + ("0" + (rem % 60)).slice(-2);
-            } else {
-                $("dcLockCountdown").textContent = "pending next scan";
-            }
-        }
-
         var lockedTitle = $("dcLockedTitle");
-        if (locked) {
-            lockedTitle.innerHTML = '<i class="fas fa-lock"></i> Today\'s Kavach List';
-            var atEl = $("dcLockedAt");
-            atEl.textContent = state.locked_at
-                ? "Locked at " + fmtDataAsOf(state.locked_at)
-                : "";
-        } else if (preview) {
-            lockedTitle.innerHTML = '<i class="fas fa-eye"></i> Preview — unconfirmed until 09:25 lock';
-            $("dcLockedAt").textContent = "";
-        } else {
-            lockedTitle.innerHTML = '<i class="fas fa-clock"></i> Today\'s Kavach List';
-            $("dcLockedAt").textContent = "";
+        if (lockedTitle) {
+            lockedTitle.innerHTML = '<i class="fas fa-list"></i> Today\'s Kavach List';
+        }
+        var atEl = $("dcLockedAt");
+        if (atEl) {
+            atEl.hidden = true;
+            atEl.textContent = "";
         }
 
         var empty = stocks.length === 0 && carry.length === 0;
@@ -2782,21 +2791,8 @@
     }
 
     function tickClock() {
+        updateSessionWindowChip();
         var t = nowIST();
-        $("dcClock").textContent = t.str;
-        var w = $("dcWindow");
-        var start = 9 * 60 + 45, end = 14 * 60 + 30;
-        if (t.minutes < start) {
-            var rem = (start * 60) - t.secs;
-            w.textContent = "Entry opens in " + ("0" + Math.floor(rem / 60)).slice(-2) + ":" + ("0" + (rem % 60)).slice(-2);
-            w.className = "dc-window pre";
-        } else if (t.minutes <= end) {
-            w.textContent = "Entry window open";
-            w.className = "dc-window open";
-        } else {
-            w.textContent = "Entry window closed";
-            w.className = "dc-window closed";
-        }
         if (modalSymbol) {
             var stock = currentStock(modalSymbol);
             if (stock && stock.adx_935_status === "recheck") {
