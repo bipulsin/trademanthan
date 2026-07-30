@@ -4,10 +4,17 @@ Stretch penalty (Pine v2.8.7 / v13): nearer of EMA10/VWAP distance as % of price
 penalizes Trade Score and letter grade. Live by default; set
 ``STRETCH_PENALTY_LIVE=0`` to revert to shadow-only.
 
-EMA5 pullback stretch reset (Pine v3.5 parity, live): when price recently
-touched/pierced EMA5 (bar range includes EMA5), stretch penalties are reduced
-for ``STRETCH_EMA5_RESET_BARS`` bars (default 2). Mode via
-``STRETCH_EMA5_RESET_MODE``: ``off`` | ``partial`` (50%, default) | ``full``.
+EMA5 stretch reset (Pine v3.5 parity, live) via ``STRETCH_EMA5_RESET_MODE``:
+
+- ``off`` — stretch penalties unchanged
+- ``structural`` (default) — same-bar EMA5 touch only (no multi-bar persist).
+  Penalty factor starts at 0%, then +50% for each of: (a) close beyond
+  proximity % of EMA5 (default 0.5%), (b) EMA5–EMA10 gap shrunk below
+  gap-ratio of prior bar (default 70%). Cap 100%. On a touch bar, hard
+  force-to-D is bypassed; scaled soft letter steps still apply. Score-floor
+  ``tradeScore < 65 → D`` is upstream of stretch and untouched.
+- ``full`` — zero stretch penalties while a recent EMA5 touch is within
+  ``STRETCH_EMA5_RESET_BARS`` (default 2), unchanged from prior Full mode.
 """
 from __future__ import annotations
 
@@ -23,9 +30,10 @@ PurityProven = bool  # >= 60%
 
 DEFAULT_SOFT_STRETCH_PCT = 0.35
 DEFAULT_HARD_STRETCH_PCT = 0.50
-DEFAULT_EMA5_RESET_MODE = "partial"  # match Pine default; not Off
-DEFAULT_EMA5_RESET_BARS = 2
-DEFAULT_EMA5_RESET_PARTIAL_FACTOR = 0.50
+DEFAULT_EMA5_RESET_MODE = "structural"  # Pine v3.5 live default
+DEFAULT_EMA5_RESET_BARS = 2  # Full mode persist only
+DEFAULT_EMA5_STRUCTURAL_PROXIMITY_PCT = 0.5
+DEFAULT_EMA5_STRUCTURAL_GAP_RATIO = 0.70
 
 _LETTER_RANK = {"A+": 0, "A": 1, "B": 2, "C": 3, "D": 4}
 _RANK_LETTER = {0: "A+", 1: "A", 2: "B", 3: "C", 4: "D"}
@@ -226,17 +234,18 @@ def stretch_penalties(
 
 
 def stretch_ema5_reset_mode() -> str:
-    """Pine v3.5 stretch-reset mode: off | partial | full.
+    """Pine v3.5 stretch-reset mode: off | structural | full.
 
-    Default ``partial`` (50% reduction) — do not default to off (dashboard↔TV parity).
+    Default ``structural``. ``partial`` env alias maps to ``structural``.
     Override with ``STRETCH_EMA5_RESET_MODE``.
     """
     raw = os.environ.get("STRETCH_EMA5_RESET_MODE", DEFAULT_EMA5_RESET_MODE).strip().lower()
     if raw in ("off", "0", "false", "none"):
         return "off"
-    if raw in ("full", "reset", "1"):
+    if raw in ("full", "reset"):
         return "full"
-    return "partial"
+    # structural (default); accept legacy "partial" as structural alias
+    return "structural"
 
 
 def stretch_ema5_reset_bars() -> int:
@@ -247,14 +256,26 @@ def stretch_ema5_reset_bars() -> int:
         return DEFAULT_EMA5_RESET_BARS
 
 
-def stretch_ema5_reset_partial_factor() -> float:
+def stretch_ema5_structural_proximity_pct() -> float:
     raw = os.environ.get(
-        "STRETCH_EMA5_RESET_PARTIAL_FACTOR", str(DEFAULT_EMA5_RESET_PARTIAL_FACTOR)
+        "STRETCH_EMA5_STRUCTURAL_PROXIMITY_PCT",
+        str(DEFAULT_EMA5_STRUCTURAL_PROXIMITY_PCT),
+    )
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_EMA5_STRUCTURAL_PROXIMITY_PCT
+
+
+def stretch_ema5_structural_gap_ratio() -> float:
+    raw = os.environ.get(
+        "STRETCH_EMA5_STRUCTURAL_GAP_RATIO",
+        str(DEFAULT_EMA5_STRUCTURAL_GAP_RATIO),
     )
     try:
         return min(1.0, max(0.0, float(raw)))
     except (TypeError, ValueError):
-        return DEFAULT_EMA5_RESET_PARTIAL_FACTOR
+        return DEFAULT_EMA5_STRUCTURAL_GAP_RATIO
 
 
 def _f_num(v: Any) -> Optional[float]:
@@ -281,27 +302,38 @@ def _ema_series(closes: Sequence[float], length: int = 5) -> List[float]:
     return out
 
 
-def detect_ema5_touch_reset(
-    candles: Optional[Sequence[Dict[str, Any]]],
-    *,
-    persist_bars: Optional[int] = None,
-) -> Dict[str, Any]:
-    """True when a confirmed bar's range includes EMA5 within persist window.
-
-    ``candles`` are chronological OHLC dicts (uses high/low/close). Last bar is
-    treated as the evaluation bar (confirmed / closed in caller context).
-    """
-    persist = stretch_ema5_reset_bars() if persist_bars is None else int(persist_bars)
-    mode = stretch_ema5_reset_mode()
-    empty = {
+def _empty_ema5_reset(mode: str, persist: int) -> Dict[str, Any]:
+    return {
         "ema5_reset_active": False,
         "ema5_reset_mode": mode,
         "ema5_reset_bars_since_touch": None,
         "ema5_reset_persist_bars": persist,
         "ema5_reset_factor": 1.0,
         "ema5_at_touch": None,
+        "ema5_touch_this_bar": False,
+        "ema5_bypass_hard_force_d": False,
+        "ema5_structural_proximity_trigger": False,
+        "ema5_structural_gap_shrink_trigger": False,
+        "ema5_structural_proximity_pct": stretch_ema5_structural_proximity_pct(),
+        "ema5_structural_gap_ratio": stretch_ema5_structural_gap_ratio(),
     }
-    if mode == "off" or not candles or persist < 0:
+
+
+def detect_ema5_touch_reset(
+    candles: Optional[Sequence[Dict[str, Any]]],
+    *,
+    persist_bars: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Compute EMA5 stretch-reset factor for the last (eval) candle.
+
+    Structural: only the eval bar's high/low including EMA5 counts; factor is
+    0 + 0.5×proximity + 0.5×gap-shrink (cap 1). Full: zero factor while a
+    touch is within ``persist_bars`` of the eval bar.
+    """
+    persist = stretch_ema5_reset_bars() if persist_bars is None else int(persist_bars)
+    mode = stretch_ema5_reset_mode()
+    empty = _empty_ema5_reset(mode, persist)
+    if mode == "off" or not candles:
         return empty
 
     closes: List[float] = []
@@ -316,11 +348,50 @@ def detect_ema5_touch_reset(
         closes.append(cl)
         highs.append(hi if hi is not None else cl)
         lows.append(lo if lo is not None else cl)
-    if len(closes) < 5:
+    need = 10 if mode == "structural" else 5
+    if len(closes) < need:
         return empty
 
     ema5 = _ema_series(closes, 5)
+    ema10 = _ema_series(closes, 10)
     last_i = len(closes) - 1
+    touch_this = lows[last_i] <= ema5[last_i] <= highs[last_i]
+
+    if mode == "structural":
+        if not touch_this:
+            return empty
+        prox_pct = stretch_ema5_structural_proximity_pct()
+        gap_ratio_thr = stretch_ema5_structural_gap_ratio()
+        e5 = ema5[last_i]
+        close = closes[last_i]
+        prox_trig = False
+        if e5 and abs(e5) > 1e-12:
+            prox_trig = abs(close - e5) / abs(e5) * 100.0 > prox_pct
+        gap_trig = False
+        if last_i >= 1:
+            gap_now = abs(ema5[last_i] - ema10[last_i])
+            gap_prev = abs(ema5[last_i - 1] - ema10[last_i - 1])
+            if gap_prev > 1e-12:
+                gap_trig = gap_now < gap_ratio_thr * gap_prev
+            elif gap_now < 1e-12:
+                gap_trig = True  # already flat → treat as shrunk
+        factor = min(1.0, (0.5 if prox_trig else 0.0) + (0.5 if gap_trig else 0.0))
+        return {
+            "ema5_reset_active": True,
+            "ema5_reset_mode": mode,
+            "ema5_reset_bars_since_touch": 0,
+            "ema5_reset_persist_bars": persist,
+            "ema5_reset_factor": factor,
+            "ema5_at_touch": round(e5, 4),
+            "ema5_touch_this_bar": True,
+            "ema5_bypass_hard_force_d": True,
+            "ema5_structural_proximity_trigger": prox_trig,
+            "ema5_structural_gap_shrink_trigger": gap_trig,
+            "ema5_structural_proximity_pct": prox_pct,
+            "ema5_structural_gap_ratio": gap_ratio_thr,
+        }
+
+    # Full mode: multi-bar persist, factor 0 while active.
     touch_i = None
     for i in range(last_i, -1, -1):
         e = ema5[i]
@@ -329,27 +400,26 @@ def detect_ema5_touch_reset(
             break
     if touch_i is None:
         return empty
-
     bars_since = last_i - touch_i
-    active = bars_since <= persist
-    if not active:
+    if bars_since > persist:
         return {
             **empty,
             "ema5_reset_bars_since_touch": bars_since,
             "ema5_at_touch": round(ema5[touch_i], 4),
         }
-
-    if mode == "full":
-        factor = 0.0
-    else:
-        factor = stretch_ema5_reset_partial_factor()
     return {
         "ema5_reset_active": True,
         "ema5_reset_mode": mode,
         "ema5_reset_bars_since_touch": bars_since,
         "ema5_reset_persist_bars": persist,
-        "ema5_reset_factor": factor,
+        "ema5_reset_factor": 0.0,
         "ema5_at_touch": round(ema5[touch_i], 4),
+        "ema5_touch_this_bar": touch_this,
+        "ema5_bypass_hard_force_d": True,
+        "ema5_structural_proximity_trigger": False,
+        "ema5_structural_gap_shrink_trigger": False,
+        "ema5_structural_proximity_pct": stretch_ema5_structural_proximity_pct(),
+        "ema5_structural_gap_ratio": stretch_ema5_structural_gap_ratio(),
     }
 
 
@@ -358,21 +428,29 @@ def apply_ema5_reset_to_penalties(
     letter_pen: int,
     reset: Dict[str, Any],
 ) -> Tuple[int, int]:
-    """Scale stretch penalties by EMA5 reset factor (partial/full)."""
-    if not reset.get("ema5_reset_active"):
+    """Scale stretch penalties by EMA5 reset factor.
+
+    Structural/full on an active touch: hard force-D (letter 99) is converted
+    to soft 2-letter steps before scaling (bypass hard floor). Factor 0 → zero
+    both; factor 1 with bypass → score unchanged, letter 99→2.
+    """
+    active = bool(reset.get("ema5_reset_active"))
+    bypass = bool(reset.get("ema5_bypass_hard_force_d")) or active
+    if not active and not reset.get("ema5_bypass_hard_force_d"):
         return score_pen, letter_pen
     try:
         factor = float(reset.get("ema5_reset_factor", 1.0))
     except (TypeError, ValueError):
         factor = 1.0
-    if factor >= 1.0:
-        return score_pen, letter_pen
+    # Hard force-D → soft letter steps when EMA5 touch scheme is in play.
+    if bypass and letter_pen >= 99:
+        letter_pen = 2
     if factor <= 0.0:
         return 0, 0
-    # Partial: scale score pts; letter 99 (hard D) → treat as soft 2-step then scale.
+    if factor >= 1.0:
+        return score_pen, letter_pen
     new_score = int(round(score_pen * factor))
-    base_letter = 2 if letter_pen >= 99 else max(0, int(letter_pen))
-    new_letter = max(0, int(round(base_letter * factor)))
+    new_letter = max(0, int(round(max(0, int(letter_pen)) * factor)))
     return new_score, new_letter
 
 
@@ -481,7 +559,7 @@ def explain_confidence_grade(
     floor_pre = would_tf_pre
 
     base_from_post_score, rule_post = _band_base_grade(post_s, vol, pure)
-    # letter_pen: 99 = hard force-D; 1–2 = soft steps (EMA5 partial may yield 1).
+    # letter_pen: 99 = hard force-D; 1–2 = soft steps (structural/full may soften).
     if letter_pen >= 99:
         base_stretched = "D"
         stretch_letter_steps = 2  # Pine still applies soft +2 before hard force
@@ -492,7 +570,7 @@ def explain_confidence_grade(
         base_stretched = base_from_post_score
         stretch_letter_steps = 0
 
-    # Hard stretch = pre-reset hard band still active (full force-D), not partial-softened.
+    # Hard stretch force-D only when letter_pen still 99 (EMA5 touch bypasses this).
     hard_stretch = (
         stretch_pct is not None
         and stretch_pct > hard_v
@@ -561,6 +639,12 @@ def explain_confidence_grade(
             "ema5_reset_persist_bars",
             "ema5_reset_factor",
             "ema5_at_touch",
+            "ema5_touch_this_bar",
+            "ema5_bypass_hard_force_d",
+            "ema5_structural_proximity_trigger",
+            "ema5_structural_gap_shrink_trigger",
+            "ema5_structural_proximity_pct",
+            "ema5_structural_gap_ratio",
         )},
     }
 

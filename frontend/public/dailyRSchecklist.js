@@ -19,6 +19,11 @@
     var readyNowAudio = null;
     var readyNowAudioUnlocked = false;
     var readyNowAlertsPrimed = false;
+    /** Take Trade armed: once per symbol per false→true transition. */
+    var takeTradeArmedAlerted = {};
+    var takeTradeArmedPrimed = false;
+    var takeTradeAudio = null;
+    var takeTradeAudioUnlocked = false;
 
     var AUTO_FIELDS = [
         "entry_time", "kavach_score_entry", "confidence", "trading_state",
@@ -426,6 +431,85 @@
             if (!live[sym]) delete readyNowAlerted[sym];
         });
         if (readyNowAlertEnabled && fresh.length) playReadyNowAlert();
+    }
+
+    function ensureTakeTradeAudio() {
+        if (!takeTradeAudio) {
+            takeTradeAudio = new Audio("audio/trade_now.mp3");
+            takeTradeAudio.preload = "auto";
+        }
+        return takeTradeAudio;
+    }
+
+    function unlockTakeTradeAudio() {
+        if (takeTradeAudioUnlocked) return;
+        try {
+            var a = ensureTakeTradeAudio();
+            a.muted = true;
+            var p = a.play();
+            if (p && typeof p.then === "function") {
+                p.then(function () {
+                    a.pause();
+                    a.currentTime = 0;
+                    a.muted = false;
+                    takeTradeAudioUnlocked = true;
+                }).catch(function () {
+                    a.muted = false;
+                });
+            } else {
+                a.muted = false;
+                takeTradeAudioUnlocked = true;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function playTakeTradeArmedAlert() {
+        try {
+            var a = ensureTakeTradeAudio();
+            a.muted = false;
+            a.currentTime = 0;
+            var p = a.play();
+            if (p && typeof p.then === "function") {
+                p.then(function () { takeTradeAudioUnlocked = true; }).catch(function () { /* muted */ });
+            }
+        } catch (e) { /* muted */ }
+    }
+
+    /**
+     * Once per symbol when trade_take_enabled flips false→true while READY.
+     * First poll after load only seeds (no sound) to avoid refresh storms.
+     */
+    function checkTakeTradeArmedAlerts(stocks) {
+        if (!stocks) return;
+        var windowOpen = entryWindowOpenIST();
+        var afterClose = afterSquareOffIST();
+        var armed = {};
+        stocks.forEach(function (s) {
+            if (!isReadyState(s.trade_state)) return;
+            if (!windowOpen || afterClose) return;
+            if (s.trade_state === "EXPIRED" || s.trade_expiry_crossed) return;
+            if (s.trade_taken || s.stopped_out_today || s.trade_exited) return;
+            if (s.trade_take_enabled !== true) return;
+            var sym = s.symbol;
+            if (!sym) return;
+            armed[sym] = true;
+        });
+        if (!takeTradeArmedPrimed) {
+            Object.keys(armed).forEach(function (sym) { takeTradeArmedAlerted[sym] = true; });
+            takeTradeArmedPrimed = true;
+            return;
+        }
+        var fresh = [];
+        Object.keys(armed).forEach(function (sym) {
+            if (!takeTradeArmedAlerted[sym]) {
+                takeTradeArmedAlerted[sym] = true;
+                fresh.push(sym);
+            }
+        });
+        Object.keys(takeTradeArmedAlerted).forEach(function (sym) {
+            if (!armed[sym]) delete takeTradeArmedAlerted[sym];
+        });
+        if (fresh.length) playTakeTradeArmedAlert();
     }
 
     function fmtIstAmPm(totalMinutes) {
@@ -1430,10 +1514,14 @@
             takeBtn.title = canTake
                 ? "Mark trade taken"
                 : takeDisableTitle(stock, "Take Trade disabled");
+            card.classList.toggle("dc-ready-card--take-armed", canTake);
             var rem = win ? win.remaining : secsToNextTenMin();
             var mm = Math.floor(rem / 60);
             var ss = rem % 60;
             timer.textContent = "Enter within " + mm + ":" + ("0" + ss).slice(-2);
+        }
+        if (expired || (win && win.missed)) {
+            card.classList.remove("dc-ready-card--take-armed");
         }
         if (!expired && win && win.attempt > 1 && !(win && win.missed)) {
             recheck.hidden = false;
@@ -1819,6 +1907,7 @@
         renderGaruda();
         checkGoAlerts(stocks);
         checkReadyNowAlerts(stocks);
+        checkTakeTradeArmedAlerts(stocks);
 
         if (modalSymbol) renderModal(currentStock(modalSymbol));
     }
@@ -2837,9 +2926,10 @@
                 playReadyNowAlert();
             });
         }
-        // One gesture unlocks HTMLAudio for later READY NOW cues (autoplay policy).
+        // One gesture unlocks HTMLAudio for later READY NOW / Take Trade cues.
         document.addEventListener("click", function () {
             if (readyNowAlertEnabled) unlockReadyNowAudio();
+            unlockTakeTradeAudio();
         }, { once: true, capture: true });
         var ackBtn = $("dcExitAckBtn");
         if (ackBtn) {

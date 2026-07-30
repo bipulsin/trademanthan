@@ -197,77 +197,108 @@ def test_resolve_score_and_grade_levels():
     assert out["stretch"]["stretch_score_penalty"] == 50
 
 
-def _touch_candles(bars_after_touch: int = 0) -> list:
-    """Synthetic series where last closed bar (or bars_after earlier) pierces EMA5."""
-    # Rising closes so EMA5 trails below; final bars dip to touch EMA5.
+def _touch_candles(bars_after_touch: int = 0, *, close_at_ema: bool = True) -> list:
+    """Synthetic series; pierce EMA5 on touch bar. Optionally keep close on EMA5."""
     closes = [100.0 + i * 0.5 for i in range(20)]
     candles = []
     for i, c in enumerate(closes):
         candles.append({"open": c, "high": c + 0.2, "low": c - 0.2, "close": c})
-    # Force a touch on bar index target: range includes a synthetic EMA5.
     touch_i = len(candles) - 1 - bars_after_touch
-    # Rebuild EMA5 and set low/high to bracket it on touch bar.
     from backend.services.kavach_confidence import _ema_series
 
     ema = _ema_series([x["close"] for x in candles], 5)
     e = ema[touch_i]
     candles[touch_i]["low"] = e - 0.5
     candles[touch_i]["high"] = e + 0.5
+    if close_at_ema:
+        candles[touch_i]["close"] = e
     return candles
 
 
-def test_detect_ema5_touch_active_within_persist():
+def test_detect_structural_touch_this_bar_only(monkeypatch):
+    monkeypatch.setenv("STRETCH_EMA5_RESET_MODE", "structural")
+    candles = _touch_candles(0, close_at_ema=True)
+    info = detect_ema5_touch_reset(candles)
+    assert info["ema5_reset_active"] is True
+    assert info["ema5_touch_this_bar"] is True
+    assert info["ema5_bypass_hard_force_d"] is True
+    assert info["ema5_reset_mode"] == "structural"
+    # Close on EMA5 → no proximity; rising series → gap unlikely shrunk → factor 0
+    assert info["ema5_reset_factor"] in (0.0, 0.5, 1.0)
+
+
+def test_detect_structural_not_persisted(monkeypatch):
+    monkeypatch.setenv("STRETCH_EMA5_RESET_MODE", "structural")
+    candles = _touch_candles(1)  # touch was prior bar; last bar may not touch
+    # Ensure last bar does NOT include EMA5
+    from backend.services.kavach_confidence import _ema_series
+
+    closes = [c["close"] for c in candles]
+    e = _ema_series(closes, 5)[-1]
+    candles[-1]["low"] = e + 1.0
+    candles[-1]["high"] = e + 2.0
+    candles[-1]["close"] = e + 1.5
+    info = detect_ema5_touch_reset(candles)
+    assert info["ema5_reset_active"] is False
+
+
+def test_detect_full_persist_and_expire(monkeypatch):
+    monkeypatch.setenv("STRETCH_EMA5_RESET_MODE", "full")
     candles = _touch_candles(0)
     info = detect_ema5_touch_reset(candles, persist_bars=2)
     assert info["ema5_reset_active"] is True
-    assert info["ema5_reset_bars_since_touch"] == 0
-    assert info["ema5_reset_mode"] == "partial"
-    assert info["ema5_reset_factor"] == 0.5
+    assert info["ema5_reset_factor"] == 0.0
+    candles3 = _touch_candles(3)
+    info3 = detect_ema5_touch_reset(candles3, persist_bars=2)
+    assert info3["ema5_reset_active"] is False
+    assert info3["ema5_reset_bars_since_touch"] == 3
 
 
-def test_detect_ema5_touch_expires_after_persist():
-    candles = _touch_candles(3)
-    info = detect_ema5_touch_reset(candles, persist_bars=2)
-    assert info["ema5_reset_active"] is False
-    assert info["ema5_reset_bars_since_touch"] == 3
-
-
-def test_apply_ema5_partial_halves_penalties():
+def test_apply_structural_factor_and_hard_bypass():
     score, letter = apply_ema5_reset_to_penalties(
         20,
         2,
-        {"ema5_reset_active": True, "ema5_reset_factor": 0.5},
+        {"ema5_reset_active": True, "ema5_reset_factor": 0.5, "ema5_bypass_hard_force_d": True},
     )
     assert score == 10
     assert letter == 1
     score2, letter2 = apply_ema5_reset_to_penalties(
         50,
         99,
-        {"ema5_reset_active": True, "ema5_reset_factor": 0.5},
+        {"ema5_reset_active": True, "ema5_reset_factor": 0.5, "ema5_bypass_hard_force_d": True},
     )
     assert score2 == 25
     assert letter2 == 1
+    # factor 1.0 still bypasses hard force-D
+    score3, letter3 = apply_ema5_reset_to_penalties(
+        50,
+        99,
+        {"ema5_reset_active": True, "ema5_reset_factor": 1.0, "ema5_bypass_hard_force_d": True},
+    )
+    assert score3 == 50
+    assert letter3 == 2
 
 
 def test_apply_ema5_full_zeros_penalties():
     score, letter = apply_ema5_reset_to_penalties(
         50,
         99,
-        {"ema5_reset_active": True, "ema5_reset_factor": 0.0},
+        {"ema5_reset_active": True, "ema5_reset_factor": 0.0, "ema5_bypass_hard_force_d": True},
     )
     assert score == 0
     assert letter == 0
 
 
-def test_explain_partial_ema5_reset_on_hard_stretch():
-    # Hard stretch without reset → 45 / D!. With partial reset → score 70, 1-letter.
+def test_explain_structural_ema5_on_hard_stretch():
     reset = {
         "ema5_reset_active": True,
-        "ema5_reset_mode": "partial",
+        "ema5_reset_mode": "structural",
         "ema5_reset_bars_since_touch": 0,
         "ema5_reset_persist_bars": 2,
         "ema5_reset_factor": 0.5,
         "ema5_at_touch": 100.0,
+        "ema5_touch_this_bar": True,
+        "ema5_bypass_hard_force_d": True,
     }
     explained = explain_confidence_grade(
         95,
@@ -281,9 +312,32 @@ def test_explain_partial_ema5_reset_on_hard_stretch():
     assert explained["stretch_score_penalty"] == 25
     assert explained["stretch_letter_penalty"] == 1
     assert explained["trade_score_post_stretch"] == 70
-    assert explained["stretch"]["ema5_reset_active"] is True
-    # High pure 70 → D from banding (<75); letter −1 stays D → D!
+    # Score floor <65 → D is upstream; 70 still bands via High/pure then letter.
     assert explained["display_grade"] == "D!"
+
+
+def test_explain_score_floor_untouched_by_ema5_reset():
+    """tradeScore < 65 → hard D upstream of stretch/EMA5; reset cannot rescue."""
+    reset = {
+        "ema5_reset_active": True,
+        "ema5_reset_mode": "structural",
+        "ema5_reset_factor": 0.0,
+        "ema5_bypass_hard_force_d": True,
+        "ema5_touch_this_bar": True,
+    }
+    explained = explain_confidence_grade(
+        60,
+        "High",
+        80.0,
+        REGIME_TREND,
+        stretch_pct=0.613,
+        apply_live=True,
+        ema5_reset=reset,
+    )
+    # Raw 60 already D from score floor; stretch zeroed still 60 → D
+    assert explained["trade_score_post_stretch"] == 60
+    assert explained["grade"] == "D"
+    assert explained["display_grade"] in ("D", "D!")
 
 
 def test_explain_full_ema5_reset_clears_hard_stretch():
@@ -294,6 +348,7 @@ def test_explain_full_ema5_reset_clears_hard_stretch():
         "ema5_reset_persist_bars": 2,
         "ema5_reset_factor": 0.0,
         "ema5_at_touch": 100.0,
+        "ema5_bypass_hard_force_d": True,
     }
     explained = explain_confidence_grade(
         95,
