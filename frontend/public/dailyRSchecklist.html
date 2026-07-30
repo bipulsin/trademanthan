@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=42">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=43">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -47,24 +47,6 @@
                         </div>
                     </div>
                     <div class="dc-toolbar-line2">
-                        <div class="dc-toolbar-niftydir">
-                            <label for="dcFiiDii">FII/DII Flow (index-level, once daily)</label>
-                            <select class="dc-select dc-select--compact" id="dcFiiDii">
-                                <option value="">— unset —</option>
-                                <option value="FII net buy">FII net buy</option>
-                                <option value="FII net sell">FII net sell</option>
-                                <option value="Neutral / mixed">Neutral / mixed</option>
-                            </select>
-                        </div>
-                        <div class="dc-toolbar-niftydir">
-                            <label for="dcNiftyDir">Nifty Opening Direction</label>
-                            <select class="dc-select dc-select--compact" id="dcNiftyDir">
-                                <option value="">— select —</option>
-                                <option value="Gap sustained up">Gap sustained ↑</option>
-                                <option value="Gap sustained down">Gap sustained ↓</option>
-                                <option value="Gap reversed">Gap reversed</option>
-                            </select>
-                        </div>
                         <div class="dc-actions">
                             <label class="dc-go-alert-toggle" title="Off by default — enable after reviewing first live session">
                                 <input type="checkbox" id="dcGoAlertSound"> GO alert sound
@@ -72,14 +54,7 @@
                             <label class="dc-go-alert-toggle" title="Off by default — same default as GO alert sound. Plays once when a new READY NOW card appears.">
                                 <input type="checkbox" id="dcReadyNowAlertSound"> READY NOW sound
                             </label>
-                            <button type="button" class="dc-btn dc-btn--primary" id="dcPull"><i class="fas fa-sync-alt"></i> Refresh from RS</button>
-                            <button type="button" class="dc-btn" id="dcSave"><i class="fas fa-floppy-disk"></i> Save</button>
-                            <button type="button" class="dc-btn" id="dcPrint"><i class="fas fa-print"></i> Print</button>
-                            <button type="button" class="dc-btn dc-btn--danger" id="dcReset"><i class="fas fa-rotate-left"></i> Reset Day</button>
                         </div>
-                    </div>
-                    <div class="dc-warn-banner" id="dcGapWarn">
-                        ⚠ Gap reversal detected — RS+ stocks may be dragged lower. Wait for the 9:35 candle direction.
                     </div>
                     <div class="dc-rotation-banner" id="dcRotationBanner" hidden></div>
                     <!-- Zone 1 — session status bar (~60px) -->
@@ -133,7 +108,6 @@
                 <!-- Bullish | Bearish columns (today's locked or preview) -->
                 <div class="dc-empty dc-card" id="dcEmpty">
                     <p>Loading checklist…</p>
-                    <button type="button" class="dc-btn dc-btn--primary" id="dcPullEmpty"><i class="fas fa-sync-alt"></i> Pull from RS Scanner</button>
                 </div>
 
                 <div class="dc-columns" id="dcColumns" hidden>
@@ -386,6 +360,6 @@
     </template>
 
     <script src="left-menu.js?v=3.26"></script>
-    <script src="dailyRSchecklist.js?v=43"></script>
+    <script src="dailyRSchecklist.js?v=44"></script>
 </body>
 </html>

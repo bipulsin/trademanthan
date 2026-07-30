@@ -44,12 +44,8 @@
 
 .dc-toolbar-line2 {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    justify-content: space-between;
+    justify-content: flex-end;
 }
-.dc-toolbar-niftydir {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0;
-}
-.dc-toolbar-niftydir label { font-size: 12px; font-weight: 700; white-space: nowrap; }
 
 /* Status chips — always high-contrast (immune to theme text overrides) */
 .dc-pill,
@@ -99,22 +95,10 @@ body[data-theme="dark"] .dc-decision--NONE {
 .dc-btn--primary { background: var(--theme-accent, #2563eb); color: #fff !important; border-color: var(--theme-accent, #2563eb); }
 .dc-btn--danger { border-color: var(--out-bd); color: var(--out-ink) !important; }
 
-.dc-select--compact {
-    font-size: 12px; padding: 4px 8px; min-height: 28px; max-width: 200px;
-    border: 1px solid var(--theme-border, #e2e8f0); border-radius: 6px;
-    background: var(--theme-card-alt, #fff); color: var(--theme-text, #0f172a);
-}
 .dc-select, .dc-num, .dc-time {
     font-size: 13px; padding: 6px 8px; border: 1px solid var(--theme-border, #e2e8f0);
     border-radius: 6px; background: var(--theme-card-alt, #fff); color: var(--theme-text, #0f172a);
 }
-
-.dc-warn-banner {
-    margin-top: 8px; padding: 8px 10px; border-radius: 6px; display: none;
-    background: var(--watch-bg) !important; color: var(--watch-ink) !important;
-    border: 1px solid var(--watch-bd); font-size: 12px; font-weight: 600;
-}
-.dc-warn-banner.show { display: block; }
 
 .dc-hardrules { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .dc-hardrule {

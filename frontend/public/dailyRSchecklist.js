@@ -1790,12 +1790,6 @@
                 + "not the READY NOW / WAIT / BLOCKED trade-state system used on cards";
         }
 
-        var sel = $("dcNiftyDir");
-        if (document.activeElement !== sel) sel.value = state.nifty_open_direction || "";
-        var fiiSel = $("dcFiiDii");
-        if (fiiSel && document.activeElement !== fiiSel) fiiSel.value = state.fii_dii_flow || "";
-        $("dcGapWarn").classList.toggle("show", (state.nifty_open_direction || "") === "Gap reversed");
-
         // Single day-regime banner (CHOP / ROTATION / MIXED / CONTINUATION); gated ≥09:45 IST.
         var rotEl = $("dcRotationBanner");
         var dayFlag = resolveDayRegimeFlag(state);
@@ -2787,31 +2781,6 @@
         }, 500);
     }
 
-    function pull() {
-        toast("Refreshing Kavach data for locked watchlist…");
-        api("/refresh", { method: "POST" }).then(function (s) {
-            applyState(s);
-            if (s.refresh_status === "no_lock") {
-                toast(s.refresh_message || "Morning snapshot not yet taken");
-            } else if (s.refresh_status === "ok") {
-                toast("Watchlist updated");
-            }
-        }).catch(function () { toast("Refresh failed"); });
-    }
-
-    function resetDay() {
-        if (!confirm("Reset today's checklist and morning snapshot lock? All saved values will be cleared.")) return;
-        api("/reset", { method: "POST" })
-            .then(function (s) {
-                cardEls = {};
-                if ($("dcZone3Grid")) $("dcZone3Grid").innerHTML = "";
-                if ($("dcZone4List")) $("dcZone4List").innerHTML = "";
-                closeModal();
-                applyState(s);
-                toast("Day reset");
-            });
-    }
-
     function tickClock() {
         var t = nowIST();
         $("dcClock").textContent = t.str;
@@ -2857,23 +2826,6 @@
             if (cached) { state = JSON.parse(cached); render(); }
         } catch (e) {}
 
-        $("dcNiftyDir").addEventListener("change", function () {
-            onChange("", "nifty_open_direction", this.value);
-        });
-        var fiiEl = $("dcFiiDii");
-        if (fiiEl) {
-            fiiEl.addEventListener("change", function () {
-                onChange("", "fii_dii_flow", this.value);
-            });
-        }
-        $("dcPull").addEventListener("click", pull);
-        $("dcPullEmpty").addEventListener("click", pull);
-        $("dcReset").addEventListener("click", resetDay);
-        $("dcPrint").addEventListener("click", function () { window.print(); });
-        $("dcSave").addEventListener("click", function () {
-            try { localStorage.setItem(lsKey(), JSON.stringify(state)); } catch (e) {}
-            toast("Session saved");
-        });
         $("dcModalClose").addEventListener("click", closeModal);
         $("dcModalBackdrop").addEventListener("click", closeModal);
         wireTier3Toggle("dcSessionLogToggle", "dcSessionLogBody");
