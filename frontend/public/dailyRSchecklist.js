@@ -649,6 +649,26 @@
             ("0" + d.getSeconds()).slice(-2) + " IST";
     }
 
+    /** Absolute IST clock: dd-mmm-yyyy hh:mm:ss (Asia/Kolkata). */
+    function fmtIstDateTime(iso) {
+        if (!iso) return "—";
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return "—";
+        var parts = new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Asia/Kolkata",
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+        }).formatToParts(d);
+        var o = {};
+        parts.forEach(function (p) { if (p.type !== "literal") o[p.type] = p.value; });
+        return o.day + "-" + o.month + "-" + o.year + " " + o.hour + ":" + o.minute + ":" + o.second;
+    }
+
     function dataAgeMinutes(iso) {
         if (!iso) return 999;
         var d = new Date(iso);
@@ -1974,9 +1994,7 @@
         var g = garudaState || {};
         var items = g.top_n || [];
         if (asof) {
-            asof.textContent = g.bar_end
-                ? ("as of " + String(g.bar_end).replace("T", " ").slice(0, 16) + " IST")
-                : "";
+            asof.textContent = g.bar_end ? ("as of " + fmtIstDateTime(g.bar_end) + " IST") : "";
         }
         stack.innerHTML = "";
         if (!items.length) {
