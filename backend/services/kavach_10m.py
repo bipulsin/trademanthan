@@ -348,6 +348,7 @@ def metrics_from_10m_candles(
         close=closed_price,
         ema10=ema10,
         vwap=vwap,
+        candles=candles[: pair_end + 1] if pair_end >= 0 else candles,
     )
     trade_score = resolved["trade_score"]
     stretch = resolved.get("stretch") or {}

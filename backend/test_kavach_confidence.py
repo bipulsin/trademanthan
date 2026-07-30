@@ -4,8 +4,10 @@ import pytest
 from backend.services.kavach_confidence import (
     REGIME_TRANSITION,
     REGIME_TREND,
+    apply_ema5_reset_to_penalties,
     compute_confidence_grade,
     compute_stretch_pct,
+    detect_ema5_touch_reset,
     explain_confidence_grade,
     format_confidence_display,
     resolve_score_and_grade,
@@ -193,3 +195,115 @@ def test_resolve_score_and_grade_levels():
     assert out["trade_score"] == 95
     assert out["stretch"]["stretch_pct"] == pytest.approx(0.6135, rel=1e-2)
     assert out["stretch"]["stretch_score_penalty"] == 50
+
+
+def _touch_candles(bars_after_touch: int = 0) -> list:
+    """Synthetic series where last closed bar (or bars_after earlier) pierces EMA5."""
+    # Rising closes so EMA5 trails below; final bars dip to touch EMA5.
+    closes = [100.0 + i * 0.5 for i in range(20)]
+    candles = []
+    for i, c in enumerate(closes):
+        candles.append({"open": c, "high": c + 0.2, "low": c - 0.2, "close": c})
+    # Force a touch on bar index target: range includes a synthetic EMA5.
+    touch_i = len(candles) - 1 - bars_after_touch
+    # Rebuild EMA5 and set low/high to bracket it on touch bar.
+    from backend.services.kavach_confidence import _ema_series
+
+    ema = _ema_series([x["close"] for x in candles], 5)
+    e = ema[touch_i]
+    candles[touch_i]["low"] = e - 0.5
+    candles[touch_i]["high"] = e + 0.5
+    return candles
+
+
+def test_detect_ema5_touch_active_within_persist():
+    candles = _touch_candles(0)
+    info = detect_ema5_touch_reset(candles, persist_bars=2)
+    assert info["ema5_reset_active"] is True
+    assert info["ema5_reset_bars_since_touch"] == 0
+    assert info["ema5_reset_mode"] == "partial"
+    assert info["ema5_reset_factor"] == 0.5
+
+
+def test_detect_ema5_touch_expires_after_persist():
+    candles = _touch_candles(3)
+    info = detect_ema5_touch_reset(candles, persist_bars=2)
+    assert info["ema5_reset_active"] is False
+    assert info["ema5_reset_bars_since_touch"] == 3
+
+
+def test_apply_ema5_partial_halves_penalties():
+    score, letter = apply_ema5_reset_to_penalties(
+        20,
+        2,
+        {"ema5_reset_active": True, "ema5_reset_factor": 0.5},
+    )
+    assert score == 10
+    assert letter == 1
+    score2, letter2 = apply_ema5_reset_to_penalties(
+        50,
+        99,
+        {"ema5_reset_active": True, "ema5_reset_factor": 0.5},
+    )
+    assert score2 == 25
+    assert letter2 == 1
+
+
+def test_apply_ema5_full_zeros_penalties():
+    score, letter = apply_ema5_reset_to_penalties(
+        50,
+        99,
+        {"ema5_reset_active": True, "ema5_reset_factor": 0.0},
+    )
+    assert score == 0
+    assert letter == 0
+
+
+def test_explain_partial_ema5_reset_on_hard_stretch():
+    # Hard stretch without reset → 45 / D!. With partial reset → score 70, 1-letter.
+    reset = {
+        "ema5_reset_active": True,
+        "ema5_reset_mode": "partial",
+        "ema5_reset_bars_since_touch": 0,
+        "ema5_reset_persist_bars": 2,
+        "ema5_reset_factor": 0.5,
+        "ema5_at_touch": 100.0,
+    }
+    explained = explain_confidence_grade(
+        95,
+        "High",
+        80.0,
+        REGIME_TREND,
+        stretch_pct=0.613,
+        apply_live=True,
+        ema5_reset=reset,
+    )
+    assert explained["stretch_score_penalty"] == 25
+    assert explained["stretch_letter_penalty"] == 1
+    assert explained["trade_score_post_stretch"] == 70
+    assert explained["stretch"]["ema5_reset_active"] is True
+    # High pure 70 → D from banding (<75); letter −1 stays D → D!
+    assert explained["display_grade"] == "D!"
+
+
+def test_explain_full_ema5_reset_clears_hard_stretch():
+    reset = {
+        "ema5_reset_active": True,
+        "ema5_reset_mode": "full",
+        "ema5_reset_bars_since_touch": 0,
+        "ema5_reset_persist_bars": 2,
+        "ema5_reset_factor": 0.0,
+        "ema5_at_touch": 100.0,
+    }
+    explained = explain_confidence_grade(
+        95,
+        "High",
+        80.0,
+        REGIME_TREND,
+        stretch_pct=0.613,
+        apply_live=True,
+        ema5_reset=reset,
+    )
+    assert explained["stretch_score_penalty"] == 0
+    assert explained["trade_score_post_stretch"] == 95
+    assert explained["display_grade"] == "A+"

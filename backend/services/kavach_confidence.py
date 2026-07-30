@@ -3,12 +3,17 @@
 Stretch penalty (Pine v2.8.7 / v13): nearer of EMA10/VWAP distance as % of price
 penalizes Trade Score and letter grade. Live by default; set
 ``STRETCH_PENALTY_LIVE=0`` to revert to shadow-only.
+
+EMA5 pullback stretch reset (Pine v3.5 parity, live): when price recently
+touched/pierced EMA5 (bar range includes EMA5), stretch penalties are reduced
+for ``STRETCH_EMA5_RESET_BARS`` bars (default 2). Mode via
+``STRETCH_EMA5_RESET_MODE``: ``off`` | ``partial`` (50%, default) | ``full``.
 """
 from __future__ import annotations
 
 import math
 import os
-from typing import List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 REGIME_TREND = "TREND"
 REGIME_TRANSITION = "TRANSITION"
@@ -18,6 +23,9 @@ PurityProven = bool  # >= 60%
 
 DEFAULT_SOFT_STRETCH_PCT = 0.35
 DEFAULT_HARD_STRETCH_PCT = 0.50
+DEFAULT_EMA5_RESET_MODE = "partial"  # match Pine default; not Off
+DEFAULT_EMA5_RESET_BARS = 2
+DEFAULT_EMA5_RESET_PARTIAL_FACTOR = 0.50
 
 _LETTER_RANK = {"A+": 0, "A": 1, "B": 2, "C": 3, "D": 4}
 _RANK_LETTER = {0: "A+", 1: "A", 2: "B", 3: "C", 4: "D"}
@@ -217,6 +225,157 @@ def stretch_penalties(
     return 0, 0
 
 
+def stretch_ema5_reset_mode() -> str:
+    """Pine v3.5 stretch-reset mode: off | partial | full.
+
+    Default ``partial`` (50% reduction) — do not default to off (dashboard↔TV parity).
+    Override with ``STRETCH_EMA5_RESET_MODE``.
+    """
+    raw = os.environ.get("STRETCH_EMA5_RESET_MODE", DEFAULT_EMA5_RESET_MODE).strip().lower()
+    if raw in ("off", "0", "false", "none"):
+        return "off"
+    if raw in ("full", "reset", "1"):
+        return "full"
+    return "partial"
+
+
+def stretch_ema5_reset_bars() -> int:
+    raw = os.environ.get("STRETCH_EMA5_RESET_BARS", str(DEFAULT_EMA5_RESET_BARS))
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_EMA5_RESET_BARS
+
+
+def stretch_ema5_reset_partial_factor() -> float:
+    raw = os.environ.get(
+        "STRETCH_EMA5_RESET_PARTIAL_FACTOR", str(DEFAULT_EMA5_RESET_PARTIAL_FACTOR)
+    )
+    try:
+        return min(1.0, max(0.0, float(raw)))
+    except (TypeError, ValueError):
+        return DEFAULT_EMA5_RESET_PARTIAL_FACTOR
+
+
+def _f_num(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(x) or math.isinf(x):
+        return None
+    return x
+
+
+def _ema_series(closes: Sequence[float], length: int = 5) -> List[float]:
+    if not closes:
+        return []
+    k = 2.0 / (length + 1.0)
+    out: List[float] = []
+    ema = float(closes[0])
+    for c in closes:
+        ema = float(c) * k + ema * (1.0 - k)
+        out.append(ema)
+    return out
+
+
+def detect_ema5_touch_reset(
+    candles: Optional[Sequence[Dict[str, Any]]],
+    *,
+    persist_bars: Optional[int] = None,
+) -> Dict[str, Any]:
+    """True when a confirmed bar's range includes EMA5 within persist window.
+
+    ``candles`` are chronological OHLC dicts (uses high/low/close). Last bar is
+    treated as the evaluation bar (confirmed / closed in caller context).
+    """
+    persist = stretch_ema5_reset_bars() if persist_bars is None else int(persist_bars)
+    mode = stretch_ema5_reset_mode()
+    empty = {
+        "ema5_reset_active": False,
+        "ema5_reset_mode": mode,
+        "ema5_reset_bars_since_touch": None,
+        "ema5_reset_persist_bars": persist,
+        "ema5_reset_factor": 1.0,
+        "ema5_at_touch": None,
+    }
+    if mode == "off" or not candles or persist < 0:
+        return empty
+
+    closes: List[float] = []
+    highs: List[float] = []
+    lows: List[float] = []
+    for c in candles:
+        cl = _f_num(c.get("close"))
+        hi = _f_num(c.get("high"))
+        lo = _f_num(c.get("low"))
+        if cl is None:
+            continue
+        closes.append(cl)
+        highs.append(hi if hi is not None else cl)
+        lows.append(lo if lo is not None else cl)
+    if len(closes) < 5:
+        return empty
+
+    ema5 = _ema_series(closes, 5)
+    last_i = len(closes) - 1
+    touch_i = None
+    for i in range(last_i, -1, -1):
+        e = ema5[i]
+        if lows[i] <= e <= highs[i]:
+            touch_i = i
+            break
+    if touch_i is None:
+        return empty
+
+    bars_since = last_i - touch_i
+    active = bars_since <= persist
+    if not active:
+        return {
+            **empty,
+            "ema5_reset_bars_since_touch": bars_since,
+            "ema5_at_touch": round(ema5[touch_i], 4),
+        }
+
+    if mode == "full":
+        factor = 0.0
+    else:
+        factor = stretch_ema5_reset_partial_factor()
+    return {
+        "ema5_reset_active": True,
+        "ema5_reset_mode": mode,
+        "ema5_reset_bars_since_touch": bars_since,
+        "ema5_reset_persist_bars": persist,
+        "ema5_reset_factor": factor,
+        "ema5_at_touch": round(ema5[touch_i], 4),
+    }
+
+
+def apply_ema5_reset_to_penalties(
+    score_pen: int,
+    letter_pen: int,
+    reset: Dict[str, Any],
+) -> Tuple[int, int]:
+    """Scale stretch penalties by EMA5 reset factor (partial/full)."""
+    if not reset.get("ema5_reset_active"):
+        return score_pen, letter_pen
+    try:
+        factor = float(reset.get("ema5_reset_factor", 1.0))
+    except (TypeError, ValueError):
+        factor = 1.0
+    if factor >= 1.0:
+        return score_pen, letter_pen
+    if factor <= 0.0:
+        return 0, 0
+    # Partial: scale score pts; letter 99 (hard D) → treat as soft 2-step then scale.
+    new_score = int(round(score_pen * factor))
+    base_letter = 2 if letter_pen >= 99 else max(0, int(letter_pen))
+    new_letter = max(0, int(round(base_letter * factor)))
+    return new_score, new_letter
+
+
 def _downgrade_letters(grade: str, steps: int) -> str:
     idx = _LETTER_RANK.get((grade or "D").replace("*", "").replace("!", ""), 4)
     return _RANK_LETTER[min(4, idx + max(0, int(steps)))]
@@ -290,8 +449,10 @@ def explain_confidence_grade(
     soft: Optional[float] = None,
     hard: Optional[float] = None,
     apply_live: Optional[bool] = None,
+    candles: Optional[Sequence[Dict[str, Any]]] = None,
+    ema5_reset: Optional[Dict[str, Any]] = None,
 ) -> dict:
-    """Banding + stretch penalty (Pine v13). Always returns pre/post stretch fields.
+    """Banding + stretch penalty (Pine v13) + EMA5 pullback reset (Pine v3.5).
 
     When ``apply_live`` is False (or env ``STRETCH_PENALTY_LIVE=0``),
     ``grade`` / ``score_int`` / ``display_grade`` stay on the pre-stretch path.
@@ -307,6 +468,9 @@ def explain_confidence_grade(
         stretch_pct = compute_stretch_pct(close, ema10, vwap)
 
     score_pen, letter_pen = stretch_penalties(stretch_pct, soft=soft_v, hard=hard_v)
+    reset_info = ema5_reset if ema5_reset is not None else detect_ema5_touch_reset(candles)
+    score_pen_pre_reset, letter_pen_pre_reset = score_pen, letter_pen
+    score_pen, letter_pen = apply_ema5_reset_to_penalties(score_pen, letter_pen, reset_info)
     post_s = max(0, raw_s - score_pen)
 
     base_pre, rule_pre = _band_base_grade(raw_s, vol, pure)
@@ -317,17 +481,23 @@ def explain_confidence_grade(
     floor_pre = would_tf_pre
 
     base_from_post_score, rule_post = _band_base_grade(post_s, vol, pure)
+    # letter_pen: 99 = hard force-D; 1–2 = soft steps (EMA5 partial may yield 1).
     if letter_pen >= 99:
         base_stretched = "D"
         stretch_letter_steps = 2  # Pine still applies soft +2 before hard force
-    elif letter_pen >= 2:
-        base_stretched = _downgrade_letters(base_from_post_score, 2)
-        stretch_letter_steps = 2
+    elif letter_pen > 0:
+        stretch_letter_steps = int(letter_pen)
+        base_stretched = _downgrade_letters(base_from_post_score, stretch_letter_steps)
     else:
         base_stretched = base_from_post_score
         stretch_letter_steps = 0
 
-    hard_stretch = stretch_pct is not None and stretch_pct > hard_v
+    # Hard stretch = pre-reset hard band still active (full force-D), not partial-softened.
+    hard_stretch = (
+        stretch_pct is not None
+        and stretch_pct > hard_v
+        and letter_pen >= 99
+    )
     # Stretch before transition-floor; hard stretch never rescued to C*.
     transition_floor_post = (
         base_stretched == "D"
@@ -372,6 +542,8 @@ def explain_confidence_grade(
         "stretch_pct": stretch_pct,
         "stretch_score_penalty": score_pen,
         "stretch_letter_penalty": letter_pen,
+        "stretch_score_penalty_pre_ema5_reset": score_pen_pre_reset,
+        "stretch_letter_penalty_pre_ema5_reset": letter_pen_pre_reset,
         "trade_score_pre_stretch": raw_s,
         "trade_score_post_stretch": post_s,
         "base_grade_pre_stretch": display_pre,
@@ -382,6 +554,14 @@ def explain_confidence_grade(
         "stretch_penalty_live": live,
         "base_grade_from_post_score": base_from_post_score,
         "base_grade_stretched": base_stretched,
+        **{k: reset_info.get(k) for k in (
+            "ema5_reset_active",
+            "ema5_reset_mode",
+            "ema5_reset_bars_since_touch",
+            "ema5_reset_persist_bars",
+            "ema5_reset_factor",
+            "ema5_at_touch",
+        )},
     }
 
     return {
@@ -420,6 +600,8 @@ def resolve_score_and_grade(
     vwap: Optional[float] = None,
     stretch_pct: Optional[float] = None,
     apply_live: Optional[bool] = None,
+    candles: Optional[Sequence[Dict[str, Any]]] = None,
+    ema5_reset: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """One-shot: raw Trade Score → live-aware score + display grade + stretch dict."""
     explained = explain_confidence_grade(
@@ -432,6 +614,8 @@ def resolve_score_and_grade(
         vwap=vwap,
         stretch_pct=stretch_pct,
         apply_live=apply_live,
+        candles=candles,
+        ema5_reset=ema5_reset,
     )
     return {
         "trade_score": int(explained["score_int"]),

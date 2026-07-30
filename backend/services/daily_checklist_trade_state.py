@@ -29,7 +29,8 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - Missing SL / Risk → not READY; Take Trade disabled.
   - Risk > ₹3k with R:R < 1:2 → BLOCKED (hard). R:R ≥ 1:2 → cap waived label.
   - Computed R:R < 1:2 alone → BLOCKED (independent of ₹3k; was a DLF gap).
-  - ≥2 of {REGIME UNSTABLE, CHURN, DIR CONFLICT} on READY → WAIT (heuristic).
+  - ≥2 of {REGIME UNSTABLE (blend<0.40), CHURN, DIR CONFLICT} on READY → WAIT.
+    REGIME UNSTABLE is live-blended: 0.20×NIFTY TREND + 0.80×signed VWAP slope.
   - 2nd+ pullback combined with any of those warnings → WAIT.
   - Live panel Trend (price vs VWAP) / Supertrend / MACD ≥2-of-3 oppose lock
     → WAIT (DIR CONFLICT). Also WAIT when live Kavach state is opposite the
@@ -219,6 +220,7 @@ def apply_warning_stack_downgrades(stocks: List[Dict[str, Any]]) -> int:
 
     Rules (logged for later backtest):
       - ≥2 of {REGIME UNSTABLE, CHURN, DIR CONFLICT} → WAIT
+        (REGIME UNSTABLE badge is blend-based after ``apply_regime_blend_to_stocks``)
       - 2nd+ pullback AND ≥1 of those warnings → WAIT
     Does not change BLOCKED/EXPIRED. Returns number of cards downgraded.
     """
@@ -2068,6 +2070,17 @@ def enrich_stocks_trade_state(
             imbalance=zone1_early.get("direction_imbalance"),
             removals=removals,
         )
+        # Live: rewrite REGIME UNSTABLE from NIFTY+signed-VWAP blend (threshold 0.40).
+        regime_blend_stats: Dict[str, int] = {}
+        try:
+            from backend.services.regime_blend import apply_regime_blend_to_stocks
+
+            regime_blend_stats = apply_regime_blend_to_stocks(
+                stocks, market_regime=mkt.get("market_regime")
+            )
+        except Exception as exc:
+            logger.debug("regime blend apply skipped: %s", exc)
+            regime_blend_stats = {}
         # After regime badges exist: stack of warnings / 2nd+ pullback combo → WAIT.
         stack_n = apply_warning_stack_downgrades(stocks)
 
@@ -2161,6 +2174,18 @@ def enrich_stocks_trade_state(
             inp["card_visible"] = s_final.get("card_visible")
             inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
             inp["ready_visible_since"] = s_final.get("ready_visible_since")
+            # Live regime blend (REGIME UNSTABLE for stack = blend < threshold).
+            for k in (
+                "regime_blend",
+                "regime_blend_nifty_c",
+                "regime_blend_stock_c",
+                "regime_blend_threshold",
+                "regime_blend_direction_ok",
+                "regime_blend_aligned_signed_atr",
+                "regime_unstable_for_stack",
+            ):
+                if k in s_final:
+                    inp[k] = s_final[k]
             # Part 1 ATR READY suppress (live display + shadow) + Part 2 DI override shadow.
             atr_dec = s_final.get("atr_ready_suppress")
             if isinstance(atr_dec, dict):
@@ -2264,6 +2289,7 @@ def enrich_stocks_trade_state(
                         close=close_px,
                         ema10=ema10,
                         vwap=vwap,
+                        candles=candle_cache.get(sym_u) or [],
                     )
                     stretch = resolved.get("stretch") or {}
                     s_final["stretch"] = stretch
@@ -2420,6 +2446,7 @@ def enrich_stocks_trade_state(
             "ready_consistency_logged": len(consistency_rows),
             "vwap_raw_logged": vwap_raw_n,
             "warning_stack_downgraded": stack_n,
+            "regime_blend": regime_blend_stats,
             "badge_input_logged": badge_logged,
             "ready_entry_staleness_logged": entry_staleness_logged,
             "dwell_entry_live": dwell_live_stats,
