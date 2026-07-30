@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     slippage_pts DOUBLE PRECISION,
     points_captured DOUBLE PRECISION,
     ema10_at_entry DOUBLE PRECISION,
+    ema10_at_exit DOUBLE PRECISION,
     ema5_at_entry DOUBLE PRECISION,
     vwap_at_entry DOUBLE PRECISION,
     entry_to_ema10_buffer_pct DOUBLE PRECISION,
@@ -76,7 +77,7 @@ _UPSERT = text(
         session_date, symbol, contract, direction, qty,
         entry_time, entry_price, exit_time, exit_price, exit_price_intended,
         slippage_pts, slippage_inr, points_captured,
-        ema10_at_entry, ema5_at_entry, vwap_at_entry, entry_to_ema10_buffer_pct,
+        ema10_at_entry, ema10_at_exit, ema5_at_entry, vwap_at_entry, entry_to_ema10_buffer_pct,
         planned_risk_pts, planned_risk_inr,
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
         confidence_at_exit, trade_score_at_exit,
@@ -90,7 +91,7 @@ _UPSERT = text(
         CAST(:entry_time AS time), :entry_price, CAST(:exit_time AS time),
         :exit_price, :exit_price_intended,
         :slippage_pts, :slippage_inr, :points_captured,
-        :ema10_at_entry, :ema5_at_entry, :vwap_at_entry, :entry_to_ema10_buffer_pct,
+        :ema10_at_entry, :ema10_at_exit, :ema5_at_entry, :vwap_at_entry, :entry_to_ema10_buffer_pct,
         :planned_risk_pts, :planned_risk_inr,
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
         :confidence_at_exit, :trade_score_at_exit,
@@ -110,6 +111,7 @@ _UPSERT = text(
         slippage_inr = COALESCE(EXCLUDED.slippage_inr, {TABLE}.slippage_inr),
         points_captured = COALESCE(EXCLUDED.points_captured, {TABLE}.points_captured),
         ema10_at_entry = COALESCE(EXCLUDED.ema10_at_entry, {TABLE}.ema10_at_entry),
+        ema10_at_exit = COALESCE(EXCLUDED.ema10_at_exit, {TABLE}.ema10_at_exit),
         ema5_at_entry = COALESCE(EXCLUDED.ema5_at_entry, {TABLE}.ema5_at_entry),
         vwap_at_entry = COALESCE(EXCLUDED.vwap_at_entry, {TABLE}.vwap_at_entry),
         entry_to_ema10_buffer_pct = COALESCE(
@@ -197,6 +199,13 @@ def ensure_trade_log_table() -> None:
             text(
                 f"ALTER TABLE {TABLE} "
                 "ADD COLUMN IF NOT EXISTS slippage_inr DOUBLE PRECISION"
+            )
+        )
+        # EMA10 at exit — journal only; enables entry→exit stop-ref drift queries.
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS ema10_at_exit DOUBLE PRECISION"
             )
         )
 
@@ -356,6 +365,7 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         "slippage_inr": slip_inr,
         "points_captured": _f(points),
         "ema10_at_entry": _f(payload.get("ema10_at_entry")),
+        "ema10_at_exit": _f(payload.get("ema10_at_exit")),
         "ema5_at_entry": _f(payload.get("ema5_at_entry")),
         "vwap_at_entry": _f(payload.get("vwap_at_entry")),
         "entry_to_ema10_buffer_pct": (

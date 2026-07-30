@@ -1225,6 +1225,16 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 except Exception:
                     pass
+                # Journal-only: EMA10 at exit for stop-ref drift across trades.
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS ema10_at_exit DOUBLE PRECISION"
+                        )
+                    )
+                except Exception:
+                    pass
                 try:
                     conn.execute(
                         text(
