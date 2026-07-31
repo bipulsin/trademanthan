@@ -1185,11 +1185,52 @@
             }
         }
         if (warn) {
-            warn.hidden = !obs.churn_warning;
-            if (obs.churn_warning && obs.churn_symbols && obs.churn_symbols.length) {
-                warn.textContent = "Lock churn elevated (" + obs.churn_count +
-                    " symbols with cycles > 1: " + obs.churn_symbols.join(", ") +
-                    "). Check promotion / R1·R2 behaviour.";
+            var churnOn = !!(obs.churn_warning && obs.churn_symbols && obs.churn_symbols.length);
+            warn.hidden = !churnOn;
+            if (churnOn) {
+                var n = obs.churn_count || obs.churn_symbols.length;
+                var main = $("dcTradeChurnMain");
+                if (main) {
+                    main.innerHTML =
+                        "<strong>" + n + " symbol" + (n === 1 ? "" : "s") +
+                        " showing elevated lock churn today</strong>" +
+                        " — RS-rank lock membership has been unstable (re-promote / R1·R2 cycles). " +
+                        "Informational context only; grade remains the gate.";
+                }
+                var details = $("dcTradeChurnDetails");
+                var symsEl = $("dcTradeChurnSyms");
+                var gradeNote = $("dcTradeChurnGradeNote");
+                if (details) details.hidden = false;
+                if (symsEl) {
+                    symsEl.textContent = obs.churn_symbols.join(", ");
+                }
+                // Optional: footnote high-grade names still on the live board.
+                var highGrade = [];
+                var stockList = (state && state.stocks) || [];
+                var bySym = {};
+                stockList.forEach(function (s) {
+                    if (s && s.symbol) bySym[String(s.symbol).toUpperCase()] = s;
+                });
+                obs.churn_symbols.forEach(function (sym) {
+                    var s = bySym[String(sym).toUpperCase()];
+                    if (!s) return;
+                    var g = String(s.confidence || s.confidence_grade || s.dashboard_kavach || "")
+                        .replace("!", "")
+                        .trim();
+                    if (g === "A" || g === "A+" || g === "A*") {
+                        highGrade.push(sym + " (" + (s.confidence || s.confidence_grade || g) + ")");
+                    }
+                });
+                if (gradeNote) {
+                    if (highGrade.length) {
+                        gradeNote.hidden = false;
+                        gradeNote.textContent =
+                            "Still A-grade on the live board despite churn: " + highGrade.join(", ") + ".";
+                    } else {
+                        gradeNote.hidden = true;
+                        gradeNote.textContent = "";
+                    }
+                }
             }
         }
         if (!strip || !chips) return;

@@ -585,17 +585,55 @@ body[data-theme="dark"] .dc-gate-badge--pb3 {
 }
 .dc-trade-pos--locked { color: #0369a1; }
 
-.dc-trade-churn-warn {
+.dc-trade-churn-note {
     padding: 8px 12px;
     margin-bottom: 8px;
     border-radius: 8px;
     font-size: 12px;
-    font-weight: 600;
-    color: #92400e;
-    background: #fffbeb;
-    border: 1px solid #fcd34d;
+    font-weight: 400;
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
 }
-.dc-trade-churn-warn[hidden] { display: none !important; }
+.dc-trade-churn-note[hidden] { display: none !important; }
+.dc-trade-churn-note-line {
+    color: #475569;
+    line-height: 1.45;
+}
+.dc-trade-churn-note-line strong {
+    font-weight: 600;
+    color: #334155;
+}
+.dc-trade-churn-details {
+    margin-top: 4px;
+}
+.dc-trade-churn-details > summary {
+    cursor: pointer;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 500;
+    list-style: none;
+    user-select: none;
+}
+.dc-trade-churn-details > summary::-webkit-details-marker { display: none; }
+.dc-trade-churn-details > summary::before {
+    content: "▸ ";
+    color: #94a3b8;
+}
+.dc-trade-churn-details[open] > summary::before { content: "▾ "; }
+.dc-trade-churn-syms {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 400;
+    line-height: 1.4;
+}
+.dc-trade-churn-grade-note {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #64748b;
+    font-style: italic;
+}
 
 .dc-removals-strip {
     display: flex;
@@ -702,10 +740,17 @@ body[data-theme="dark"] .dc-tstate--recheck { color: #fbbf24; }
 body[data-theme="dark"] .dc-tstate--blocked,
 body[data-theme="dark"] .dc-trade-risk--over,
 body[data-theme="dark"] .dc-trade-pos--book { color: #f87171; }
-body[data-theme="dark"] .dc-trade-churn-warn {
-    background: #422006;
-    border-color: #92400e;
-    color: #fde68a;
+body[data-theme="dark"] .dc-trade-churn-note {
+    background: #1e293b;
+    border-color: #334155;
+    color: #cbd5e1;
+}
+body[data-theme="dark"] .dc-trade-churn-note-line { color: #94a3b8; }
+body[data-theme="dark"] .dc-trade-churn-note-line strong { color: #e2e8f0; }
+body[data-theme="dark"] .dc-trade-churn-details > summary,
+body[data-theme="dark"] .dc-trade-churn-syms,
+body[data-theme="dark"] .dc-trade-churn-grade-note {
+    color: #94a3b8;
 }
 .dc-live-setups-label { font-size: 11px; font-weight: 800; color: var(--theme-muted, #64748b); white-space: nowrap; }
 .dc-live-setups-chips { display: flex; flex-wrap: wrap; gap: 6px; }

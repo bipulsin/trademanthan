@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="dailyRSchecklist.css?v=44">
+    <link rel="stylesheet" href="dailyRSchecklist.css?v=45">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -93,8 +93,13 @@
                     <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
                 </div>
 
-                <div class="dc-trade-churn-warn" id="dcTradeChurnWarn" hidden>
-                    Lock churn elevated — multiple symbols re-cycled today. Check promotion / R1·R2 behaviour.
+                <div class="dc-trade-churn-note" id="dcTradeChurnWarn" hidden>
+                    <div class="dc-trade-churn-note-line" id="dcTradeChurnMain"></div>
+                    <details class="dc-trade-churn-details" id="dcTradeChurnDetails" hidden>
+                        <summary>Symbol list</summary>
+                        <div class="dc-trade-churn-syms" id="dcTradeChurnSyms"></div>
+                        <div class="dc-trade-churn-grade-note" id="dcTradeChurnGradeNote" hidden></div>
+                    </details>
                 </div>
 
                 <!-- Bullish | Bearish columns (today's locked or preview) -->
@@ -348,6 +353,6 @@
     </template>
 
     <script src="left-menu.js?v=3.26"></script>
-    <script src="dailyRSchecklist.js?v=47"></script>
+    <script src="dailyRSchecklist.js?v=48"></script>
 </body>
 </html>
