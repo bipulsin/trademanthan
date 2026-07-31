@@ -976,9 +976,21 @@
 
         var en = row.querySelector(".dc-trade-entry");
         if (en) {
-            en.textContent = (st === "EXPIRED" || st === "BLOCKED")
-                ? "Entry —"
-                : ("Entry " + fmtPx(stock.trade_entry));
+            if (st === "EXPIRED" || st === "BLOCKED") {
+                en.textContent = "Entry —";
+            } else {
+                var src = stock.trade_entry_source || "";
+                var srcLbl =
+                    stock.trade_entry_source_label ||
+                    (src === "candle_open_fallback"
+                        ? "Entry (Open, EMA5 unavailable)"
+                        : "Entry (EMA5)");
+                en.textContent = srcLbl + " " + fmtPx(stock.trade_entry);
+                en.classList.toggle(
+                    "dc-trade-entry--open-fallback",
+                    src === "candle_open_fallback"
+                );
+            }
         }
         var sl = row.querySelector(".dc-trade-sl");
         if (sl) {
@@ -1503,6 +1515,24 @@
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
         var entry = stock.trade_entry;
         var sl = stock.trade_sl;
+        var entryLabelEl = card.querySelector(".dc-ready-entry-label");
+        var entrySrc = stock.trade_entry_source || "";
+        var entryLabel =
+            stock.trade_entry_source_label ||
+            (entrySrc === "candle_open_fallback"
+                ? "Entry (Open, EMA5 unavailable)"
+                : "Entry (EMA5)");
+        if (entryLabelEl) {
+            entryLabelEl.textContent = entry != null ? entryLabel : "Entry";
+            entryLabelEl.classList.toggle(
+                "dc-ready-entry-label--open-fallback",
+                entrySrc === "candle_open_fallback"
+            );
+        }
+        card.classList.toggle(
+            "dc-ready-card--entry-open-fallback",
+            entrySrc === "candle_open_fallback"
+        );
         card.querySelector(".dc-ready-entry").textContent =
             entry != null ? Number(entry).toFixed(2) : "—";
         card.querySelector(".dc-ready-sl").textContent = sl != null ? "SL " + Number(sl).toFixed(2) : "SL —";

@@ -438,6 +438,7 @@ def overlay_live_momentum_from_candles(
         stock["live_candle_price"] = _f(metrics.get("price"))
         stock["live_candle_vwap"] = _f(metrics.get("vwap"))
         stock["live_candle_bar_at"] = str(metrics.get("bar_evaluated_at") or "")
+        stock["live_candle_bar_open"] = _f(metrics.get("bar_open"))
         if metrics.get("stretch") is not None:
             stock["stretch"] = metrics.get("stretch")
         if metrics.get("trade_score_raw") is not None:
@@ -2180,6 +2181,10 @@ def enrich_stocks_trade_state(
             inp["trade_state_reason"] = s_final.get("trade_state_reason")
             inp["zone_downgrade"] = s_final.get("zone_downgrade")
             inp["trade_entry_window_open"] = s_final.get("trade_entry_window_open")
+            inp["trade_entry"] = s_final.get("trade_entry")
+            inp["trade_sl"] = s_final.get("trade_sl")
+            inp["trade_entry_source"] = s_final.get("trade_entry_source")
+            inp["trade_entry_source_label"] = s_final.get("trade_entry_source_label")
             inp["card_visible"] = s_final.get("card_visible")
             inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
             inp["ready_visible_since"] = s_final.get("ready_visible_since")

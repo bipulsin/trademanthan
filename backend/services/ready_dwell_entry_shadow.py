@@ -33,6 +33,9 @@ MIN_INR_RISK_FLOOR_B = 500.0
 OPTION_C_ATR_MULT = 0.25
 READY_DWELL_MINUTES = 10
 ENTRY_EMA5_WARN_PCT = 0.5  # same band as ENTRY_EMA5_TOL_PCT; WARN only
+# Entry price source labels (logged + card UI).
+ENTRY_SOURCE_LIVE_EMA5 = "live_ema5"
+ENTRY_SOURCE_CANDLE_OPEN = "candle_open_fallback"
 # Back-compat alias.
 MIN_INR_RISK_FLOOR = MIN_INR_RISK_FLOOR_A
 # Live decision default = Option B (owner go-live 2026-07-18).
@@ -705,6 +708,43 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
+def current_10m_candle_open(
+    candles: Optional[List[Any]],
+    *,
+    direction: str = "LONG",
+    nifty_pct: float = 0.0,
+    now: Optional[datetime] = None,
+) -> Optional[float]:
+    """Open of the current (forming or just-closed) 10m candle — real traded price."""
+    if not candles:
+        return None
+    try:
+        from backend.services.kavach_10m import metrics_from_10m_candles
+        from backend.services.relative_strength_scanner import (
+            RANKING_BEARISH,
+            RANKING_BULLISH,
+        )
+
+        ranking = (
+            RANKING_BEARISH if str(direction).upper() == "SHORT" else RANKING_BULLISH
+        )
+        m = metrics_from_10m_candles(
+            candles,
+            ranking_type=ranking,
+            nifty_pct=float(nifty_pct or 0.0),
+            include_forming=True,
+            now=now,
+        )
+        if m:
+            o = _f(m.get("bar_open"))
+            if o is not None:
+                return o
+    except Exception as exc:
+        logger.debug("current_10m_candle_open metrics skipped: %s", exc)
+    tip = candles[-1] if candles else None
+    return _f((tip or {}).get("open") or (tip or {}).get("close"))
+
+
 def _as_ist(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return IST.localize(dt)
@@ -776,6 +816,7 @@ def apply_ready_dwell_entry_live(
         "entry_tip_stale": 0,
         "entry_candle_reloaded": 0,
         "entry_audit_suppressed": 0,
+        "entry_open_fallback": 0,
         "distance_blocked": 0,
         "distance_dwell_held": 0,
         "dwell_soft_kept": 0,
@@ -855,6 +896,11 @@ def apply_ready_dwell_entry_live(
 
         if live_e5 is not None:
             s["trade_entry"] = round(float(live_e5), 2)
+            s["trade_entry_source"] = ENTRY_SOURCE_LIVE_EMA5
+            s["trade_entry_source_label"] = "Entry (EMA5)"
+            s.pop("entry_audit_suppressed", None)
+            badges = [b for b in (s.get("gate_badges") or []) if b != "ENTRY STALE"]
+            s["gate_badges"] = badges
             stats["entry_overridden"] += 1
         if live_e10 is not None:
             s["trade_sl"] = round(float(live_e10), 2)
@@ -862,8 +908,8 @@ def apply_ready_dwell_entry_live(
             risk_pts = abs(float(s["trade_entry"]) - float(s["trade_sl"]))
             s["trade_risk_inr"] = int(round(risk_pts * lot, 0))
 
-        # Never leave lagging audit EMA on a READY/dwell card when live EMA is
-        # unavailable — blank levels rather than a frozen actionable Entry.
+        # When live EMA5 is unavailable: use current 10m candle open (real print),
+        # never sticky audit EMA and never a nudged/synthetic price.
         pre_for_entry = s.get("_pre_stack_state") or s.get("trade_state")
         ready_or_dwell = (
             pre_for_entry in (STATE_READY, STATE_READY_RECHECK)
@@ -872,15 +918,56 @@ def apply_ready_dwell_entry_live(
             or bool(s.get("ready_visible_since"))
         )
         if live_e5 is None and ready_or_dwell:
-            s["trade_entry"] = None
-            s["trade_sl"] = None
-            s["trade_risk_inr"] = None
-            badges = list(s.get("gate_badges") or [])
-            if "ENTRY STALE" not in badges:
-                badges.append("ENTRY STALE")
-            s["gate_badges"] = badges
-            s["entry_audit_suppressed"] = True
-            stats["entry_audit_suppressed"] += 1
+            open_px = _f(s.get("live_candle_bar_open"))
+            if open_px is None:
+                open_px = current_10m_candle_open(
+                    candle_cache.get(sym) or [],
+                    direction=str(s.get("direction") or "LONG"),
+                    nifty_pct=nifty_pct,
+                    now=clock,
+                )
+            if open_px is not None:
+                s["trade_entry"] = round(float(open_px), 2)
+                s["trade_entry_source"] = ENTRY_SOURCE_CANDLE_OPEN
+                s["trade_entry_source_label"] = "Entry (Open, EMA5 unavailable)"
+                s.pop("entry_audit_suppressed", None)
+                badges = [b for b in (s.get("gate_badges") or []) if b != "ENTRY STALE"]
+                if "ENTRY OPEN" not in badges:
+                    badges.append("ENTRY OPEN")
+                s["gate_badges"] = badges
+                if live_e10 is not None:
+                    s["trade_sl"] = round(float(live_e10), 2)
+                if s.get("trade_entry") is not None and s.get("trade_sl") is not None:
+                    risk_pts = abs(float(s["trade_entry"]) - float(s["trade_sl"]))
+                    s["trade_risk_inr"] = int(round(risk_pts * lot, 0))
+                stats["entry_open_fallback"] += 1
+                logger.info(
+                    "ready_entry_source symbol=%s source=%s entry=%s",
+                    sym,
+                    ENTRY_SOURCE_CANDLE_OPEN,
+                    s["trade_entry"],
+                )
+            else:
+                # No live EMA and no candle open — blank rather than audit freeze.
+                s["trade_entry"] = None
+                s["trade_sl"] = None
+                s["trade_risk_inr"] = None
+                s["trade_entry_source"] = None
+                s["trade_entry_source_label"] = None
+                badges = list(s.get("gate_badges") or [])
+                if "ENTRY STALE" not in badges:
+                    badges.append("ENTRY STALE")
+                s["gate_badges"] = badges
+                s["entry_audit_suppressed"] = True
+                stats["entry_audit_suppressed"] += 1
+
+        if s.get("trade_entry_source") == ENTRY_SOURCE_LIVE_EMA5:
+            logger.debug(
+                "ready_entry_source symbol=%s source=%s entry=%s",
+                sym,
+                ENTRY_SOURCE_LIVE_EMA5,
+                s.get("trade_entry"),
+            )
 
         direction = (s.get("direction") or "LONG").upper()
         is_long = direction != "SHORT"

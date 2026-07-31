@@ -1228,6 +1228,16 @@ body[data-theme="dark"] .dc-go-board-card {
     text-transform: uppercase;
     color: var(--theme-muted, #94a3b8);
 }
+.dc-ready-entry-label--open-fallback,
+.dc-trade-entry--open-fallback {
+    color: #f59e0b !important;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    font-weight: 800;
+}
+.dc-ready-card--entry-open-fallback .dc-ready-entry {
+    color: #fbbf24 !important;
+}
 .dc-ready-entry {
     font-size: 28px;
     font-weight: 800;

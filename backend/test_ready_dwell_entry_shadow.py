@@ -337,71 +337,12 @@ def test_live_entry_override_from_ema5(monkeypatch):
     assert stats["entry_overridden"] == 1
     assert s["trade_entry"] == 101.25
     assert s["trade_sl"] == 90.0
+    assert s["trade_entry_source"] == "live_ema5"
+    assert s["trade_entry_source_label"] == "Entry (EMA5)"
 
 
-def test_live_tip_stale_blanks_entry_keeps_dwell(monkeypatch):
-    """Tip-regressed candles: blank entry/SL/risk but keep dwell soft-hold timing."""
-    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
-    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
-    monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
-    monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "B")
-    monkeypatch.setattr(
-        "backend.services.ready_dwell_entry_shadow._load_shadow_since",
-        lambda *_a, **_k: since,
-    )
-    monkeypatch.setattr(
-        "backend.services.ready_dwell_entry_shadow._upsert_shadow_state",
-        lambda *_a, **_k: None,
-    )
-    monkeypatch.setattr(
-        "backend.services.daily_checklist_trade_state.entry_window_open_ist",
-        lambda: True,
-    )
-    # Reload must not "heal" with fresh series in this test.
-    monkeypatch.setattr(
-        "backend.services.daily_checklist_snapshot._load_candles_for_symbol",
-        lambda *_a, **_k: [
-            {"timestamp": "2026-07-22T09:35:00+05:30", "close": 636.8},
-        ],
-    )
-    s = _stock(
-        trade_entry=636.73,
-        trade_sl=638.71,
-        trade_risk_inr=2673,
-        live_candle_ema5=636.73,
-        live_candle_ema10=638.71,
-        live_candle_price=634.4,
-        zone_downgrade="direction_imbalance",
-        trade_state=STATE_WAIT,
-        _pre_stack_state=STATE_READY,
-        trade_take_enabled=False,
-        ready_visible_since=since.isoformat(),
-    )
-    stale_candles = [
-        {"timestamp": "2026-07-22T09:35:00+05:30", "close": 636.8},
-    ]
-    stats = apply_ready_dwell_entry_live(
-        [s],
-        db=MagicMock(),
-        session_date="2026-07-22",
-        candle_cache={"TEST": stale_candles},
-        lot_cache={"TEST": 50},
-        atr_pct_map={"TEST": 1.0},
-        nifty_pct=0.0,
-        now=now,
-    )
-    assert stats["entry_tip_stale"] >= 1 or stats["entry_audit_suppressed"] >= 1
-    assert s["trade_entry"] is None
-    assert s["trade_sl"] is None
-    assert s["trade_risk_inr"] is None
-    assert "ENTRY STALE" in (s.get("gate_badges") or [])
-    # Dwell soft-hold still keeps card (timing unchanged).
-    assert s["card_visible"] is True
-    assert s["trade_state"] == STATE_READY
-
-
-def test_live_audit_entry_suppressed_when_no_live_ema(monkeypatch):
-    """Sticky rs_live audit EMA must not remain as READY Entry without live overlay."""
+def test_live_candle_open_fallback_when_no_ema5(monkeypatch):
+    """No live EMA5 → Entry = current candle open (real print), labeled, not blanked."""
     since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
     now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
     monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
@@ -423,15 +364,18 @@ def test_live_audit_entry_suppressed_when_no_live_ema(monkeypatch):
         lambda *_a, **_k: [],
     )
     s = _stock(
-        trade_entry=177.23,  # sticky audit
-        trade_sl=177.0,
+        trade_entry=177.23,  # sticky audit must be replaced
+        trade_sl=170.0,
         live_candle_ema5=None,
-        live_candle_ema10=None,
+        live_candle_ema10=170.0,
         live_candle_price=None,
+        live_candle_bar_open=178.5,
         _pre_stack_state=STATE_READY,
         trade_state=STATE_READY,
         ready_visible_since=since.isoformat(),
+        trade_take_enabled=True,
     )
+    # Healthy gap so distance does not soft-hide (open 178.5 vs SL/ema10 170).
     stats = apply_ready_dwell_entry_live(
         [s],
         db=MagicMock(),
@@ -442,6 +386,119 @@ def test_live_audit_entry_suppressed_when_no_live_ema(monkeypatch):
         nifty_pct=0.0,
         now=now,
     )
-    assert stats["entry_audit_suppressed"] == 1
-    assert s["trade_entry"] is None
-    assert "ENTRY STALE" in (s.get("gate_badges") or [])
+    assert stats["entry_open_fallback"] == 1
+    assert s["trade_entry"] == 178.5
+    assert s["trade_entry_source"] == "candle_open_fallback"
+    assert s["trade_entry_source_label"] == "Entry (Open, EMA5 unavailable)"
+    assert "ENTRY OPEN" in (s.get("gate_badges") or [])
+    assert "ENTRY STALE" not in (s.get("gate_badges") or [])
+    # Req §5: fallback does not force Take Trade off — normal gates only.
+    # Soft-hide from distance may still disable; with healthy gap take stays on path.
+    assert s.get("entry_audit_suppressed") is not True
+
+
+def test_live_open_fallback_does_not_force_take_false(monkeypatch):
+    """Fallback source alone must not force trade_take_enabled=False (§5)."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
+    monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "B")
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._load_shadow_since",
+        lambda *_a, **_k: since,
+    )
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._upsert_shadow_state",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_trade_state.entry_window_open_ist",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_snapshot._load_candles_for_symbol",
+        lambda *_a, **_k: [],
+    )
+    # Avoid soft-hide / distance: wide gap, no zone downgrade.
+    s = _stock(
+        trade_entry=100.0,
+        trade_sl=90.0,
+        live_candle_ema5=None,
+        live_candle_ema10=90.0,
+        live_candle_bar_open=101.0,
+        live_candle_price=101.0,
+        _pre_stack_state=STATE_READY,
+        trade_state=STATE_READY,
+        trade_take_enabled=True,
+        ready_visible_since=since.isoformat(),
+        zone_downgrade=None,
+        gate_badges=[],
+    )
+    apply_ready_dwell_entry_live(
+        [s],
+        db=MagicMock(),
+        session_date="2026-07-22",
+        candle_cache={},
+        lot_cache={"TEST": 50},
+        atr_pct_map={"TEST": 1.0},
+        nifty_pct=0.0,
+        now=now,
+    )
+    assert s["trade_entry_source"] == "candle_open_fallback"
+    assert s["trade_entry"] == 101.0
+    # Not forced false solely because of fallback source.
+    assert s.get("trade_take_enabled") is True
+
+
+def test_live_tip_stale_uses_open_or_blanks(monkeypatch):
+    """Tip-regressed: prefer candle open fallback; dwell timing unchanged."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
+    monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "B")
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._load_shadow_since",
+        lambda *_a, **_k: since,
+    )
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._upsert_shadow_state",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_trade_state.entry_window_open_ist",
+        lambda: True,
+    )
+    stale = [{"timestamp": "2026-07-22T09:35:00+05:30", "open": 636.0, "close": 636.8}]
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_snapshot._load_candles_for_symbol",
+        lambda *_a, **_k: stale,
+    )
+    s = _stock(
+        trade_entry=636.73,
+        trade_sl=638.71,
+        trade_risk_inr=2673,
+        live_candle_ema5=636.73,
+        live_candle_ema10=638.71,
+        live_candle_price=634.4,
+        live_candle_bar_open=636.0,
+        zone_downgrade="direction_imbalance",
+        trade_state=STATE_WAIT,
+        _pre_stack_state=STATE_READY,
+        trade_take_enabled=False,
+        ready_visible_since=since.isoformat(),
+    )
+    stats = apply_ready_dwell_entry_live(
+        [s],
+        db=MagicMock(),
+        session_date="2026-07-22",
+        candle_cache={"TEST": stale},
+        lot_cache={"TEST": 50},
+        atr_pct_map={"TEST": 1.0},
+        nifty_pct=0.0,
+        now=now,
+    )
+    assert stats.get("entry_tip_stale", 0) >= 1 or stats.get("entry_open_fallback", 0) >= 1
+    assert s["trade_entry"] == 636.0
+    assert s["trade_entry_source"] == "candle_open_fallback"
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY
