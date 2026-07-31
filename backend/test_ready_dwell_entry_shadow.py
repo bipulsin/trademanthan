@@ -504,8 +504,8 @@ def test_live_tip_stale_uses_open_or_blanks(monkeypatch):
     assert s["trade_state"] == STATE_READY
 
 
-def test_warning_stack_soft_hold_blank_entry_gets_stale_badge(monkeypatch):
-    """ABCAPITAL-class path: soft-held READY, no EMA5/open → blank + ENTRY STALE, take off."""
+def test_warning_stack_soft_hold_blank_entry_demotes_to_wait(monkeypatch):
+    """No EMA5/open → no READY NOW / soft-hold; stay WAIT (entry precondition)."""
     since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
     now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
     monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
@@ -551,12 +551,36 @@ def test_warning_stack_soft_hold_blank_entry_gets_stale_badge(monkeypatch):
         nifty_pct=0.0,
         now=now,
     )
-    assert stats.get("entry_audit_suppressed", 0) >= 1
+    assert stats.get("entry_unavailable_blocked", 0) >= 1
     assert s.get("trade_entry") is None
     assert s.get("trade_sl") is None
-    assert s.get("trade_risk_inr") is None
     assert s.get("trade_entry_source") is None
     assert "ENTRY STALE" in (s.get("gate_badges") or [])
     assert s.get("trade_take_enabled") is False
-    assert s.get("card_visible") is True
-    assert s.get("trade_state") == STATE_READY
+    assert s.get("card_visible") is False
+    assert s.get("trade_state") == STATE_WAIT
+    assert "entry price unavailable" in (s.get("trade_state_reason") or "")
+    assert s.get("ready_visible_since") is None
+    assert s.get("dwell_soft_hold") is False
+
+
+def test_warning_stack_soft_hold_keeps_ready_when_entry_valid(monkeypatch):
+    """Entry precondition does not break dwell soft-hold when EMA5 is present."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    s = _stock(
+        trade_state=STATE_WAIT,
+        zone_downgrade="warning_stack",
+        trade_state_reason="WAIT · warning stack (CHURN+REGIME UNSTABLE)",
+        trade_take_enabled=False,
+        live_candle_ema5=100.0,
+        live_candle_ema10=90.0,
+        live_candle_price=100.0,
+    )
+    stats = _apply(monkeypatch, [s], since=since, now=now)
+    assert stats["dwell_soft_kept"] == 1
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY
+    assert s["trade_entry"] == 100.0
+    assert s["trade_entry_source"] == "live_ema5"
+    assert s["trade_take_enabled"] is False

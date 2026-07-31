@@ -817,6 +817,7 @@ def apply_ready_dwell_entry_live(
         "entry_candle_reloaded": 0,
         "entry_audit_suppressed": 0,
         "entry_open_fallback": 0,
+        "entry_unavailable_blocked": 0,
         "distance_blocked": 0,
         "distance_dwell_held": 0,
         "dwell_soft_kept": 0,
@@ -1130,6 +1131,52 @@ def apply_ready_dwell_entry_live(
                     f"WAIT · dwell hard end ({hard_reason})"
                 )
             _persist(None, f"live_end_hard:{hard_reason}", False)
+            continue
+
+        # Architectural precondition: READY NOW / soft-hold dwell requires a
+        # computable entry this cycle (live EMA5 or candle-open fallback).
+        # Grade/FSM can still pass via sticky rs_live_kavach_audit when the
+        # candle overlay fails — that must not surface a READY card with blank
+        # Entry. Dwell timing / distance / R:R gates are unchanged when entry
+        # is valid; this only blocks promotion/visibility without a price.
+        entry_ok = s.get("trade_entry") is not None and s.get("trade_entry_source") in (
+            ENTRY_SOURCE_LIVE_EMA5,
+            ENTRY_SOURCE_CANDLE_OPEN,
+        )
+        needs_entry_gate = (
+            was_ready
+            or s.get("trade_state") in (STATE_READY, STATE_READY_RECHECK)
+            or bool(s.get("dwell_soft_hold"))
+            or bool(s.get("ready_visible_since"))
+            or prev_since is not None
+        )
+        if needs_entry_gate and not entry_ok:
+            reason = "WAIT · entry price unavailable"
+            s["trade_state"] = STATE_WAIT
+            s["trade_state_reason"] = reason
+            s["trade_take_enabled"] = False
+            s["card_visible"] = False
+            s["ready_visible_since"] = None
+            s["dwell_soft_hold"] = False
+            s.pop("dwell_hold_reason", None)
+            badges = list(s.get("gate_badges") or [])
+            if "ENTRY STALE" not in badges:
+                badges.append("ENTRY STALE")
+            s["gate_badges"] = badges
+            s["entry_audit_suppressed"] = True
+            s["trade_take_disable_reason"] = trade_take_disable_reason(
+                trade_state=STATE_WAIT,
+                trade_take_enabled=False,
+                trade_state_reason=reason,
+                trade_entry_window_open=s.get("trade_entry_window_open"),
+                entry=s.get("trade_entry"),
+                sl=s.get("trade_sl"),
+                risk_inr=s.get("trade_risk_inr"),
+                rr=s.get("trade_rr"),
+                zone_downgrade=s.get("zone_downgrade"),
+            )
+            _persist(None, "live_block_entry_unavailable", False)
+            stats["entry_unavailable_blocked"] += 1
             continue
 
         in_dwell = prev_since is not None
