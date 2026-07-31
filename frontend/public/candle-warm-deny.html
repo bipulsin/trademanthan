@@ -252,16 +252,24 @@
         const limit = document.getElementById("limitSel").value || "24";
         document.getElementById("statusLine").textContent = "Loading…";
         try {
+          // Prefer /api/… — bare /market-data/ is not proxied by nginx and returns SPA HTML.
           const res = await fetch(
-            API_BASE + "/market-data/candle-warm-cycles?limit=" + encodeURIComponent(limit),
+            API_BASE + "/api/market-data/candle-warm-cycles?limit=" + encodeURIComponent(limit),
             {
               headers: { Authorization: "Bearer " + token() },
               cache: "no-store",
             }
           );
-          if (!res.ok) throw new Error("HTTP " + res.status);
+          const ctype = (res.headers.get("content-type") || "").toLowerCase();
+          if (!ctype.includes("application/json")) {
+            throw new Error(
+              "HTTP " + res.status + " (expected JSON, got " + (ctype || "non-JSON") + ")"
+            );
+          }
           const data = await res.json();
-          if (!data.success) throw new Error(data.message || "request failed");
+          if (!res.ok || !data.success) {
+            throw new Error((data && (data.detail || data.message)) || "HTTP " + res.status);
+          }
           render(data.cycles || []);
           document.getElementById("statusLine").textContent =
             "Updated " + new Date().toLocaleTimeString();
