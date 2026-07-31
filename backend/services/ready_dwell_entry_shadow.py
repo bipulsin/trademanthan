@@ -773,6 +773,7 @@ def apply_ready_dwell_entry_live(
     stats = {
         "live_applied": 0,
         "entry_overridden": 0,
+        "entry_tip_stale": 0,
         "distance_blocked": 0,
         "distance_dwell_held": 0,
         "dwell_soft_kept": 0,
@@ -802,6 +803,32 @@ def apply_ready_dwell_entry_live(
         live_px = _f(s.get("live_candle_price"))
         lot = max(int(lot_cache.get(sym) or s.get("trade_lot") or 1), 1)
 
+        # Defense: refuse to stamp entry from tip-regressed overlay (cache poison).
+        # Dwell timing / soft-hold is unchanged — only the price write is skipped.
+        candles = candle_cache.get(sym) or []
+        tip_stale = False
+        try:
+            from backend.services.daily_checklist_snapshot import _rth_candle_tip_stale
+
+            tip_stale = bool(candles) and _rth_candle_tip_stale(candles, now=clock)
+        except Exception:
+            tip_stale = False
+        if tip_stale:
+            live_e5 = None
+            live_e10 = None
+            live_px = None
+            # Blank misleading levels rather than keep a frozen morning EMA as
+            # "Entry" while dwell soft-hold keeps the card visible.
+            s["trade_entry"] = None
+            s["trade_sl"] = None
+            s["trade_risk_inr"] = None
+            badges = list(s.get("gate_badges") or [])
+            if "ENTRY STALE" not in badges:
+                badges.append("ENTRY STALE")
+            s["gate_badges"] = badges
+            s["entry_tip_stale"] = True
+            stats["entry_tip_stale"] += 1
+
         if live_e5 is not None:
             s["trade_entry"] = round(float(live_e5), 2)
             stats["entry_overridden"] += 1
@@ -810,7 +837,6 @@ def apply_ready_dwell_entry_live(
         if s.get("trade_entry") is not None and s.get("trade_sl") is not None:
             risk_pts = abs(float(s["trade_entry"]) - float(s["trade_sl"]))
             s["trade_risk_inr"] = int(round(risk_pts * lot, 0))
-
         direction = (s.get("direction") or "LONG").upper()
         is_long = direction != "SHORT"
         atr_pct = float(atr_pct_map.get(sym) or 0.0)

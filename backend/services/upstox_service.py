@@ -155,14 +155,15 @@ def _merge_historical_with_intraday(
     *,
     session_date: date,
 ) -> List[Dict[str, Any]]:
-    """
-    Append today's intraday candles and drop same-day rows from historical (often stale).
+    """Union historical + intraday; intraday wins on timestamp conflicts.
+
+    Previously dropped *all* same-day historical bars before appending intraday.
+    When the intraday feed was empty or truncated to the morning, that wiped
+    afternoon bars and poisoned the shared candle cache — READY cards then
+    froze entry/EMA5/LTP on the truncated tip for the cache TTL.
     """
     merged: Dict[str, Dict[str, Any]] = {}
     for c in historical or []:
-        dt = _parse_ts_to_aware_ist(c.get("timestamp"))
-        if dt is not None and dt.date() >= session_date:
-            continue
         ts_key = str(c.get("timestamp") or "")
         if ts_key:
             merged[ts_key] = c
@@ -173,6 +174,8 @@ def _merge_historical_with_intraday(
             continue
         merged[ts_key] = c
         added += 1
+    # Empty intraday: keep historical as-is (including today) rather than
+    # stripping the session down to prior days only.
     out = list(merged.values())
     out.sort(key=lambda x: str(x.get("timestamp") or ""))
     if added:

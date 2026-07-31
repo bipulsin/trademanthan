@@ -320,3 +320,73 @@ def test_live_soft_after_floor_allows_removal(monkeypatch):
     _apply(monkeypatch, [s], since=since, now=now)
     assert s["card_visible"] is False
     assert s["trade_state"] == STATE_WAIT
+
+
+def test_live_entry_override_from_ema5(monkeypatch):
+    """Regression: dwell still rewrites trade_entry from live EMA5 when tip is fresh."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    s = _stock(
+        trade_entry=90.0,
+        trade_sl=90.0,
+        live_candle_ema5=101.25,
+        live_candle_ema10=90.0,
+        live_candle_price=101.0,
+    )
+    stats = _apply(monkeypatch, [s], since=since, now=now)
+    assert stats["entry_overridden"] == 1
+    assert s["trade_entry"] == 101.25
+    assert s["trade_sl"] == 90.0
+
+
+def test_live_tip_stale_blanks_entry_keeps_dwell(monkeypatch):
+    """Tip-regressed candles: blank entry/SL/risk but keep dwell soft-hold timing."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
+    monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "B")
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._load_shadow_since",
+        lambda *_a, **_k: since,
+    )
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._upsert_shadow_state",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_trade_state.entry_window_open_ist",
+        lambda: True,
+    )
+    s = _stock(
+        trade_entry=636.73,
+        trade_sl=638.71,
+        trade_risk_inr=2673,
+        live_candle_ema5=636.73,
+        live_candle_ema10=638.71,
+        live_candle_price=634.4,
+        zone_downgrade="direction_imbalance",
+        trade_state=STATE_WAIT,
+        _pre_stack_state=STATE_READY,
+        trade_take_enabled=False,
+    )
+    stale_candles = [
+        {"timestamp": "2026-07-22T09:35:00+05:30", "close": 636.8},
+    ]
+    stats = apply_ready_dwell_entry_live(
+        [s],
+        db=MagicMock(),
+        session_date="2026-07-22",
+        candle_cache={"TEST": stale_candles},
+        lot_cache={"TEST": 50},
+        atr_pct_map={"TEST": 1.0},
+        nifty_pct=0.0,
+        now=now,
+    )
+    assert stats["entry_tip_stale"] == 1
+    assert s["trade_entry"] is None
+    assert s["trade_sl"] is None
+    assert s["trade_risk_inr"] is None
+    assert "ENTRY STALE" in (s.get("gate_badges") or [])
+    # Dwell soft-hold still keeps card (timing unchanged).
+    assert s["card_visible"] is True
+    assert s["trade_state"] == STATE_READY

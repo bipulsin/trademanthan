@@ -421,24 +421,67 @@ def _r2_rank_gone(
     return True
 
 
+def _candle_tip_lag_sec(candles: List[Dict[str, Any]], *, now: Optional[datetime] = None) -> Optional[float]:
+    """Seconds since the latest candle open timestamp, or None if unparseable."""
+    from backend.services.market_data.candle_cache import tip_timestamp
+
+    tip = tip_timestamp(candles)
+    if not tip:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(tip).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    clock = now or datetime.now(IST)
+    if clock.tzinfo is None:
+        clock = IST.localize(clock)
+    else:
+        clock = clock.astimezone(IST)
+    return max(0.0, (clock - dt.astimezone(IST)).total_seconds())
+
+
+def _rth_candle_tip_stale(candles: List[Dict[str, Any]], *, now: Optional[datetime] = None) -> bool:
+    """True when RTH tip lags wall clock by >12m (poisoned/truncated shared cache)."""
+    clock = now or datetime.now(IST)
+    if clock.tzinfo is None:
+        clock = IST.localize(clock)
+    else:
+        clock = clock.astimezone(IST)
+    # Enforce only while 5m bars should still be advancing.
+    t = clock.hour * 60 + clock.minute
+    if t < (9 * 60 + 20) or t > (15 * 60 + 25):
+        return False
+    lag = _candle_tip_lag_sec(candles, now=clock)
+    if lag is None:
+        return False
+    return lag > 12 * 60
+
+
 def _load_candles_for_symbol(db, symbol: str) -> Optional[List[Dict[str, Any]]]:
     try:
+        from backend.services.market_data import candle_cache
         from backend.services.rs_conviction_candles import candles_cache_only, load_instrument_atr_maps
-
-        ikey_map, _ = load_instrument_atr_maps(db, {symbol})
-        ikey = ikey_map.get(symbol)
-        if not ikey:
-            return None
-        candles = candles_cache_only(ikey)
-        if candles:
-            return candles
-        from backend.config import settings
         from backend.services.relative_strength_scanner import (
             CANDLE_DAYS_BACK,
             CANDLE_INTERVAL,
             MIN_BARS,
             _sorted_candles,
         )
+
+        ikey_map, _ = load_instrument_atr_maps(db, {symbol})
+        ikey = ikey_map.get(symbol)
+        if not ikey:
+            return None
+        candles = candles_cache_only(ikey)
+        if candles and _rth_candle_tip_stale(candles):
+            # TTL-fresh but tip-regressed (partial intraday merge). Force refetch.
+            candle_cache.invalidate(ikey, CANDLE_INTERVAL)
+            candles = None
+        if candles:
+            return candles
+        from backend.config import settings
         from backend.services.upstox_service import UpstoxService
 
         raw = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET).get_historical_candles_by_instrument_key(

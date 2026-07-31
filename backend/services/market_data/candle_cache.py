@@ -85,6 +85,18 @@ def _evict_if_needed() -> None:
         _CACHE.pop(key, None)
 
 
+def tip_timestamp(candles: Optional[List[Dict[str, Any]]]) -> str:
+    """Lexicographically latest candle timestamp string, or empty."""
+    if not candles:
+        return ""
+    tip = ""
+    for c in candles:
+        ts = str(c.get("timestamp") or "")
+        if ts > tip:
+            tip = ts
+    return tip
+
+
 def put(
     instrument_key: str,
     interval: str,
@@ -92,17 +104,43 @@ def put(
     to_date: str,
     candles: Optional[List[Dict[str, Any]]],
 ) -> None:
-    """Store a fetched candle span (no-op for empty input)."""
+    """Store a fetched candle span (no-op for empty input).
+
+    Refuses to overwrite a newer tip with an older/truncated series so a partial
+    Upstox intraday merge cannot poison the shared cache (READY entry freeze).
+    """
     if not instrument_key or not interval or not candles:
         return
     with _LOCK:
-        _CACHE[(instrument_key, interval)] = _Entry(
+        key = (instrument_key, interval)
+        existing = _CACHE.get(key)
+        if existing is not None:
+            old_tip = tip_timestamp(existing.candles)
+            new_tip = tip_timestamp(candles)
+            if old_tip and new_tip and new_tip < old_tip:
+                return
+            if (
+                old_tip
+                and new_tip
+                and new_tip == old_tip
+                and len(candles) < len(existing.candles)
+            ):
+                return
+        _CACHE[key] = _Entry(
             fetched=time.time(),
             from_date=from_date or "",
             to_date=to_date or "",
             candles=list(candles),
         )
         _evict_if_needed()
+
+
+def invalidate(instrument_key: str, interval: str) -> bool:
+    """Drop one cache entry so the next reader refetches. Returns True if removed."""
+    if not instrument_key or not interval:
+        return False
+    with _LOCK:
+        return _CACHE.pop((instrument_key, interval), None) is not None
 
 
 def get(
