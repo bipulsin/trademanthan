@@ -82,6 +82,7 @@ _UPSERT = text(
         confidence_at_entry, trade_score_at_entry, adx_at_entry,
         confidence_at_exit, trade_score_at_exit,
         mfe_r, mae_r, r_realized, bars_held_10m,
+        peak_unrealized_pnl, peak_to_exit_giveback_r,
         exit_trigger, exit_trigger_type,
         entry_trigger_type, pullback_number_at_entry,
         notes, source,
@@ -96,6 +97,7 @@ _UPSERT = text(
         :confidence_at_entry, :trade_score_at_entry, :adx_at_entry,
         :confidence_at_exit, :trade_score_at_exit,
         :mfe_r, :mae_r, :r_realized, :bars_held_10m,
+        :peak_unrealized_pnl, :peak_to_exit_giveback_r,
         :exit_trigger, :exit_trigger_type,
         :entry_trigger_type, :pullback_number_at_entry,
         :notes, :source,
@@ -128,6 +130,10 @@ _UPSERT = text(
         mae_r = COALESCE(EXCLUDED.mae_r, {TABLE}.mae_r),
         r_realized = COALESCE(EXCLUDED.r_realized, {TABLE}.r_realized),
         bars_held_10m = COALESCE(EXCLUDED.bars_held_10m, {TABLE}.bars_held_10m),
+        peak_unrealized_pnl = COALESCE(EXCLUDED.peak_unrealized_pnl, {TABLE}.peak_unrealized_pnl),
+        peak_to_exit_giveback_r = COALESCE(
+            EXCLUDED.peak_to_exit_giveback_r, {TABLE}.peak_to_exit_giveback_r
+        ),
         exit_trigger = COALESCE(EXCLUDED.exit_trigger, {TABLE}.exit_trigger),
         exit_trigger_type = COALESCE(EXCLUDED.exit_trigger_type, {TABLE}.exit_trigger_type),
         entry_trigger_type = COALESCE(EXCLUDED.entry_trigger_type, {TABLE}.entry_trigger_type),
@@ -208,6 +214,20 @@ def ensure_trade_log_table() -> None:
                 "ADD COLUMN IF NOT EXISTS ema10_at_exit DOUBLE PRECISION"
             )
         )
+        # Peak unrealized P&L (INR) and peak→exit giveback in R — journal only.
+        # Standard on every closed trade going forward (EMA5 trail giveback research).
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS peak_unrealized_pnl DOUBLE PRECISION"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS peak_to_exit_giveback_r DOUBLE PRECISION"
+            )
+        )
 
 
 def normalize_exit_trigger_type(val: Any) -> Optional[str]:
@@ -257,6 +277,45 @@ def compute_entry_to_ema10_buffer_pct(
     if ep == 0:
         return None
     return round(abs(ep - e10) / ep * 100.0, 6)
+
+
+def compute_peak_giveback_metrics(
+    *,
+    direction: str,
+    entry_price: float,
+    exit_price: float,
+    qty: int,
+    planned_risk_inr: float,
+    peak_favorable_price: float,
+) -> Dict[str, Optional[float]]:
+    """Journal helper: peak unrealized INR + peak→exit giveback in R.
+
+    Intended for auto-fill on future closes from the hold-period price series
+    (tick or candle extreme). Not a live gate.
+    """
+    try:
+        ep = float(entry_price)
+        xp = float(exit_price)
+        peak = float(peak_favorable_price)
+        q = max(int(qty), 1)
+        risk = float(planned_risk_inr)
+    except (TypeError, ValueError):
+        return {"peak_unrealized_pnl": None, "peak_to_exit_giveback_r": None, "mfe_r": None}
+    d = (direction or "").upper()
+    if d == "SHORT":
+        peak_pts = ep - peak
+        giveback_pts = max(0.0, xp - peak)
+    else:
+        peak_pts = peak - ep
+        giveback_pts = max(0.0, peak - xp)
+    peak_pnl = round(peak_pts * q, 2)
+    giveback_r = round((giveback_pts * q) / risk, 4) if risk > 0 else None
+    mfe_r = round((peak_pts * q) / risk, 4) if risk > 0 else None
+    return {
+        "peak_unrealized_pnl": peak_pnl,
+        "peak_to_exit_giveback_r": giveback_r,
+        "mfe_r": mfe_r,
+    }
 
 
 def _as_date(val: Any) -> Optional[date]:
@@ -384,6 +443,12 @@ def row_params(payload: Dict[str, Any]) -> Dict[str, Any]:
         "mae_r": _f(payload.get("mae_r")),
         "r_realized": _f(payload.get("r_realized")),
         "bars_held_10m": int(payload["bars_held_10m"]) if payload.get("bars_held_10m") is not None else None,
+        "peak_unrealized_pnl": _f(
+            payload.get("peak_unrealized_pnl")
+            if payload.get("peak_unrealized_pnl") is not None
+            else payload.get("peak_unrealized_pnl_rupees")
+        ),
+        "peak_to_exit_giveback_r": _f(payload.get("peak_to_exit_giveback_r")),
         "exit_trigger": payload.get("exit_trigger"),
         "exit_trigger_type": normalize_exit_trigger_type(payload.get("exit_trigger_type")),
         "entry_trigger_type": normalize_entry_trigger_type(payload.get("entry_trigger_type")),

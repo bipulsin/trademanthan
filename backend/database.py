@@ -1235,6 +1235,25 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 except Exception:
                     pass
+                # Journal-only: peak unrealized P&L (INR) + peak→exit giveback in R.
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS peak_unrealized_pnl DOUBLE PRECISION"
+                        )
+                    )
+                except Exception:
+                    pass
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE trade_log "
+                            "ADD COLUMN IF NOT EXISTS peak_to_exit_giveback_r DOUBLE PRECISION"
+                        )
+                    )
+                except Exception:
+                    pass
                 try:
                     conn.execute(
                         text(
