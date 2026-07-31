@@ -352,6 +352,18 @@
         return readyNowAudio;
     }
 
+    function setReadyNowAckBanner(visible, blocked) {
+        var ban = $("dcReadyNowAckBanner");
+        if (!ban) return;
+        ban.hidden = !visible;
+        var txt = $("dcReadyNowAckText");
+        if (txt) {
+            txt.textContent = blocked
+                ? "Browser blocked READY NOW sound — click once to unlock audio"
+                : "READY NOW sound needs one click to unlock (browser autoplay policy)";
+        }
+    }
+
     function unlockReadyNowAudio() {
         if (readyNowAudioUnlocked) return;
         try {
@@ -364,14 +376,14 @@
                     a.currentTime = 0;
                     a.muted = false;
                     readyNowAudioUnlocked = true;
-                    var ban = $("dcReadyNowAckBanner");
-                    if (ban) ban.hidden = true;
+                    setReadyNowAckBanner(false);
                 }).catch(function () {
                     a.muted = false;
                 });
             } else {
                 a.muted = false;
                 readyNowAudioUnlocked = true;
+                setReadyNowAckBanner(false);
             }
         } catch (e) { /* ignore */ }
     }
@@ -386,11 +398,9 @@
             if (p && typeof p.then === "function") {
                 p.then(function () {
                     readyNowAudioUnlocked = true;
-                    var ban = $("dcReadyNowAckBanner");
-                    if (ban) ban.hidden = true;
+                    setReadyNowAckBanner(false);
                 }).catch(function () {
-                    var ban = $("dcReadyNowAckBanner");
-                    if (ban) ban.hidden = false;
+                    setReadyNowAckBanner(true, true);
                 });
             }
         } catch (e) { /* muted */ }
@@ -2912,8 +2922,18 @@
                 try {
                     localStorage.setItem("dc_ready_now_alert_sound", readyNowAlertEnabled ? "1" : "0");
                 } catch (e) { /* ignore */ }
-                if (readyNowAlertEnabled) unlockReadyNowAudio();
+                if (readyNowAlertEnabled) {
+                    unlockReadyNowAudio();
+                    if (!readyNowAudioUnlocked) setReadyNowAckBanner(true, false);
+                } else {
+                    setReadyNowAckBanner(false);
+                }
             });
+            // Sound was already on from a prior visit — browsers still require one
+            // gesture per tab load before autoplay is allowed.
+            if (readyNowAlertEnabled && !readyNowAudioUnlocked) {
+                setReadyNowAckBanner(true, false);
+            }
         }
         var readyNowAckBtn = $("dcReadyNowAckBtn");
         if (readyNowAckBtn) {
@@ -2926,6 +2946,7 @@
         document.addEventListener("click", function () {
             if (readyNowAlertEnabled) unlockReadyNowAudio();
             unlockTakeTradeAudio();
+            if (readyNowAudioUnlocked) setReadyNowAckBanner(false);
         }, { once: true, capture: true });
         var ackBtn = $("dcExitAckBtn");
         if (ackBtn) {
