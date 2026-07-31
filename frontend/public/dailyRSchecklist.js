@@ -365,27 +365,44 @@
     }
 
     function unlockReadyNowAudio() {
-        if (readyNowAudioUnlocked) return;
+        if (readyNowAudioUnlocked) return Promise.resolve(true);
         try {
             var a = ensureReadyNowAudio();
             a.muted = true;
             var p = a.play();
             if (p && typeof p.then === "function") {
-                p.then(function () {
+                return p.then(function () {
                     a.pause();
                     a.currentTime = 0;
                     a.muted = false;
                     readyNowAudioUnlocked = true;
                     setReadyNowAckBanner(false);
+                    return true;
                 }).catch(function () {
                     a.muted = false;
+                    return false;
                 });
-            } else {
-                a.muted = false;
-                readyNowAudioUnlocked = true;
-                setReadyNowAckBanner(false);
+            }
+            a.muted = false;
+            readyNowAudioUnlocked = true;
+            setReadyNowAckBanner(false);
+            return Promise.resolve(true);
+        } catch (e) {
+            return Promise.resolve(false);
+        }
+    }
+
+    /** Prefer silent unlock; never show the ack banner until a real play is blocked. */
+    function tryUnlockReadyNowAudioQuiet() {
+        if (!readyNowAlertEnabled || readyNowAudioUnlocked) return;
+        try {
+            if (typeof navigator.getAutoplayPolicy === "function") {
+                var a = ensureReadyNowAudio();
+                var policy = navigator.getAutoplayPolicy(a);
+                if (policy === "disallowed") return;
             }
         } catch (e) { /* ignore */ }
+        unlockReadyNowAudio();
     }
 
     function playReadyNowAlert() {
@@ -2958,31 +2975,33 @@
                     localStorage.setItem("dc_ready_now_alert_sound", readyNowAlertEnabled ? "1" : "0");
                 } catch (e) { /* ignore */ }
                 if (readyNowAlertEnabled) {
+                    // Checkbox change is a user gesture — unlock here without nagging.
                     unlockReadyNowAudio();
-                    if (!readyNowAudioUnlocked) setReadyNowAckBanner(true, false);
                 } else {
                     setReadyNowAckBanner(false);
                 }
             });
-            // Sound was already on from a prior visit — browsers still require one
-            // gesture per tab load before autoplay is allowed.
-            if (readyNowAlertEnabled && !readyNowAudioUnlocked) {
-                setReadyNowAckBanner(true, false);
-            }
+            // Sound preference may already be on; try quiet unlock (site Sound allowlist /
+            // muted autoplay). Do not show the banner on every reload — only if a later
+            // alert play is actually blocked (see playReadyNowAlert).
+            if (readyNowAlertEnabled) tryUnlockReadyNowAudioQuiet();
         }
         var readyNowAckBtn = $("dcReadyNowAckBtn");
         if (readyNowAckBtn) {
             readyNowAckBtn.addEventListener("click", function () {
-                unlockReadyNowAudio();
-                playReadyNowAlert();
+                unlockReadyNowAudio().then(function (ok) {
+                    if (ok) playReadyNowAlert();
+                });
             });
         }
-        // One gesture unlocks HTMLAudio for later READY NOW / Take Trade cues.
-        document.addEventListener("click", function () {
+        // Any first gesture unlocks HTMLAudio for later READY NOW / Take Trade cues.
+        function onFirstGesture() {
             if (readyNowAlertEnabled) unlockReadyNowAudio();
             unlockTakeTradeAudio();
-            if (readyNowAudioUnlocked) setReadyNowAckBanner(false);
-        }, { once: true, capture: true });
+        }
+        ["pointerdown", "keydown", "touchstart", "click"].forEach(function (evt) {
+            document.addEventListener(evt, onFirstGesture, { once: true, capture: true });
+        });
         var ackBtn = $("dcExitAckBtn");
         if (ackBtn) {
             ackBtn.addEventListener("click", function () {
