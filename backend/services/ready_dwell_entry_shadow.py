@@ -910,12 +910,18 @@ def apply_ready_dwell_entry_live(
 
         # When live EMA5 is unavailable: use current 10m candle open (real print),
         # never sticky audit EMA and never a nudged/synthetic price.
+        # Include post-stack READY / WAIT-soft-hold / dwell-visible cards so the
+        # warning_stack soft-hold path cannot skip open→stale fallback.
         pre_for_entry = s.get("_pre_stack_state") or s.get("trade_state")
+        post_state = s.get("trade_state")
         ready_or_dwell = (
             pre_for_entry in (STATE_READY, STATE_READY_RECHECK)
             or str(pre_for_entry or "").upper().startswith("READY")
+            or post_state in (STATE_READY, STATE_READY_RECHECK)
+            or str(post_state or "").upper().startswith("READY")
             or bool(s.get("dwell_soft_hold"))
             or bool(s.get("ready_visible_since"))
+            or s.get("zone_downgrade") in SOFT_ZONE_DOWNGRADES
         )
         if live_e5 is None and ready_or_dwell:
             open_px = _f(s.get("live_candle_bar_open"))
@@ -954,12 +960,26 @@ def apply_ready_dwell_entry_live(
                 s["trade_risk_inr"] = None
                 s["trade_entry_source"] = None
                 s["trade_entry_source_label"] = None
+                s["trade_take_enabled"] = False
                 badges = list(s.get("gate_badges") or [])
                 if "ENTRY STALE" not in badges:
                     badges.append("ENTRY STALE")
                 s["gate_badges"] = badges
                 s["entry_audit_suppressed"] = True
                 stats["entry_audit_suppressed"] += 1
+
+        # Defensive: any blank Entry on a READY-family / dwell card must carry
+        # ENTRY STALE (covers paths that nulled entry without the branch above).
+        if s.get("trade_entry") is None and ready_or_dwell:
+            badges = list(s.get("gate_badges") or [])
+            if "ENTRY STALE" not in badges:
+                badges.append("ENTRY STALE")
+            s["gate_badges"] = badges
+            s["entry_audit_suppressed"] = True
+            s["trade_take_enabled"] = False
+            if s.get("trade_sl") is not None and s.get("trade_entry") is None:
+                s["trade_sl"] = None
+                s["trade_risk_inr"] = None
 
         if s.get("trade_entry_source") == ENTRY_SOURCE_LIVE_EMA5:
             logger.debug(

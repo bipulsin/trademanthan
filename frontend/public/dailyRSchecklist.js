@@ -1072,6 +1072,9 @@
         else if (t.indexOf("CHOP") >= 0) cls += " dc-gate-badge--chop";
         else if (t.indexOf("CAP WAIVED") >= 0) cls += " dc-gate-badge--waiver";
         else if (t.indexOf("VWAP+") === 0) cls += " dc-gate-badge--vwapplus";
+        else if (t.indexOf("ENTRY STALE") >= 0) cls += " dc-gate-badge--entry-stale";
+        else if (t.indexOf("ENTRY OPEN") >= 0) cls += " dc-gate-badge--entry-open";
+        else if (t.indexOf("ENTRY DRIFT") >= 0) cls += " dc-gate-badge--entry-drift";
         return cls;
     }
 
@@ -1579,7 +1582,27 @@
         var expLabel = card.querySelector(".dc-ready-expired-label");
         if (expLabel) expLabel.hidden = !expired;
         var confirmNote = card.querySelector(".dc-ready-confirm-note");
-        if (confirmNote) confirmNote.hidden = expired;
+        var entryMissing = entry == null || sl == null;
+        if (confirmNote) {
+            if (expired) {
+                confirmNote.hidden = true;
+            } else if (entryMissing) {
+                confirmNote.hidden = false;
+                confirmNote.textContent = "Entry pending — awaiting valid price source";
+                confirmNote.classList.add("dc-ready-confirm-note--stale");
+            } else if (stock.trade_take_enabled !== true) {
+                confirmNote.hidden = false;
+                confirmNote.textContent =
+                    stock.trade_take_disable_reason
+                    || stock.trade_state_reason
+                    || "Take Trade disabled";
+                confirmNote.classList.remove("dc-ready-confirm-note--stale");
+            } else {
+                confirmNote.hidden = false;
+                confirmNote.textContent = "Take Trade OK — Watching READY TO ≠ entry";
+                confirmNote.classList.remove("dc-ready-confirm-note--stale");
+            }
+        }
 
         var grade = stock.confidence || stock.dashboard_kavach || "—";
         var rs = stock.rs_pct != null ? ((stock.rs_pct >= 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%") : "";
@@ -1618,6 +1641,7 @@
             missedEl.hidden = true;
             var canTake = (
                 stock.trade_take_enabled === true
+                && !entryMissing
                 && !stock.trade_taken
                 && !stock.stopped_out_today
                 && !stock.trade_exited
@@ -1625,7 +1649,10 @@
             takeBtn.disabled = !canTake;
             takeBtn.title = canTake
                 ? "Mark trade taken"
-                : takeDisableTitle(stock, "Take Trade disabled");
+                : takeDisableTitle(
+                    stock,
+                    entryMissing ? "Entry pending — awaiting valid price source" : "Take Trade disabled"
+                );
             card.classList.toggle("dc-ready-card--take-armed", canTake);
             var rem = win ? win.remaining : secsToNextTenMin();
             var mm = Math.floor(rem / 60);
@@ -1675,13 +1702,21 @@
                     || t.indexOf("DIR CONFLICT") >= 0
                     || t.indexOf("ATR ") === 0
                     || t.indexOf("VWAP+") === 0
+                    || t.indexOf("ENTRY STALE") >= 0
+                    || t.indexOf("ENTRY OPEN") >= 0
+                    || t.indexOf("ENTRY DRIFT") >= 0
                 ) {
                     if (show.indexOf(t) < 0) show.push(t);
                 }
             });
+            // Blank Entry/SL must always surface as degraded — never silent dashes.
+            if (entryMissing && show.indexOf("ENTRY STALE") < 0) {
+                show.push("ENTRY STALE");
+            }
             flagsEl.innerHTML = renderGateBadgesHtml(show);
             flagsEl.hidden = !show.length;
         }
+        card.classList.toggle("dc-ready-card--entry-stale", entryMissing);
     }
 
     function patchWatchRow(row, stock) {

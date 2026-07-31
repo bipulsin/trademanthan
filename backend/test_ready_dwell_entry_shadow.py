@@ -502,3 +502,61 @@ def test_live_tip_stale_uses_open_or_blanks(monkeypatch):
     assert s["trade_entry_source"] == "candle_open_fallback"
     assert s["card_visible"] is True
     assert s["trade_state"] == STATE_READY
+
+
+def test_warning_stack_soft_hold_blank_entry_gets_stale_badge(monkeypatch):
+    """ABCAPITAL-class path: soft-held READY, no EMA5/open → blank + ENTRY STALE, take off."""
+    since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
+    now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
+    monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
+    monkeypatch.setenv("READY_DWELL_ENTRY_OPTION", "B")
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._load_shadow_since",
+        lambda *_a, **_k: since,
+    )
+    monkeypatch.setattr(
+        "backend.services.ready_dwell_entry_shadow._upsert_shadow_state",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_trade_state.entry_window_open_ist",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "backend.services.daily_checklist_snapshot._load_candles_for_symbol",
+        lambda *_a, **_k: [],
+    )
+    s = _stock(
+        trade_entry=412.16,
+        trade_sl=411.62,
+        trade_risk_inr=500,
+        live_candle_ema5=None,
+        live_candle_ema10=None,
+        live_candle_price=None,
+        live_candle_bar_open=None,
+        zone_downgrade="warning_stack",
+        gate_badges=["REGIME UNSTABLE", "CHURN 12"],
+        trade_state=STATE_WAIT,
+        _pre_stack_state=STATE_READY,
+        trade_take_enabled=True,
+        ready_visible_since=since.isoformat(),
+    )
+    stats = apply_ready_dwell_entry_live(
+        [s],
+        db=MagicMock(),
+        session_date="2026-07-22",
+        candle_cache={},
+        lot_cache={"TEST": 2700},
+        atr_pct_map={"TEST": 1.0},
+        nifty_pct=0.0,
+        now=now,
+    )
+    assert stats.get("entry_audit_suppressed", 0) >= 1
+    assert s.get("trade_entry") is None
+    assert s.get("trade_sl") is None
+    assert s.get("trade_risk_inr") is None
+    assert s.get("trade_entry_source") is None
+    assert "ENTRY STALE" in (s.get("gate_badges") or [])
+    assert s.get("trade_take_enabled") is False
+    assert s.get("card_visible") is True
+    assert s.get("trade_state") == STATE_READY

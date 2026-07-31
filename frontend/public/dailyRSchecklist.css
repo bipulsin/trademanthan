@@ -1238,6 +1238,27 @@ body[data-theme="dark"] .dc-go-board-card {
 .dc-ready-card--entry-open-fallback .dc-ready-entry {
     color: #fbbf24 !important;
 }
+.dc-ready-card--entry-stale .dc-ready-entry {
+    color: #f87171 !important;
+}
+.dc-ready-confirm-note--stale {
+    color: #fca5a5 !important;
+    font-weight: 700;
+}
+.dc-gate-badge--entry-stale {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fecaca;
+    border-color: rgba(239, 68, 68, 0.45);
+}
+.dc-gate-badge--entry-open {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fcd34d;
+    border-color: rgba(245, 158, 11, 0.4);
+}
+.dc-gate-badge--entry-drift {
+    background: rgba(251, 146, 60, 0.18);
+    color: #fdba74;
+}
 .dc-ready-entry {
     font-size: 28px;
     font-weight: 800;
