@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from backend.services.vajra.job import load_arbitrage_curr_mth_universe
+from backend.services.arbitrage_universe import load_arbitrage_curr_mth_universe
 
 
 def load_volume_mismatch_universe() -> List[Dict[str, Any]]:

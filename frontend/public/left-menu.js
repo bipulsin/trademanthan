@@ -269,8 +269,6 @@ class LeftMenu {
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
-                <li class="nav-item" data-page="smartfuture.html"><img src="icons/smart-futures.png?v=3" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Smart Futures</span></li>
-                <li class="nav-item" data-page="vajrafutures.html"><i class="fas fa-bolt" style="color:#2563eb;"></i><span>Vajra Futures</span></li>
                 <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
                 <li class="nav-item" data-page="volumemismatchfutures.html"><i class="fas fa-chart-bar" style="color:#7c3aed;"></i><span>Volume Mismatch Futures</span></li>
                 <li class="nav-item" data-page="iron-condor.html"><i class="fas fa-layer-group"></i><span>Iron Condor</span></li>

@@ -1,9 +1,10 @@
 """Market data service configuration."""
 from __future__ import annotations
 
-# Default staleness for 5m refresh cycle (+ buffer)
-DEFAULT_LTP_MAX_AGE_SEC = 360
-DEFAULT_INDICATOR_MAX_AGE_SEC = 420
+# Default staleness for 10m curr-month REST warm cycle (+ buffer).
+# Stock/next LTP persist on a 30m WS path; readers typically use allow_stale=True.
+DEFAULT_LTP_MAX_AGE_SEC = 720
+DEFAULT_INDICATOR_MAX_AGE_SEC = 900
 
 BATCH_QUOTE_CHUNK = 450
 CANDLE_FETCH_WORKERS = 10

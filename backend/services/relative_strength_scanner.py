@@ -637,7 +637,7 @@ def run_relative_strength_scan(
         return {"ok": False, "reason": "nifty_unavailable"}
 
     # Lazy import avoids a circular import at module load time.
-    from backend.services.vajra.job import load_arbitrage_curr_mth_universe
+    from backend.services.arbitrage_universe import load_arbitrage_curr_mth_universe
 
     universe = load_arbitrage_curr_mth_universe()
     rows: List[Dict[str, Any]] = []

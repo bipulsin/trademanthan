@@ -335,6 +335,10 @@ def _upstox_oi_change_vs_prior_daily(u: Any, instrument_key: str, current_oi: in
 
 
 def _try_upstox_heatmap_row(rank: int, symbol: str) -> Optional[Dict[str, Any]]:
+    from backend.config import settings
+
+    if not getattr(settings, "UPSTOX_OI_ENABLED", False):
+        return None
     u = _upstox_service()
     if not u:
         return None

@@ -573,7 +573,11 @@ def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
         from backend.services.market_data.engine import refresh_arbitrage_master_market_data
         from backend.services.market_data.reads import invalidate_read_cache
 
-        out = refresh_arbitrage_master_market_data(execution="arbitrage_scheduler", fetch_candles=True)
+        out = refresh_arbitrage_master_market_data(
+            execution="arbitrage_scheduler",
+            fetch_candles=True,
+            candle_legs=("currmth",),
+        )
         invalidate_read_cache()
         return int(out.get("rows_updated") or 0)
     except Exception as e:
@@ -625,17 +629,23 @@ def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
 
 
 def run_arbitrage_ltp_refresh(execution: _Execution = "intraday_ltp") -> Dict:
-    """Intraday: centralized market data refresh (LTP; candles on 5m job only)."""
+    """Intraday: stock/next LTP via WS; morning paths may still warm curr-month candles."""
     try:
         _ensure_arbitrage_table()
-        from backend.services.market_data.engine import refresh_arbitrage_master_market_data
+        from backend.services.market_data.engine import (
+            refresh_arbitrage_master_market_data,
+            refresh_stock_next_ltp_from_ws,
+        )
         from backend.services.market_data.reads import invalidate_read_cache
 
-        fetch_candles = execution != "intraday_ltp"
-        out = refresh_arbitrage_master_market_data(
-            execution=execution or "intraday_ltp",
-            fetch_candles=fetch_candles,
-        )
+        if execution == "intraday_ltp":
+            out = refresh_stock_next_ltp_from_ws(execution=execution or "intraday_ltp")
+        else:
+            out = refresh_arbitrage_master_market_data(
+                execution=execution or "intraday_ltp",
+                fetch_candles=True,
+                candle_legs=("currmth",),
+            )
         invalidate_read_cache()
         return {
             "success": bool(out.get("success")),

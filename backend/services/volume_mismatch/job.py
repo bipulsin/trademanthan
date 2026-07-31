@@ -23,9 +23,9 @@ def is_scan_window(now: Optional[datetime] = None) -> bool:
     if t.weekday() >= 5:
         return False
     t = t.astimezone(IST) if t.tzinfo else IST.localize(t)
-    # Allow scan from 09:30:30 through 10:00 (misfire grace)
+    # First 10m (09:15–09:25) closes at 09:25; scan from 09:28 (after :25 warm tip).
     m = t.hour * 60 + t.minute
-    return (9 * 60 + 30) <= m <= (10 * 60)
+    return (9 * 60 + 28) <= m <= (10 * 60)
 
 
 def run_volume_mismatch_daily_scan_job() -> Dict[str, Any]:

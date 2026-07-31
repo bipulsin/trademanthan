@@ -1,7 +1,9 @@
-"""Daily 09:30:30 scan — first 15m volume mismatch candidates.
+"""Daily 09:28 scan — first 10m volume mismatch candidates.
 
-Live path: fresh Upstox candles via ``batch_fetch_candles`` (no disk cache / backtest artifact).
-``clear_candle_cache()`` at job start; results persisted to ``volume_mismatch_signals`` for the live page.
+Live path: shared ``candle_cache`` only.
+- First opening bar = aggregate of curr-month **5m** bars 09:15 + 09:20 (10m window).
+- Daily BB / prev close from morning aux ``days/1`` warm.
+No independent Upstox candle loops; no minutes/15 dependency.
 """
 from __future__ import annotations
 
@@ -10,17 +12,15 @@ import time
 from datetime import date
 from typing import Any, Dict, List, Optional
 
-from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
-from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.candles import (
     BB_DAILY_DAYS_BACK,
     batch_fetch_candles,
     candle_fetch_stats,
     clear_candle_cache,
-    first_15m_bar_for_session,
-    first_15m_volumes_by_session,
+    first_10m_bar_from_5m,
+    first_10m_volumes_by_session,
     previous_day_close,
 )
 from backend.services.volume_mismatch.constants import (
@@ -36,12 +36,13 @@ logger = logging.getLogger(__name__)
 
 
 def collect_volume_mismatch_signals_for_date(
-    upstox: UpstoxService,
+    upstox: Any,
     universe: List[Dict[str, Any]],
     trade_date: date,
     *,
     gap_threshold: float = DEFAULT_GAP_THRESHOLD_PCT,
     max_workers: int = 24,
+    allow_rest: bool = False,
 ) -> List[Dict[str, Any]]:
     """Run mismatch logic for one session (no DB write)."""
     if not universe:
@@ -50,30 +51,32 @@ def collect_volume_mismatch_signals_for_date(
     clear_candle_cache()
     keys = [u["instrument_key"] for u in universe if u.get("instrument_key")]
 
-    candles_15m = batch_fetch_candles(
+    # Opening range from centralized 5m cache (aggregated to first 10m).
+    candles_5m = batch_fetch_candles(
         upstox,
         keys,
-        "minutes/15",
+        "minutes/5",
         days_back=35,
-        range_end_date=trade_date,
         max_workers=max_workers,
+        allow_rest=allow_rest,
     )
     candles_1d = batch_fetch_candles(
         upstox,
         keys,
         "days/1",
         days_back=BB_DAILY_DAYS_BACK,
-        range_end_date=trade_date,
+        range_end_date=trade_date if allow_rest else None,
         max_workers=max_workers,
+        allow_rest=allow_rest,
     )
 
     signals: List[Dict[str, Any]] = []
     for u in universe:
         ik = u["instrument_key"]
         sym = u["symbol"]
-        bars_15 = candles_15m.get(ik) or []
+        bars_5 = candles_5m.get(ik) or []
         bars_1d = candles_1d.get(ik) or []
-        first_bar = first_15m_bar_for_session(bars_15, trade_date)
+        first_bar = first_10m_bar_from_5m(bars_5, trade_date)
         if not first_bar:
             continue
         prev_close = previous_day_close(bars_1d, trade_date)
@@ -88,8 +91,8 @@ def collect_volume_mismatch_signals_for_date(
         if not bb:
             continue
 
-        hist_vols = first_15m_volumes_by_session(
-            bars_15,
+        hist_vols = first_10m_volumes_by_session(
+            bars_5,
             before_date=trade_date,
             max_sessions=RELATIVE_VOLUME_LOOKBACK_SESSIONS,
         )
@@ -131,9 +134,8 @@ def run_volume_mismatch_scan(
     if not universe:
         return {"success": False, "error": "empty_universe", "trade_date": str(sd)}
 
-    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     signals = collect_volume_mismatch_signals_for_date(
-        upstox, universe, sd, gap_threshold=gap_threshold
+        None, universe, sd, gap_threshold=gap_threshold, allow_rest=False
     )
     for row in signals:
         row["entry_status"] = "WAITING"
@@ -156,15 +158,16 @@ def run_volume_mismatch_scan(
     cstats = candle_fetch_stats()
     logger.info(
         "Volume Mismatch scan %s: %s signals (LONG=%s SHORT=%s) in %.3fs / universe=%s "
-        "(Upstox fetches=%s in-memory cache_hits=%s)",
+        "(shared_hits=%s in-memory=%s api=%s) first_bar=10m_from_5m",
         sd,
         len(signals),
         long_n,
         short_n,
         elapsed,
         len(universe),
-        cstats.get("api", 0),
+        cstats.get("shared_hit", 0),
         cstats.get("cache_hit", 0),
+        cstats.get("api", 0),
     )
     return {
         "success": True,
@@ -174,4 +177,6 @@ def run_volume_mismatch_scan(
         "long_count": long_n,
         "short_count": short_n,
         "elapsed_sec": elapsed,
+        "candle_stats": cstats,
+        "first_bar_tf": "10m_from_5m",
     }

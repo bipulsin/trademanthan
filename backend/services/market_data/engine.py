@@ -2,6 +2,10 @@
 Centralized market data refresh for arbitrage_master.
 
 Single entry point for LTP + 5m VWAP/EMA(5) persistence. Algos read via ``reads`` module.
+
+REST candle warm is **curr-month futures only** (~200 keys). Stock and next-month
+LTP refresh via WebSocket every 30 minutes; stock/next VWAP+EMA5 refresh via a
+separate hourly REST candle job at :20 IST.
 """
 from __future__ import annotations
 
@@ -31,6 +35,10 @@ from backend.services.market_data.schema import ensure_market_data_columns
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
+# Legs that may receive REST historical/intraday candle fetches.
+DEFAULT_CANDLE_LEGS: Tuple[str, ...] = ("currmth",)
+ALL_LEGS: Tuple[str, ...] = ("stock", "currmth", "nextmth")
+
 
 def _now_ist() -> datetime:
     return datetime.now(IST)
@@ -46,20 +54,32 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
-def _collect_all_instrument_keys(rows: List[Dict[str, Any]]) -> List[str]:
+def _leg_instrument_key(row: Dict[str, Any], leg: str) -> str:
+    if leg == "stock":
+        return str(row.get("stock_instrument_key") or "").strip()
+    if leg == "currmth":
+        return str(row.get("currmth_future_instrument_key") or "").strip()
+    if leg == "nextmth":
+        return str(row.get("nextmth_future_instrement_key") or "").strip()
+    return ""
+
+
+def _collect_instrument_keys_for_legs(
+    rows: List[Dict[str, Any]], legs: Sequence[str]
+) -> List[str]:
     seen: Set[str] = set()
     keys: List[str] = []
     for row in rows:
-        for k in (
-            row.get("stock_instrument_key"),
-            row.get("currmth_future_instrument_key"),
-            row.get("nextmth_future_instrement_key"),
-        ):
-            ks = str(k or "").strip()
+        for leg in legs:
+            ks = _leg_instrument_key(row, leg)
             if ks and ks not in seen:
                 seen.add(ks)
                 keys.append(ks)
     return keys
+
+
+def _collect_all_instrument_keys(rows: List[Dict[str, Any]]) -> List[str]:
+    return _collect_instrument_keys_for_legs(rows, ALL_LEGS)
 
 
 def _batch_ltp_map(upstox: Any, keys: List[str]) -> Dict[str, float]:
@@ -79,23 +99,46 @@ def _batch_ltp_map(upstox: Any, keys: List[str]) -> Dict[str, float]:
     return out
 
 
-def _ws_ltp_overlay(keys: List[str], ltp_map: Dict[str, float]) -> int:
-    """Overlay fresher websocket LTP when feed is running."""
-    n = 0
+def _ws_ltp_map(keys: List[str]) -> Dict[str, float]:
+    """Read LTP from live WebSocket cache (no REST)."""
+    out: Dict[str, float] = {}
+    if not keys:
+        return out
     try:
         from backend.services.upstox_market_feed import get_ws_quote_for_instrument
 
-        for ik in keys[:250]:
+        for ik in keys:
             wq = get_ws_quote_for_instrument(ik)
             if not wq:
                 continue
             lp = _f(wq.get("ltp") or wq.get("last_price"))
             if lp is not None:
-                ltp_map[ik] = lp
-                n += 1
+                out[ik] = lp
     except Exception as e:
-        logger.debug("market_data ws overlay skipped: %s", e)
+        logger.debug("market_data ws ltp map skipped: %s", e)
+    return out
+
+
+def _ws_ltp_overlay(keys: List[str], ltp_map: Dict[str, float]) -> int:
+    """Overlay fresher websocket LTP when feed is running."""
+    n = 0
+    ws = _ws_ltp_map(keys)
+    for ik, lp in ws.items():
+        ltp_map[ik] = lp
+        n += 1
     return n
+
+
+def _ensure_ws_universe(rows: List[Dict[str, Any]]) -> None:
+    """Keep WS subscribed to stock + curr + next so 30m LTP snapshots stay available."""
+    try:
+        from backend.services.upstox_market_feed import ensure_market_feed_running
+
+        keys = _collect_all_instrument_keys(rows)
+        # Cap matches prior behavior; full FO universe is typically ~600 keys.
+        ensure_market_feed_running(keys[:2000])
+    except Exception:
+        pass
 
 
 def _fetch_5m_indicators(upstox: Any, instrument_key: str) -> Optional[Dict[str, float]]:
@@ -142,16 +185,206 @@ def _leg_update(
     return patch
 
 
+def refresh_stock_next_ltp_from_ws(
+    *,
+    execution: str = "scheduled_ws_ltp_30m",
+    stocks: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Persist stock + next-month LTP (prefer WebSocket; REST quote fallback).
+
+    Intended cadence: every 30 minutes. Does **not** update VWAP/EMA5 — those
+    are owned by ``refresh_stock_next_vwap_ema_hourly``. Arb live selection still
+    uses on-demand REST quotes when the UI needs fresher LTPs.
+    """
+    ensure_market_data_columns()
+    started = _now_ist()
+    rows = load_universe_rows()
+    if stocks:
+        want = {str(s or "").strip().upper() for s in stocks if str(s or "").strip()}
+        rows = [r for r in rows if str(r.get("stock") or "").strip().upper() in want]
+    if not rows:
+        return {
+            "success": True,
+            "rows": 0,
+            "execution": execution,
+            "message": "empty_universe",
+        }
+
+    _ensure_ws_universe(rows)
+    keys = _collect_instrument_keys_for_legs(rows, ("stock", "nextmth"))
+    ltp_map = _ws_ltp_map(keys)
+
+    # Soft fallback: REST quotes only for keys missing from WS (does not use candle budget).
+    missing = [k for k in keys if k not in ltp_map]
+    rest_n = 0
+    if missing:
+        try:
+            from backend.services.upstox_service import UpstoxService
+
+            upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            if getattr(upstox, "access_token", None):
+                fb = _batch_ltp_map(upstox, missing)
+                for k, v in fb.items():
+                    ltp_map[k] = v
+                    rest_n += 1
+        except Exception as e:
+            logger.warning("stock/next WS LTP REST fallback failed: %s", e)
+
+    now = _now_ist()
+    updates: List[Dict[str, Any]] = []
+    ok = 0
+    for row in rows:
+        stock = row.get("stock")
+        sk = _leg_instrument_key(row, "stock")
+        nk = _leg_instrument_key(row, "nextmth")
+        upd: Dict[str, Any] = {
+            "stock": stock,
+            "market_data_source": DATA_SOURCE_WS if rest_n == 0 else DATA_SOURCE_REST,
+            "market_data_last_updated": now,
+        }
+        hit = False
+        if sk and sk in ltp_map:
+            upd["stock_ltp"] = ltp_map[sk]
+            upd["stock_last_updated"] = now
+            hit = True
+        if nk and nk in ltp_map:
+            upd["nextmth_future_ltp"] = ltp_map[nk]
+            upd["nextmth_future_last_updated"] = now
+            hit = True
+        if hit:
+            ok += 1
+            updates.append(upd)
+
+    written = bulk_update_market_data(updates) if updates else 0
+    summary = {
+        "success": True,
+        "execution": execution,
+        "rows_total": len(rows),
+        "rows_updated": written,
+        "ltp_keys": len(ltp_map),
+        "ws_ltp_hits": len(ltp_map) - rest_n,
+        "rest_quote_fallback": rest_n,
+        "status_ok": ok,
+        "elapsed_sec": round((_now_ist() - started).total_seconds(), 2),
+        "updated_at_ist": _now_ist().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    logger.info("market_data stock/next WS LTP: %s", summary)
+    return summary
+
+
+def refresh_stock_next_vwap_ema_hourly(
+    *,
+    execution: str = "scheduled_stock_next_vwap_ema_hourly",
+    stocks: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """
+    REST 5m candles for stock + next-month → ``stock_vwap`` / ``stock_ema5`` /
+    ``nextmth_future_vwap`` / ``nextmth_future_ema5``.
+
+    Does **not** write LTP columns (owned by the 30m WS job). Cadence: hourly at :20 IST.
+    """
+    return refresh_arbitrage_master_market_data(
+        execution=execution,
+        fetch_candles=True,
+        stocks=stocks,
+        candle_legs=("stock", "nextmth"),
+        ltp_legs=(),
+    )
+
+
+def refresh_curr_month_aux_candles(
+    *,
+    execution: str = "scheduled_aux_0905",
+    stocks: Optional[Sequence[str]] = None,
+    intervals: Optional[Sequence[Tuple[str, int]]] = None,
+) -> Dict[str, Any]:
+    """
+    REST warm of curr-month intervals into shared candle_cache.
+
+    Default: ``days/1`` (45d) for VM Bollinger / prev-close. Opening 10m range
+    comes from the curr-month 5m warm (aggregated 09:15+09:20), not minutes/15.
+    """
+    ensure_market_data_columns()
+    started = _now_ist()
+    rows = load_universe_rows()
+    if stocks:
+        want = {str(s or "").strip().upper() for s in stocks if str(s or "").strip()}
+        rows = [r for r in rows if str(r.get("stock") or "").strip().upper() in want]
+    if not rows:
+        return {
+            "success": True,
+            "rows": 0,
+            "execution": execution,
+            "message": "empty_universe",
+        }
+
+    try:
+        from backend.services.upstox_service import UpstoxService
+
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    except Exception as e:
+        return {"success": False, "execution": execution, "error": str(e)}
+
+    if not getattr(upstox, "access_token", None):
+        return {"success": False, "execution": execution, "error": "upstox_not_connected"}
+
+    keys = _collect_instrument_keys_for_legs(rows, ("currmth",))
+    specs: List[Tuple[str, int]] = list(intervals) if intervals else [
+        ("days/1", 45),
+    ]
+    ok_by: Dict[str, int] = {iv: 0 for iv, _ in specs}
+    err = 0
+
+    def _one(ik: str, interval: str, days_back: int) -> Tuple[str, bool]:
+        try:
+            bars = upstox.get_historical_candles_by_instrument_key(
+                ik, interval=interval, days_back=days_back
+            )
+            return interval, bool(bars)
+        except Exception:
+            return interval, False
+
+    with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
+        futs = []
+        for ik in keys:
+            for interval, days_back in specs:
+                futs.append(pool.submit(_one, ik, interval, days_back))
+        for fut in as_completed(futs):
+            interval, ok = fut.result()
+            if ok:
+                ok_by[interval] = ok_by.get(interval, 0) + 1
+            else:
+                err += 1
+
+    summary = {
+        "success": True,
+        "execution": execution,
+        "keys": len(keys),
+        "ok_by_interval": ok_by,
+        "errors": err,
+        "elapsed_sec": round((_now_ist() - started).total_seconds(), 2),
+        "updated_at_ist": _now_ist().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    logger.info("market_data curr-month aux candles: %s", summary)
+    return summary
+
+
 def refresh_arbitrage_master_market_data(
     *,
     execution: str = "scheduled",
     fetch_candles: bool = True,
     stocks: Optional[Sequence[str]] = None,
+    candle_legs: Sequence[str] = DEFAULT_CANDLE_LEGS,
+    ltp_legs: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """
     Refresh LTP (+ optional 5m VWAP/EMA) for arbitrage_master rows.
 
     When ``stocks`` is set, only those underlyings are refreshed (case-insensitive).
+    REST candles are limited to ``candle_legs`` (default: curr-month futures only).
+    ``ltp_legs`` defaults to all three legs; pass ``("currmth",)`` on the 10m warm
+    job so stock/next LTP are left to the 30m WS path.
     Safe to call from schedulers; returns summary dict for monitoring.
     """
     ensure_market_data_columns()
@@ -183,28 +416,22 @@ def refresh_arbitrage_master_market_data(
             "error": "upstox_not_connected",
         }
 
-    all_keys = _collect_all_instrument_keys(rows)
-    ltp_map = _batch_ltp_map(upstox, all_keys)
-    ws_n = _ws_ltp_overlay(all_keys, ltp_map)
+    legs_for_ltp: Sequence[str] = tuple(ltp_legs) if ltp_legs is not None else ALL_LEGS
+    legs_for_candles: Sequence[str] = tuple(candle_legs) if fetch_candles else ()
 
-    # Optional: start WS feed for universe (non-blocking)
-    try:
-        from backend.services.upstox_market_feed import ensure_market_feed_running
+    # Always keep full universe on WS even when this cycle only quotes currmth.
+    _ensure_ws_universe(rows)
 
-        ensure_market_feed_running(all_keys[:500])
-    except Exception:
-        pass
+    quote_keys = _collect_instrument_keys_for_legs(rows, legs_for_ltp)
+    ltp_map = _batch_ltp_map(upstox, quote_keys)
+    ws_n = _ws_ltp_overlay(quote_keys, ltp_map)
 
     candle_keys: List[Tuple[str, str, str]] = []
     for row in rows:
         stock = row.get("stock")
-        for leg, ik in (
-            ("stock", row.get("stock_instrument_key")),
-            ("currmth", row.get("currmth_future_instrument_key")),
-            ("nextmth", row.get("nextmth_future_instrement_key")),
-        ):
-            ks = str(ik or "").strip()
-            if ks and fetch_candles:
+        for leg in legs_for_candles:
+            ks = _leg_instrument_key(row, leg)
+            if ks:
                 candle_keys.append((str(stock), leg, ks))
 
     indicators_by_key: Dict[str, Dict[str, float]] = {}
@@ -229,29 +456,35 @@ def refresh_arbitrage_master_market_data(
     ok_rows = 0
     partial_rows = 0
     failed_rows = 0
+    want_stock_ltp = "stock" in legs_for_ltp
+    want_curr_ltp = "currmth" in legs_for_ltp
+    want_next_ltp = "nextmth" in legs_for_ltp
+    want_stock_ind = "stock" in legs_for_candles
+    want_curr_ind = "currmth" in legs_for_candles
+    want_next_ind = "nextmth" in legs_for_candles
 
     for row in rows:
         stock = row.get("stock")
-        sk = str(row.get("stock_instrument_key") or "").strip()
-        ck = str(row.get("currmth_future_instrument_key") or "").strip()
-        nk = str(row.get("nextmth_future_instrement_key") or "").strip()
+        sk = _leg_instrument_key(row, "stock")
+        ck = _leg_instrument_key(row, "currmth")
+        nk = _leg_instrument_key(row, "nextmth")
 
         stock_patch = _leg_update(
-            ltp_map=ltp_map,
-            ik=sk or None,
-            ind=indicators_by_key.get(sk),
+            ltp_map=ltp_map if want_stock_ltp else {},
+            ik=sk or None if want_stock_ltp else None,
+            ind=indicators_by_key.get(sk) if want_stock_ind else None,
             now=now,
         )
         curr_patch = _leg_update(
-            ltp_map=ltp_map,
-            ik=ck or None,
-            ind=indicators_by_key.get(ck),
+            ltp_map=ltp_map if want_curr_ltp else {},
+            ik=ck or None if want_curr_ltp else None,
+            ind=indicators_by_key.get(ck) if want_curr_ind else None,
             now=now,
         )
         next_patch = _leg_update(
-            ltp_map=ltp_map,
-            ik=nk or None,
-            ind=indicators_by_key.get(nk),
+            ltp_map=ltp_map if want_next_ltp else {},
+            ik=nk or None if want_next_ltp else None,
+            ind=indicators_by_key.get(nk) if want_next_ind else None,
             now=now,
         )
 
@@ -317,6 +550,8 @@ def refresh_arbitrage_master_market_data(
         "rows_total": len(rows),
         "rows_updated": written,
         "ltp_keys": len(ltp_map),
+        "ltp_legs": list(legs_for_ltp),
+        "candle_legs": list(legs_for_candles),
         "ws_ltp_overlays": ws_n,
         "candle_keys_requested": len({ik for _, _, ik in candle_keys}) if fetch_candles else 0,
         "candle_indicators_ok": len(indicators_by_key),

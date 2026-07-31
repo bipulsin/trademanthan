@@ -87,8 +87,6 @@ from backend.services.index_price_scheduler import index_price_scheduler
 from backend.services.car_nifty200_updater import run_car_nifty200_update_job
 from backend.services.entry_slip_monitor import run_entry_slip_monitor
 from backend.services.fin_sentiment_job import run_fin_sentiment_job
-from backend.services.smart_futures_picker.job import run_smart_futures_picker_job
-from backend.services.vajra.job import run_vajra_futures_rating_job
 from backend.services.premarket_watchlist_job import (
     premarket_incomplete_for_session_date,
     run_premarket_watchlist_job_with_lock,
@@ -682,7 +680,9 @@ class SmartFutureAlgoScheduler:
                 t = now.time()
                 if t < dt_time(9, 15) or t > dt_time(15, 35):
                     return
-                logger.info("🔧 Triggering centralized arbitrage_master market data refresh...")
+                logger.info(
+                    "🔧 Triggering centralized curr-month market data refresh (REST candles)..."
+                )
                 try:
                     from backend.services.market_data.scheduler import run_market_data_refresh_job
 
@@ -691,18 +691,148 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ Centralized market data refresh failed: %s", e, exc_info=True)
 
+            # Replace legacy interval job ids so APScheduler does not keep old cadences.
+            for _legacy_md_id in (
+                "centralized_market_data_5m",
+                "centralized_market_data_10m",
+                "stock_next_ltp_hourly_20",  # Phase 1 mis-merge: LTP is 30m WS, not hourly
+            ):
+                try:
+                    if self.scheduler.get_job(_legacy_md_id):
+                        self.scheduler.remove_job(_legacy_md_id)
+                except Exception:
+                    pass
+
+            # Clock-aligned :05/:15/… so hourly stock/next VWAP/EMA at :20 never overlaps.
             self.scheduler.add_job(
                 run_centralized_market_data_refresh,
-                trigger=IntervalTrigger(minutes=5),
-                id="centralized_market_data_5m",
-                name="Centralized market data (arbitrage_master LTP/VWAP/EMA)",
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute="5,15,25,35,45,55",
+                    timezone="Asia/Kolkata",
+                ),
+                id="centralized_market_data_10m",
+                name="Centralized market data (curr-month REST candles/LTP)",
                 replace_existing=True,
                 max_instances=1,
                 misfire_grace_time=300,
                 coalesce=True,
             )
-            logger.info("✅ Scheduled: Centralized market data (every 5 min, 9:15–15:35 IST)")
-            
+            logger.info(
+                "✅ Scheduled: Centralized curr-month market data (every 10 min at :05/:15/… IST)"
+            )
+
+            # 2a — Stock/next LTP via WebSocket every 30 minutes (unchanged parallel flow).
+            def run_stock_next_ws_ltp_refresh():
+                if _skip_ist_non_trading_job("stock/next WS LTP"):
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                t = now.time()
+                if t < dt_time(9, 15) or t > dt_time(15, 35):
+                    return
+                logger.info("🔧 Triggering stock/next-month WS LTP refresh...")
+                try:
+                    from backend.services.market_data.scheduler import run_stock_next_ws_ltp_job
+
+                    out = run_stock_next_ws_ltp_job()
+                    logger.info("✅ Stock/next WS LTP refresh: %s", out)
+                except Exception as e:
+                    logger.error("❌ Stock/next WS LTP refresh failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_stock_next_ws_ltp_refresh,
+                trigger=IntervalTrigger(minutes=30),
+                id="stock_next_ws_ltp_30m",
+                name="Stock/next-month LTP via WebSocket",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Stock/next WS LTP (every 30 min, 9:15–15:35 IST)"
+            )
+
+            # 2b — Stock/next VWAP+EMA5 via REST candles hourly at :20 (additive; no LTP writes).
+            def run_stock_next_vwap_ema_hourly():
+                if _skip_ist_non_trading_job("stock/next VWAP/EMA hourly"):
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                t = now.time()
+                if t < dt_time(9, 15) or t > dt_time(15, 30):
+                    return
+                logger.info("🔧 Triggering stock/next VWAP/EMA5 REST refresh (hourly :20)...")
+                try:
+                    from backend.services.market_data.scheduler import (
+                        run_stock_next_vwap_ema_hourly_job,
+                    )
+
+                    out = run_stock_next_vwap_ema_hourly_job()
+                    logger.info("✅ Stock/next VWAP/EMA5 refresh: %s", out)
+                except Exception as e:
+                    logger.error("❌ Stock/next VWAP/EMA5 refresh failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_stock_next_vwap_ema_hourly,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour="9-15",
+                    minute=20,
+                    timezone="Asia/Kolkata",
+                ),
+                id="stock_next_vwap_ema_hourly_20",
+                name="Stock/next VWAP+EMA5 (hourly :20 IST)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=300,
+                coalesce=True,
+            )
+            logger.info(
+                "✅ Scheduled: Stock/next VWAP+EMA5 at 09:20–15:20 IST hourly"
+            )
+
+            def run_curr_month_aux_warm():
+                if _skip_ist_non_trading_job("curr-month aux candles"):
+                    return
+                logger.info("🔧 Triggering curr-month aux candle warm (daily BB)...")
+                try:
+                    from backend.services.market_data.scheduler import (
+                        run_curr_month_aux_candle_warm_job,
+                    )
+
+                    out = run_curr_month_aux_candle_warm_job()
+                    logger.info("✅ Curr-month aux candle warm: %s", out)
+                except Exception as e:
+                    logger.error("❌ Curr-month aux candle warm failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_curr_month_aux_warm,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=9,
+                    minute=5,
+                    timezone="Asia/Kolkata",
+                ),
+                id="curr_month_aux_candles_0905",
+                name="Curr-month aux candles (daily @ 09:05)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=600,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: Curr-month daily aux candles 09:05 IST (Mon–Fri)")
+
+            # Remove obsolete minutes/15 tip warm (VM now uses 10m-from-5m).
+            try:
+                if self.scheduler.get_job("curr_month_15m_tip_0922"):
+                    self.scheduler.remove_job("curr_month_15m_tip_0922")
+                if self.scheduler.get_job("curr_month_15m_tip_0920"):
+                    self.scheduler.remove_job("curr_month_15m_tip_0920")
+            except Exception:
+                pass
             # Special jobs for 9:15 AM and 3:30 PM
             def run_index_price_9_15():
                 if _skip_ist_non_trading_job("index price 9:15"):
@@ -938,149 +1068,31 @@ class SmartFutureAlgoScheduler:
                 coalesce=True,
             )
             logger.info(
-                "✅ Scheduled: OI heatmap refresh every 15 min (9:15–15:15 IST, Mon–Fri); "
-                "dashboard falls back to oi_heatmap_latest when live fetch fails"
+                "✅ Scheduled: OI heatmap tick every 15 min (live fetch gated by "
+                "UPSTOX_OI_ENABLED; default false in Phase 1)"
             )
 
-            # Smart Futures picker — every 15 minutes 9:30–15:00 IST (weekdays); aligns with TRADE_WINDOWS
-            _sf_picker_slots: List[Tuple[int, int]] = []
-            _ph, _pm = 9, 30
-            while True:
-                _sf_picker_slots.append((_ph, _pm))
-                if _ph == 15 and _pm == 0:
-                    break
-                _pm += 15
-                if _pm >= 60:
-                    _ph += 1
-                    _pm -= 60
-
-            def _create_sf_picker_wrapper(_hh: int, _mm: int):
-                _label = f"{_hh:02d}:{_mm:02d}"
-
-                def _run_sf_picker():
-                    if not is_allowed_scheduler_window_ist():
-                        logger.debug("Outside 08:30–21:00 IST — skip Smart Futures picker %s", _label)
-                        return
-                    ist = pytz.timezone("Asia/Kolkata")
-                    if _skip_ist_non_trading_job(f"Smart Futures picker {_label}", datetime.now(ist)):
-                        return
-                    logger.info("🔧 Smart Futures picker (%s IST)...", _label)
-                    try:
-                        run_smart_futures_picker_job(scan_trigger=_label)
-                        logger.info("✅ Smart Futures picker (%s) completed", _label)
-                    except Exception as e:
-                        logger.error("❌ Smart Futures picker (%s) failed: %s", _label, e, exc_info=True)
-
-                return _run_sf_picker
-
-            for _hh, _mm in _sf_picker_slots:
-                self.scheduler.add_job(
-                    _create_sf_picker_wrapper(_hh, _mm),
-                    trigger=CronTrigger(
-                        day_of_week="mon-fri",
-                        hour=_hh,
-                        minute=_mm,
-                        timezone="Asia/Kolkata",
-                    ),
-                    id=f"smart_future_futures_picker_{_hh}_{_mm:02d}",
-                    name=f"Smart Futures picker ({_hh:02d}:{_mm:02d} IST)",
-                    replace_existing=True,
-                    max_instances=1,
-                    misfire_grace_time=300,
-                    coalesce=True,
-                )
+            # Phase 1: Smart Futures + Vajra jobs removed (candle-budget consolidation).
+            for _legacy_sf_vajra_id in (
+                "smart_future_vajra_rating_5m",
+                "smart_future_vajra_rating_open_920",
+                "vajra_discretionary_refresh_5m",
+            ):
+                try:
+                    if self.scheduler.get_job(_legacy_sf_vajra_id):
+                        self.scheduler.remove_job(_legacy_sf_vajra_id)
+                except Exception:
+                    pass
+            # Remove any leftover Smart Futures picker slot jobs (9:30–15:00 / 15m).
+            try:
+                for _j in list(self.scheduler.get_jobs()):
+                    jid = str(getattr(_j, "id", "") or "")
+                    if jid.startswith("smart_future_futures_picker_"):
+                        self.scheduler.remove_job(jid)
+            except Exception:
+                pass
             logger.info(
-                "✅ Scheduled: Smart Futures picker (%s weekday slots, every 15 min 9:30–15:00 IST)",
-                len(_sf_picker_slots),
-            )
-
-            # Vajra futures rating — every 5 min (IST window + holiday checks inside job)
-            def _run_vajra_5m():
-                if not is_allowed_scheduler_window_ist():
-                    logger.debug("Outside 08:30–21:00 IST — skip Vajra rating 5m tick")
-                    return
-                ist = pytz.timezone("Asia/Kolkata")
-                if _skip_ist_non_trading_job("Vajra rating 5m", datetime.now(ist)):
-                    return
-                logger.info("🔧 Vajra futures rating (5m interval)...")
-                try:
-                    run_vajra_futures_rating_job(scan_trigger="5m_interval")
-                    logger.info("✅ Vajra futures rating (5m interval) completed")
-                except Exception as e:
-                    logger.error("❌ Vajra futures rating (5m interval) failed: %s", e, exc_info=True)
-
-            self.scheduler.add_job(
-                _run_vajra_5m,
-                trigger=IntervalTrigger(minutes=5),
-                id="smart_future_vajra_rating_5m",
-                name="Vajra futures rating (every 5 min)",
-                replace_existing=True,
-                max_instances=1,
-                misfire_grace_time=120,
-                coalesce=True,
-            )
-            logger.info("✅ Scheduled: Vajra futures rating (every 5 min, IST trading window)")
-
-            def _run_vajra_open_920():
-                ist = pytz.timezone("Asia/Kolkata")
-                if _skip_ist_non_trading_job("Vajra open 09:20", datetime.now(ist)):
-                    return
-                from backend.services.vajra.candles import is_vajra_screening_ready_ist
-
-                if not is_vajra_screening_ready_ist():
-                    logger.debug("Before 09:20 IST — skip Vajra open refresh")
-                    return
-                logger.info("🔧 Vajra futures rating (09:20 open refresh)...")
-                try:
-                    run_vajra_futures_rating_job(scan_trigger="open_0920")
-                    logger.info("✅ Vajra futures rating (09:20 open refresh) completed")
-                except Exception as e:
-                    logger.error(
-                        "❌ Vajra futures rating (09:20 open refresh) failed: %s",
-                        e,
-                        exc_info=True,
-                    )
-
-            self.scheduler.add_job(
-                _run_vajra_open_920,
-                trigger=CronTrigger(
-                    day_of_week="mon-fri",
-                    hour=9,
-                    minute=20,
-                    timezone="Asia/Kolkata",
-                ),
-                id="smart_future_vajra_rating_open_920",
-                name="Vajra futures rating (09:20 open)",
-                replace_existing=True,
-                max_instances=1,
-                misfire_grace_time=300,
-                coalesce=True,
-            )
-            logger.info(
-                "✅ Scheduled: Vajra open refresh 09:20 IST (5m after market open, Mon–Fri)"
-            )
-
-            def _run_vajra_disc_refresh():
-                if not is_allowed_scheduler_window_ist():
-                    return
-                try:
-                    from backend.services.vajra.trade_service import refresh_all_active_trades
-
-                    n = refresh_all_active_trades()
-                    if n:
-                        logger.info("✅ Vajra discretionary refresh: %s active trades", n)
-                except Exception as e:
-                    logger.error("❌ Vajra discretionary refresh failed: %s", e)
-
-            self.scheduler.add_job(
-                _run_vajra_disc_refresh,
-                trigger=IntervalTrigger(minutes=5),
-                id="vajra_discretionary_refresh_5m",
-                name="Vajra discretionary trade refresh (5m)",
-                replace_existing=True,
-                max_instances=1,
-                misfire_grace_time=120,
-                coalesce=True,
+                "✅ Phase 1: Smart Futures picker + Vajra rating/discretionary jobs removed"
             )
 
             # Relative Strength Scanner — every 5 min, 09:20–15:15 IST (Mon–Fri)
@@ -1304,7 +1316,8 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ Universe VWAP slope scan failed: %s", e, exc_info=True)
 
-            # Offset +1 min from centralized_market_data_5m so shared candle_cache is warm.
+            # Offset +1 min after 10m curr-month warm where possible; still runs every 5m
+            # and prefers shared candle_cache (REST backfill only on miss).
             self.scheduler.add_job(
                 _run_universe_vwap_scan,
                 trigger=CronTrigger(
@@ -1446,12 +1459,12 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Daily RS Checklist refresh (every 5 min, 09:15–15:30 IST)"
             )
 
-            # Volume Mismatch Futures — 09:30:30 scan + 5m entry monitor
+            # Volume Mismatch Futures — 09:28 scan (first 10m closed + :25 warm) + 5m entry monitor
             def _run_vm_scan():
                 ist = pytz.timezone("Asia/Kolkata")
                 if _skip_ist_non_trading_job("Volume Mismatch scan", datetime.now(ist)):
                     return
-                logger.info("🔧 Volume Mismatch Futures daily scan (09:30:30)...")
+                logger.info("🔧 Volume Mismatch Futures daily scan (09:28, first 10m)...")
                 try:
                     from backend.services.volume_mismatch.job import run_volume_mismatch_daily_scan_job
 
@@ -1460,23 +1473,32 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ Volume Mismatch Futures daily scan failed: %s", e, exc_info=True)
 
+            for _legacy_vm_id in (
+                "volume_mismatch_scan_093030",
+                "volume_mismatch_scan_0925",
+            ):
+                try:
+                    if self.scheduler.get_job(_legacy_vm_id):
+                        self.scheduler.remove_job(_legacy_vm_id)
+                except Exception:
+                    pass
+
             self.scheduler.add_job(
                 _run_vm_scan,
                 trigger=CronTrigger(
                     day_of_week="mon-fri",
                     hour=9,
-                    minute=30,
-                    second=30,
+                    minute=28,
                     timezone="Asia/Kolkata",
                 ),
-                id="volume_mismatch_scan_093030",
-                name="Volume Mismatch Futures scan (09:30:30)",
+                id="volume_mismatch_scan_0928",
+                name="Volume Mismatch Futures scan (09:28)",
                 replace_existing=True,
                 max_instances=1,
                 misfire_grace_time=300,
                 coalesce=True,
             )
-            logger.info("✅ Scheduled: Volume Mismatch Futures scan 09:30:30 IST (Mon–Fri)")
+            logger.info("✅ Scheduled: Volume Mismatch Futures scan 09:28 IST (Mon–Fri)")
 
             def _run_vm_monitor():
                 if not is_allowed_scheduler_window_ist():
@@ -1546,30 +1568,7 @@ class SmartFutureAlgoScheduler:
 
             threading.Thread(target=_car_nifty_startup_bg, name="car_nifty200_startup", daemon=True).start()
 
-            def _vajra_post_deploy_refresh():
-                time.sleep(20)
-                try:
-                    if not is_allowed_scheduler_window_ist():
-                        return
-                    ist = pytz.timezone("Asia/Kolkata")
-                    if _skip_ist_non_trading_job("Vajra post-deploy refresh", datetime.now(ist)):
-                        return
-                    from backend.services.vajra.job import maybe_refresh_vajra_after_deploy
-
-                    logger.info("🔧 Vajra post-deploy / startup freshness check...")
-                    result = maybe_refresh_vajra_after_deploy()
-                    if result:
-                        logger.info("✅ Vajra post-deploy refresh completed: %s", result.get("scan_trigger"))
-                    else:
-                        logger.info("✅ Vajra ratings already fresh after startup")
-                except Exception as e:
-                    logger.error("❌ Vajra post-deploy refresh failed: %s", e, exc_info=True)
-
-            threading.Thread(
-                target=_vajra_post_deploy_refresh,
-                name="vajra_post_deploy_refresh",
-                daemon=True,
-            ).start()
+            # Phase 1: Vajra post-deploy refresh removed (feature dropped from live path).
 
             def _premarket_watchlist_catchup_after_start():
                 time.sleep(25)

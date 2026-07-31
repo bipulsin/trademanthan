@@ -60,29 +60,12 @@ def _sort_candles(raw: Optional[List[dict]]) -> List[dict]:
 
 
 def load_arbitrage_curr_mth_universe() -> List[Dict[str, str]]:
-    db = SessionLocal()
-    try:
-        rows = db.execute(
-            text(
-                """
-                SELECT stock, currmth_future_symbol, currmth_future_instrument_key
-                FROM arbitrage_master
-                WHERE currmth_future_instrument_key IS NOT NULL
-                  AND TRIM(currmth_future_instrument_key) <> ''
-                ORDER BY stock
-                """
-            )
-        ).fetchall()
-        return [
-            {
-                "stock": str(r[0] or "").strip(),
-                "future_symbol": str(r[1] or "").strip(),
-                "instrument_key": str(r[2] or "").strip(),
-            }
-            for r in rows
-        ]
-    finally:
-        db.close()
+    """Deprecated shim — use backend.services.arbitrage_universe."""
+    from backend.services.arbitrage_universe import (
+        load_arbitrage_curr_mth_universe as _load,
+    )
+
+    return _load()
 
 
 def fetch_vajra_ratings_for_session(session_date: Optional[date] = None) -> List[Dict[str, Any]]:

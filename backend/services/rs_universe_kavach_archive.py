@@ -32,7 +32,7 @@ from backend.services.relative_strength_scanner import (
     _nifty_change_pct,
 )
 from backend.services.upstox_service import UpstoxService
-from backend.services.vajra.job import load_arbitrage_curr_mth_universe
+from backend.services.arbitrage_universe import load_arbitrage_curr_mth_universe
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")

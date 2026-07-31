@@ -7,11 +7,9 @@ from typing import Any, Dict, List, Optional
 
 import pytz
 
-from backend.config import settings
 from backend.database import SessionLocal
 from backend.services.market_data.reads import ltp_map_with_fallback
 from backend.services.smart_futures_session_date import effective_session_date_ist_for_trend
-from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.candles import (
     batch_fetch_candles,
     clear_candle_cache,
@@ -20,7 +18,6 @@ from backend.services.volume_mismatch.candles import (
 from sqlalchemy import text
 
 from backend.services.volume_mismatch.fresh_market import (
-    refresh_stale_arbitrage_master,
     resolve_fut_price_and_indicators,
 )
 from backend.services.volume_mismatch.momentum_discovery import (
@@ -121,19 +118,20 @@ def run_volume_mismatch_entry_monitor(
             }
 
         symbols = [str(r.get("symbol") or "").strip().upper() for r in waiting]
-        refresh_stale_arbitrage_master(symbols)
+        # Phase 1: do not trigger on-demand REST candle refresh; use centralized cache/DB.
 
         keys = [str(r.get("instrument_token") or "").strip() for r in waiting]
         keys = [k for k in keys if k]
         ltp_map = ltp_map_with_fallback(
             keys,
-            allow_broker_fallback=True,
-            allow_stale=False,
+            allow_broker_fallback=False,
+            allow_stale=True,
         )
 
         clear_candle_cache()
-        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        candles_5m = batch_fetch_candles(upstox, keys, "minutes/5", days_back=2)
+        candles_5m = batch_fetch_candles(
+            None, keys, "minutes/5", days_back=2, allow_rest=False
+        )
 
         ready_count = 0
         flip_count = 0

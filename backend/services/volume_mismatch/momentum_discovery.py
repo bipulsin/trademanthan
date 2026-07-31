@@ -7,13 +7,11 @@ from typing import Any, Dict, List, Optional, Set
 
 import pytz
 
-from backend.config import settings
 from backend.services.market_data.reads import ltp_map_with_fallback
-from backend.services.upstox_service import UpstoxService
 from backend.services.volume_mismatch.candles import (
     batch_fetch_candles,
     clear_candle_cache,
-    first_15m_bar_for_session,
+    first_10m_bar_from_5m,
     last_two_completed_5m_bars,
     previous_day_close,
 )
@@ -125,11 +123,9 @@ def discover_intraday_momentum_signals(
 
     keys = [u["instrument_key"] for u in candidates]
     clear_candle_cache()
-    upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-    candles_5m = batch_fetch_candles(upstox, keys, "minutes/5", days_back=2)
-    candles_15m = batch_fetch_candles(upstox, keys, "minutes/15", days_back=35, range_end_date=trade_date)
-    candles_1d = batch_fetch_candles(upstox, keys, "days/1", days_back=45, range_end_date=trade_date)
-    ltp_map = ltp_map_with_fallback(keys, allow_broker_fallback=True, allow_stale=False)
+    candles_5m = batch_fetch_candles(None, keys, "minutes/5", days_back=35, allow_rest=False)
+    candles_1d = batch_fetch_candles(None, keys, "days/1", days_back=45, allow_rest=False)
+    ltp_map = ltp_map_with_fallback(keys, allow_broker_fallback=False, allow_stale=True)
 
     discovered: List[Dict[str, Any]] = []
     for u in candidates:
@@ -138,9 +134,8 @@ def discover_intraday_momentum_signals(
         ik = u["instrument_key"]
         sym = u["symbol"]
         bars_5 = candles_5m.get(ik) or []
-        bars_15 = candles_15m.get(ik) or []
         bars_1d = candles_1d.get(ik) or []
-        first_bar = first_15m_bar_for_session(bars_15, trade_date)
+        first_bar = first_10m_bar_from_5m(bars_5, trade_date)
         prev_close = previous_day_close(bars_1d, trade_date)
         if not first_bar or not prev_close or prev_close <= 0:
             continue
@@ -175,7 +170,7 @@ def discover_intraday_momentum_signals(
         if trend != "BULLISH":
             continue
 
-        rel_vol = compute_relative_volume(first_bar, bars_15, trade_date)
+        rel_vol = compute_relative_volume(first_bar, bars_5, trade_date)
         if rel_vol is not None and rel_vol < MOMENTUM_DISCOVERY_MIN_REL_VOL:
             continue
 

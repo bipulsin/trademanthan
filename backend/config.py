@@ -90,7 +90,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
     # Live OI heatmap (Upstox-only: instruments JSON + batch market quotes)
-    UPSTOX_OI_ENABLED: bool = os.getenv("UPSTOX_OI_ENABLED", "true").lower() in ("1", "true", "yes")
+    # Phase 1 consolidation: OI Heatmap live fetching paused (code retained; set true to re-enable).
+    UPSTOX_OI_ENABLED: bool = os.getenv("UPSTOX_OI_ENABLED", "false").lower() in ("1", "true", "yes")
     # Legacy name: live OI heatmap refresh cadence is now fixed in smart_future_algo (every 15 min, 9:15–15:15 IST).
     OI_REFRESH_INTERVAL: int = int(os.getenv("OI_REFRESH_INTERVAL", "60"))
     OI_HEATMAP_TOP_N: int = int(os.getenv("OI_HEATMAP_TOP_N", "200"))

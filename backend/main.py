@@ -22,15 +22,13 @@ import backend.routers.scan as scan
 import backend.routers.cargpt as cargpt
 import backend.routers.arbitrage as arbitrage
 import backend.routers.market_data as market_data_router
-import backend.routers.smart_futures_stub as smart_futures
-import backend.routers.smart_futures_backtest_router as smart_futures_backtest
+# Phase 1: Smart Futures + Vajra routers unmounted (packages retained for shared helpers).
 import backend.routers.nks_intraday as nks_intraday
 import backend.routers.btst_backtest as btst_backtest
 import backend.routers.fno_bullish as fno_bullish
 import backend.routers.daily_futures as daily_futures
 import backend.routers.futures_reports as futures_reports
 import backend.routers.iron_condor as iron_condor
-import backend.routers.vajra_futures as vajra_futures
 import backend.routers.volume_mismatch_futures as volume_mismatch_futures
 import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
@@ -314,10 +312,6 @@ app.include_router(cargpt.router)
 app.include_router(arbitrage.router)
 app.include_router(market_data_router.router, prefix="/api")
 app.include_router(market_data_router.router)
-app.include_router(smart_futures.router, prefix="/api/smart-futures")
-app.include_router(smart_futures.router, prefix="/smart-futures")
-app.include_router(smart_futures_backtest.router, prefix="/api/smart-futures-backtest")
-app.include_router(smart_futures_backtest.router, prefix="/smart-futures-backtest")
 app.include_router(nks_intraday.router, prefix="/api/nks-intraday")
 app.include_router(nks_intraday.router, prefix="/nks-intraday")
 app.include_router(btst_backtest.router, prefix="/api/btst-backtest")
@@ -331,8 +325,6 @@ app.include_router(daily_futures.bearish_router, prefix="")
 app.include_router(futures_reports.router, prefix="/api")
 app.include_router(iron_condor.router, prefix="/api")
 app.include_router(iron_condor.router, prefix="")
-app.include_router(vajra_futures.router, prefix="/api")
-app.include_router(vajra_futures.router, prefix="")
 app.include_router(volume_mismatch_futures.router, prefix="/api")
 app.include_router(volume_mismatch_futures.router, prefix="")
 app.include_router(volume_mismatch_backtest.router, prefix="/api")

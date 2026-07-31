@@ -184,14 +184,14 @@ def compute_relative_volume(
     *,
     lookback: int = RELATIVE_VOLUME_LOOKBACK_SESSIONS,
 ) -> Optional[float]:
-    """Today's first 15m volume vs average of prior ``lookback`` sessions."""
-    from backend.services.volume_mismatch.candles import first_15m_volumes_by_session
+    """Today's first 10m volume vs average of prior ``lookback`` sessions (from 5m legs)."""
+    from backend.services.volume_mismatch.candles import first_10m_volumes_by_session
 
     try:
         today_vol = float(first_bar.get("volume") or 0)
     except (TypeError, ValueError):
         today_vol = 0.0
-    hist_vols = first_15m_volumes_by_session(
+    hist_vols = first_10m_volumes_by_session(
         m15_candles,
         before_date=session_date,
         max_sessions=lookback,
