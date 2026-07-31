@@ -4315,18 +4315,32 @@ async def health_check():
             except Exception:
                 pass
         
-        # Check Upstox token (only during market hours to avoid unnecessary API calls)
+        # Check Upstox token during IST market hours (container clock is UTC).
+        # Historically this used naive ``datetime.now().hour`` (UTC on paperclip)
+        # and ``result.get("nifty")`` — but check_index_trends never returns ``nifty``,
+        # so upstox_api stayed red whenever UTC hour was 9–16 (most of the IST afternoon).
         token_valid = False
         token_error = None
         try:
-            # Only check during market hours (9 AM - 4 PM)
-            current_hour = datetime.now().hour
-            if 9 <= current_hour <= 16:
-                result = vwap_service.check_index_trends()
-                if result and result.get('nifty'):
+            ist_hour = now.hour
+            ist_minute = now.minute
+            # Probe roughly through the session + short buffer (09:00–16:00 IST).
+            in_probe_window = (9 <= ist_hour < 16) or (ist_hour == 16 and ist_minute == 0)
+            if in_probe_window:
+                health = None
+                try:
+                    health = vwap_service.check_api_health()
+                except Exception as probe_exc:
+                    token_error = str(probe_exc)
+                    health = None
+                if health and health.get("api_accessible") and health.get("token_valid"):
                     token_valid = True
+                    token_error = None
+                else:
+                    token_valid = False
+                    if not token_error:
+                        token_error = (health or {}).get("message") or "Upstox API probe failed"
             else:
-                # After market hours, assume token is valid (skip API call)
                 token_valid = True
                 token_error = "Market closed - token check skipped"
         except Exception as e:
