@@ -1777,6 +1777,28 @@ def enrich_stocks_trade_state(
             whip = count_whipsaw_reversals(
                 candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
             ) if candles else 0
+            # Chart choppiness (body-cross / EMA5×VWAP) — informational, not a gate.
+            try:
+                from backend.services.chart_choppiness import evaluate_chart_choppiness
+
+                if candles:
+                    chop_ev = evaluate_chart_choppiness(
+                        candles, session_date=session_date, symbol=sym
+                    )
+                    s["chart_choppy"] = bool(chop_ev.combined_final)
+                    s["chart_chop_a"] = bool(chop_ev.cond_a_final)
+                    s["chart_chop_b"] = bool(chop_ev.cond_b_final)
+                    s["chart_chop_b_count"] = int(chop_ev.cond_b_count)
+                    s["chart_chop_body_crosses"] = len(chop_ev.all_body_crosses)
+                else:
+                    s["chart_choppy"] = False
+                    s["chart_chop_a"] = False
+                    s["chart_chop_b"] = False
+                    s["chart_chop_b_count"] = 0
+                    s["chart_chop_body_crosses"] = 0
+            except Exception as chop_exc:
+                logger.debug("chart_choppiness skipped for %s: %s", sym, chop_exc)
+                s["chart_choppy"] = False
             from backend.services.kavach_readiness import attach_readiness_to_stock
 
             attach_readiness_to_stock(
@@ -2455,6 +2477,9 @@ def enrich_stocks_trade_state(
             logger.debug("ready entry staleness shadow skipped: %s", exc)
 
         return {
+            # Lock-membership churn retained for post-session / checkpoint analysis.
+            # Live checklist UI no longer surfaces churn_warning as a session banner
+            # (replaced by chart_choppiness — see backend.services.chart_choppiness).
             "churn_warning": len(churn_syms) >= 3,
             "churn_symbols": churn_syms,
             "churn_count": len(churn_syms),

@@ -863,6 +863,34 @@
                 ignEl.hidden = true;
             }
         }
+        var chopEl = card.querySelector(".dc-chop-chip");
+        if (chopEl) {
+            var tsChop = stock.trade_state || "";
+            var onWatchOrReady =
+                tsChop === "WATCHING" ||
+                tsChop === "READY" ||
+                tsChop === "READY(RECHECK)" ||
+                tsChop === "READY TO LONG" ||
+                tsChop === "READY TO SHORT";
+            var showChop = !!(stock.chart_choppy && onWatchOrReady);
+            chopEl.hidden = !showChop;
+            if (showChop) {
+                var bits = [];
+                if (stock.chart_chop_a) bits.push("A");
+                if (stock.chart_chop_b) {
+                    bits.push(
+                        "B×" + (stock.chart_chop_b_count != null ? stock.chart_chop_b_count : "?")
+                    );
+                }
+                chopEl.title =
+                    "Chart chop vs VWAP" +
+                    (bits.length ? " (" + bits.join(" · ") + ")" : "") +
+                    (stock.chart_chop_body_crosses != null
+                        ? " · " + stock.chart_chop_body_crosses + " body crosses today"
+                        : "") +
+                    " — context only; grade remains the gate";
+            }
+        }
         patchTradeRow(card, stock);
         var takeBtn = card.querySelector(".dc-take-trade");
         var takenLbl = card.querySelector(".dc-trade-taken-label");
@@ -1184,54 +1212,11 @@
                 compChip.title = comp.label || "";
             }
         }
+        // RS-lock churn banner retired from live UI (measures lock membership
+        // turnover, not chart chop). Backend still computes churn_warning /
+        // churn_symbols / lock_cycles for post-session / checkpoint use.
         if (warn) {
-            var churnOn = !!(obs.churn_warning && obs.churn_symbols && obs.churn_symbols.length);
-            warn.hidden = !churnOn;
-            if (churnOn) {
-                var n = obs.churn_count || obs.churn_symbols.length;
-                var main = $("dcTradeChurnMain");
-                if (main) {
-                    main.innerHTML =
-                        "<strong>" + n + " symbol" + (n === 1 ? "" : "s") +
-                        " showing elevated lock churn today</strong>" +
-                        " — RS-rank lock membership has been unstable (re-promote / R1·R2 cycles). " +
-                        "Informational context only; grade remains the gate.";
-                }
-                var details = $("dcTradeChurnDetails");
-                var symsEl = $("dcTradeChurnSyms");
-                var gradeNote = $("dcTradeChurnGradeNote");
-                if (details) details.hidden = false;
-                if (symsEl) {
-                    symsEl.textContent = obs.churn_symbols.join(", ");
-                }
-                // Optional: footnote high-grade names still on the live board.
-                var highGrade = [];
-                var stockList = (state && state.stocks) || [];
-                var bySym = {};
-                stockList.forEach(function (s) {
-                    if (s && s.symbol) bySym[String(s.symbol).toUpperCase()] = s;
-                });
-                obs.churn_symbols.forEach(function (sym) {
-                    var s = bySym[String(sym).toUpperCase()];
-                    if (!s) return;
-                    var g = String(s.confidence || s.confidence_grade || s.dashboard_kavach || "")
-                        .replace("!", "")
-                        .trim();
-                    if (g === "A" || g === "A+" || g === "A*") {
-                        highGrade.push(sym + " (" + (s.confidence || s.confidence_grade || g) + ")");
-                    }
-                });
-                if (gradeNote) {
-                    if (highGrade.length) {
-                        gradeNote.hidden = false;
-                        gradeNote.textContent =
-                            "Still A-grade on the live board despite churn: " + highGrade.join(", ") + ".";
-                    } else {
-                        gradeNote.hidden = true;
-                        gradeNote.textContent = "";
-                    }
-                }
-            }
+            warn.hidden = true;
         }
         if (!strip || !chips) return;
         var rem = obs.recent_removals || [];

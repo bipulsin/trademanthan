@@ -93,6 +93,7 @@
                     <div class="dc-live-setups-chips" id="dcLiveSetupsChips"></div>
                 </div>
 
+                <!-- RS-lock churn live banner retired; DOM kept hidden for API/checkpoint parity -->
                 <div class="dc-trade-churn-note" id="dcTradeChurnWarn" hidden>
                     <div class="dc-trade-churn-note-line" id="dcTradeChurnMain"></div>
                     <details class="dc-trade-churn-details" id="dcTradeChurnDetails" hidden>
@@ -322,6 +323,7 @@
                     <span class="dc-sector-badge"></span>
                     <span class="dc-setup"></span>
                     <span class="dc-ignition" hidden>Ignition Building</span>
+                    <span class="dc-chop-chip" hidden title="Chart choppiness: body crosses vs VWAP / EMA5">Chop</span>
                     <span class="dc-grade-lock" hidden title="Setup live but grade gate failed">🔒</span>
                     <span class="dc-trade-taken-label" hidden></span>
                     <span class="dc-decision dc-decision--NONE">⬜ Not assessed</span>
@@ -353,6 +355,6 @@
     </template>
 
     <script src="left-menu.js?v=3.26"></script>
-    <script src="dailyRSchecklist.js?v=48"></script>
+    <script src="dailyRSchecklist.js?v=49"></script>
 </body>
 </html>

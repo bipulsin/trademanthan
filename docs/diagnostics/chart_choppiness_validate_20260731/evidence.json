@@ -1,0 +1,4769 @@
+{
+  "session": "2026-07-31",
+  "reports": [
+    {
+      "summary": {
+        "symbol": "APLAPOLLO",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "2 cross(es) in first 4 bars; dirs=['bearish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 2,
+        "bootstrap_dirs": [
+          "bearish"
+        ],
+        "body_cross_n": 10,
+        "ema5_vwap_cross_n": 4,
+        "cond_a_final": false,
+        "cond_b_count": 4,
+        "cond_b_final": true,
+        "combined_final": true,
+        "cond_a_on_bars": 19,
+        "combined_on_bars": 32,
+        "state_toggles": 1
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bullish"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "dir": "bearish"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "dir": "bullish"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "dir": "bearish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": "bullish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": "bullish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": "bullish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": "bullish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": true,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 4,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "HYUNDAI",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "1 cross(es) in first 4 bars; dirs=['bullish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 1,
+        "bootstrap_dirs": [
+          "bullish"
+        ],
+        "body_cross_n": 1,
+        "ema5_vwap_cross_n": 0,
+        "cond_a_final": false,
+        "cond_b_count": 0,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "ASHOKLEY",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "2 cross(es) in first 4 bars; dirs=['bullish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 2,
+        "bootstrap_dirs": [
+          "bullish"
+        ],
+        "body_cross_n": 2,
+        "ema5_vwap_cross_n": 0,
+        "cond_a_final": false,
+        "cond_b_count": 0,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "BAJAJFINSV",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "1 cross(es) in first 4 bars; dirs=['bullish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 1,
+        "bootstrap_dirs": [
+          "bullish"
+        ],
+        "body_cross_n": 1,
+        "ema5_vwap_cross_n": 0,
+        "cond_a_final": false,
+        "cond_b_count": 0,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "KALYANKJIL",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": true,
+        "bootstrap_note": "2 crosses in first 4 bars with both directions (['bearish', 'bullish'])",
+        "bootstrap_cross_n": 2,
+        "bootstrap_dirs": [
+          "bearish",
+          "bullish"
+        ],
+        "body_cross_n": 6,
+        "ema5_vwap_cross_n": 3,
+        "cond_a_final": false,
+        "cond_b_count": 3,
+        "cond_b_final": true,
+        "combined_final": true,
+        "cond_a_on_bars": 17,
+        "combined_on_bars": 33,
+        "state_toggles": 3
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "dir": "bearish"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "dir": "bullish"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "dir": "bearish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": "bullish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": true,
+          "B_n": 2,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": true,
+          "B_n": 2,
+          "B": false,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": true,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 3,
+          "B": true,
+          "flag": true,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "SWIGGY",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": true,
+        "bootstrap_note": "2 crosses in first 4 bars with both directions (['bearish', 'bullish'])",
+        "bootstrap_cross_n": 2,
+        "bootstrap_dirs": [
+          "bearish",
+          "bullish"
+        ],
+        "body_cross_n": 3,
+        "ema5_vwap_cross_n": 1,
+        "cond_a_final": false,
+        "cond_b_count": 1,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 10,
+        "combined_on_bars": 10,
+        "state_toggles": 4
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "dir": "bearish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "BAJFINANCE",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "1 cross(es) in first 4 bars; dirs=['bullish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 1,
+        "bootstrap_dirs": [
+          "bullish"
+        ],
+        "body_cross_n": 1,
+        "ema5_vwap_cross_n": 0,
+        "cond_a_final": false,
+        "cond_b_count": 0,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "BOSCHLTD",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "1 cross(es) in first 4 bars; dirs=['bearish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 1,
+        "bootstrap_dirs": [
+          "bearish"
+        ],
+        "body_cross_n": 1,
+        "ema5_vwap_cross_n": 1,
+        "cond_a_final": false,
+        "cond_b_count": 1,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "dir": "bearish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "ETERNAL",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "1 cross(es) in first 4 bars; dirs=['bearish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 1,
+        "bootstrap_dirs": [
+          "bearish"
+        ],
+        "body_cross_n": 1,
+        "ema5_vwap_cross_n": 1,
+        "cond_a_final": false,
+        "cond_b_count": 1,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bearish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "PREMIERENE",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": false,
+        "bootstrap_note": "3 cross(es) in first 4 bars; dirs=['bullish'] \u2014 need \u22652 with both bullish+bearish",
+        "bootstrap_cross_n": 3,
+        "bootstrap_dirs": [
+          "bullish"
+        ],
+        "body_cross_n": 3,
+        "ema5_vwap_cross_n": 2,
+        "cond_a_final": false,
+        "cond_b_count": 2,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 0,
+        "combined_on_bars": 0,
+        "state_toggles": 0
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "dir": "bearish"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "hold_off"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 2,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    },
+    {
+      "summary": {
+        "symbol": "WIPRO",
+        "session_date": "2026-07-31",
+        "bars_n": 37,
+        "bootstrap_flagged": true,
+        "bootstrap_note": "2 crosses in first 4 bars with both directions (['bearish', 'bullish'])",
+        "bootstrap_cross_n": 2,
+        "bootstrap_dirs": [
+          "bearish",
+          "bullish"
+        ],
+        "body_cross_n": 3,
+        "ema5_vwap_cross_n": 1,
+        "cond_a_final": false,
+        "cond_b_count": 1,
+        "cond_b_final": false,
+        "combined_final": false,
+        "cond_a_on_bars": 10,
+        "combined_on_bars": 10,
+        "state_toggles": 4
+      },
+      "bootstrap_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        }
+      ],
+      "body_crosses": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "dir": "bullish",
+          "kind": "intra_bar"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "dir": "bearish",
+          "kind": "intra_bar"
+        }
+      ],
+      "ema5_crosses": [
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "dir": "bullish"
+        }
+      ],
+      "timeline": [
+        {
+          "bar": 0,
+          "ts": "09:20",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": "bearish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 1,
+          "ts": "09:30",
+          "A": false,
+          "B_n": 0,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 2,
+          "ts": "09:40",
+          "A": true,
+          "B_n": 0,
+          "B": false,
+          "flag": true,
+          "cross": "bullish",
+          "note": "bootstrap"
+        },
+        {
+          "bar": 3,
+          "ts": "09:50",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "bootstrap"
+        },
+        {
+          "bar": 4,
+          "ts": "10:00",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 5,
+          "ts": "10:10",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 6,
+          "ts": "10:20",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 7,
+          "ts": "10:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 8,
+          "ts": "10:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 9,
+          "ts": "10:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 10,
+          "ts": "11:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 11,
+          "ts": "11:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 12,
+          "ts": "11:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 13,
+          "ts": "11:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 14,
+          "ts": "11:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 15,
+          "ts": "11:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 16,
+          "ts": "12:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 17,
+          "ts": "12:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 18,
+          "ts": "12:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 19,
+          "ts": "12:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 20,
+          "ts": "12:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 21,
+          "ts": "12:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 22,
+          "ts": "13:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 23,
+          "ts": "13:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 24,
+          "ts": "13:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 25,
+          "ts": "13:30",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": "bearish",
+          "note": "rolling_on"
+        },
+        {
+          "bar": 26,
+          "ts": "13:40",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 27,
+          "ts": "13:50",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 28,
+          "ts": "14:00",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on_lookback"
+        },
+        {
+          "bar": 29,
+          "ts": "14:10",
+          "A": true,
+          "B_n": 1,
+          "B": false,
+          "flag": true,
+          "cross": null,
+          "note": "hold_on"
+        },
+        {
+          "bar": 30,
+          "ts": "14:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 31,
+          "ts": "14:30",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 32,
+          "ts": "14:40",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 33,
+          "ts": "14:50",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 34,
+          "ts": "15:00",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 35,
+          "ts": "15:10",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        },
+        {
+          "bar": 36,
+          "ts": "15:20",
+          "A": false,
+          "B_n": 1,
+          "B": false,
+          "flag": false,
+          "cross": null,
+          "note": "exit_after_5_same_side"
+        }
+      ]
+    }
+  ]
+}

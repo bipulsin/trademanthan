@@ -380,6 +380,19 @@ body[data-theme="dark"] .dc-rs--neg { color: #f87171 !important; }
     flex: 0 0 auto;
     white-space: nowrap;
 }
+.dc-chop-chip {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    color: #475569;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    white-space: nowrap;
+}
+.dc-chop-chip[hidden] { display: none !important; }
 .dc-grade-lock {
     flex: 0 0 auto;
     font-size: 14px;
@@ -751,6 +764,11 @@ body[data-theme="dark"] .dc-trade-churn-details > summary,
 body[data-theme="dark"] .dc-trade-churn-syms,
 body[data-theme="dark"] .dc-trade-churn-grade-note {
     color: #94a3b8;
+}
+body[data-theme="dark"] .dc-chop-chip {
+    color: #94a3b8;
+    background: #1e293b;
+    border-color: #334155;
 }
 .dc-live-setups-label { font-size: 11px; font-weight: 800; color: var(--theme-muted, #64748b); white-space: nowrap; }
 .dc-live-setups-chips { display: flex; flex-wrap: wrap; gap: 6px; }
