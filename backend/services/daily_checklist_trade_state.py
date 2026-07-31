@@ -1761,6 +1761,15 @@ def enrich_stocks_trade_state(
             atr = (price * atr_pct / 100.0) if price and atr_pct > 0 else None
             is_long = (s.get("direction") or "LONG").upper() != "SHORT"
             candles = candle_cache.get(sym) or []
+            # READY entry must come from live 10m EMA5. Empty candle_cache (cache
+            # miss / rate-limit skip) silently fell back to sticky rs_live audit
+            # EMA and froze Entry on READY cards for many polls — force reload.
+            if not candles:
+                try:
+                    candles = _load_candles_for_symbol(db, sym) or []
+                    candle_cache[sym] = candles
+                except Exception:
+                    candles = []
             # Every poll: refresh Trend/ST/MACD from the same 10m candle path as
             # live Kavach so DIR CONFLICT is not stuck on sticky checklist labels.
             overlay_live_momentum_from_candles(s, candles, nifty_pct=nifty_pct)

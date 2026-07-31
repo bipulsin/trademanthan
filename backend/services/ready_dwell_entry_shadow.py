@@ -774,6 +774,8 @@ def apply_ready_dwell_entry_live(
         "live_applied": 0,
         "entry_overridden": 0,
         "entry_tip_stale": 0,
+        "entry_candle_reloaded": 0,
+        "entry_audit_suppressed": 0,
         "distance_blocked": 0,
         "distance_dwell_held": 0,
         "dwell_soft_kept": 0,
@@ -817,17 +819,39 @@ def apply_ready_dwell_entry_live(
             live_e5 = None
             live_e10 = None
             live_px = None
-            # Blank misleading levels rather than keep a frozen morning EMA as
-            # "Entry" while dwell soft-hold keeps the card visible.
-            s["trade_entry"] = None
-            s["trade_sl"] = None
-            s["trade_risk_inr"] = None
-            badges = list(s.get("gate_badges") or [])
-            if "ENTRY STALE" not in badges:
-                badges.append("ENTRY STALE")
-            s["gate_badges"] = badges
             s["entry_tip_stale"] = True
             stats["entry_tip_stale"] += 1
+
+        # Widespread path: empty candle_cache → no live EMA → FSM keeps sticky
+        # rs_live audit EMA as trade_entry. Reload + overlay before accepting.
+        if live_e5 is None:
+            try:
+                from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
+                from backend.services.daily_checklist_trade_state import (
+                    overlay_live_momentum_from_candles,
+                )
+
+                fresh = _load_candles_for_symbol(db, sym) or []
+                if fresh:
+                    candle_cache[sym] = fresh
+                    overlay_live_momentum_from_candles(s, fresh, nifty_pct=nifty_pct)
+                    live_e5 = _f(s.get("live_candle_ema5"))
+                    live_e10 = _f(s.get("live_candle_ema10"))
+                    live_px = _f(s.get("live_candle_price"))
+                    tip_stale = False
+                    try:
+                        tip_stale = _rth_candle_tip_stale(fresh, now=clock)
+                    except Exception:
+                        tip_stale = False
+                    if tip_stale:
+                        live_e5 = None
+                        live_e10 = None
+                        live_px = None
+                        s["entry_tip_stale"] = True
+                    else:
+                        stats["entry_candle_reloaded"] += 1
+            except Exception as exc:
+                logger.debug("ready entry candle reload skipped %s: %s", sym, exc)
 
         if live_e5 is not None:
             s["trade_entry"] = round(float(live_e5), 2)
@@ -837,6 +861,27 @@ def apply_ready_dwell_entry_live(
         if s.get("trade_entry") is not None and s.get("trade_sl") is not None:
             risk_pts = abs(float(s["trade_entry"]) - float(s["trade_sl"]))
             s["trade_risk_inr"] = int(round(risk_pts * lot, 0))
+
+        # Never leave lagging audit EMA on a READY/dwell card when live EMA is
+        # unavailable — blank levels rather than a frozen actionable Entry.
+        pre_for_entry = s.get("_pre_stack_state") or s.get("trade_state")
+        ready_or_dwell = (
+            pre_for_entry in (STATE_READY, STATE_READY_RECHECK)
+            or str(pre_for_entry or "").upper().startswith("READY")
+            or bool(s.get("dwell_soft_hold"))
+            or bool(s.get("ready_visible_since"))
+        )
+        if live_e5 is None and ready_or_dwell:
+            s["trade_entry"] = None
+            s["trade_sl"] = None
+            s["trade_risk_inr"] = None
+            badges = list(s.get("gate_badges") or [])
+            if "ENTRY STALE" not in badges:
+                badges.append("ENTRY STALE")
+            s["gate_badges"] = badges
+            s["entry_audit_suppressed"] = True
+            stats["entry_audit_suppressed"] += 1
+
         direction = (s.get("direction") or "LONG").upper()
         is_long = direction != "SHORT"
         atr_pct = float(atr_pct_map.get(sym) or 0.0)
