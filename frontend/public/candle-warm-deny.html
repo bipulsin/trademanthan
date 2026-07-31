@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>Candle Warm Deny Monitor · TradeWithCTO</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+  <script src="auth-check.js?v=1"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --panel-2: #232d3a;
+      --border: #334155;
+      --text: #e8eef4;
+      --muted: #94a3b8;
+      --accent: #0d9488;
+      --warn: #f59e0b;
+      --danger: #f87171;
+      --ok: #34d399;
+      --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.4;
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2a32 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 16px 18px 48px; }
+    header {
+      display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+      border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; max-width: 78ch; }
+    .meta { color: var(--muted); font-size: 12px; text-align: right; }
+    .meta a { color: #5eead4; text-decoration: none; }
+    .meta a:hover { text-decoration: underline; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+      margin-bottom: 14px;
+    }
+    button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit;
+    }
+    button:hover { border-color: var(--accent); }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+    }
+    .pill-ok { background: rgba(52,211,153,.15); color: var(--ok); }
+    .pill-warn { background: rgba(245,158,11,.15); color: var(--warn); }
+    .pill-bad { background: rgba(248,113,113,.15); color: var(--danger); }
+    .spark {
+      display: flex; align-items: flex-end; gap: 2px; height: 48px;
+      padding: 8px 10px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; margin-bottom: 14px; overflow-x: auto;
+    }
+    .spark-bar {
+      width: 10px; min-height: 2px; border-radius: 2px 2px 0 0;
+      background: var(--accent); opacity: 0.85;
+    }
+    .spark-bar.high { background: var(--danger); }
+    .spark-bar.mid { background: var(--warn); }
+    table {
+      width: 100%; border-collapse: collapse; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    }
+    th, td {
+      text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      background: var(--panel-2); color: var(--muted); font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600;
+    }
+    tr:last-child td { border-bottom: none; }
+    .mono { font-family: var(--mono); }
+    .syms { color: var(--muted); font-size: 12px; max-width: 52ch; word-break: break-word; }
+    .empty { color: var(--muted); padding: 24px; text-align: center; }
+    .err { color: var(--danger); margin: 8px 0 14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Candle warm · deny monitor</h1>
+        <p class="sub">
+          Rolling view of centralized market-data candle warm cycles: deny rate,
+          missing symbols (rate-limit / empty / fetch failure), and timestamps.
+          In-memory on the app process — resets on restart.
+        </p>
+      </div>
+      <div class="meta">
+        <div><a href="/dailyRSchecklist.html">← Daily Checklist</a></div>
+        <div id="statusLine">—</div>
+      </div>
+    </header>
+
+    <div class="toolbar">
+      <button type="button" id="btnRefresh">Refresh</button>
+      <label class="meta">Limit
+        <select id="limitSel">
+          <option value="12">12</option>
+          <option value="24" selected>24</option>
+          <option value="36">36</option>
+          <option value="72">72</option>
+        </select>
+      </label>
+      <span class="meta" id="countLine"></span>
+    </div>
+    <div class="err" id="errLine" hidden></div>
+    <div class="spark" id="spark" title="Deny % per cycle (oldest → newest left→right)"></div>
+    <div id="tableHost"><div class="empty">Loading…</div></div>
+  </div>
+
+  <script>
+    (function () {
+      const API_BASE =
+        window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+          ? "http://localhost:8000"
+          : window.location.origin;
+
+      function token() {
+        return localStorage.getItem("trademanthan_token") || "";
+      }
+
+      function denyClass(pct) {
+        if (pct >= 10) return "pill-bad";
+        if (pct >= 2) return "pill-warn";
+        return "pill-ok";
+      }
+
+      function barClass(pct) {
+        if (pct >= 10) return "high";
+        if (pct >= 2) return "mid";
+        return "";
+      }
+
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function render(cycles) {
+        const spark = document.getElementById("spark");
+        const host = document.getElementById("tableHost");
+        document.getElementById("countLine").textContent =
+          cycles.length ? cycles.length + " cycles (newest first)" : "No cycles yet";
+
+        if (!cycles.length) {
+          spark.innerHTML = "";
+          host.innerHTML =
+            '<div class="empty">No warm cycles recorded yet. Wait for the next scheduled candle warm, or trigger a market-data refresh.</div>';
+          return;
+        }
+
+        // Spark: chronological left→right (oldest first)
+        const chrono = cycles.slice().reverse();
+        const maxPct = Math.max(1, ...chrono.map((c) => Number(c.candle_deny_pct) || 0));
+        spark.innerHTML = chrono
+          .map((c) => {
+            const pct = Number(c.candle_deny_pct) || 0;
+            const h = Math.max(2, Math.round((pct / maxPct) * 40));
+            const title = (c.updated_at_ist || "?") + " · " + pct + "%";
+            return (
+              '<div class="spark-bar ' +
+              barClass(pct) +
+              '" style="height:' +
+              h +
+              'px" title="' +
+              esc(title) +
+              '"></div>'
+            );
+          })
+          .join("");
+
+        let html =
+          "<table><thead><tr>" +
+          "<th>Time (IST)</th><th>Exec</th><th>Requested</th><th>OK</th><th>Errors</th>" +
+          "<th>Deny %</th><th>Denied symbols</th><th>RL (acq/den)</th><th>Elapsed</th>" +
+          "</tr></thead><tbody>";
+
+        for (const c of cycles) {
+          const req = c.candle_keys_requested || 0;
+          const ok = c.candle_indicators_ok || 0;
+          const err = c.candle_errors || 0;
+          const pct = Number(c.candle_deny_pct) || 0;
+          const syms = c.candle_denied_symbols || [];
+          const byStock = c.candle_denied_by_stock || {};
+          const rl = c.candle_rl || {};
+          const symLabel = syms.length
+            ? syms
+                .map((s) => {
+                  const legs = (byStock[s] || []).join("+");
+                  return legs ? s + "(" + legs + ")" : s;
+                })
+                .join(", ")
+            : "—";
+          html +=
+            "<tr>" +
+            '<td class="mono">' +
+            esc(c.updated_at_ist || c.recorded_at_ist || "—") +
+            "</td>" +
+            "<td>" +
+            esc(c.execution || "—") +
+            "</td>" +
+            '<td class="mono">' +
+            req +
+            "</td>" +
+            '<td class="mono">' +
+            ok +
+            "</td>" +
+            '<td class="mono">' +
+            err +
+            "</td>" +
+            "<td><span class=\"pill " +
+            denyClass(pct) +
+            '">' +
+            pct.toFixed(1) +
+            "%</span></td>" +
+            '<td class="syms">' +
+            esc(symLabel) +
+            (syms.length ? " <span class=\"mono\">(" + syms.length + ")</span>" : "") +
+            "</td>" +
+            '<td class="mono">' +
+            (rl.acquired != null ? rl.acquired + "/" + (rl.denied || 0) : "—") +
+            "</td>" +
+            '<td class="mono">' +
+            (c.elapsed_sec != null ? c.elapsed_sec + "s" : "—") +
+            "</td>" +
+            "</tr>";
+        }
+        html += "</tbody></table>";
+        host.innerHTML = html;
+      }
+
+      async function load() {
+        const errEl = document.getElementById("errLine");
+        errEl.hidden = true;
+        const limit = document.getElementById("limitSel").value || "24";
+        document.getElementById("statusLine").textContent = "Loading…";
+        try {
+          const res = await fetch(
+            API_BASE + "/market-data/candle-warm-cycles?limit=" + encodeURIComponent(limit),
+            {
+              headers: { Authorization: "Bearer " + token() },
+              cache: "no-store",
+            }
+          );
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          if (!data.success) throw new Error(data.message || "request failed");
+          render(data.cycles || []);
+          document.getElementById("statusLine").textContent =
+            "Updated " + new Date().toLocaleTimeString();
+        } catch (e) {
+          errEl.hidden = false;
+          errEl.textContent = "Failed to load: " + (e && e.message ? e.message : e);
+          document.getElementById("statusLine").textContent = "Error";
+        }
+      }
+
+      document.getElementById("btnRefresh").addEventListener("click", load);
+      document.getElementById("limitSel").addEventListener("change", load);
+      load();
+      setInterval(load, 60000);
+    })();
+  </script>
+</body>
+</html>

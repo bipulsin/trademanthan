@@ -137,6 +137,10 @@ Logged from **DELHIVERY SHORT** `trade_log` 2026-07-22 (entry 11:12 @ 474.50 →
 
 Also noted on that trade (not a Rule 15 change): post-exit grade recovered to **A** within minutes — treated as **noise** (no re-chase of grade flicker after exit).
 
+### Rule 15/22 override case — SRF LONG 24-Jul (journal only)
+
+**SRF** LONG `trade_log` 2026-07-24 (entry ~10:45 @ 2670.00 → exit ~11:34 @ 2670.40, qty 200, +₹80). Rule 15/22 (2-candle validation) **FAILED** (entry high 2681; C1 high 2669.20; C2 close 2671.30 — no new high). Trader **discretionary stay**; should have market-exited ~10:55–11:00. Peak MFE ~+₹1,260 then faded; final exit was confirmed 10m close below EMA5+EMA10 (`exit_trigger_type=rule_compliant` for actual exit). Notes carry `rule_override=true` / `entry_rule_violated=Rule_15_22_2_candle_validation` (no dedicated columns). **No live rule change.**
+
 ---
 
 ## Profit-protection research thread — 22-Jul contrast case
@@ -233,3 +237,24 @@ Shadow modules: `kavach_watching_shadow.py`, `kavach_ready_exit_plus4_shadow.py`
 10. **Min-10m dwell floor** — spot-check first live session after 24-Jul deploy (expected: zero under-10m distance vanishings).
 
 Do **not** carry: touch-reject, +4 extension rule, appearance-count rule, Item 7/8, UI declutter, READY audio, realism (docs only).
+
+---
+
+## Stale-entry / candle-warm arc (2026-07-31) — carry into 8-Aug
+
+Full arc closed in code on **31-Jul**; first live co-verification is the **next market session**.
+
+| Step | What landed |
+|---|---|
+| Bug | READY cards blank / tip-regressed entry under candle rate deny |
+| Root cause | Shared Upstox candle RL + invalidate-before-refetch emptied last-good tips |
+| Phase 1 | Curr-month REST @10m; stock/next LTP via WS @30m; stock/next VWAP/EMA hourly @:20; SF/Vajra live surface removed; OI heatmap disabled (`c115a77`) |
+| Health | `/scan/health` Upstox probe fixed (IST window + `check_api_health`) — pre-existing UTC/`nifty` key bug (`7e3aef3`) |
+| Tip-stale | Keep last-good series; replace only on fresher tip; tip-stale barred from READY entry (`live_ema5` / `candle_open_fallback` gate unchanged) |
+| Monitor | `/candle-warm-deny.html` + `GET /market-data/candle-warm-cycles` — deny % + missing symbols per warm cycle |
+
+**8-Aug review TODO (fill after first live day):**
+
+1. Deny clusters at prior failure windows (~11:32, 13:42, 14:17 IST)? Y/N + notes
+2. Any READY/READY-family card with stale tip treated as fresh entry in those windows? (expect **no**)
+3. Session deny-rate baseline under Phase 1 + tip-stale together

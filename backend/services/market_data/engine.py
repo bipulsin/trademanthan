@@ -436,6 +436,7 @@ def refresh_arbitrage_master_market_data(
 
     indicators_by_key: Dict[str, Dict[str, float]] = {}
     candle_errors = 0
+    candle_failed_iks: List[str] = []
     if fetch_candles and candle_keys:
         unique_iks = list({ik for _, _, ik in candle_keys})
         with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
@@ -448,8 +449,10 @@ def refresh_arbitrage_master_market_data(
                         indicators_by_key[ik] = ind
                     else:
                         candle_errors += 1
+                        candle_failed_iks.append(ik)
                 except Exception:
                     candle_errors += 1
+                    candle_failed_iks.append(ik)
 
     now = _now_ist()
     updates: List[Dict[str, Any]] = []
@@ -544,6 +547,30 @@ def refresh_arbitrage_master_market_data(
     written = bulk_update_market_data(updates)
     elapsed = (_now_ist() - started).total_seconds()
 
+    candle_keys_requested = len({ik for _, _, ik in candle_keys}) if fetch_candles else 0
+    failed_ik_set = set(candle_failed_iks)
+    # Map failed instrument keys → stocks (and which legs missed).
+    denied_by_stock: Dict[str, List[str]] = {}
+    for stock, leg, ik in candle_keys:
+        if ik in failed_ik_set:
+            denied_by_stock.setdefault(str(stock), [])
+            if leg not in denied_by_stock[str(stock)]:
+                denied_by_stock[str(stock)].append(leg)
+    denied_symbols = sorted(denied_by_stock.keys())
+    deny_pct = (
+        round(100.0 * candle_errors / candle_keys_requested, 1)
+        if candle_keys_requested
+        else 0.0
+    )
+
+    rl_stats: Dict[str, Any] = {}
+    try:
+        from backend.services.upstox_rate_limiter import stats as candle_rl_stats
+
+        rl_stats = candle_rl_stats() or {}
+    except Exception:
+        rl_stats = {}
+
     summary = {
         "success": True,
         "execution": execution,
@@ -553,9 +580,13 @@ def refresh_arbitrage_master_market_data(
         "ltp_legs": list(legs_for_ltp),
         "candle_legs": list(legs_for_candles),
         "ws_ltp_overlays": ws_n,
-        "candle_keys_requested": len({ik for _, _, ik in candle_keys}) if fetch_candles else 0,
+        "candle_keys_requested": candle_keys_requested,
         "candle_indicators_ok": len(indicators_by_key),
         "candle_errors": candle_errors,
+        "candle_deny_pct": deny_pct,
+        "candle_denied_symbols": denied_symbols,
+        "candle_denied_by_stock": denied_by_stock,
+        "candle_rl": rl_stats,
         "status_ok": ok_rows,
         "status_partial": partial_rows,
         "status_failed": failed_rows,
@@ -563,4 +594,10 @@ def refresh_arbitrage_master_market_data(
         "updated_at_ist": _now_ist().strftime("%Y-%m-%d %H:%M:%S"),
     }
     logger.info("market_data refresh: %s", summary)
+    try:
+        from backend.services.market_data.warm_cycle_log import record_warm_cycle
+
+        record_warm_cycle(summary)
+    except Exception as log_exc:
+        logger.debug("warm_cycle_log record skipped: %s", log_exc)
     return summary

@@ -282,6 +282,7 @@ class LeftMenu {
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
                 <li class="nav-item nav-item-admin" data-page="kavachIgnitionDiag.html" style="display: none;" title="Administrator only"><i class="fas fa-bolt"></i><span>Ignition Diag</span></li>
                 <li class="nav-item nav-item-admin" data-page="rs-journey.html" style="display: none;" title="Administrator only"><i class="fas fa-route"></i><span>RS Journey</span></li>
+                <li class="nav-item nav-item-admin" data-page="candle-warm-deny.html" style="display: none;" title="Administrator only"><i class="fas fa-chart-area"></i><span>Candle Deny</span></li>
             </ul>
         </nav>
         <div class="panel-footer">

@@ -461,7 +461,6 @@ def _rth_candle_tip_stale(candles: List[Dict[str, Any]], *, now: Optional[dateti
 
 def _load_candles_for_symbol(db, symbol: str) -> Optional[List[Dict[str, Any]]]:
     try:
-        from backend.services.market_data import candle_cache
         from backend.services.rs_conviction_candles import candles_cache_only, load_instrument_atr_maps
         from backend.services.relative_strength_scanner import (
             CANDLE_DAYS_BACK,
@@ -475,10 +474,28 @@ def _load_candles_for_symbol(db, symbol: str) -> Optional[List[Dict[str, Any]]]:
         if not ikey:
             return None
         candles = candles_cache_only(ikey)
-        if candles and _rth_candle_tip_stale(candles):
-            # TTL-fresh but tip-regressed (partial intraday merge). Force refetch.
-            candle_cache.invalidate(ikey, CANDLE_INTERVAL)
-            candles = None
+        tip_stale = bool(candles) and _rth_candle_tip_stale(candles)
+        if tip_stale:
+            # Keep last-good series; attempt a newer fetch without clearing the cache
+            # first (invalidate-before-refetch caused empty tips under rate deny).
+            try:
+                from backend.config import settings
+                from backend.services.upstox_service import UpstoxService
+
+                raw = UpstoxService(
+                    settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET
+                ).get_historical_candles_by_instrument_key(
+                    ikey, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
+                )
+                if raw and len(raw) >= MIN_BARS:
+                    fresh = _sorted_candles(raw)
+                    if fresh and not _rth_candle_tip_stale(fresh):
+                        return fresh
+            except Exception as refetch_exc:
+                logger.debug("tip-stale refetch kept last-good for %s: %s", symbol, refetch_exc)
+            # Refetch failed or still tip-stale — return retained series (callers must
+            # treat tip_stale as unfit for READY entry; see ready_dwell_entry_shadow).
+            return candles
         if candles:
             return candles
         from backend.config import settings

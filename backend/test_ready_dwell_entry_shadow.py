@@ -450,8 +450,8 @@ def test_live_open_fallback_does_not_force_take_false(monkeypatch):
     assert s.get("trade_take_enabled") is True
 
 
-def test_live_tip_stale_uses_open_or_blanks(monkeypatch):
-    """Tip-regressed: prefer candle open fallback; dwell timing unchanged."""
+def test_live_tip_stale_blanks_entry_and_blocks_ready(monkeypatch):
+    """Tip-regressed: retain series for non-entry use, but blank Entry and demote READY."""
     since = IST.localize(datetime(2026, 7, 22, 10, 55, 0))
     now = IST.localize(datetime(2026, 7, 22, 11, 0, 0))
     monkeypatch.setenv("READY_DWELL_ENTRY_LIVE", "1")
@@ -497,11 +497,15 @@ def test_live_tip_stale_uses_open_or_blanks(monkeypatch):
         nifty_pct=0.0,
         now=now,
     )
-    assert stats.get("entry_tip_stale", 0) >= 1 or stats.get("entry_open_fallback", 0) >= 1
-    assert s["trade_entry"] == 636.0
-    assert s["trade_entry_source"] == "candle_open_fallback"
-    assert s["card_visible"] is True
-    assert s["trade_state"] == STATE_READY
+    assert stats.get("entry_tip_stale", 0) >= 1
+    assert stats.get("entry_open_fallback", 0) == 0
+    assert s.get("trade_entry") is None
+    assert s.get("trade_entry_source") is None
+    assert "ENTRY STALE" in (s.get("gate_badges") or [])
+    assert s.get("trade_take_enabled") is False
+    assert s.get("card_visible") is False
+    assert s.get("trade_state") == STATE_WAIT
+    assert "entry price unavailable" in (s.get("trade_state_reason") or "")
 
 
 def test_warning_stack_soft_hold_blank_entry_demotes_to_wait(monkeypatch):

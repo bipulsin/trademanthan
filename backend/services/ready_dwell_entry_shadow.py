@@ -862,11 +862,14 @@ def apply_ready_dwell_entry_live(
             live_e10 = None
             live_px = None
             s["entry_tip_stale"] = True
+            # Stale tip must not feed candle-open fallback either — open of a
+            # tip-regressed series is not a this-cycle fresh print.
+            s["live_candle_bar_open"] = None
             stats["entry_tip_stale"] += 1
 
         # Widespread path: empty candle_cache → no live EMA → FSM keeps sticky
         # rs_live audit EMA as trade_entry. Reload + overlay before accepting.
-        if live_e5 is None:
+        if live_e5 is None and not tip_stale:
             try:
                 from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
                 from backend.services.daily_checklist_trade_state import (
@@ -890,6 +893,7 @@ def apply_ready_dwell_entry_live(
                         live_e10 = None
                         live_px = None
                         s["entry_tip_stale"] = True
+                        s["live_candle_bar_open"] = None
                     else:
                         stats["entry_candle_reloaded"] += 1
             except Exception as exc:
@@ -911,8 +915,7 @@ def apply_ready_dwell_entry_live(
 
         # When live EMA5 is unavailable: use current 10m candle open (real print),
         # never sticky audit EMA and never a nudged/synthetic price.
-        # Include post-stack READY / WAIT-soft-hold / dwell-visible cards so the
-        # warning_stack soft-hold path cannot skip open→stale fallback.
+        # Tip-stale series are excluded — open from a lagging tip is not this-cycle.
         pre_for_entry = s.get("_pre_stack_state") or s.get("trade_state")
         post_state = s.get("trade_state")
         ready_or_dwell = (
@@ -924,7 +927,7 @@ def apply_ready_dwell_entry_live(
             or bool(s.get("ready_visible_since"))
             or s.get("zone_downgrade") in SOFT_ZONE_DOWNGRADES
         )
-        if live_e5 is None and ready_or_dwell:
+        if live_e5 is None and ready_or_dwell and not tip_stale and not s.get("entry_tip_stale"):
             open_px = _f(s.get("live_candle_bar_open"))
             if open_px is None:
                 open_px = current_10m_candle_open(
@@ -968,6 +971,20 @@ def apply_ready_dwell_entry_live(
                 s["gate_badges"] = badges
                 s["entry_audit_suppressed"] = True
                 stats["entry_audit_suppressed"] += 1
+        elif live_e5 is None and ready_or_dwell and (tip_stale or s.get("entry_tip_stale")):
+            # Tip-stale: blank Entry/SL; READY gate below demotes to WAIT.
+            s["trade_entry"] = None
+            s["trade_sl"] = None
+            s["trade_risk_inr"] = None
+            s["trade_entry_source"] = None
+            s["trade_entry_source_label"] = None
+            s["trade_take_enabled"] = False
+            badges = list(s.get("gate_badges") or [])
+            if "ENTRY STALE" not in badges:
+                badges.append("ENTRY STALE")
+            s["gate_badges"] = badges
+            s["entry_audit_suppressed"] = True
+            stats["entry_audit_suppressed"] += 1
 
         # Defensive: any blank Entry on a READY-family / dwell card must carry
         # ENTRY STALE (covers paths that nulled entry without the branch above).
