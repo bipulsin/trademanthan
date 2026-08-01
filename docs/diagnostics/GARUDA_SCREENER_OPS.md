@@ -5,7 +5,7 @@
 **Module:** `backend/services/garuda_screener/`  
 **Job:** `garuda_screener_10m` in `smart_future_algo` (Mon–Fri `:06/:16/:26/:36/:46/:56` IST)  
 **API:** `GET /api/dashboard/garuda/latest`  
-**Export API:** `GET /api/export/garuda-shadow` (JWT Bearer auth; read-only joins of Top-6 + RS/grade/forward price)  
+**Export API:** `GET /api/export/garuda-shadow` (JWT Bearer; schema_version 2 — Top-6 `rows` + `ready_now_promotions` + `session_summaries`)  
 **UI:** `dailyRSchecklist.html` — Garuda section with permanent non-dismissible testing banner  
 **Table:** `garuda_screener_log` (Option A: one row per symbol per `bar_end`)
 

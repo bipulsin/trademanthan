@@ -20,7 +20,7 @@ from backend.services.garuda_screener.job import ensure_garuda_screener_log
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_PAGE_LIMIT = 200
 MAX_PAGE_LIMIT = 1000
 
@@ -28,6 +28,21 @@ MAX_PAGE_LIMIT = 1000
 RS_MATCH_WINDOW = timedelta(minutes=20)
 
 SESSION_END_IST = time(15, 30)
+
+# Field contract for ready_now_promotions[] (join on symbol + session_date).
+READY_NOW_PROMOTION_FIELDS = {
+    "symbol": "str",
+    "session_date": "YYYY-MM-DD",
+    "promoted_at": "ISO-8601 timestamptz — episode start",
+    "confidence_grade": "str | null",
+    "trade_score": "float | null",
+    "kavach_state": "str | null — BUY/SELL/… from Kavach panel state",
+    "rendered_state": "READY | READY(RECHECK)",
+    "entry_seq": "int — 1-based per symbol/session",
+    "ready_visible_since": "ISO-8601 | null",
+    "logged_at": "ISO-8601 — consistency_log row timestamp",
+    "score_source": "inputs | kavach_audit | null",
+}
 
 _EXPORT_NOTES = {
     "qualifiers": (
@@ -52,6 +67,18 @@ _EXPORT_NOTES = {
     "data_completeness": (
         "Per-row flag listing missing/null expected joins so nulls are not "
         "misread as zeros."
+    ),
+    "ready_now_promotions": (
+        "Every READY / READY(RECHECK) *entry* that session from "
+        "kavach_ready_consistency_log (non-READY→READY transition; re-entries "
+        "included). promoted_at prefers inputs.ready_visible_since. "
+        "confidence_grade from inputs.confidence; trade_score/kavach_state from "
+        "inputs when present, else nearest rs_live_kavach_audit within 30m. "
+        "Not paginated with `rows` — full date-range list (symbol filter applies)."
+    ),
+    "session_summaries": (
+        "Per session_date: first READY NOW promotion time/symbol (any symbol), "
+        "promotion counts, and first Garuda Top-6 bar_end that day."
     ),
 }
 
@@ -641,6 +668,247 @@ def _qualifier_dict(r: Any) -> Dict[str, Any]:
     }
 
 
+def _is_ready_family(state: Any) -> bool:
+    return str(state or "").upper().startswith("READY")
+
+
+def _parse_ts(val: Any) -> Optional[datetime]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return _as_ist(val)
+    try:
+        dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    return _as_ist(dt)
+
+
+def fetch_ready_now_promotions(
+    db,
+    *,
+    start_date: str,
+    end_date: str,
+    symbol: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """READY-family entry events (first + re-entries) for [start_date, end_date]."""
+    where = [
+        "session_date >= CAST(:d0 AS date)",
+        "session_date <= CAST(:d1 AS date)",
+    ]
+    params: Dict[str, Any] = {"d0": start_date, "d1": end_date}
+    if symbol:
+        where.append("UPPER(TRIM(symbol)) = :sym")
+        params["sym"] = symbol.upper().strip()
+    clause = " AND ".join(where)
+    rows = db.execute(
+        text(
+            f"""
+            SELECT session_date::text AS session_date,
+                   UPPER(TRIM(symbol)) AS symbol,
+                   rendered_state,
+                   logged_at,
+                   inputs
+            FROM kavach_ready_consistency_log
+            WHERE {clause}
+            ORDER BY session_date, symbol, logged_at
+            """
+        ),
+        params,
+    ).mappings().all()
+
+    by_key: Dict[Tuple[str, str], List[Any]] = {}
+    for r in rows:
+        key = (r["session_date"], r["symbol"])
+        by_key.setdefault(key, []).append(r)
+
+    events: List[Dict[str, Any]] = []
+    for (sd, sym), seq in by_key.items():
+        prev_ready = False
+        last_visible: Optional[str] = None
+        entry_seq = 0
+        for r in seq:
+            ready = _is_ready_family(r.get("rendered_state"))
+            if not ready:
+                prev_ready = False
+                last_visible = None
+                continue
+            inp = r.get("inputs") if isinstance(r.get("inputs"), dict) else {}
+            visible = inp.get("ready_visible_since")
+            visible_s = str(visible) if visible else None
+            is_new = False
+            if not prev_ready:
+                is_new = True
+            elif visible_s and last_visible and visible_s != last_visible:
+                is_new = True
+            if visible_s:
+                last_visible = visible_s
+            if not is_new:
+                prev_ready = True
+                continue
+
+            entry_seq += 1
+            promoted = _parse_ts(visible) or _parse_ts(r.get("logged_at"))
+            grade = inp.get("confidence") or inp.get("confidence_grade")
+            trade_score = inp.get("trade_score")
+            if trade_score is None:
+                trade_score = inp.get("dashboard_score")
+            kavach_state = inp.get("kavach_state") or inp.get("dashboard_kavach")
+            score_source = None
+            if any(
+                inp.get(k) is not None
+                for k in ("trade_score", "dashboard_score", "kavach_state", "dashboard_kavach")
+            ):
+                score_source = "inputs"
+
+            events.append(
+                {
+                    "symbol": sym,
+                    "session_date": sd,
+                    "promoted_at": _iso(promoted),
+                    "confidence_grade": grade,
+                    "trade_score": _f(trade_score),
+                    "kavach_state": kavach_state,
+                    "rendered_state": r.get("rendered_state"),
+                    "entry_seq": entry_seq,
+                    "ready_visible_since": visible_s,
+                    "logged_at": _iso(r.get("logged_at")),
+                    "score_source": score_source,
+                    "_promoted_dt": promoted,
+                }
+            )
+            prev_ready = True
+
+    _enrich_ready_from_audit(db, events, start_date, end_date)
+    for e in events:
+        e.pop("_promoted_dt", None)
+    events.sort(key=lambda x: (x["session_date"], x["promoted_at"] or "", x["symbol"]))
+    return events
+
+
+def _enrich_ready_from_audit(
+    db, events: List[Dict[str, Any]], start_date: str, end_date: str
+) -> None:
+    need = [e for e in events if e.get("trade_score") is None or e.get("kavach_state") is None]
+    if not need:
+        return
+    syms = sorted({e["symbol"] for e in need})
+    audits = db.execute(
+        text(
+            """
+            SELECT session_date::text AS session_date,
+                   UPPER(TRIM(symbol)) AS symbol,
+                   computed_at,
+                   trade_score,
+                   kavach_state,
+                   confidence_grade
+            FROM rs_live_kavach_audit
+            WHERE session_date BETWEEN CAST(:d0 AS date) AND CAST(:d1 AS date)
+              AND UPPER(TRIM(symbol)) = ANY(:syms)
+            ORDER BY session_date, symbol, computed_at
+            """
+        ),
+        {"d0": start_date, "d1": end_date, "syms": syms},
+    ).mappings().all()
+    by_key: Dict[Tuple[str, str], List[Any]] = {}
+    for a in audits:
+        by_key.setdefault((a["session_date"], a["symbol"]), []).append(a)
+
+    for e in need:
+        seq = by_key.get((e["session_date"], e["symbol"])) or []
+        if not seq:
+            continue
+        target = e.get("_promoted_dt") or _parse_ts(e.get("promoted_at"))
+        if not target:
+            continue
+        best = None
+        best_delta = None
+        for a in seq:
+            at = _parse_ts(a.get("computed_at"))
+            if not at:
+                continue
+            delta = abs((at - target).total_seconds())
+            if best_delta is None or delta < best_delta:
+                best_delta = delta
+                best = a
+        if not best or best_delta is None or best_delta > 30 * 60:
+            continue
+        if e.get("trade_score") is None and best.get("trade_score") is not None:
+            e["trade_score"] = _f(best["trade_score"])
+            e["score_source"] = "kavach_audit"
+        if e.get("kavach_state") is None and best.get("kavach_state"):
+            e["kavach_state"] = best["kavach_state"]
+            if e.get("score_source") is None:
+                e["score_source"] = "kavach_audit"
+        if e.get("confidence_grade") is None and best.get("confidence_grade"):
+            e["confidence_grade"] = best["confidence_grade"]
+
+
+def build_session_summaries(
+    *,
+    start_date: str,
+    end_date: str,
+    ready_promotions: List[Dict[str, Any]],
+    db,
+    symbol: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Per-day first READY NOW + Garuda Top-6 timing sanity fields."""
+    d0 = date.fromisoformat(start_date)
+    d1 = date.fromisoformat(end_date)
+    days: List[str] = []
+    cur = d0
+    while cur <= d1:
+        days.append(cur.isoformat())
+        cur += timedelta(days=1)
+
+    ready_by: Dict[str, List[Dict[str, Any]]] = {}
+    for e in ready_promotions:
+        ready_by.setdefault(e["session_date"], []).append(e)
+
+    where = [
+        "top6_rank IS NOT NULL",
+        "session_date >= CAST(:d0 AS date)",
+        "session_date <= CAST(:d1 AS date)",
+    ]
+    params: Dict[str, Any] = {"d0": start_date, "d1": end_date}
+    if symbol:
+        where.append("UPPER(TRIM(symbol)) = :sym")
+        params["sym"] = symbol.upper().strip()
+    clause = " AND ".join(where)
+    g_rows = db.execute(
+        text(
+            f"""
+            SELECT session_date::text AS session_date,
+                   MIN(bar_end) AS first_bar_end,
+                   COUNT(*) AS n
+            FROM garuda_screener_log
+            WHERE {clause}
+            GROUP BY session_date
+            """
+        ),
+        params,
+    ).mappings().all()
+    g_by = {r["session_date"]: r for r in g_rows}
+
+    out: List[Dict[str, Any]] = []
+    for sd in days:
+        rs = ready_by.get(sd) or []
+        first_r = min(rs, key=lambda x: x["promoted_at"] or "9999") if rs else None
+        g = g_by.get(sd) or {}
+        out.append(
+            {
+                "session_date": sd,
+                "first_ready_now_at": (first_r or {}).get("promoted_at"),
+                "first_ready_now_symbol": (first_r or {}).get("symbol"),
+                "ready_now_promotion_count": len(rs),
+                "distinct_ready_now_symbols": len({e["symbol"] for e in rs}),
+                "first_garuda_top6_at": _iso(g.get("first_bar_end")),
+                "garuda_top6_row_count": int(g.get("n") or 0),
+            }
+        )
+    return out
+
+
 def export_garuda_shadow(
     *,
     start_date: Optional[str] = None,
@@ -679,7 +947,12 @@ def export_garuda_shadow(
                 "offset": off,
                 "has_more": False,
                 "notes": _EXPORT_NOTES,
+                "field_schema": {
+                    "ready_now_promotions": READY_NOW_PROMOTION_FIELDS,
+                },
                 "rows": [],
+                "ready_now_promotions": [],
+                "session_summaries": [],
                 "empty": True,
                 "message": "No Garuda Top-6 rows in garuda_screener_log yet.",
             }
@@ -764,6 +1037,17 @@ def export_garuda_shadow(
                 }
             )
 
+        ready_promos = fetch_ready_now_promotions(
+            db, start_date=d0, end_date=d1, symbol=sym
+        )
+        session_summaries = build_session_summaries(
+            start_date=d0,
+            end_date=d1,
+            ready_promotions=ready_promos,
+            db=db,
+            symbol=sym,
+        )
+
         return {
             "ok": True,
             "schema_version": SCHEMA_VERSION,
@@ -777,7 +1061,16 @@ def export_garuda_shadow(
             "offset": off,
             "has_more": (off + len(rows_out)) < total,
             "notes": _EXPORT_NOTES,
+            "field_schema": {
+                "ready_now_promotions": READY_NOW_PROMOTION_FIELDS,
+            },
             "rows": rows_out,
+            "ready_now_promotions": ready_promos,
+            "session_summaries": session_summaries,
+            "counts": {
+                "ready_now_promotions": len(ready_promos),
+                "session_summaries": len(session_summaries),
+            },
         }
     except Exception as exc:
         logger.warning("garuda shadow export failed: %s", exc, exc_info=True)

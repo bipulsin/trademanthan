@@ -39,10 +39,16 @@ def garuda_shadow_export(
     ),
     _user: User = Depends(get_current_user),
 ):
-    """Export Garuda Top-6 qualification events with RS/grade/forward joins.
+    """Export Garuda Top-6 qualification events with RS/grade/forward joins,
+    plus READY NOW promotion events and per-session first-READY summaries.
 
     Auth: ``Authorization: Bearer <JWT>`` (same dashboard session token as
     other authenticated tradewithcto.com APIs).
+
+    Response blocks (schema_version ≥ 2):
+      - ``rows``: Garuda Top-6 qualifier rows (paginated)
+      - ``ready_now_promotions``: READY entry events for the date range
+      - ``session_summaries``: first READY NOW time per day
     """
     data = export_garuda_shadow(
         start_date=start_date,

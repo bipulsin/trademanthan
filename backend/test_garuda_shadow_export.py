@@ -22,7 +22,7 @@ def _dt(s: str) -> datetime:
 
 
 def test_schema_version_stable():
-    assert SCHEMA_VERSION == 1
+    assert SCHEMA_VERSION == 2
 
 
 def test_nearest_rs_within_window():
@@ -251,3 +251,71 @@ def test_data_completeness_complete_when_all_present():
     )
     assert completeness["complete"] is True
     assert completeness["missing_fields"] == []
+
+
+def test_ready_now_promotion_field_schema():
+    from backend.services.garuda_screener.export import (
+        READY_NOW_PROMOTION_FIELDS,
+        SCHEMA_VERSION,
+        _is_ready_family,
+    )
+
+    assert SCHEMA_VERSION >= 2
+    for k in (
+        "symbol",
+        "session_date",
+        "promoted_at",
+        "confidence_grade",
+        "trade_score",
+        "kavach_state",
+        "rendered_state",
+        "entry_seq",
+    ):
+        assert k in READY_NOW_PROMOTION_FIELDS
+    assert _is_ready_family("READY")
+    assert _is_ready_family("READY(RECHECK)")
+    assert not _is_ready_family("WATCHING")
+
+
+def test_session_summaries_first_ready():
+    from backend.services.garuda_screener.export import build_session_summaries
+
+    class _FakeDB:
+        def execute(self, *_a, **_k):
+            class _R:
+                def mappings(self):
+                    return self
+
+                def all(self):
+                    return [
+                        {
+                            "session_date": "2026-07-31",
+                            "first_bar_end": None,
+                            "n": 0,
+                        }
+                    ]
+
+            return _R()
+
+    promos = [
+        {
+            "symbol": "HYUNDAI",
+            "session_date": "2026-07-31",
+            "promoted_at": "2026-07-31T11:25:05+05:30",
+        },
+        {
+            "symbol": "KALYANKJIL",
+            "session_date": "2026-07-31",
+            "promoted_at": "2026-07-31T10:46:57+05:30",
+        },
+    ]
+    summaries = build_session_summaries(
+        start_date="2026-07-31",
+        end_date="2026-07-31",
+        ready_promotions=promos,
+        db=_FakeDB(),
+    )
+    assert len(summaries) == 1
+    assert summaries[0]["first_ready_now_symbol"] == "KALYANKJIL"
+    assert summaries[0]["ready_now_promotion_count"] == 2
+    assert summaries[0]["distinct_ready_now_symbols"] == 2

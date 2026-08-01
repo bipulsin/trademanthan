@@ -2213,6 +2213,19 @@ def enrich_stocks_trade_state(
             inp["card_visible"] = s_final.get("card_visible")
             inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
             inp["ready_visible_since"] = s_final.get("ready_visible_since")
+            # Export helpers for /api/export/garuda-shadow ready_now_promotions (not gating).
+            if s_final.get("trade_score") is not None:
+                inp["trade_score"] = s_final.get("trade_score")
+            elif s_final.get("dashboard_score") is not None:
+                inp["trade_score"] = s_final.get("dashboard_score")
+                inp["dashboard_score"] = s_final.get("dashboard_score")
+            kav_state = (
+                s_final.get("dashboard_kavach_live")
+                or s_final.get("dashboard_kavach")
+                or s_final.get("kavach_state")
+            )
+            if kav_state is not None:
+                inp["kavach_state"] = kav_state
             # Live regime blend (REGIME UNSTABLE for stack = blend < threshold).
             for k in (
                 "regime_blend",
