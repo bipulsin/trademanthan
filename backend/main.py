@@ -36,6 +36,7 @@ import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
 import backend.routers.daily_checklist as daily_checklist
 import backend.routers.garuda_screener as garuda_screener
+import backend.routers.garuda_export as garuda_export
 import backend.routers.rs_confidence_divergence as rs_confidence_divergence
 import backend.routers.rs_journey as rs_journey
 import backend.routers.kavach_ignition_diagnostics as kavach_ignition_diagnostics
@@ -341,6 +342,8 @@ app.include_router(daily_checklist.router)
 app.include_router(daily_checklist.router, prefix="/scan")
 app.include_router(garuda_screener.router)
 app.include_router(garuda_screener.router, prefix="/scan")
+app.include_router(garuda_export.router)
+app.include_router(garuda_export.router, prefix="/scan")
 app.include_router(rs_confidence_divergence.router)
 app.include_router(rs_confidence_divergence.router, prefix="/scan")
 app.include_router(rs_journey.router)

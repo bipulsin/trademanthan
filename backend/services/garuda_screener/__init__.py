@@ -10,6 +10,7 @@ from backend.services.garuda_screener.job import (
     lookup_garuda_confluence,
     run_live_garuda_screener,
 )
+from backend.services.garuda_screener.export import export_garuda_shadow
 
 __all__ = [
     "GarudaBarContext",
@@ -19,4 +20,5 @@ __all__ = [
     "run_live_garuda_screener",
     "get_latest_top6",
     "lookup_garuda_confluence",
+    "export_garuda_shadow",
 ]
