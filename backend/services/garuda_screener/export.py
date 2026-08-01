@@ -902,7 +902,7 @@ def build_session_summaries(
                 "first_ready_now_symbol": (first_r or {}).get("symbol"),
                 "ready_now_promotion_count": len(rs),
                 "distinct_ready_now_symbols": len({e["symbol"] for e in rs}),
-                "first_garuda_top6_at": _iso(g.get("first_bar_end")),
+                "first_garuda_top6_at": _iso(_as_ist(g.get("first_bar_end"))),
                 "garuda_top6_row_count": int(g.get("n") or 0),
             }
         )
