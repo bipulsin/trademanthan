@@ -12,13 +12,13 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytz
 
 from backend.services.kavach_10m import aggregate_10m_bars
 from backend.services.kavach_volume import _f, _parse_ist
-from backend.services.relative_strength_scanner import _parse_ist_date, _sorted_candles
+from backend.services.relative_strength_scanner import _sorted_candles
 from backend.services.vajra.indicators import cumulative_vwap, ema_series
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,53 @@ def step_vw(
     return float(prev_vw), cls
 
 
-EMA_RELIABLE_AFTER_BARS = 6  # first N session 10m bars: EMA5 not yet trusted for EW
+EMA_RELIABLE_AFTER_BARS = 0  # removed 2026-08-02: prior-session EMA seed is exact from bar 1
+
+
+def ema_seeded(values: Sequence[float], period: int, seed: float) -> List[float]:
+    """Close-only EMA continuing from ``seed`` (prior-session final EMA)."""
+    if not values:
+        return []
+    k = 2.0 / (max(1, int(period)) + 1.0)
+    out: List[float] = []
+    ema_v = float(seed)
+    for v in values:
+        ema_v = float(v) * k + ema_v * (1.0 - k)
+        out.append(ema_v)
+    return out
+
+
+def prior_session_10m_ema_seed(
+    candles: List[Dict[str, Any]], session_date: str, period: int = 5
+) -> Optional[float]:
+    """Final close-EMA on aggregated 10m bars strictly before ``session_date``.
+
+    Matches the v1.2 backtest seed: recursive EMA continued from prior history,
+    so today's bar-1 EMA is the mathematically correct continuation (no warm-up).
+    """
+    prior_closes: List[float] = []
+    for b in aggregate_10m_bars(_sorted_candles(candles or [])):
+        dt = b.get("bar_end")
+        if not isinstance(dt, datetime):
+            dt = _parse_ist(b.get("timestamp"))
+            if dt is not None:
+                dt = dt + timedelta(minutes=5)
+        if dt is None:
+            continue
+        if dt.tzinfo is None:
+            dt = IST.localize(dt)
+        else:
+            dt = dt.astimezone(IST)
+        d = dt.strftime("%Y-%m-%d")
+        if d < session_date:
+            cl = _f(b.get("close"))
+            if cl is not None:
+                prior_closes.append(float(cl))
+        elif d >= session_date:
+            break
+    if len(prior_closes) < max(1, int(period)):
+        return None
+    return float(ema_series(prior_closes, period)[-1])
 
 
 def step_ew_v12(
@@ -245,7 +291,13 @@ def enrich_session_10m_bars(
     lows = [b["low"] for b in day]
     vols = [b["volume"] for b in day]
     vwap_s = cumulative_vwap(highs, lows, closes, vols)
-    ema5_s = ema_series(closes, 5)
+    seed5 = prior_session_10m_ema_seed(candles, session_date, 5)
+    if seed5 is not None:
+        ema5_s = ema_seeded(closes, 5, seed5)
+    else:
+        # No prior history: cold-start EMA. Buffer stays 0; start_aligned is gone so
+        # bar 1 only seeds prev_side — no free EW=100 from an unreliable first print.
+        ema5_s = ema_series(closes, 5)
     session_open = float(day[0]["open"])
     out = []
     for i, b in enumerate(day):
@@ -256,6 +308,7 @@ def enrich_session_10m_bars(
                 "ema5": float(ema5_s[i]),
                 "session_open": session_open,
                 "bar_hhmm": b["bar_end"].strftime("%H:%M"),
+                # Prior-session seed → EMA exact from bar 1; fixed buffer removed.
                 "ema_reliable": i >= EMA_RELIABLE_AFTER_BARS,
             }
         )

@@ -59,6 +59,23 @@ def test_genuine_cross_arms_100():
     assert st["armed"] is True
 
 
+def test_ema_seeded_exact_from_bar1():
+    """Prior seed → bar1 EMA is recursive continuation, not cold-start close."""
+    from backend.services.structural_quality_score import EMA_RELIABLE_AFTER_BARS, ema_seeded
+    from backend.services.vajra.indicators import ema_series
+
+    assert EMA_RELIABLE_AFTER_BARS == 0
+    closes = [100.0, 102.0, 101.0, 103.0]
+    seed = 99.5
+    k = 2.0 / 6.0
+    expected_b1 = 100.0 * k + seed * (1.0 - k)
+    seeded = ema_seeded(closes, 5, seed)
+    cold = ema_series(closes, 5)
+    assert abs(seeded[0] - expected_b1) < 1e-9
+    assert abs(cold[0] - 100.0) < 1e-9  # cold starts at first close
+    assert abs(seeded[0] - cold[0]) > 0.1
+
+
 def test_composite_maxish():
     # 0.15*100*5 + 25 = 100
     t = composite_total(

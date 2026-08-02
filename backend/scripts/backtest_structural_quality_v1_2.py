@@ -4,7 +4,7 @@
 Data fixes vs v1.1:
   - VWAP from 1m typical price (H+L+C)/3 × volume, session-anchored 09:15 IST
   - EMA5/EMA10 on **close only**, seeded from prior session final EMA (carry-forward)
-  - ema_reliable=false for first 6 session 10m bars (convergence window)
+  - ema_reliable: prior-session EMA seed is exact from bar 1 (6-bar buffer removed 2026-08-02)
 
 Formula fixes:
   - EW: if EMA5 already on qualifying side at first evaluated bar → EW=100 (start aligned)
@@ -52,7 +52,7 @@ from backend.services.vajra.indicators import cumulative_vwap, ema_series
 
 IST = pytz.timezone("Asia/Kolkata")
 SESSION_OPEN = dtime(9, 15)
-EMA_RELIABLE_AFTER_BARS = 6  # first N session 10m bars flagged unreliable
+EMA_RELIABLE_AFTER_BARS = 0  # removed 2026-08-02: prior-session seed is exact from bar 1
 
 
 def ema_seeded(values: Sequence[float], period: int, seed: float) -> List[float]:
@@ -588,7 +588,7 @@ def write_md(path: Path, payload: Dict[str, Any]) -> None:
         "buckets skewed early bars; 1m path is the fix.)",
         "2. **EMA5/EMA10:** computed on **close price only** (unchanged definition). "
         "Seeded from **prior session final EMA** (carry-forward), not reset-to-close on bar 1. "
-        "`ema_reliable=false` for first 6 session 10m bars.",
+        "Prior-session EMA seed is exact from bar 1 (`EMA_RELIABLE_AFTER_BARS=0`).",
         "",
         "## Formula fixes",
         "",
