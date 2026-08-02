@@ -180,15 +180,22 @@ def simulate_day(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument(
+        "--warm-minutes-only",
+        action="store_true",
+        help="Keep only scans at :05/:15/:25/:35/:45/:55 (10m warm-aligned subsample).",
+    )
     args = ap.parse_args()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    warm_mins = {5, 15, 25, 35, 45, 55}
 
     db = SessionLocal()
     report: Dict[str, Any] = {
         "window": SESSIONS,
         "note": "Boards reconstructed from RSS Top-10 + beyond_persist exclusions (scored set only).",
         "bonuses": BONUSES,
+        "warm_minutes_only": bool(args.warm_minutes_only),
         "by_day": {},
         "totals": {},
     }
@@ -196,6 +203,12 @@ def main() -> int:
         totals = {b: {"churn_events_total": 0, "n_scans": 0, "days": 0} for b in BONUSES}
         for day in SESSIONS:
             boards = load_boards(db, day)
+            if args.warm_minutes_only:
+                boards = {
+                    st: sides
+                    for st, sides in boards.items()
+                    if _ist(st).minute in warm_mins
+                }
             day_out = {}
             for b in BONUSES:
                 sim = simulate_day(boards, b)
@@ -226,9 +239,13 @@ def main() -> int:
     finally:
         db.close()
 
-    (out_dir / "hysteresis_churn.json").write_text(json.dumps(report, indent=2, default=str))
+    suffix = "_warm10m" if args.warm_minutes_only else ""
+    (out_dir / f"hysteresis_churn{suffix}.json").write_text(
+        json.dumps(report, indent=2, default=str)
+    )
     lines = [
-        "# RS Top-10 hysteresis churn (2026-07-27..31)",
+        "# RS Top-10 hysteresis churn (2026-07-27..31)"
+        + (" — warm-minute subsample" if args.warm_minutes_only else ""),
         "",
         "Reconstructed boards from RSS + `beyond_persist_top_n` exclusions.",
         "",
@@ -242,7 +259,7 @@ def main() -> int:
             f"{t.get('churn_reduction_vs_B0_pct', '—')}% |"
         )
     lines += ["", "Proposed default **B20 (0.20 RS pts)**.", ""]
-    (out_dir / "README.md").write_text("\n".join(lines))
+    (out_dir / f"README{suffix}.md").write_text("\n".join(lines))
     print(json.dumps(report["totals"], indent=2))
     return 0
 

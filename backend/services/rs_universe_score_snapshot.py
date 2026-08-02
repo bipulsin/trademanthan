@@ -34,8 +34,9 @@ SHADOW_ENABLED = os.getenv("RS_UNIVERSE_SCORE_SHADOW", "1").strip().lower() in (
     "yes",
     "on",
 )
-# Grade-first cutover: live grade readers may prefer this table when set.
-GRADE_CUTOVER = os.getenv("RS_UNIVERSE_GRADE_CUTOVER", "0").strip().lower() in (
+# Grade-first cutover: live grade readers prefer rs_universe_score_snapshot when set.
+# Default on (2026-08-02): grade coverage only — lock/R2 still on Top-10 RSS.
+GRADE_CUTOVER = os.getenv("RS_UNIVERSE_GRADE_CUTOVER", "1").strip().lower() in (
     "1",
     "true",
     "yes",

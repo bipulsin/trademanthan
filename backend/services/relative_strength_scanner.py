@@ -629,7 +629,7 @@ def _persist(scan_time: datetime, ranked: List[Dict[str, Any]]) -> None:
 
 
 def run_relative_strength_scan(
-    scan_trigger: str = "5m_interval", *, cache_only: Optional[bool] = None
+    scan_trigger: str = "10m_warm", *, cache_only: Optional[bool] = None
 ) -> Dict[str, Any]:
     """Run one full scan and persist Top-5 Bullish / Bearish. Returns a summary.
 

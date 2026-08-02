@@ -1,22 +1,20 @@
 # Plan: Full-Universe RS Score/Grade + Dynamic Top-10 (Hysteresis)
 
-**Status:** Design for review — **no live cutover in this pass.**  
+**Status (2026-08-02):** Phase S0 deployed; **RS cron = 10m warm-synced**; **`RS_UNIVERSE_GRADE_CUTOVER` default on** (grade coverage only). Lock/R2 deferred.  
 **Driver:** TVSMOTOR / OBEROIRLTY grade LOCF gaps (Top-10 persist + lock-only audit).  
 **Constraint:** No change to READY NOW promotion rules or Confidence Grade formula — coverage + persistence + Top-10 membership mechanics only.
 
 ---
 
-## Cadence confirmation (2026-08-02) — **KEEP 5m**
+## Cadence confirmation (2026-08-02) — **ALIGN TO 10m warm**
 
-Verified in code before S0:
+Verified in code before S0, then cutover decision same day:
 
 1. Live RS (`cache_only=True` in session) reads **`candle_cache.get_recent(..., "minutes/5")` only**. On miss it returns unscored — **no Upstox per-symbol fetch**.
-2. Shared warm (`CANDLE_INTERVAL = minutes/5` in `market_data/constants.py`) is what fills that cache on the 10m clock; RS re-runs at :00/:05 are **pure compute** on the same 5m bars (may recompute twice per warm window).
-3. NIFTY % prefers `index_prices` DB; Upstox fallback is **one index key**, not the FO universe.
+2. Shared warm (`CANDLE_INTERVAL = minutes/5`) fills that cache on the **10m** clock (`:05/:15/…`). Off-tick RS (:00/:10/…) re-scored the **same** cached series — no freshness benefit.
+3. **Final cadence:** RS job = **10m warm-synced** (`relative_strength_scanner_10m`, same minutes as warm). Anchor labels `:30` remapped to `:25`.
 
-**Hard rule satisfied:** 5m cadence adds **no** additional FO candle API load. Final cadence: **5m**.
-
-§9 locked: bonus **0.20**, neutrals every cycle, grade-first cutover (flag), audit kept, lock/R2 deferred.
+§9 locked: bonus **0.20**, neutrals every cycle, grade-first cutover **live**, audit kept, lock/R2 deferred.
 
 
 | Assumption in prompt | Code today | Plan stance |

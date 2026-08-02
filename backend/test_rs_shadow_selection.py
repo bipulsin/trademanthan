@@ -29,7 +29,17 @@ def test_volume_weighted_top5_picks_five():
 
 
 def test_shadow_checkpoints_match_anchor_subset():
-    assert set(SHADOW_CHECKPOINTS) <= {"09:25", "09:45", "10:15", "10:30", "12:30", "14:30"}
+    assert set(SHADOW_CHECKPOINTS) <= {
+        "09:25",
+        "09:45",
+        "10:15",
+        "10:25",
+        "10:30",
+        "12:25",
+        "12:30",
+        "14:25",
+        "14:30",
+    }
 
 
 def test_run_shadow_no_live_snapshot_writes():

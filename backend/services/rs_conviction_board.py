@@ -29,10 +29,10 @@ def today_ist() -> str:
 
 
 def is_board_cycle_for_scheduled_minute(hour: int, minute: int, cfg: Optional[Dict[str, Any]] = None) -> bool:
-    """True when the RS 5m job's scheduled (hour, minute) is a board-close cycle.
+    """True when the RS 10m warm-synced job's scheduled minute is a board-close cycle.
 
     Uses the cron-fired minute captured at job start — not wall clock after a long RS
-  scan — so APScheduler misfire/coalesce does not silently skip logging.
+    scan — so APScheduler misfire/coalesce does not silently skip logging.
     """
     cfg = cfg or get_config()
     m = int(hour) * 60 + int(minute)

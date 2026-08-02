@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 
-ANCHOR_LABELS: tuple[str, ...] = ("09:25", "09:45", "10:30", "12:30", "14:30")
+# Warm-synced minutes only (RS cron :05/:15/…). Former :30 labels remapped to :25.
+ANCHOR_LABELS: tuple[str, ...] = ("09:25", "09:45", "10:25", "12:25", "14:25")
 
 _INSERT = text(
     """
@@ -213,7 +214,7 @@ def query_anchor_snapshots(
 
 
 def anchor_overlap_at_0925() -> Dict[str, Any]:
-    """Compare today's 09:25 anchor vs yesterday's final 14:30 lists."""
+    """Compare today's 09:25 anchor vs yesterday's final afternoon list (14:25, else 14:30)."""
     db = SessionLocal()
     try:
         today = _today()
@@ -245,8 +246,9 @@ def anchor_overlap_at_0925() -> Dict[str, Any]:
 
         bull_t = syms(today, "09:25", "BULLISH")
         bear_t = syms(today, "09:25", "BEARISH")
-        bull_y = syms(yday, "14:30", "BULLISH")
-        bear_y = syms(yday, "14:30", "BEARISH")
+        # Prefer warm-synced 14:25; fall back to legacy 14:30 for pre-cutover days.
+        bull_y = syms(yday, "14:25", "BULLISH") or syms(yday, "14:30", "BULLISH")
+        bear_y = syms(yday, "14:25", "BEARISH") or syms(yday, "14:30", "BEARISH")
         bull_ov = len(bull_t & bull_y)
         bear_ov = len(bear_t & bear_y)
         if bull_ov >= 3 or bear_ov >= 3:

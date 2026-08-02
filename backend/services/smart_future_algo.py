@@ -1095,8 +1095,9 @@ class SmartFutureAlgoScheduler:
                 "✅ Phase 1: Smart Futures picker + Vajra rating/discretionary jobs removed"
             )
 
-            # Relative Strength Scanner — every 5 min, 09:20–15:15 IST (Mon–Fri)
-            def _run_relative_strength_5m():
+            # Relative Strength Scanner — warm-synced 10m (:05/:15/…), 09:20–15:15 IST
+            # Off-tick :00/:10/:20/:30/:40/:50 dropped: same candle_cache series until next warm.
+            def _run_relative_strength_10m():
                 ist = pytz.timezone("Asia/Kolkata")
                 now = datetime.now(ist)
                 if _skip_ist_non_trading_job("Relative Strength scan", now):
@@ -1111,7 +1112,7 @@ class SmartFutureAlgoScheduler:
                         run_relative_strength_scan,
                     )
 
-                    run_relative_strength_scan(scan_trigger="5m_interval")
+                    run_relative_strength_scan(scan_trigger="10m_warm")
                     hm = f"{h:02d}:{m:02d}"
                     try:
                         from backend.services.rs_scanner_anchors import (
@@ -1188,23 +1189,30 @@ class SmartFutureAlgoScheduler:
                         "❌ Relative Strength scan failed: %s", e, exc_info=True
                     )
 
+            for _legacy_rs_id in ("relative_strength_scanner_5m",):
+                try:
+                    if self.scheduler.get_job(_legacy_rs_id):
+                        self.scheduler.remove_job(_legacy_rs_id)
+                except Exception:
+                    pass
+
             self.scheduler.add_job(
-                _run_relative_strength_5m,
+                _run_relative_strength_10m,
                 trigger=CronTrigger(
                     day_of_week="mon-fri",
                     hour="9-15",
-                    minute="0,5,10,15,20,25,30,35,40,45,50,55",
+                    minute="5,15,25,35,45,55",
                     timezone="Asia/Kolkata",
                 ),
-                id="relative_strength_scanner_5m",
-                name="Relative Strength Scanner (every 5 min, 09:20–15:15 IST)",
+                id="relative_strength_scanner_10m",
+                name="Relative Strength Scanner (10m warm-synced, 09:20–15:15 IST)",
                 replace_existing=True,
                 max_instances=1,
                 misfire_grace_time=120,
                 coalesce=True,
             )
             logger.info(
-                "✅ Scheduled: Relative Strength Scanner (every 5 min, 09:20–15:15 IST)"
+                "✅ Scheduled: Relative Strength Scanner (10m warm-synced :05/:15/…, 09:20–15:15 IST)"
             )
 
             # EOD Relative Strength — after index close (15:30) so NIFTY % uses final close.
