@@ -459,11 +459,13 @@ def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
 # --- ranking -----------------------------------------------------------------
 
 
-def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def _rank(
+    rows: List[Dict[str, Any]],
+) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict], List[Dict]]:
     """Build Top-N Bullish / Bearish lists with trade scores and rank positions.
 
-    Also returns exclusion rows for NEUTRAL Kavach and beyond-persist truncates
-    (audit only — ranking output unchanged).
+    Returns ``(kept_bull, kept_bear, exclusions, full_bull, full_bear)``.
+    Full lists are scored+sorted before Top-N truncate (for universe shadow).
     """
     from backend.services.rs_exclusion_audit import (
         REASON_BEYOND_PERSIST,
@@ -530,6 +532,9 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict], List[Dict
     bullish.sort(key=lambda x: (-x["relative_strength"], -x["trade_score"]))
     bearish.sort(key=lambda x: (x["relative_strength"], -x["trade_score"]))
 
+    full_bull = [dict(r) for r in bullish]
+    full_bear = [dict(r) for r in bearish]
+
     def _truncate(bucket: List[Dict], side: str) -> List[Dict]:
         cutoff_rs_persist = (
             bucket[persist_n - 1]["relative_strength"] if len(bucket) >= persist_n else None
@@ -567,7 +572,13 @@ def _rank(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict], List[Dict
                 )
         return kept
 
-    return _truncate(bullish, RANKING_BULLISH), _truncate(bearish, RANKING_BEARISH), exclusions
+    return (
+        _truncate(bullish, RANKING_BULLISH),
+        _truncate(bearish, RANKING_BEARISH),
+        exclusions,
+        full_bull,
+        full_bear,
+    )
 
 
 # --- persistence -------------------------------------------------------------
@@ -680,9 +691,17 @@ def run_relative_strength_scan(
                 )
             )
 
-    bullish, bearish, rank_exclusions = _rank(rows)
+    bullish, bearish, rank_exclusions, full_bull, full_bear = _rank(rows)
     exclusions.extend(rank_exclusions)
     ranked = bullish + bearish
+    # Neutrals: scored rows not in bull/bear buckets
+    bull_bear_syms = {str(r.get("symbol") or "").upper() for r in full_bull + full_bear}
+    neutrals = []
+    for r in rows:
+        sym = str(r.get("symbol") or "").upper()
+        if sym and sym not in bull_bear_syms:
+            neutrals.append(dict(r))
+    scored_for_shadow = full_bull + full_bear + neutrals
     try:
         from backend.services.rs_scanner_maturity import enrich_ranked_with_maturity
 
@@ -696,12 +715,77 @@ def run_relative_strength_scan(
         scan_time=scan_time, scan_trigger=scan_trigger, exclusions=exclusions
     )
 
+    # Phase S0 shadow: full-universe persist + hysteresis Top-10 flags (no consumer cutover).
+    universe_shadow: Dict[str, Any] = {"ok": False, "reason": "not_run"}
+    skip_syms: List[str] = []
+    try:
+        from backend.services.rs_universe_score_snapshot import (
+            persist_universe_shadow,
+            shadow_enabled,
+        )
+        from backend.services.rs_score_cycle_log import record_rs_score_cycle
+
+        if shadow_enabled():
+            unscored = [
+                {
+                    "symbol": e.get("symbol"),
+                    "instrument_key": e.get("instrument_key"),
+                    "exclusion_reason": e.get("exclusion_reason"),
+                    "detail": e.get("detail"),
+                }
+                for e in exclusions
+                if (e.get("exclusion_reason") or "")
+                in (
+                    "missing_candles_or_min_bars",
+                    "missing_key",
+                    "no_prev_close",
+                    "no_closed_bar",
+                    "exception",
+                )
+            ]
+            universe_shadow = persist_universe_shadow(
+                scan_time=scan_time,
+                scored_rows=scored_for_shadow,
+                unscored=unscored,
+                scan_trigger=scan_trigger,
+                cache_only=cache_only,
+            )
+            skip_syms = sorted(
+                {
+                    str(u.get("symbol") or "").upper()
+                    for u in unscored
+                    if u.get("symbol")
+                }
+            )
+            record_rs_score_cycle(
+                {
+                    "scan_time_ist": scan_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "scan_trigger": scan_trigger,
+                    "cache_only": cache_only,
+                    "universe": len(universe),
+                    "scored": len(rows),
+                    "cache_hits": cache_hits,
+                    "rs_skipped_count": len(skip_syms),
+                    "rs_skipped_symbols": skip_syms[:80],
+                    "rs_skipped_truncated": len(skip_syms) > 80,
+                    "shadow_ok": bool(universe_shadow.get("ok")),
+                    "shadow_rows": universe_shadow.get("n_rows"),
+                    "duration_sec": round(time.time() - started, 1),
+                    "incumbent_rs_bonus": universe_shadow.get("bonus"),
+                }
+            )
+    except Exception as exc:
+        logger.warning("RS universe shadow persist failed: %s", exc)
+        universe_shadow = {"ok": False, "reason": str(exc)[:200]}
+
     duration = time.time() - started
     logger.info(
         "Relative Strength scan (%s, cache_only=%s): %d/%d symbols (%d from cache), "
-        "NIFTY %+.2f%%, %d bullish / %d bearish, %d exclusions logged in %.1fs",
+        "NIFTY %+.2f%%, %d bullish / %d bearish, %d exclusions logged in %.1fs "
+        "(universe_shadow ok=%s rows=%s skips=%d)",
         scan_trigger, cache_only, len(rows), len(universe), cache_hits, nifty_pct,
         len(bullish), len(bearish), excl_n, duration,
+        universe_shadow.get("ok"), universe_shadow.get("n_rows"), len(skip_syms),
     )
     return {
         "ok": True,
@@ -714,6 +798,8 @@ def run_relative_strength_scan(
         "bearish": len(bearish),
         "exclusions_logged": excl_n,
         "duration_sec": round(duration, 1),
+        "universe_shadow": universe_shadow,
+        "rs_skipped_count": len(skip_syms),
     }
 
 

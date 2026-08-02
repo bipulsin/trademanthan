@@ -36,9 +36,11 @@ def test_rank_logs_neutral_and_beyond_persist():
     for i in range(3):
         rows.append(_row(f"BEAR{i}", rs=-1.0 - i * 0.1, state=STATE_SELL))
 
-    bullish, bearish, exclusions = _rank(rows)
+    bullish, bearish, exclusions, full_bull, full_bear = _rank(rows)
     assert len(bullish) == PERSIST_TOP_N
     assert len(bearish) == 3
+    assert len(full_bull) == 12
+    assert len(full_bear) == 3
     assert bullish[0]["rank_position"] == 1
     assert bullish[-1]["rank_position"] == PERSIST_TOP_N
 

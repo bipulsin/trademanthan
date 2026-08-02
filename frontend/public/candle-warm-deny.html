@@ -96,6 +96,7 @@
         <p class="sub">
           Rolling view of centralized market-data candle warm cycles: deny rate,
           missing symbols (rate-limit / empty / fetch failure), and timestamps.
+          Also: RS scoring skips (cache miss / unscored) — separate from candle-warm deny.
           In-memory on the app process — resets on restart.
         </p>
       </div>
@@ -118,8 +119,13 @@
       <span class="meta" id="countLine"></span>
     </div>
     <div class="err" id="errLine" hidden></div>
+    <h2 style="font-size:1rem;margin:8px 0 6px;color:var(--muted);font-weight:600;">Candle warm deny</h2>
     <div class="spark" id="spark" title="Deny % per cycle (oldest → newest left→right)"></div>
     <div id="tableHost"><div class="empty">Loading…</div></div>
+    <h2 style="font-size:1rem;margin:22px 0 6px;color:var(--muted);font-weight:600;">RS scoring skipped this cycle</h2>
+    <p class="sub" style="margin-top:0;">Symbols the RS scan could not score (usually cache_only miss). Visibility only — no extra fetch.</p>
+    <div class="meta" id="rsCountLine" style="margin-bottom:8px;"></div>
+    <div id="rsTableHost"><div class="empty">Loading…</div></div>
   </div>
 
   <script>
@@ -246,31 +252,103 @@
         host.innerHTML = html;
       }
 
+      function renderRs(cycles) {
+        const host = document.getElementById("rsTableHost");
+        document.getElementById("rsCountLine").textContent = cycles.length
+          ? cycles.length + " RS cycles (newest first)"
+          : "No RS score cycles yet";
+        if (!cycles.length) {
+          host.innerHTML =
+            '<div class="empty">No RS score cycles recorded yet (shadow writer starts after deploy + next RS scan).</div>';
+          return;
+        }
+        let html =
+          "<table><thead><tr>" +
+          "<th>Time (IST)</th><th>Trigger</th><th>Scored</th><th>Universe</th>" +
+          "<th>Skipped</th><th>Skip symbols</th><th>Shadow rows</th><th>Bonus</th><th>Duration</th>" +
+          "</tr></thead><tbody>";
+        for (const c of cycles) {
+          const syms = c.rs_skipped_symbols || [];
+          html +=
+            "<tr>" +
+            '<td class="mono">' +
+            esc(c.scan_time_ist || c.recorded_at_ist || "—") +
+            "</td>" +
+            "<td>" +
+            esc(c.scan_trigger || "—") +
+            "</td>" +
+            '<td class="mono">' +
+            (c.scored != null ? c.scored : "—") +
+            "</td>" +
+            '<td class="mono">' +
+            (c.universe != null ? c.universe : "—") +
+            "</td>" +
+            "<td><span class=\"pill " +
+            denyClass(c.rs_skipped_count >= 20 ? 15 : c.rs_skipped_count >= 5 ? 5 : 0) +
+            '">' +
+            (c.rs_skipped_count != null ? c.rs_skipped_count : 0) +
+            "</span></td>" +
+            '<td class="syms">' +
+            esc(syms.length ? syms.join(", ") : "—") +
+            (c.rs_skipped_truncated ? " …" : "") +
+            "</td>" +
+            '<td class="mono">' +
+            (c.shadow_rows != null ? c.shadow_rows : "—") +
+            "</td>" +
+            '<td class="mono">' +
+            (c.incumbent_rs_bonus != null ? c.incumbent_rs_bonus : "—") +
+            "</td>" +
+            '<td class="mono">' +
+            (c.duration_sec != null ? c.duration_sec + "s" : "—") +
+            "</td>" +
+            "</tr>";
+        }
+        html += "</tbody></table>";
+        host.innerHTML = html;
+      }
+
       async function load() {
         const errEl = document.getElementById("errLine");
         errEl.hidden = true;
         const limit = document.getElementById("limitSel").value || "24";
         document.getElementById("statusLine").textContent = "Loading…";
         try {
-          // Prefer /api/… — bare /market-data/ is not proxied by nginx and returns SPA HTML.
-          const res = await fetch(
-            API_BASE + "/api/market-data/candle-warm-cycles?limit=" + encodeURIComponent(limit),
-            {
-              headers: { Authorization: "Bearer " + token() },
-              cache: "no-store",
-            }
-          );
-          const ctype = (res.headers.get("content-type") || "").toLowerCase();
+          const headers = { Authorization: "Bearer " + token() };
+          const [warmRes, rsRes] = await Promise.all([
+            fetch(
+              API_BASE + "/api/market-data/candle-warm-cycles?limit=" + encodeURIComponent(limit),
+              { headers, cache: "no-store" }
+            ),
+            fetch(
+              API_BASE + "/api/market-data/rs-score-cycles?limit=" + encodeURIComponent(limit),
+              { headers, cache: "no-store" }
+            ),
+          ]);
+          const ctype = (warmRes.headers.get("content-type") || "").toLowerCase();
           if (!ctype.includes("application/json")) {
             throw new Error(
-              "HTTP " + res.status + " (expected JSON, got " + (ctype || "non-JSON") + ")"
+              "HTTP " + warmRes.status + " (expected JSON, got " + (ctype || "non-JSON") + ")"
             );
           }
-          const data = await res.json();
-          if (!res.ok || !data.success) {
-            throw new Error((data && (data.detail || data.message)) || "HTTP " + res.status);
+          const data = await warmRes.json();
+          if (!warmRes.ok || !data.success) {
+            throw new Error((data && (data.detail || data.message)) || "HTTP " + warmRes.status);
           }
           render(data.cycles || []);
+
+          try {
+            const rsData = await rsRes.json();
+            if (rsRes.ok && rsData.success) {
+              renderRs(rsData.cycles || []);
+            } else {
+              document.getElementById("rsTableHost").innerHTML =
+                '<div class="empty">RS score cycles unavailable</div>';
+            }
+          } catch (e2) {
+            document.getElementById("rsTableHost").innerHTML =
+              '<div class="empty">RS score cycles unavailable</div>';
+          }
+
           document.getElementById("statusLine").textContent =
             "Updated " + new Date().toLocaleTimeString();
         } catch (e) {

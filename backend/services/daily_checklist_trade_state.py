@@ -846,6 +846,42 @@ def _load_price_levels(db, symbols: List[str], session_date: str) -> Dict[str, D
 
     missing = [s for s in syms if s not in out]
     if missing:
+        # Grade-first cutover: prefer full-universe RS snapshot when enabled.
+        try:
+            from backend.services.rs_universe_score_snapshot import grade_cutover_enabled
+
+            if grade_cutover_enabled():
+                rows_u = db.execute(
+                    text(
+                        """
+                        SELECT DISTINCT ON (UPPER(symbol))
+                               UPPER(symbol) AS symbol, current_price, ema5, ema10, vwap,
+                               adx, confidence_grade, market_regime
+                        FROM rs_universe_score_snapshot
+                        WHERE session_date = CAST(:d AS date)
+                          AND UPPER(symbol) IN :syms
+                          AND confidence_grade IS NOT NULL
+                        ORDER BY UPPER(symbol), scan_time DESC
+                        """
+                    ).bindparams(bindparam("syms", expanding=True)),
+                    {"d": session_date, "syms": missing},
+                ).fetchall()
+                for r in rows_u:
+                    out[str(r.symbol).upper()] = {
+                        "price": _f(r.current_price),
+                        "ema5": _f(r.ema5),
+                        "ema10": _f(r.ema10),
+                        "vwap": _f(r.vwap),
+                        "adx": _f(r.adx),
+                        "confidence_grade": r.confidence_grade,
+                        "market_regime": r.market_regime,
+                        "source": "rs_universe",
+                    }
+        except Exception as exc:
+            logger.debug("trade-state universe grade cutover skipped: %s", exc)
+
+    missing = [s for s in syms if s not in out]
+    if missing:
         try:
             rows = db.execute(
                 text(
