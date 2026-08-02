@@ -1,0 +1,1709 @@
+{
+  "formula": "Total = 0.15*(RS_trade_score + Garuda + OW + VW + EW) + Grade_Bonus",
+  "grade_bonus": {
+    "A+": 25,
+    "A": 20,
+    "B": 15,
+    "C": 10,
+    "D/D!": 0
+  },
+  "candidates": "garuda_top6_rank NOT NULL AND grade A/B AND trade_score+garuda present",
+  "window": [
+    "2026-07-27",
+    "2026-07-28",
+    "2026-07-29",
+    "2026-07-30",
+    "2026-07-31"
+  ],
+  "candidate_rows": 1833,
+  "actual_ready_first_episodes": 71,
+  "threshold_curve": [
+    {
+      "threshold": 70,
+      "proposed_n": 120,
+      "actual_n": 71,
+      "TP": 39,
+      "FP": 81,
+      "FN": 32,
+      "precision": 0.325,
+      "recall": 0.5493,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 30,
+          "actual_n": 10,
+          "TP": 5,
+          "FP": 25,
+          "FN": 5,
+          "precision": 0.1667,
+          "recall": 0.5,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|SHRIRAMFIN"
+          ],
+          "fp_list": [
+            "2026-07-27|ASIANPAINT",
+            "2026-07-27|AUBANK",
+            "2026-07-27|BHEL",
+            "2026-07-27|CAMS",
+            "2026-07-27|CHOLAFIN",
+            "2026-07-27|COLPAL",
+            "2026-07-27|ETERNAL",
+            "2026-07-27|HEROMOTOCO",
+            "2026-07-27|HINDPETRO",
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|JUBLFOOD",
+            "2026-07-27|LAURUSLABS",
+            "2026-07-27|LICHSGFIN",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|MANAPPURAM",
+            "2026-07-27|MPHASIS",
+            "2026-07-27|NAUKRI",
+            "2026-07-27|NESTLEIND",
+            "2026-07-27|OFSS",
+            "2026-07-27|PIDILITIND",
+            "2026-07-27|RBLBANK",
+            "2026-07-27|SBICARD",
+            "2026-07-27|SWIGGY",
+            "2026-07-27|TATAELXSI"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|ONGC"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 26,
+          "actual_n": 17,
+          "TP": 8,
+          "FP": 18,
+          "FN": 9,
+          "precision": 0.3077,
+          "recall": 0.4706,
+          "tp_list": [
+            "2026-07-28|ETERNAL",
+            "2026-07-28|INFY",
+            "2026-07-28|LODHA",
+            "2026-07-28|LTM",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT",
+            "2026-07-28|SBICARD"
+          ],
+          "fp_list": [
+            "2026-07-28|ASHOKLEY",
+            "2026-07-28|COFORGE",
+            "2026-07-28|CONCOR",
+            "2026-07-28|GODREJPROP",
+            "2026-07-28|HCLTECH",
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|KALYANKJIL",
+            "2026-07-28|KFINTECH",
+            "2026-07-28|KPITTECH",
+            "2026-07-28|LAURUSLABS",
+            "2026-07-28|M&M",
+            "2026-07-28|NESTLEIND",
+            "2026-07-28|OFSS",
+            "2026-07-28|SWIGGY",
+            "2026-07-28|TATAELXSI",
+            "2026-07-28|TCS",
+            "2026-07-28|TECHM",
+            "2026-07-28|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 23,
+          "actual_n": 18,
+          "TP": 12,
+          "FP": 11,
+          "FN": 6,
+          "precision": 0.5217,
+          "recall": 0.6667,
+          "tp_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|CIPLA",
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|INFY",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|M&M",
+            "2026-07-29|SWIGGY",
+            "2026-07-29|VBL"
+          ],
+          "fp_list": [
+            "2026-07-29|BANKBARODA",
+            "2026-07-29|BHARTIARTL",
+            "2026-07-29|COFORGE",
+            "2026-07-29|GLENMARK",
+            "2026-07-29|JIOFIN",
+            "2026-07-29|JSWSTEEL",
+            "2026-07-29|MANAPPURAM",
+            "2026-07-29|NATIONALUM",
+            "2026-07-29|PATANJALI",
+            "2026-07-29|PGEL",
+            "2026-07-29|TATASTEEL"
+          ],
+          "fn_list": [
+            "2026-07-29|BHEL",
+            "2026-07-29|LTF",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 13,
+          "actual_n": 11,
+          "TP": 4,
+          "FP": 9,
+          "FN": 7,
+          "precision": 0.3077,
+          "recall": 0.3636,
+          "tp_list": [
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|COALINDIA",
+            "2026-07-30|CUMMINSIND",
+            "2026-07-30|KALYANKJIL",
+            "2026-07-30|MPHASIS",
+            "2026-07-30|OIL",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT",
+            "2026-07-30|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 28,
+          "actual_n": 15,
+          "TP": 10,
+          "FP": 18,
+          "FN": 5,
+          "precision": 0.3571,
+          "recall": 0.6667,
+          "tp_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|KAYNES",
+            "2026-07-31|KEI",
+            "2026-07-31|SIEMENS",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ADANIPORTS",
+            "2026-07-31|ADANIPOWER",
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|BSE",
+            "2026-07-31|CGPOWER",
+            "2026-07-31|CHOLAFIN",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|HDFCAMC",
+            "2026-07-31|INOXWIND",
+            "2026-07-31|JSWENERGY",
+            "2026-07-31|M&M",
+            "2026-07-31|MAZDOCK",
+            "2026-07-31|MOTHERSON",
+            "2026-07-31|MUTHOOTFIN",
+            "2026-07-31|POLYCAB",
+            "2026-07-31|POWERINDIA",
+            "2026-07-31|SUNPHARMA",
+            "2026-07-31|TORNTPHARM"
+          ],
+          "fn_list": [
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND"
+          ]
+        }
+      }
+    },
+    {
+      "threshold": 72,
+      "proposed_n": 115,
+      "actual_n": 71,
+      "TP": 39,
+      "FP": 76,
+      "FN": 32,
+      "precision": 0.3391,
+      "recall": 0.5493,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 30,
+          "actual_n": 10,
+          "TP": 5,
+          "FP": 25,
+          "FN": 5,
+          "precision": 0.1667,
+          "recall": 0.5,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|SHRIRAMFIN"
+          ],
+          "fp_list": [
+            "2026-07-27|ASIANPAINT",
+            "2026-07-27|AUBANK",
+            "2026-07-27|BHEL",
+            "2026-07-27|CAMS",
+            "2026-07-27|CHOLAFIN",
+            "2026-07-27|COLPAL",
+            "2026-07-27|ETERNAL",
+            "2026-07-27|HEROMOTOCO",
+            "2026-07-27|HINDPETRO",
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|JUBLFOOD",
+            "2026-07-27|LAURUSLABS",
+            "2026-07-27|LICHSGFIN",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|MANAPPURAM",
+            "2026-07-27|MPHASIS",
+            "2026-07-27|NAUKRI",
+            "2026-07-27|NESTLEIND",
+            "2026-07-27|OFSS",
+            "2026-07-27|PIDILITIND",
+            "2026-07-27|RBLBANK",
+            "2026-07-27|SBICARD",
+            "2026-07-27|SWIGGY",
+            "2026-07-27|TATAELXSI"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|ONGC"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 24,
+          "actual_n": 17,
+          "TP": 8,
+          "FP": 16,
+          "FN": 9,
+          "precision": 0.3333,
+          "recall": 0.4706,
+          "tp_list": [
+            "2026-07-28|ETERNAL",
+            "2026-07-28|INFY",
+            "2026-07-28|LODHA",
+            "2026-07-28|LTM",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT",
+            "2026-07-28|SBICARD"
+          ],
+          "fp_list": [
+            "2026-07-28|ASHOKLEY",
+            "2026-07-28|COFORGE",
+            "2026-07-28|CONCOR",
+            "2026-07-28|HCLTECH",
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|KALYANKJIL",
+            "2026-07-28|KFINTECH",
+            "2026-07-28|KPITTECH",
+            "2026-07-28|LAURUSLABS",
+            "2026-07-28|M&M",
+            "2026-07-28|NESTLEIND",
+            "2026-07-28|OFSS",
+            "2026-07-28|TATAELXSI",
+            "2026-07-28|TCS",
+            "2026-07-28|TECHM",
+            "2026-07-28|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 22,
+          "actual_n": 18,
+          "TP": 12,
+          "FP": 10,
+          "FN": 6,
+          "precision": 0.5455,
+          "recall": 0.6667,
+          "tp_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|CIPLA",
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|INFY",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|M&M",
+            "2026-07-29|SWIGGY",
+            "2026-07-29|VBL"
+          ],
+          "fp_list": [
+            "2026-07-29|BANKBARODA",
+            "2026-07-29|COFORGE",
+            "2026-07-29|GLENMARK",
+            "2026-07-29|JIOFIN",
+            "2026-07-29|JSWSTEEL",
+            "2026-07-29|MANAPPURAM",
+            "2026-07-29|NATIONALUM",
+            "2026-07-29|PATANJALI",
+            "2026-07-29|PGEL",
+            "2026-07-29|TATASTEEL"
+          ],
+          "fn_list": [
+            "2026-07-29|BHEL",
+            "2026-07-29|LTF",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 12,
+          "actual_n": 11,
+          "TP": 4,
+          "FP": 8,
+          "FN": 7,
+          "precision": 0.3333,
+          "recall": 0.3636,
+          "tp_list": [
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|COALINDIA",
+            "2026-07-30|CUMMINSIND",
+            "2026-07-30|KALYANKJIL",
+            "2026-07-30|OIL",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT",
+            "2026-07-30|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 27,
+          "actual_n": 15,
+          "TP": 10,
+          "FP": 17,
+          "FN": 5,
+          "precision": 0.3704,
+          "recall": 0.6667,
+          "tp_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|KAYNES",
+            "2026-07-31|KEI",
+            "2026-07-31|SIEMENS",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ADANIPORTS",
+            "2026-07-31|ADANIPOWER",
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|BSE",
+            "2026-07-31|CGPOWER",
+            "2026-07-31|CHOLAFIN",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|HDFCAMC",
+            "2026-07-31|INOXWIND",
+            "2026-07-31|JSWENERGY",
+            "2026-07-31|M&M",
+            "2026-07-31|MAZDOCK",
+            "2026-07-31|MOTHERSON",
+            "2026-07-31|POLYCAB",
+            "2026-07-31|POWERINDIA",
+            "2026-07-31|SUNPHARMA",
+            "2026-07-31|TORNTPHARM"
+          ],
+          "fn_list": [
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND"
+          ]
+        }
+      }
+    },
+    {
+      "threshold": 75,
+      "proposed_n": 102,
+      "actual_n": 71,
+      "TP": 37,
+      "FP": 65,
+      "FN": 34,
+      "precision": 0.3627,
+      "recall": 0.5211,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 27,
+          "actual_n": 10,
+          "TP": 5,
+          "FP": 22,
+          "FN": 5,
+          "precision": 0.1852,
+          "recall": 0.5,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|SHRIRAMFIN"
+          ],
+          "fp_list": [
+            "2026-07-27|ASIANPAINT",
+            "2026-07-27|AUBANK",
+            "2026-07-27|BHEL",
+            "2026-07-27|CAMS",
+            "2026-07-27|CHOLAFIN",
+            "2026-07-27|COLPAL",
+            "2026-07-27|ETERNAL",
+            "2026-07-27|HEROMOTOCO",
+            "2026-07-27|HINDPETRO",
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|LAURUSLABS",
+            "2026-07-27|LICHSGFIN",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|NAUKRI",
+            "2026-07-27|NESTLEIND",
+            "2026-07-27|OFSS",
+            "2026-07-27|PIDILITIND",
+            "2026-07-27|RBLBANK",
+            "2026-07-27|SBICARD",
+            "2026-07-27|SWIGGY",
+            "2026-07-27|TATAELXSI"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|ONGC"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 22,
+          "actual_n": 17,
+          "TP": 8,
+          "FP": 14,
+          "FN": 9,
+          "precision": 0.3636,
+          "recall": 0.4706,
+          "tp_list": [
+            "2026-07-28|ETERNAL",
+            "2026-07-28|INFY",
+            "2026-07-28|LODHA",
+            "2026-07-28|LTM",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT",
+            "2026-07-28|SBICARD"
+          ],
+          "fp_list": [
+            "2026-07-28|ASHOKLEY",
+            "2026-07-28|COFORGE",
+            "2026-07-28|HCLTECH",
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|KALYANKJIL",
+            "2026-07-28|KPITTECH",
+            "2026-07-28|LAURUSLABS",
+            "2026-07-28|M&M",
+            "2026-07-28|NESTLEIND",
+            "2026-07-28|OFSS",
+            "2026-07-28|TATAELXSI",
+            "2026-07-28|TCS",
+            "2026-07-28|TECHM",
+            "2026-07-28|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 17,
+          "actual_n": 18,
+          "TP": 10,
+          "FP": 7,
+          "FN": 8,
+          "precision": 0.5882,
+          "recall": 0.5556,
+          "tp_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|CIPLA",
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|M&M",
+            "2026-07-29|SWIGGY",
+            "2026-07-29|VBL"
+          ],
+          "fp_list": [
+            "2026-07-29|BANKBARODA",
+            "2026-07-29|COFORGE",
+            "2026-07-29|JIOFIN",
+            "2026-07-29|JSWSTEEL",
+            "2026-07-29|MANAPPURAM",
+            "2026-07-29|PGEL",
+            "2026-07-29|TATASTEEL"
+          ],
+          "fn_list": [
+            "2026-07-29|BHEL",
+            "2026-07-29|INFY",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|LTF",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 12,
+          "actual_n": 11,
+          "TP": 4,
+          "FP": 8,
+          "FN": 7,
+          "precision": 0.3333,
+          "recall": 0.3636,
+          "tp_list": [
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|COALINDIA",
+            "2026-07-30|CUMMINSIND",
+            "2026-07-30|KALYANKJIL",
+            "2026-07-30|OIL",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT",
+            "2026-07-30|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 24,
+          "actual_n": 15,
+          "TP": 10,
+          "FP": 14,
+          "FN": 5,
+          "precision": 0.4167,
+          "recall": 0.6667,
+          "tp_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|KAYNES",
+            "2026-07-31|KEI",
+            "2026-07-31|SIEMENS",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ADANIPORTS",
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|CGPOWER",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|HDFCAMC",
+            "2026-07-31|INOXWIND",
+            "2026-07-31|JSWENERGY",
+            "2026-07-31|M&M",
+            "2026-07-31|MAZDOCK",
+            "2026-07-31|MOTHERSON",
+            "2026-07-31|POLYCAB",
+            "2026-07-31|POWERINDIA",
+            "2026-07-31|SUNPHARMA",
+            "2026-07-31|TORNTPHARM"
+          ],
+          "fn_list": [
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND"
+          ]
+        }
+      }
+    },
+    {
+      "threshold": 78,
+      "proposed_n": 90,
+      "actual_n": 71,
+      "TP": 33,
+      "FP": 57,
+      "FN": 38,
+      "precision": 0.3667,
+      "recall": 0.4648,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 23,
+          "actual_n": 10,
+          "TP": 3,
+          "FP": 20,
+          "FN": 7,
+          "precision": 0.1304,
+          "recall": 0.3,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY"
+          ],
+          "fp_list": [
+            "2026-07-27|ASIANPAINT",
+            "2026-07-27|AUBANK",
+            "2026-07-27|CAMS",
+            "2026-07-27|CHOLAFIN",
+            "2026-07-27|COLPAL",
+            "2026-07-27|ETERNAL",
+            "2026-07-27|HEROMOTOCO",
+            "2026-07-27|HINDPETRO",
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|LAURUSLABS",
+            "2026-07-27|LICHSGFIN",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|NAUKRI",
+            "2026-07-27|NESTLEIND",
+            "2026-07-27|PIDILITIND",
+            "2026-07-27|RBLBANK",
+            "2026-07-27|SBICARD",
+            "2026-07-27|SWIGGY",
+            "2026-07-27|TATAELXSI"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|ONGC",
+            "2026-07-27|SHRIRAMFIN"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 19,
+          "actual_n": 17,
+          "TP": 6,
+          "FP": 13,
+          "FN": 11,
+          "precision": 0.3158,
+          "recall": 0.3529,
+          "tp_list": [
+            "2026-07-28|ETERNAL",
+            "2026-07-28|INFY",
+            "2026-07-28|LODHA",
+            "2026-07-28|LTM",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT"
+          ],
+          "fp_list": [
+            "2026-07-28|ASHOKLEY",
+            "2026-07-28|HCLTECH",
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|KALYANKJIL",
+            "2026-07-28|KPITTECH",
+            "2026-07-28|LAURUSLABS",
+            "2026-07-28|M&M",
+            "2026-07-28|NESTLEIND",
+            "2026-07-28|OFSS",
+            "2026-07-28|TATAELXSI",
+            "2026-07-28|TCS",
+            "2026-07-28|TECHM",
+            "2026-07-28|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SBICARD",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 15,
+          "actual_n": 18,
+          "TP": 10,
+          "FP": 5,
+          "FN": 8,
+          "precision": 0.6667,
+          "recall": 0.5556,
+          "tp_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|CIPLA",
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|M&M",
+            "2026-07-29|SWIGGY",
+            "2026-07-29|VBL"
+          ],
+          "fp_list": [
+            "2026-07-29|BANKBARODA",
+            "2026-07-29|COFORGE",
+            "2026-07-29|JSWSTEEL",
+            "2026-07-29|PGEL",
+            "2026-07-29|TATASTEEL"
+          ],
+          "fn_list": [
+            "2026-07-29|BHEL",
+            "2026-07-29|INFY",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|LTF",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 10,
+          "actual_n": 11,
+          "TP": 4,
+          "FP": 6,
+          "FN": 7,
+          "precision": 0.4,
+          "recall": 0.3636,
+          "tp_list": [
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|CUMMINSIND",
+            "2026-07-30|KALYANKJIL",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT",
+            "2026-07-30|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 23,
+          "actual_n": 15,
+          "TP": 10,
+          "FP": 13,
+          "FN": 5,
+          "precision": 0.4348,
+          "recall": 0.6667,
+          "tp_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|KAYNES",
+            "2026-07-31|KEI",
+            "2026-07-31|SIEMENS",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ADANIPORTS",
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|CGPOWER",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|HDFCAMC",
+            "2026-07-31|JSWENERGY",
+            "2026-07-31|M&M",
+            "2026-07-31|MAZDOCK",
+            "2026-07-31|MOTHERSON",
+            "2026-07-31|POLYCAB",
+            "2026-07-31|POWERINDIA",
+            "2026-07-31|SUNPHARMA",
+            "2026-07-31|TORNTPHARM"
+          ],
+          "fn_list": [
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND"
+          ]
+        }
+      }
+    },
+    {
+      "threshold": 80,
+      "proposed_n": 74,
+      "actual_n": 71,
+      "TP": 28,
+      "FP": 46,
+      "FN": 43,
+      "precision": 0.3784,
+      "recall": 0.3944,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 18,
+          "actual_n": 10,
+          "TP": 3,
+          "FP": 15,
+          "FN": 7,
+          "precision": 0.1667,
+          "recall": 0.3,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY"
+          ],
+          "fp_list": [
+            "2026-07-27|ASIANPAINT",
+            "2026-07-27|AUBANK",
+            "2026-07-27|CAMS",
+            "2026-07-27|COLPAL",
+            "2026-07-27|ETERNAL",
+            "2026-07-27|HINDPETRO",
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|LICHSGFIN",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|NAUKRI",
+            "2026-07-27|PIDILITIND",
+            "2026-07-27|RBLBANK",
+            "2026-07-27|SBICARD",
+            "2026-07-27|SWIGGY"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|ONGC",
+            "2026-07-27|SHRIRAMFIN"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 17,
+          "actual_n": 17,
+          "TP": 6,
+          "FP": 11,
+          "FN": 11,
+          "precision": 0.3529,
+          "recall": 0.3529,
+          "tp_list": [
+            "2026-07-28|ETERNAL",
+            "2026-07-28|INFY",
+            "2026-07-28|LODHA",
+            "2026-07-28|LTM",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT"
+          ],
+          "fp_list": [
+            "2026-07-28|ASHOKLEY",
+            "2026-07-28|HCLTECH",
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|KPITTECH",
+            "2026-07-28|LAURUSLABS",
+            "2026-07-28|M&M",
+            "2026-07-28|NESTLEIND",
+            "2026-07-28|TATAELXSI",
+            "2026-07-28|TCS",
+            "2026-07-28|TECHM",
+            "2026-07-28|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SBICARD",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 12,
+          "actual_n": 18,
+          "TP": 8,
+          "FP": 4,
+          "FN": 10,
+          "precision": 0.6667,
+          "recall": 0.4444,
+          "tp_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|SWIGGY",
+            "2026-07-29|VBL"
+          ],
+          "fp_list": [
+            "2026-07-29|BANKBARODA",
+            "2026-07-29|COFORGE",
+            "2026-07-29|JSWSTEEL",
+            "2026-07-29|TATASTEEL"
+          ],
+          "fn_list": [
+            "2026-07-29|BHEL",
+            "2026-07-29|CIPLA",
+            "2026-07-29|INFY",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|LTF",
+            "2026-07-29|M&M",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 10,
+          "actual_n": 11,
+          "TP": 4,
+          "FP": 6,
+          "FN": 7,
+          "precision": 0.4,
+          "recall": 0.3636,
+          "tp_list": [
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|CUMMINSIND",
+            "2026-07-30|KALYANKJIL",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT",
+            "2026-07-30|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 17,
+          "actual_n": 15,
+          "TP": 7,
+          "FP": 10,
+          "FN": 8,
+          "precision": 0.4118,
+          "recall": 0.4667,
+          "tp_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|KAYNES",
+            "2026-07-31|KEI",
+            "2026-07-31|SIEMENS",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|CGPOWER",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|HDFCAMC",
+            "2026-07-31|M&M",
+            "2026-07-31|MAZDOCK",
+            "2026-07-31|MOTHERSON",
+            "2026-07-31|POWERINDIA",
+            "2026-07-31|SUNPHARMA",
+            "2026-07-31|TORNTPHARM"
+          ],
+          "fn_list": [
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND"
+          ]
+        }
+      }
+    },
+    {
+      "threshold": 82,
+      "proposed_n": 52,
+      "actual_n": 71,
+      "TP": 22,
+      "FP": 30,
+      "FN": 49,
+      "precision": 0.4231,
+      "recall": 0.3099,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 14,
+          "actual_n": 10,
+          "TP": 3,
+          "FP": 11,
+          "FN": 7,
+          "precision": 0.2143,
+          "recall": 0.3,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY"
+          ],
+          "fp_list": [
+            "2026-07-27|ASIANPAINT",
+            "2026-07-27|AUBANK",
+            "2026-07-27|CAMS",
+            "2026-07-27|ETERNAL",
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|LICHSGFIN",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|NAUKRI",
+            "2026-07-27|PIDILITIND",
+            "2026-07-27|RBLBANK"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|ONGC",
+            "2026-07-27|SHRIRAMFIN"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 13,
+          "actual_n": 17,
+          "TP": 6,
+          "FP": 7,
+          "FN": 11,
+          "precision": 0.4615,
+          "recall": 0.3529,
+          "tp_list": [
+            "2026-07-28|ETERNAL",
+            "2026-07-28|INFY",
+            "2026-07-28|LODHA",
+            "2026-07-28|LTM",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT"
+          ],
+          "fp_list": [
+            "2026-07-28|ASHOKLEY",
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|M&M",
+            "2026-07-28|NESTLEIND",
+            "2026-07-28|TATAELXSI",
+            "2026-07-28|TCS",
+            "2026-07-28|WIPRO"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SBICARD",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 7,
+          "actual_n": 18,
+          "TP": 6,
+          "FP": 1,
+          "FN": 12,
+          "precision": 0.8571,
+          "recall": 0.3333,
+          "tp_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|SWIGGY",
+            "2026-07-29|VBL"
+          ],
+          "fp_list": [
+            "2026-07-29|TATASTEEL"
+          ],
+          "fn_list": [
+            "2026-07-29|BHEL",
+            "2026-07-29|CIPLA",
+            "2026-07-29|INFY",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|LTF",
+            "2026-07-29|M&M",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 5,
+          "actual_n": 11,
+          "TP": 2,
+          "FP": 3,
+          "FN": 9,
+          "precision": 0.4,
+          "recall": 0.1818,
+          "tp_list": [
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 13,
+          "actual_n": 15,
+          "TP": 5,
+          "FP": 8,
+          "FN": 10,
+          "precision": 0.3846,
+          "recall": 0.3333,
+          "tp_list": [
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|KEI",
+            "2026-07-31|SIEMENS",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|CGPOWER",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|M&M",
+            "2026-07-31|MAZDOCK",
+            "2026-07-31|POWERINDIA",
+            "2026-07-31|SUNPHARMA",
+            "2026-07-31|TORNTPHARM"
+          ],
+          "fn_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|KAYNES",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND"
+          ]
+        }
+      }
+    },
+    {
+      "threshold": 85,
+      "proposed_n": 23,
+      "actual_n": 71,
+      "TP": 10,
+      "FP": 13,
+      "FN": 61,
+      "precision": 0.4348,
+      "recall": 0.1408,
+      "by_day": {
+        "2026-07-27": {
+          "proposed_n": 7,
+          "actual_n": 10,
+          "TP": 3,
+          "FP": 4,
+          "FN": 7,
+          "precision": 0.4286,
+          "recall": 0.3,
+          "tp_list": [
+            "2026-07-27|360ONE",
+            "2026-07-27|INDIGO",
+            "2026-07-27|INFY"
+          ],
+          "fp_list": [
+            "2026-07-27|JINDALSTEL",
+            "2026-07-27|LODHA",
+            "2026-07-27|LTM",
+            "2026-07-27|NAUKRI"
+          ],
+          "fn_list": [
+            "2026-07-27|ABB",
+            "2026-07-27|ADANIENSOL",
+            "2026-07-27|BANKINDIA",
+            "2026-07-27|DIXON",
+            "2026-07-27|KFINTECH",
+            "2026-07-27|ONGC",
+            "2026-07-27|SHRIRAMFIN"
+          ]
+        },
+        "2026-07-28": {
+          "proposed_n": 5,
+          "actual_n": 17,
+          "TP": 2,
+          "FP": 3,
+          "FN": 15,
+          "precision": 0.4,
+          "recall": 0.1176,
+          "tp_list": [
+            "2026-07-28|INFY",
+            "2026-07-28|LTM"
+          ],
+          "fp_list": [
+            "2026-07-28|HYUNDAI",
+            "2026-07-28|M&M",
+            "2026-07-28|TATAELXSI"
+          ],
+          "fn_list": [
+            "2026-07-28|ADANIENSOL",
+            "2026-07-28|BHEL",
+            "2026-07-28|CGPOWER",
+            "2026-07-28|COALINDIA",
+            "2026-07-28|DMART",
+            "2026-07-28|ETERNAL",
+            "2026-07-28|LODHA",
+            "2026-07-28|MPHASIS",
+            "2026-07-28|NAUKRI",
+            "2026-07-28|PERSISTENT",
+            "2026-07-28|POWERINDIA",
+            "2026-07-28|SBICARD",
+            "2026-07-28|SOLARINDS",
+            "2026-07-28|SUZLON",
+            "2026-07-28|TATAPOWER"
+          ]
+        },
+        "2026-07-29": {
+          "proposed_n": 2,
+          "actual_n": 18,
+          "TP": 2,
+          "FP": 0,
+          "FN": 16,
+          "precision": 1.0,
+          "recall": 0.1111,
+          "tp_list": [
+            "2026-07-29|DIVISLAB",
+            "2026-07-29|SWIGGY"
+          ],
+          "fp_list": [],
+          "fn_list": [
+            "2026-07-29|AUROPHARMA",
+            "2026-07-29|BHEL",
+            "2026-07-29|CIPLA",
+            "2026-07-29|HINDUNILVR",
+            "2026-07-29|INFY",
+            "2026-07-29|JINDALSTEL",
+            "2026-07-29|KALYANKJIL",
+            "2026-07-29|KAYNES",
+            "2026-07-29|KPITTECH",
+            "2026-07-29|LTF",
+            "2026-07-29|M&M",
+            "2026-07-29|PAGEIND",
+            "2026-07-29|PHOENIXLTD",
+            "2026-07-29|SAIL",
+            "2026-07-29|SUZLON",
+            "2026-07-29|VBL"
+          ]
+        },
+        "2026-07-30": {
+          "proposed_n": 4,
+          "actual_n": 11,
+          "TP": 1,
+          "FP": 3,
+          "FN": 10,
+          "precision": 0.25,
+          "recall": 0.0909,
+          "tp_list": [
+            "2026-07-30|TVSMOTOR"
+          ],
+          "fp_list": [
+            "2026-07-30|ALKEM",
+            "2026-07-30|PERSISTENT",
+            "2026-07-30|TRENT"
+          ],
+          "fn_list": [
+            "2026-07-30|360ONE",
+            "2026-07-30|ADANIPORTS",
+            "2026-07-30|DLF",
+            "2026-07-30|HEROMOTOCO",
+            "2026-07-30|KFINTECH",
+            "2026-07-30|M&M",
+            "2026-07-30|PAGEIND",
+            "2026-07-30|RBLBANK",
+            "2026-07-30|SONACOMS",
+            "2026-07-30|TIINDIA"
+          ]
+        },
+        "2026-07-31": {
+          "proposed_n": 5,
+          "actual_n": 15,
+          "TP": 2,
+          "FP": 3,
+          "FN": 13,
+          "precision": 0.4,
+          "recall": 0.1333,
+          "tp_list": [
+            "2026-07-31|BAJAJFINSV",
+            "2026-07-31|TIINDIA"
+          ],
+          "fp_list": [
+            "2026-07-31|ASHOKLEY",
+            "2026-07-31|CUMMINSIND",
+            "2026-07-31|M&M"
+          ],
+          "fn_list": [
+            "2026-07-31|ABCAPITAL",
+            "2026-07-31|BAJAJHLDNG",
+            "2026-07-31|BAJFINANCE",
+            "2026-07-31|BRITANNIA",
+            "2026-07-31|GAIL",
+            "2026-07-31|HYUNDAI",
+            "2026-07-31|ITC",
+            "2026-07-31|KALYANKJIL",
+            "2026-07-31|KAYNES",
+            "2026-07-31|KEI",
+            "2026-07-31|LTM",
+            "2026-07-31|MANKIND",
+            "2026-07-31|SIEMENS"
+          ]
+        }
+      }
+    }
+  ],
+  "thr_75_by_day": {
+    "2026-07-27": {
+      "proposed_n": 27,
+      "actual_n": 10,
+      "TP": 5,
+      "FP": 22,
+      "FN": 5,
+      "precision": 0.1852,
+      "recall": 0.5,
+      "tp_list": [
+        "2026-07-27|360ONE",
+        "2026-07-27|INDIGO",
+        "2026-07-27|INFY",
+        "2026-07-27|KFINTECH",
+        "2026-07-27|SHRIRAMFIN"
+      ],
+      "fp_list": [
+        "2026-07-27|ASIANPAINT",
+        "2026-07-27|AUBANK",
+        "2026-07-27|BHEL",
+        "2026-07-27|CAMS",
+        "2026-07-27|CHOLAFIN",
+        "2026-07-27|COLPAL",
+        "2026-07-27|ETERNAL",
+        "2026-07-27|HEROMOTOCO",
+        "2026-07-27|HINDPETRO",
+        "2026-07-27|JINDALSTEL",
+        "2026-07-27|LAURUSLABS",
+        "2026-07-27|LICHSGFIN",
+        "2026-07-27|LODHA",
+        "2026-07-27|LTM",
+        "2026-07-27|NAUKRI",
+        "2026-07-27|NESTLEIND",
+        "2026-07-27|OFSS",
+        "2026-07-27|PIDILITIND",
+        "2026-07-27|RBLBANK",
+        "2026-07-27|SBICARD",
+        "2026-07-27|SWIGGY",
+        "2026-07-27|TATAELXSI"
+      ],
+      "fn_list": [
+        "2026-07-27|ABB",
+        "2026-07-27|ADANIENSOL",
+        "2026-07-27|BANKINDIA",
+        "2026-07-27|DIXON",
+        "2026-07-27|ONGC"
+      ]
+    },
+    "2026-07-28": {
+      "proposed_n": 22,
+      "actual_n": 17,
+      "TP": 8,
+      "FP": 14,
+      "FN": 9,
+      "precision": 0.3636,
+      "recall": 0.4706,
+      "tp_list": [
+        "2026-07-28|ETERNAL",
+        "2026-07-28|INFY",
+        "2026-07-28|LODHA",
+        "2026-07-28|LTM",
+        "2026-07-28|MPHASIS",
+        "2026-07-28|NAUKRI",
+        "2026-07-28|PERSISTENT",
+        "2026-07-28|SBICARD"
+      ],
+      "fp_list": [
+        "2026-07-28|ASHOKLEY",
+        "2026-07-28|COFORGE",
+        "2026-07-28|HCLTECH",
+        "2026-07-28|HYUNDAI",
+        "2026-07-28|KALYANKJIL",
+        "2026-07-28|KPITTECH",
+        "2026-07-28|LAURUSLABS",
+        "2026-07-28|M&M",
+        "2026-07-28|NESTLEIND",
+        "2026-07-28|OFSS",
+        "2026-07-28|TATAELXSI",
+        "2026-07-28|TCS",
+        "2026-07-28|TECHM",
+        "2026-07-28|WIPRO"
+      ],
+      "fn_list": [
+        "2026-07-28|ADANIENSOL",
+        "2026-07-28|BHEL",
+        "2026-07-28|CGPOWER",
+        "2026-07-28|COALINDIA",
+        "2026-07-28|DMART",
+        "2026-07-28|POWERINDIA",
+        "2026-07-28|SOLARINDS",
+        "2026-07-28|SUZLON",
+        "2026-07-28|TATAPOWER"
+      ]
+    },
+    "2026-07-29": {
+      "proposed_n": 17,
+      "actual_n": 18,
+      "TP": 10,
+      "FP": 7,
+      "FN": 8,
+      "precision": 0.5882,
+      "recall": 0.5556,
+      "tp_list": [
+        "2026-07-29|AUROPHARMA",
+        "2026-07-29|CIPLA",
+        "2026-07-29|DIVISLAB",
+        "2026-07-29|HINDUNILVR",
+        "2026-07-29|JINDALSTEL",
+        "2026-07-29|KAYNES",
+        "2026-07-29|KPITTECH",
+        "2026-07-29|M&M",
+        "2026-07-29|SWIGGY",
+        "2026-07-29|VBL"
+      ],
+      "fp_list": [
+        "2026-07-29|BANKBARODA",
+        "2026-07-29|COFORGE",
+        "2026-07-29|JIOFIN",
+        "2026-07-29|JSWSTEEL",
+        "2026-07-29|MANAPPURAM",
+        "2026-07-29|PGEL",
+        "2026-07-29|TATASTEEL"
+      ],
+      "fn_list": [
+        "2026-07-29|BHEL",
+        "2026-07-29|INFY",
+        "2026-07-29|KALYANKJIL",
+        "2026-07-29|LTF",
+        "2026-07-29|PAGEIND",
+        "2026-07-29|PHOENIXLTD",
+        "2026-07-29|SAIL",
+        "2026-07-29|SUZLON"
+      ]
+    },
+    "2026-07-30": {
+      "proposed_n": 12,
+      "actual_n": 11,
+      "TP": 4,
+      "FP": 8,
+      "FN": 7,
+      "precision": 0.3333,
+      "recall": 0.3636,
+      "tp_list": [
+        "2026-07-30|HEROMOTOCO",
+        "2026-07-30|RBLBANK",
+        "2026-07-30|SONACOMS",
+        "2026-07-30|TVSMOTOR"
+      ],
+      "fp_list": [
+        "2026-07-30|ALKEM",
+        "2026-07-30|COALINDIA",
+        "2026-07-30|CUMMINSIND",
+        "2026-07-30|KALYANKJIL",
+        "2026-07-30|OIL",
+        "2026-07-30|PERSISTENT",
+        "2026-07-30|TRENT",
+        "2026-07-30|WIPRO"
+      ],
+      "fn_list": [
+        "2026-07-30|360ONE",
+        "2026-07-30|ADANIPORTS",
+        "2026-07-30|DLF",
+        "2026-07-30|KFINTECH",
+        "2026-07-30|M&M",
+        "2026-07-30|PAGEIND",
+        "2026-07-30|TIINDIA"
+      ]
+    },
+    "2026-07-31": {
+      "proposed_n": 24,
+      "actual_n": 15,
+      "TP": 10,
+      "FP": 14,
+      "FN": 5,
+      "precision": 0.4167,
+      "recall": 0.6667,
+      "tp_list": [
+        "2026-07-31|ABCAPITAL",
+        "2026-07-31|BAJAJFINSV",
+        "2026-07-31|BAJAJHLDNG",
+        "2026-07-31|BAJFINANCE",
+        "2026-07-31|GAIL",
+        "2026-07-31|HYUNDAI",
+        "2026-07-31|KAYNES",
+        "2026-07-31|KEI",
+        "2026-07-31|SIEMENS",
+        "2026-07-31|TIINDIA"
+      ],
+      "fp_list": [
+        "2026-07-31|ADANIPORTS",
+        "2026-07-31|ASHOKLEY",
+        "2026-07-31|CGPOWER",
+        "2026-07-31|CUMMINSIND",
+        "2026-07-31|HDFCAMC",
+        "2026-07-31|INOXWIND",
+        "2026-07-31|JSWENERGY",
+        "2026-07-31|M&M",
+        "2026-07-31|MAZDOCK",
+        "2026-07-31|MOTHERSON",
+        "2026-07-31|POLYCAB",
+        "2026-07-31|POWERINDIA",
+        "2026-07-31|SUNPHARMA",
+        "2026-07-31|TORNTPHARM"
+      ],
+      "fn_list": [
+        "2026-07-31|BRITANNIA",
+        "2026-07-31|ITC",
+        "2026-07-31|KALYANKJIL",
+        "2026-07-31|LTM",
+        "2026-07-31|MANKIND"
+      ]
+    }
+  },
+  "note": "Informational only \u2014 does not gate live deploy. RS_Score = trade_score (0\u2013100)."
+}

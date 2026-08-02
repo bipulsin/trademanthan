@@ -1569,6 +1569,25 @@
         var dirEl = card.querySelector(".dc-ready-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
+        var sqEl = card.querySelector(".dc-ready-sq");
+        if (sqEl) {
+            var viaSq = !!stock.promoted_via_structural_score;
+            var sq = stock.structural_quality || {};
+            sqEl.hidden = !viaSq;
+            if (viaSq) {
+                var tip = [
+                    "Structural Quality Total " + (stock.sq_total != null ? Number(stock.sq_total).toFixed(1) : "—"),
+                    "RS " + (sq.rs_score != null ? Number(sq.rs_score).toFixed(1) : "—"),
+                    "Garuda " + (sq.garuda_score != null ? Number(sq.garuda_score).toFixed(1) : "—"),
+                    "OW " + (sq.OW != null ? Number(sq.OW).toFixed(1) : "—"),
+                    "VW " + (sq.VW != null ? Number(sq.VW).toFixed(1) : "—"),
+                    "EW " + (sq.EW != null ? Number(sq.EW).toFixed(1) : "—"),
+                    "Grade bonus " + (sq.grade_bonus != null ? Number(sq.grade_bonus).toFixed(0) : "—"),
+                ].join(" · ");
+                sqEl.title = tip;
+                sqEl.textContent = stock.also_organic_ready ? "SQ+" : "SQ";
+            }
+        }
         var entry = stock.trade_entry;
         var sl = stock.trade_sl;
         var entryLabelEl = card.querySelector(".dc-ready-entry-label");

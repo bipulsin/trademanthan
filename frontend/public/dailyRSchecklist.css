@@ -541,6 +541,19 @@ body[data-theme="dark"] .dc-gate-badge--pb3 {
     min-height: 0;
 }
 .dc-ready-flags[hidden] { display: none !important; }
+.dc-ready-sq {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #0f766e;
+    color: #ecfdf5;
+    cursor: help;
+    align-self: center;
+}
+.dc-ready-sq[hidden] { display: none !important; }
 .dc-watch-flags {
     display: inline-flex;
     flex-wrap: wrap;

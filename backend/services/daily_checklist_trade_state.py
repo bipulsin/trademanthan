@@ -2215,6 +2215,26 @@ def enrich_stocks_trade_state(
         except Exception as exc:
             logger.debug("atr ready suppress / DI shadow skipped: %s", exc)
 
+        # Structural Quality ≥75 → READY (Top-6 + grade A/B); bypass secondary FSM.
+        sq_stats: Dict[str, int] = {}
+        try:
+            from backend.services.structural_quality_ready import apply_sq_ready_promotions
+
+            sq_stats = apply_sq_ready_promotions(
+                stocks,
+                db=db,
+                session_date=session_date,
+                candle_cache=candle_cache,
+            )
+            if sq_stats.get("promoted") or sq_stats.get("already_ready"):
+                logger.info("SQ READY promotions: %s", sq_stats)
+            from backend.services.structural_quality_ready import update_sq_lifecycle_outcomes
+
+            update_sq_lifecycle_outcomes(stocks, db=db, session_date=session_date)
+        except Exception as exc:
+            logger.warning("SQ READY promotion skipped: %s", exc)
+            sq_stats = {}
+
         # Finalize consistency log with post-stack UI state + take-enablement.
         # Shadow / live: 10-min dwell + entry distance (A/B/C sensitivity always).
         from backend.services.ready_dwell_entry_shadow import build_dwell_entry_shadow
@@ -2247,6 +2267,11 @@ def enrich_stocks_trade_state(
             inp["entry_audit_suppressed"] = s_final.get("entry_audit_suppressed")
             inp["gate_badges"] = s_final.get("gate_badges")
             inp["card_visible"] = s_final.get("card_visible")
+            if s_final.get("promoted_via_structural_score"):
+                inp["promoted_via_structural_score"] = True
+                inp["structural_quality"] = s_final.get("structural_quality")
+                inp["sq_total"] = s_final.get("sq_total")
+                inp["also_organic_ready"] = bool(s_final.get("also_organic_ready"))
             inp["dwell_soft_hold"] = s_final.get("dwell_soft_hold")
             inp["ready_visible_since"] = s_final.get("ready_visible_since")
             # Export helpers for /api/export/garuda-shadow ready_now_promotions (not gating).
