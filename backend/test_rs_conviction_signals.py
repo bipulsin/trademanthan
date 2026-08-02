@@ -77,3 +77,46 @@ def test_accumulation_signal_two_of_three():
     score, active, low_conf = accumulation_signal(candles, "BULL", DEFAULTS)
     assert score >= 40.0
     assert low_conf is True
+
+
+def test_ema10_10min_seeded_from_prior_session_no_cold_start():
+    """Prior-session seed → EMA10 available before 10 same-session 10m bars."""
+    from backend.services.rs_conviction_signals import ema10_10min
+    from backend.services.vajra.indicators import ema_series
+
+    day = "2026-07-30"
+    # 40 prior 5m bars → 20 prior 10m closes (≥10); only 4 today 5m → 2 today 10m
+    candles = _session_candles(day, 4, close_start=5000.0, drift=1.0)
+    e = ema10_10min(candles)
+    assert e is not None
+
+    # Without prior history, same today bars alone must still return None (legacy)
+    today_only = [c for c in candles if c["timestamp"].startswith(day)]
+    assert ema10_10min(today_only) is None
+
+    # Seeded value equals recursive continuation from prior final EMA10
+    from backend.services.rs_conviction_signals import (
+        _aggregate_10m_closes,
+        _ema_seeded,
+        _prior_session_10m_closes,
+        _today_slice,
+    )
+
+    today, first = _today_slice(candles)
+    prior = _prior_session_10m_closes(candles, first)
+    seed = ema_series(prior, 10)[-1]
+    expected = _ema_seeded(_aggregate_10m_closes(today), 10, seed)[-1]
+    assert abs(e - expected) < 1e-9
+
+
+def test_ema10_10min_cold_start_when_no_prior():
+    from backend.services.rs_conviction_signals import ema10_10min
+
+    day = "2026-07-30"
+    # 20 today 5m → 10 today 10m, no prior
+    candles = []
+    for i in range(20):
+        candles.append(_bar(day, i * 5, 100.0 + i * 0.1, 1000))
+    e = ema10_10min(candles)
+    assert e is not None
+    assert ema10_10min(candles[:10]) is None  # only 5 ten-min bars

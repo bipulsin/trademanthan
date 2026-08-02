@@ -164,13 +164,64 @@ def accumulation_signal(
     return 0.0, False, low_conf
 
 
+def _ema_seeded(values: List[float], period: int, seed: float) -> List[float]:
+    """Close-only EMA continuing from ``seed`` (prior-session final EMA)."""
+    if not values:
+        return []
+    k = 2.0 / (max(1, int(period)) + 1.0)
+    out: List[float] = []
+    ema_v = float(seed)
+    for v in values:
+        ema_v = float(v) * k + ema_v * (1.0 - k)
+        out.append(ema_v)
+    return out
+
+
+def _prior_session_10m_closes(candles: List[Dict], first_today: int) -> List[float]:
+    """10m closes from bars strictly before today's session (date-grouped)."""
+    if first_today <= 0:
+        return []
+    prior = candles[:first_today]
+    by_date: Dict[str, List[Dict]] = {}
+    order: List[str] = []
+    for c in prior:
+        d = _parse_ist_date(c.get("timestamp"))
+        if not d:
+            continue
+        if d not in by_date:
+            by_date[d] = []
+            order.append(d)
+        by_date[d].append(c)
+    out: List[float] = []
+    for d in order:
+        out.extend(_aggregate_10m_closes(by_date[d]))
+    return out
+
+
 def ema10_10min(candles: List[Dict]) -> Optional[float]:
-    """EMA(10) of 10-min closes for passive exit reference."""
-    today, _ = _today_slice(candles)
-    closes_10m = _aggregate_10m_closes(today)
-    if len(closes_10m) < 10:
+    """EMA(10) of 10-min closes for stretch / passive exit.
+
+    Seeded from prior-session final 10m EMA10 when ≥10 prior 10m closes exist, so
+    stretch is available from session bar 1 (no same-session 10-bar cold-start).
+    Falls back to same-session cold start only when prior history is missing and
+    ≥10 today bars exist.
+    """
+    candles = _sorted_candles(candles or [])
+    if not candles:
         return None
-    return ema_series(closes_10m, 10)[-1]
+    today, first_today = _today_slice(candles)
+    today_closes = _aggregate_10m_closes(today)
+    if not today_closes:
+        return None
+
+    prior_closes = _prior_session_10m_closes(candles, first_today)
+    if len(prior_closes) >= 10:
+        seed = float(ema_series(prior_closes, 10)[-1])
+        return float(_ema_seeded(today_closes, 10, seed)[-1])
+
+    if len(today_closes) < 10:
+        return None
+    return float(ema_series(today_closes, 10)[-1])
 
 
 def gap_history_atr(candles: List[Dict], atr_daily_pct: float) -> List[float]:
