@@ -22,6 +22,43 @@ def test_grade_ab_ok():
     assert not grade_ab_ok("D")
 
 
+def test_no_start_aligned_free_100():
+    from backend.services.structural_quality_score import step_ew_v12
+
+    st = {"ew": 0.0, "armed": False, "cross_count": 0, "prev_side": 0}
+    ew, ev = step_ew_v12(
+        st, ema5=172.46, vwap=172.40, dir_sign=1, is_first_eval=True, ema_reliable=True
+    )
+    assert ew == 0.0
+    assert ev is None
+    assert st["armed"] is False
+    assert st["prev_side"] == 1
+
+
+def test_unreliable_ema_no_arm():
+    from backend.services.structural_quality_score import step_ew_v12
+
+    st = {"ew": 0.0, "armed": False, "cross_count": 0, "prev_side": -1}
+    ew, ev = step_ew_v12(
+        st, ema5=173.0, vwap=172.0, dir_sign=1, is_first_eval=False, ema_reliable=False
+    )
+    assert ew == 0.0
+    assert ev is None
+    assert st["armed"] is False
+
+
+def test_genuine_cross_arms_100():
+    from backend.services.structural_quality_score import step_ew_v12
+
+    st = {"ew": 0.0, "armed": False, "cross_count": 0, "prev_side": -1}
+    ew, ev = step_ew_v12(
+        st, ema5=173.0, vwap=172.0, dir_sign=1, is_first_eval=False, ema_reliable=True
+    )
+    assert ew == 100.0
+    assert ev == "bullish"
+    assert st["armed"] is True
+
+
 def test_composite_maxish():
     # 0.15*100*5 + 25 = 100
     t = composite_total(

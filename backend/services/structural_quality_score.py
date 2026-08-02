@@ -135,27 +135,38 @@ def step_vw(
     return float(prev_vw), cls
 
 
+EMA_RELIABLE_AFTER_BARS = 6  # first N session 10m bars: EMA5 not yet trusted for EW
+
+
 def step_ew_v12(
     state: Dict[str, Any],
     *,
     ema5: float,
     vwap: float,
     dir_sign: int,
-    is_first_eval: bool,
+    is_first_eval: bool = False,
+    ema_reliable: bool = True,
 ) -> Tuple[float, Optional[str]]:
+    """EW arms only on a genuine observed EMA5/VWAP crossover in qualifying direction.
+
+    No ``start_aligned`` shortcut: already-on-side at first bar stays EW=0 until a
+    real cross is seen. Bars with ``ema_reliable=False`` never arm/decay/event —
+    only silently refresh ``prev_side`` so the first reliable bar does not invent
+    a false crossover from an unreliable seed.
+    """
     side = _side(ema5, vwap)
-    event = None
-    if is_first_eval and not state.get("armed"):
-        if dir_sign != 0 and side == dir_sign:
-            state["armed"] = True
-            state["cross_count"] = 0
-            state["ew"] = 100.0
-            state["prev_side"] = side
-            return 100.0, "start_aligned"
+    if not ema_reliable:
         if side != 0:
             state["prev_side"] = side
         return float(state.get("ew") or 0.0), None
 
+    # First eval (or any bar with no prior side): seed prev_side only — no free 100.
+    if is_first_eval and not state.get("armed"):
+        if side != 0:
+            state["prev_side"] = side
+        return float(state.get("ew") or 0.0), None
+
+    event = None
     prev = int(state.get("prev_side") or 0)
     if prev != 0 and side != 0 and side != prev:
         event = "bullish" if side > 0 else "bearish"
@@ -164,6 +175,7 @@ def step_ew_v12(
                 state["armed"] = True
                 state["cross_count"] = 1
                 state["ew"] = 100.0
+            # opposite first cross: ignore for arming
         else:
             state["cross_count"] = int(state.get("cross_count") or 0) + 1
             state["ew"] = float(max(0.0, float(state.get("ew") or 0.0) - 20.0))
@@ -244,6 +256,7 @@ def enrich_session_10m_bars(
                 "ema5": float(ema5_s[i]),
                 "session_open": session_open,
                 "bar_hhmm": b["bar_end"].strftime("%H:%M"),
+                "ema_reliable": i >= EMA_RELIABLE_AFTER_BARS,
             }
         )
     return out
@@ -268,6 +281,7 @@ def score_bars_through(
         "prev_side": 0,
     }
     last: Optional[Dict[str, Any]] = None
+    first_eval = True
     for i, b in enumerate(bars):
         stretch, ow = overextension_weight(float(b["close"]), float(b["session_open"]))
         vw_state, vw_cls = step_vw(
@@ -278,13 +292,17 @@ def score_bars_through(
             dir_sign=dir_sign,
             is_first_candle=(i == 0),
         )
-        ew, _ev = step_ew_v12(
+        reliable = bool(b.get("ema_reliable", i >= EMA_RELIABLE_AFTER_BARS))
+        ew, ew_event = step_ew_v12(
             ew_state,
             ema5=float(b["ema5"]),
             vwap=float(b["vwap"]),
             dir_sign=dir_sign,
-            is_first_eval=(i == 0),
+            is_first_eval=first_eval,
+            ema_reliable=reliable,
         )
+        if reliable:
+            first_eval = False
         total = composite_total(
             rs_score=rs_score,
             garuda_score=garuda_score,
@@ -299,6 +317,9 @@ def score_bars_through(
             "OW": ow,
             "VW": vw_state,
             "EW": ew,
+            "ew_event": ew_event,
+            "ew_armed": bool(ew_state.get("armed")),
+            "ema_reliable": reliable,
             "vw_classification": vw_cls,
             "stretch_pct": stretch,
             "rs_score": float(rs_score),
