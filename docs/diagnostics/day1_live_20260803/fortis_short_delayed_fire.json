@@ -1,0 +1,247 @@
+{
+  "symbol": "FORTIS",
+  "session": "2026-08-03",
+  "manual_tv_short_start": "2026-08-03T11:15:00",
+  "rows": [
+    {
+      "asof": "2026-08-03T10:56:00",
+      "garuda_side": "LONG",
+      "garuda_rank": 6,
+      "garuda_score": 66.14,
+      "rs_ranking_type": "BEARISH",
+      "rs_grade": "D",
+      "rs_score": 45.0,
+      "vwap_side_short_ok": true,
+      "vwap_detail": {
+        "close": 966.25,
+        "vwap": 969.3496,
+        "direction": "SHORT",
+        "n_closed_10m": 10,
+        "close_minus_vwap": -3.0996
+      },
+      "sq_total": null,
+      "sq_meets_75": false,
+      "grade_ab_ok": false,
+      "would_flip_promote": false,
+      "blockers": [
+        "sq_total_0_lt_75"
+      ]
+    },
+    {
+      "asof": "2026-08-03T11:06:00",
+      "garuda_side": "LONG",
+      "garuda_rank": 6,
+      "garuda_score": 66.14,
+      "rs_ranking_type": null,
+      "rs_grade": null,
+      "rs_score": null,
+      "vwap_side_short_ok": true,
+      "vwap_detail": {
+        "close": 965.05,
+        "vwap": 969.3112,
+        "direction": "SHORT",
+        "n_closed_10m": 11,
+        "close_minus_vwap": -4.2612
+      },
+      "sq_total": 75.2522,
+      "sq_meets_75": true,
+      "grade_ab_ok": true,
+      "would_flip_promote": false,
+      "blockers": [
+        "garuda_still_long_and_no_bearish_rs"
+      ]
+    },
+    {
+      "asof": "2026-08-03T11:16:00",
+      "garuda_side": "LONG",
+      "garuda_rank": 6,
+      "garuda_score": 66.14,
+      "rs_ranking_type": null,
+      "rs_grade": null,
+      "rs_score": null,
+      "vwap_side_short_ok": true,
+      "vwap_detail": {
+        "close": 964.5,
+        "vwap": 969.2661,
+        "direction": "SHORT",
+        "n_closed_10m": 12,
+        "close_minus_vwap": -4.7661
+      },
+      "sq_total": 76.8959,
+      "sq_meets_75": true,
+      "grade_ab_ok": true,
+      "would_flip_promote": false,
+      "blockers": [
+        "garuda_still_long_and_no_bearish_rs"
+      ]
+    },
+    {
+      "asof": "2026-08-03T11:26:00",
+      "garuda_side": "LONG",
+      "garuda_rank": 6,
+      "garuda_score": 66.14,
+      "rs_ranking_type": "BEARISH",
+      "rs_grade": "D",
+      "rs_score": 45.0,
+      "vwap_side_short_ok": true,
+      "vwap_detail": {
+        "close": 964.0,
+        "vwap": 969.1556,
+        "direction": "SHORT",
+        "n_closed_10m": 13,
+        "close_minus_vwap": -5.1556
+      },
+      "sq_total": null,
+      "sq_meets_75": false,
+      "grade_ab_ok": false,
+      "would_flip_promote": false,
+      "blockers": [
+        "sq_total_0_lt_75"
+      ]
+    },
+    {
+      "asof": "2026-08-03T11:36:00",
+      "garuda_side": "LONG",
+      "garuda_rank": 6,
+      "garuda_score": 66.14,
+      "rs_ranking_type": null,
+      "rs_grade": null,
+      "rs_score": null,
+      "vwap_side_short_ok": true,
+      "vwap_detail": {
+        "close": 962.0,
+        "vwap": 968.8335,
+        "direction": "SHORT",
+        "n_closed_10m": 14,
+        "close_minus_vwap": -6.8335
+      },
+      "sq_total": 80.5492,
+      "sq_meets_75": true,
+      "grade_ab_ok": true,
+      "would_flip_promote": false,
+      "blockers": [
+        "garuda_still_long_and_no_bearish_rs"
+      ]
+    }
+  ],
+  "garuda_short_ever": false,
+  "first_qualify": null,
+  "verdict": "Never qualifies for SHORT flip on 2026-08-03. Garuda never flagged FORTIS as SHORT Top-6 (always LONG LOCF). RS BEARISH ranking appears at times, but those scans carry grade D (not A/B), so SQ evaluate refuses. When SQ Total would clear 75 under forced-SHORT scoring (e.g. 11:06\u224875.3, 11:16\u224876.9, 11:36\u224880.5), contemporaneous LOCF lacks BEARISH ranking and Garuda is still LONG \u2014 Fix 3 correctly declines. Mechanism is sound but starved of compatible SHORT anchors on this name; would not have caught the ~11:15 TV SHORT.",
+  "garuda_short_rows": [],
+  "rs_bearish_rows": [
+    {
+      "t": "2026-08-03 10:45:08.033965",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 25.0
+    },
+    {
+      "t": "2026-08-03 10:55:05.617634",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 45.0
+    },
+    {
+      "t": "2026-08-03 11:25:07.570407",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 45.0
+    },
+    {
+      "t": "2026-08-03 11:55:10.712819",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 20.0
+    },
+    {
+      "t": "2026-08-03 12:05:09.373756",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 30.0
+    },
+    {
+      "t": "2026-08-03 12:15:08.456940",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 50.0
+    },
+    {
+      "t": "2026-08-03 12:25:08.946895",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 40.0
+    },
+    {
+      "t": "2026-08-03 12:35:09.814445",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 63.0
+    },
+    {
+      "t": "2026-08-03 12:45:08.673125",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 50.0
+    },
+    {
+      "t": "2026-08-03 12:55:09.122519",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 50.0
+    },
+    {
+      "t": "2026-08-03 13:05:10.018767",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 50.0
+    },
+    {
+      "t": "2026-08-03 13:15:09.145843",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 55.0
+    },
+    {
+      "t": "2026-08-03 14:15:09.932955",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 25.0
+    },
+    {
+      "t": "2026-08-03 14:25:10.030195",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 35.0
+    },
+    {
+      "t": "2026-08-03 14:35:08.773733",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D",
+      "trade_score": 27.0
+    },
+    {
+      "t": "2026-08-03 14:55:11.678031",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 30.0
+    },
+    {
+      "t": "2026-08-03 15:05:09.315234",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "D!",
+      "trade_score": 50.0
+    },
+    {
+      "t": "2026-08-03 15:32:21.536492",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "B",
+      "trade_score": 80.0
+    },
+    {
+      "t": "2026-08-03 15:37:21.294777",
+      "ranking_type": "BEARISH",
+      "confidence_grade": "B",
+      "trade_score": 80.0
+    }
+  ]
+}

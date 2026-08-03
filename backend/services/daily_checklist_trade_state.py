@@ -2298,6 +2298,21 @@ def enrich_stocks_trade_state(
             logger.warning("SQ READY promotion skipped: %s", exc)
             sq_stats = {}
 
+        # Informational EXIT NOW banner/audio on remaining READY cards (VWAP or EMA10).
+        try:
+            from backend.services.ready_exit_now_alert import apply_ready_exit_now_alerts
+
+            exit_alert_stats = apply_ready_exit_now_alerts(
+                stocks,
+                db=db,
+                session_date=session_date,
+                candle_cache=candle_cache,
+            )
+            if exit_alert_stats.get("active") or exit_alert_stats.get("logged"):
+                logger.info("ready exit_now alerts: %s", exit_alert_stats)
+        except Exception as exc:
+            logger.warning("ready exit_now alerts skipped: %s", exc)
+
         # Finalize consistency log with post-stack UI state + take-enablement.
         # Shadow / live: 10-min dwell + entry distance (A/B/C sensitivity always).
         from backend.services.ready_dwell_entry_shadow import build_dwell_entry_shadow

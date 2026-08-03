@@ -24,6 +24,11 @@
     var takeTradeArmedPrimed = false;
     var takeTradeAudio = null;
     var takeTradeAudioUnlocked = false;
+    /** READY-card EXIT NOW (VWAP/EMA10): once per symbol per active episode. */
+    var exitNowCardAlerted = {};
+    var exitNowCardAlertsPrimed = false;
+    var exitNowCardAudio = null;
+    var exitNowCardAudioUnlocked = false;
 
     var AUTO_FIELDS = [
         "entry_time", "kavach_score_entry", "confidence", "trading_state",
@@ -500,6 +505,97 @@
                 p.then(function () { takeTradeAudioUnlocked = true; }).catch(function () { /* muted */ });
             }
         } catch (e) { /* muted */ }
+    }
+
+    function ensureExitNowCardAudio() {
+        if (!exitNowCardAudio) {
+            exitNowCardAudio = new Audio("audio/exit.mp3");
+            exitNowCardAudio.preload = "auto";
+            exitNowCardAudio.volume = 1;
+        }
+        return exitNowCardAudio;
+    }
+
+    function unlockExitNowCardAudio() {
+        if (exitNowCardAudioUnlocked) return Promise.resolve(true);
+        try {
+            var a = ensureExitNowCardAudio();
+            a.muted = true;
+            var p = a.play();
+            if (p && typeof p.then === "function") {
+                return p.then(function () {
+                    a.pause();
+                    a.currentTime = 0;
+                    a.muted = false;
+                    exitNowCardAudioUnlocked = true;
+                    return true;
+                }).catch(function () {
+                    a.muted = false;
+                    return false;
+                });
+            }
+            a.muted = false;
+            exitNowCardAudioUnlocked = true;
+            return Promise.resolve(true);
+        } catch (e) {
+            return Promise.resolve(false);
+        }
+    }
+
+    function playExitNowCardAlert() {
+        try {
+            var a = ensureExitNowCardAudio();
+            a.muted = false;
+            a.currentTime = 0;
+            var p = a.play();
+            if (p && typeof p.then === "function") {
+                p.then(function () {
+                    exitNowCardAudioUnlocked = true;
+                }).catch(function () {
+                    var ban = $("dcExitAckBanner");
+                    var txt = $("dcExitAckText");
+                    if (ban) ban.hidden = false;
+                    if (txt) {
+                        txt.textContent =
+                            "Browser blocked EXIT NOW sound — click once to unlock audio";
+                    }
+                });
+            }
+        } catch (e) { /* muted */ }
+    }
+
+    /**
+     * Play exit.mp3 once when a READY card newly surfaces exit_now_alert.active.
+     * Silent while the alert stays active; clears when condition clears so a later
+     * re-trigger can alert again.
+     */
+    function checkExitNowCardAlerts(stocks) {
+        if (!stocks) return;
+        var live = {};
+        stocks.forEach(function (s) {
+            if (!isReadyState(s.trade_state)) return;
+            var alert = s.exit_now_alert || {};
+            if (!alert.active) return;
+            var sym = s.symbol;
+            if (!sym) return;
+            live[sym] = true;
+        });
+        if (!exitNowCardAlertsPrimed) {
+            Object.keys(live).forEach(function (sym) { exitNowCardAlerted[sym] = true; });
+            exitNowCardAlertsPrimed = true;
+            return;
+        }
+        var fresh = [];
+        Object.keys(live).forEach(function (sym) {
+            if (!exitNowCardAlerted[sym]) {
+                exitNowCardAlerted[sym] = true;
+                fresh.push(sym);
+            }
+        });
+        Object.keys(exitNowCardAlerted).forEach(function (sym) {
+            if (!live[sym]) delete exitNowCardAlerted[sym];
+        });
+        if (fresh.length) playExitNowCardAlert();
     }
 
     /**
@@ -1564,6 +1660,27 @@
     function patchReadyCard(card, stock) {
         var sym = stock.symbol;
         card.dataset.symbol = sym;
+        var exitAlert = stock.exit_now_alert || {};
+        var exitActive = !!exitAlert.active;
+        card.classList.toggle("dc-ready-card--exit-now", exitActive);
+        var exitBan = card.querySelector(".dc-ready-exit-now");
+        if (exitBan) {
+            exitBan.hidden = !exitActive;
+            if (exitActive) {
+                exitBan.textContent = exitAlert.banner || "EXIT NOW";
+                var d = exitAlert.detail || {};
+                exitBan.title = [
+                    "Informational — decide exit per Rule 15/24/25",
+                    "close " + (d.close != null ? d.close : "—"),
+                    "VWAP " + (d.vwap != null ? d.vwap : "—"),
+                    "EMA10 " + (d.ema10 != null ? d.ema10 : "—"),
+                    exitAlert.trigger_label || exitAlert.reason || "",
+                ].filter(Boolean).join(" · ");
+            } else {
+                exitBan.textContent = "EXIT NOW";
+                exitBan.title = "";
+            }
+        }
         card.querySelector(".dc-ready-symbol").textContent = displaySym(stock);
         var dir = (stock.direction || "LONG").toUpperCase();
         var dirEl = card.querySelector(".dc-ready-dir");
@@ -2068,6 +2185,7 @@
         checkGoAlerts(stocks);
         checkReadyNowAlerts(stocks);
         checkTakeTradeArmedAlerts(stocks);
+        checkExitNowCardAlerts(stocks);
 
         if (modalSymbol) renderModal(currentStock(modalSymbol));
     }
@@ -3039,10 +3157,11 @@
                 });
             });
         }
-        // Any first gesture unlocks HTMLAudio for later READY NOW / Take Trade cues.
+        // Any first gesture unlocks HTMLAudio for later READY NOW / Take Trade / EXIT NOW cues.
         function onFirstGesture() {
             if (readyNowAlertEnabled) unlockReadyNowAudio();
             unlockTakeTradeAudio();
+            unlockExitNowCardAudio();
         }
         ["pointerdown", "keydown", "touchstart", "click"].forEach(function (evt) {
             document.addEventListener(evt, onFirstGesture, { once: true, capture: true });
@@ -3050,13 +3169,16 @@
         var ackBtn = $("dcExitAckBtn");
         if (ackBtn) {
             ackBtn.addEventListener("click", function () {
-                if (!exitAudio) exitAudio = new Audio("audio/attention.mp3");
-                exitAudio.volume = 1;
-                exitAudio.play().then(function () {
-                    var ban = $("dcExitAckBanner");
-                    if (ban) ban.hidden = true;
-                    pendingAlarmTradeId = null;
-                }).catch(function () {});
+                unlockExitNowCardAudio().then(function () {
+                    if (!exitAudio) exitAudio = new Audio("audio/attention.mp3");
+                    exitAudio.volume = 1;
+                    exitAudio.play().then(function () {
+                        var ban = $("dcExitAckBanner");
+                        if (ban) ban.hidden = true;
+                        pendingAlarmTradeId = null;
+                    }).catch(function () {});
+                    playExitNowCardAlert();
+                });
             });
         }
 

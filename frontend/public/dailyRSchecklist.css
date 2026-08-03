@@ -1234,6 +1234,33 @@ body[data-theme="dark"] .dc-go-board-card {
 .dc-ready-card {
     background: var(--theme-card, #1e293b); border: 1px solid #22c55e;
     border-radius: 10px; padding: 12px 14px; cursor: pointer;
+    position: relative;
+}
+.dc-ready-exit-now {
+    display: none;
+    margin: -4px -6px 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-align: center;
+    text-transform: uppercase;
+    color: #fff !important;
+    background: linear-gradient(90deg, #dc2626 0%, #ea580c 55%, #dc2626 100%);
+    box-shadow: 0 0 0 1px rgba(254, 202, 202, 0.55), 0 0 18px rgba(220, 38, 38, 0.45);
+    animation: dc-exit-now-pulse 1.2s ease-in-out infinite;
+}
+.dc-ready-card--exit-now {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.55), 0 0 22px rgba(220, 38, 38, 0.35);
+}
+.dc-ready-card--exit-now .dc-ready-exit-now {
+    display: block;
+}
+@keyframes dc-exit-now-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.18); }
 }
 /* Take Trade armed — gold glitter border (distinct from mere READY NOW) */
 .dc-ready-card--take-armed {
