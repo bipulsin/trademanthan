@@ -509,10 +509,65 @@ def run_live_garuda_screener(*, force: bool = False) -> Dict[str, Any]:
         cross = {"day_rs": day_rs_list, "roc3": roc3_list, "roc3_neg": [-x for x in roc3_list]}
 
         evals: List[Dict[str, Any]] = []
+        # Prior published side (any rank) for 2-candle VWAP flip gate.
+        from backend.services.vwap_2candle_side import (
+            log_side_resolution,
+            resolve_directional_side,
+            vwap_2candle_side_enabled,
+        )
+
+        prior_sides: Dict[str, str] = {}
+        try:
+            prior_rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT ON (UPPER(symbol))
+                           UPPER(symbol) AS symbol, side
+                    FROM garuda_screener_log
+                    WHERE session_date = CAST(:d AS date)
+                    ORDER BY UPPER(symbol), bar_end DESC
+                    """
+                ),
+                {"d": session_date},
+            ).mappings().all()
+            for pr in prior_rows:
+                if pr["side"]:
+                    prior_sides[str(pr["symbol"]).upper()] = str(pr["side"])
+        except Exception as exc:
+            logger.debug("garuda prior sides load skipped: %s", exc)
+
+        flip_stats = {"confirmed": 0, "rejected": 0}
         for _sym, ctx, _pre in prepared:
             row = evaluate_symbol(ctx, cfg=cfg, cross_section=cross)
-            if row:
-                evals.append(row)
+            if not row:
+                continue
+            if vwap_2candle_side_enabled():
+                sym_u = str(row.get("symbol") or "").upper()
+                resolved = resolve_directional_side(
+                    prior_sides.get(sym_u),
+                    row.get("side"),
+                    ctx.bars,
+                    ctx.idx,
+                )
+                row["raw_side"] = row.get("side")
+                row["side"] = resolved["side"]
+                row["side_resolve_action"] = resolved.get("action")
+                if resolved.get("action") == "confirmed_flip":
+                    flip_stats["confirmed"] += 1
+                elif resolved.get("action") == "flip_rejected_no_confirm":
+                    flip_stats["rejected"] += 1
+                try:
+                    log_side_resolution(
+                        db,
+                        session_date=session_date,
+                        symbol=sym_u,
+                        source="garuda",
+                        bar_end=bar_end,
+                        resolved=resolved,
+                    )
+                except Exception:
+                    pass
+            evals.append(row)
 
         ranked = rank_top_n(evals, top_n=TOP_N)
         top_by_sym = {r["symbol"]: r for r in ranked["top_n"]}
@@ -536,6 +591,7 @@ def run_live_garuda_screener(*, force: bool = False) -> Dict[str, Any]:
             "rows_written": n,
             "cache_hits": cache_hits,
             "cache_miss": cache_miss,
+            "vwap_2candle_flips": flip_stats,
         }
         logger.info(
             "garuda screener: bar=%s eval=%s/%s top6=%s cache_miss=%s",

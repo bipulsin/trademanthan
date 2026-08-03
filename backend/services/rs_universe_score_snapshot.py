@@ -338,6 +338,115 @@ def _row_params(
     }
 
 
+def _apply_vwap_2candle_ranking_gate(
+    bull: List[Dict[str, Any]],
+    bear: List[Dict[str, Any]],
+    neutral: List[Dict[str, Any]],
+    *,
+    scan_time: datetime,
+    session_date: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Apply 2-candle VWAP confirmation to RS ranking_type (force confirm / reject raw flips)."""
+    from backend.services.rs_conviction_candles import candles_cache_only
+    from backend.services.vwap_2candle_side import (
+        bars_with_session_vwap,
+        log_side_resolution,
+        ranking_type_from_side,
+        resolve_directional_side,
+        side_from_ranking_type,
+        vwap_2candle_side_enabled,
+    )
+
+    if not vwap_2candle_side_enabled():
+        return bull, bear, neutral
+
+    prior: Dict[str, str] = {}
+    db = SessionLocal()
+    try:
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT DISTINCT ON (UPPER(symbol))
+                           UPPER(symbol) AS symbol, ranking_type
+                    FROM rs_universe_score_snapshot
+                    WHERE session_date = CAST(:d AS date)
+                      AND scan_time < :st
+                    ORDER BY UPPER(symbol), scan_time DESC
+                    """
+                ),
+                {"d": session_date, "st": scan_time},
+            ).mappings().all()
+            for r in rows:
+                if r["ranking_type"]:
+                    prior[str(r["symbol"]).upper()] = str(r["ranking_type"])
+        except Exception as exc:
+            logger.debug("rs prior ranking load skipped: %s", exc)
+
+        new_bull: List[Dict[str, Any]] = []
+        new_bear: List[Dict[str, Any]] = []
+        new_neutral: List[Dict[str, Any]] = []
+        for row0 in bull + bear + neutral:
+            row = dict(row0)
+            sym = str(row.get("symbol") or "").upper()
+            raw_rt = row.get("ranking_type")
+            prev_rt = prior.get(sym)
+            prev_side = side_from_ranking_type(prev_rt)
+            raw_side = side_from_ranking_type(raw_rt)
+            ik = row.get("instrument_key")
+            bars: List[Dict[str, Any]] = []
+            if ik:
+                try:
+                    bars = bars_with_session_vwap(
+                        candles_cache_only(str(ik)) or [], now=scan_time
+                    )
+                except Exception:
+                    bars = []
+            if sym and len(bars) >= 2 and (prev_side or raw_side):
+                resolved = resolve_directional_side(
+                    prev_side, raw_side, bars, len(bars) - 1
+                )
+                new_rt = ranking_type_from_side(resolved.get("side"))
+                if new_rt:
+                    row["ranking_type_raw"] = raw_rt
+                    row["ranking_type"] = new_rt
+                    row["ranking_resolve_action"] = resolved.get("action")
+                    try:
+                        log_side_resolution(
+                            db,
+                            session_date=str(session_date),
+                            symbol=sym,
+                            source="rs_universe",
+                            bar_end=bars[-1].get("bar_end"),
+                            resolved=resolved,
+                        )
+                    except Exception:
+                        pass
+
+            rt = row.get("ranking_type")
+            if rt == RANKING_BULLISH:
+                new_bull.append(row)
+            elif rt == RANKING_BEARISH:
+                new_bear.append(row)
+            else:
+                row["ranking_type"] = RANKING_NEUTRAL
+                row["rank_raw"] = None
+                row["rank_membership"] = None
+                row["relative_strength_membership"] = row.get("relative_strength")
+                row["in_top10_membership"] = False
+                row["in_top5_membership"] = False
+                row["incumbent_bonus_applied"] = False
+                row["incumbent_rs_bonus"] = 0.0
+                new_neutral.append(row)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        return new_bull, new_bear, new_neutral
+    finally:
+        db.close()
+
+
 def persist_universe_shadow(
     *,
     scan_time: datetime,
@@ -384,6 +493,14 @@ def persist_universe_shadow(
             row["incumbent_bonus_applied"] = False
             row["incumbent_rs_bonus"] = 0.0
             neutral.append(row)
+
+    # 2-candle VWAP side gate on ranking_type (same rule as Garuda side).
+    try:
+        bull, bear, neutral = _apply_vwap_2candle_ranking_gate(
+            bull, bear, neutral, scan_time=scan_time, session_date=session_date
+        )
+    except Exception as exc:
+        logger.debug("rs vwap_2candle ranking gate skipped: %s", exc)
 
     db = SessionLocal()
     try:

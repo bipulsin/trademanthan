@@ -76,7 +76,12 @@ def ensure_sq_ready_promotion_log() -> None:
 
 
 def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
-    """Latest Garuda Top-6 rows for session → symbol → {rank, rank_score, side}."""
+    """Latest Garuda Top-6 for SQ: rank/score from last Top-6 bar; side from latest bar.
+
+    Side uses the most recent ``garuda_screener_log`` row (any rank) so a symbol that
+    drops out of Top-6 but later prints the opposite side is not stuck on morning
+    Top-6 LOCF direction. Rank/score still LOCF from last Top-6 appearance.
+    """
     out: Dict[str, Dict[str, Any]] = {}
     try:
         from backend.services.garuda_screener.job import ensure_garuda_screener_log
@@ -85,12 +90,27 @@ def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
         rows = db.execute(
             text(
                 """
-                SELECT DISTINCT ON (UPPER(symbol))
-                       UPPER(symbol) AS symbol, side, top6_rank, rank_score, bar_end
-                FROM garuda_screener_log
-                WHERE session_date = CAST(:d AS date)
-                  AND top6_rank IS NOT NULL
-                ORDER BY UPPER(symbol), bar_end DESC
+                WITH top6 AS (
+                    SELECT DISTINCT ON (UPPER(symbol))
+                           UPPER(symbol) AS symbol,
+                           top6_rank, rank_score, side AS top6_side, bar_end AS top6_bar_end
+                    FROM garuda_screener_log
+                    WHERE session_date = CAST(:d AS date)
+                      AND top6_rank IS NOT NULL
+                    ORDER BY UPPER(symbol), bar_end DESC
+                ),
+                latest_side AS (
+                    SELECT DISTINCT ON (UPPER(symbol))
+                           UPPER(symbol) AS symbol, side, bar_end AS side_bar_end
+                    FROM garuda_screener_log
+                    WHERE session_date = CAST(:d AS date)
+                    ORDER BY UPPER(symbol), bar_end DESC
+                )
+                SELECT t.symbol, t.top6_rank, t.rank_score, t.top6_bar_end,
+                       COALESCE(l.side, t.top6_side) AS side,
+                       l.side_bar_end
+                FROM top6 t
+                LEFT JOIN latest_side l ON l.symbol = t.symbol
                 """
             ),
             {"d": session_date},
@@ -100,7 +120,8 @@ def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
                 "top6_rank": int(r["top6_rank"]) if r["top6_rank"] is not None else None,
                 "rank_score": float(r["rank_score"]) if r["rank_score"] is not None else None,
                 "side": r["side"],
-                "bar_end": r["bar_end"],
+                "bar_end": r["side_bar_end"] or r["top6_bar_end"],
+                "top6_bar_end": r["top6_bar_end"],
             }
     except Exception as exc:
         logger.debug("garuda top6 load skipped: %s", exc)
