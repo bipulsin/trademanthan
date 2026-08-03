@@ -207,6 +207,93 @@ def evaluate_sq_for_stock(
     return breakdown
 
 
+def _garuda_side_to_direction(side: Any) -> str:
+    s = str(side or "").upper()
+    if s in ("SHORT", "BEAR", "BEARISH"):
+        return "SHORT"
+    return "LONG"
+
+
+def _ensure_sq_candidates_on_board(
+    stocks: List[Dict[str, Any]],
+    top6: Dict[str, Dict[str, Any]],
+    *,
+    candle_cache: Dict[str, Any],
+    db,
+) -> int:
+    """Inject Garuda Top-6 symbols missing from checklist so SQ can promote without lock.
+
+    Returns number of stubs appended. Direction comes from Garuda side (not lock).
+    """
+    by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
+    n = 0
+    for sym, meta in top6.items():
+        if sym in by_sym:
+            continue
+        direction = _garuda_side_to_direction(meta.get("side"))
+        stub: Dict[str, Any] = {
+            "symbol": sym,
+            "direction": direction,
+            "trade_state": "WATCHING",
+            "in_lock": False,
+            "sq_direct_candidate": True,
+            "lock_rank": meta.get("top6_rank"),
+        }
+        if sym not in candle_cache:
+            try:
+                from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
+
+                candle_cache[sym] = _load_candles_for_symbol(db, sym) or []
+            except Exception:
+                candle_cache[sym] = []
+        stocks.append(stub)
+        by_sym[sym] = stub
+        n += 1
+    return n
+
+
+def _promote_stock_via_sq(
+    s: Dict[str, Any],
+    br: Dict[str, Any],
+    *,
+    already: bool,
+    path: str,
+) -> None:
+    """Stamp READY + SQ badges on stock (caller logs + VWAP-gates)."""
+    s["structural_quality"] = br
+    s["sq_total"] = br["total"]
+    s["promoted_via_structural_score"] = True
+    s["promotion_path"] = path
+    badges = list(s.get("gate_badges") or [])
+    if "SQ" not in badges:
+        badges.insert(0, "SQ")
+    s["gate_badges"] = badges
+    if already:
+        s["also_organic_ready"] = True
+        s["sq_promoted_this_cycle"] = False
+        return
+    s["trade_state"] = "READY"
+    s["trade_state_reason"] = (
+        f"READY · SQ Total {br['total']:.1f} ≥ {promote_threshold():.0f} "
+        f"({path})"
+    )
+    s["also_organic_ready"] = False
+    s["sq_promoted_this_cycle"] = True
+    s["trade_take_enabled"] = True
+    s["trade_take_disable_reason"] = None
+    ema5 = None
+    try:
+        raw = s.get("live_candle_ema5") or (s.get("_live_kavach_metrics") or {}).get("ema5")
+        if raw is not None:
+            ema5 = float(raw)
+    except (TypeError, ValueError):
+        ema5 = None
+    if ema5 is not None and ema5 > 0 and s.get("trade_entry") is None:
+        s["trade_entry"] = round(float(ema5), 2)
+        s["trade_entry_source"] = "sq_ema5"
+        s["trade_entry_source_label"] = "Entry (EMA5 · SQ)"
+
+
 def apply_sq_ready_promotions(
     stocks: List[Dict[str, Any]],
     *,
@@ -214,18 +301,32 @@ def apply_sq_ready_promotions(
     session_date: str,
     candle_cache: Dict[str, Any],
 ) -> Dict[str, int]:
-    """Force READY when SQ Total ≥ threshold for Top-6 + grade A/B.
+    """Force READY when SQ Total ≥ threshold for Garuda Top-6 + grade A/B + VWAP-side.
 
-    Runs after FSM downgrades so SQ can bypass pullback/expired/secondary blocks.
-    Grade gate remains required inside evaluate_sq_for_stock.
+    Does **not** require prior lock/checklist membership — Top-6 symbols are
+    injected onto the board when missing (``sq_direct`` path).
     """
-    stats = {"checked": 0, "eligible": 0, "promoted": 0, "already_ready": 0, "logged": 0}
+    from backend.services.vwap_side_gate import apply_vwap_side_gate, vwap_side_ok
+
+    stats = {
+        "checked": 0,
+        "eligible": 0,
+        "promoted": 0,
+        "already_ready": 0,
+        "logged": 0,
+        "injected": 0,
+        "vwap_side_rejected": 0,
+        "sq_direct": 0,
+    }
     if not promote_enabled():
         return stats
     ensure_sq_ready_promotion_log()
     top6 = load_latest_garuda_top6(db, session_date)
     if not top6:
         return stats
+    stats["injected"] = _ensure_sq_candidates_on_board(
+        stocks, top6, candle_cache=candle_cache, db=db
+    )
     syms = list(top6.keys())
     rs_map = load_universe_rs_scores(db, session_date, syms)
 
@@ -233,6 +334,10 @@ def apply_sq_ready_promotions(
         sym = (s.get("symbol") or "").upper()
         if not sym or sym not in top6:
             continue
+        # Align checklist direction with Garuda side when SQ-direct (no lock).
+        gside = _garuda_side_to_direction((top6.get(sym) or {}).get("side"))
+        if s.get("sq_direct_candidate") or not s.get("direction"):
+            s["direction"] = gside
         stats["checked"] += 1
         candles = candle_cache.get(sym) or []
         br = evaluate_sq_for_stock(
@@ -251,53 +356,158 @@ def apply_sq_ready_promotions(
         if not br.get("meets_threshold"):
             continue
 
-        pre = s.get("trade_state")
-        s["sq_pre_state"] = pre
-        already = str(pre or "").upper() in ("READY", "READY(RECHECK)")
-        if already:
-            stats["already_ready"] += 1
-            s["promoted_via_structural_score"] = True
-            s["also_organic_ready"] = True
-            s["sq_promoted_this_cycle"] = False
-            badges = list(s.get("gate_badges") or [])
-            if "SQ" not in badges:
-                badges.insert(0, "SQ")
-            s["gate_badges"] = badges
-            if _log_promotion(db, session_date, s, br, pre_state=pre):
+        # Hard VWAP-side gate — necessary in addition to SQ ≥75.
+        side_check = vwap_side_ok(s.get("direction"), candles)
+        s["vwap_side_gate"] = side_check
+        if not side_check.get("ok"):
+            stats["vwap_side_rejected"] += 1
+            logger.info(
+                "vwap_side_gate_reject sq_block symbol=%s direction=%s detail=%s",
+                sym,
+                s.get("direction"),
+                side_check.get("detail"),
+            )
+            # Fix 3: wrong-side for assigned dir — try opposite on same cycle.
+            flip = try_opposite_side_sq_promotion(
+                s,
+                db=db,
+                session_date=session_date,
+                candle_cache=candle_cache,
+                top6=top6,
+                rs_map=rs_map,
+            )
+            if flip.get("promoted"):
+                stats["promoted"] += 1
+                stats["direction_flips"] = stats.get("direction_flips", 0) + 1
                 stats["logged"] += 1
             continue
 
-        # Bypass secondary FSM: promote directly to READY.
-        s["trade_state"] = "READY"
-        s["trade_state_reason"] = (
-            f"READY · SQ Total {br['total']:.1f} ≥ {promote_threshold():.0f} "
-            f"(bypass secondary FSM)"
-        )
-        s["promoted_via_structural_score"] = True
-        s["also_organic_ready"] = False
-        s["sq_promoted_this_cycle"] = True
-        s["trade_take_enabled"] = True
-        s["trade_take_disable_reason"] = None
-        # Entry from live EMA5 when available
-        ema5 = None
-        try:
-            raw = s.get("live_candle_ema5") or (s.get("_live_kavach_metrics") or {}).get("ema5")
-            if raw is not None:
-                ema5 = float(raw)
-        except (TypeError, ValueError):
-            ema5 = None
-        if ema5 is not None and ema5 > 0 and s.get("trade_entry") is None:
-            s["trade_entry"] = round(float(ema5), 2)
-            s["trade_entry_source"] = "sq_ema5"
-            s["trade_entry_source_label"] = "Entry (EMA5 · SQ)"
-        badges = list(s.get("gate_badges") or [])
-        if "SQ" not in badges:
-            badges.insert(0, "SQ")
-        s["gate_badges"] = badges
-        stats["promoted"] += 1
+        pre = s.get("trade_state")
+        s["sq_pre_state"] = pre
+        already = str(pre or "").upper() in ("READY", "READY(RECHECK)")
+        was_lock_member = bool(s.get("in_lock")) and not s.get("sq_direct_candidate")
+        path = "organic_fsm+sq" if already else ("sq_direct" if not was_lock_member else "sq_lock")
+        _promote_stock_via_sq(s, br, already=already, path=path)
+        if already:
+            stats["already_ready"] += 1
+        else:
+            stats["promoted"] += 1
+            if path == "sq_direct":
+                stats["sq_direct"] += 1
+        # Re-assert VWAP gate after promote (defense in depth).
+        gate = apply_vwap_side_gate(s, candles)
+        if gate.get("demoted"):
+            stats["vwap_side_rejected"] += 1
+            s["sq_promoted_this_cycle"] = False
+            continue
         if _log_promotion(db, session_date, s, br, pre_state=pre):
             stats["logged"] += 1
     return stats
+
+
+def try_opposite_side_sq_promotion(
+    stock: Dict[str, Any],
+    *,
+    db,
+    session_date: str,
+    candle_cache: Dict[str, Any],
+    top6: Optional[Dict[str, Dict[str, Any]]] = None,
+    rs_map: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """After VWAP-side thesis break: evaluate opposite direction for SQ READY.
+
+    Uses Garuda Top-6 for the flipped side when available; otherwise RS universe
+    ranking_type as directional fallback. Returns result dict (promoted bool).
+    """
+    from backend.services.vwap_side_gate import (
+        apply_vwap_side_gate,
+        opposite_direction,
+        vwap_side_ok,
+    )
+
+    out: Dict[str, Any] = {"promoted": False, "reason": None}
+    sym = (stock.get("symbol") or "").upper()
+    if not sym or not promote_enabled():
+        out["reason"] = "disabled_or_no_symbol"
+        return out
+    old_dir = stock.get("direction")
+    new_dir = opposite_direction(old_dir)
+    candles = candle_cache.get(sym) or []
+    # Must already be on the new side of VWAP.
+    side_check = vwap_side_ok(new_dir, candles)
+    if not side_check.get("ok"):
+        out["reason"] = "opposite_vwap_side_fail"
+        out["vwap_side"] = side_check
+        return out
+
+    top6 = top6 if top6 is not None else load_latest_garuda_top6(db, session_date)
+    rs_map = rs_map if rs_map is not None else load_universe_rs_scores(db, session_date, [sym])
+    gmeta = top6.get(sym)
+    # Prefer Garuda side matching flip; else allow if RS ranking_type matches.
+    rs_meta = dict(rs_map.get(sym) or {})
+    g_dir = _garuda_side_to_direction((gmeta or {}).get("side")) if gmeta else None
+    ranking = str(rs_meta.get("ranking_type") or "").upper()
+    rs_dir = "SHORT" if ranking == "BEARISH" else ("LONG" if ranking == "BULLISH" else None)
+    if gmeta and g_dir == new_dir:
+        garuda_meta = gmeta
+    elif gmeta and g_dir != new_dir:
+        # Wrong Garuda side — try RS-only if rank_score still usable via LOCF.
+        if rs_dir != new_dir:
+            out["reason"] = "no_opposite_directional_anchor"
+            return out
+        garuda_meta = {
+            "top6_rank": gmeta.get("top6_rank"),
+            "rank_score": gmeta.get("rank_score"),
+            "side": new_dir,
+            "bar_end": gmeta.get("bar_end"),
+            "flip_fallback": "rs_ranking",
+        }
+    elif rs_dir == new_dir:
+        # No Top-6 — cannot meet Top-6 gate in evaluate_sq_for_stock.
+        out["reason"] = "no_garuda_top6_for_flip"
+        return out
+    else:
+        out["reason"] = "no_opposite_directional_anchor"
+        return out
+
+    probe = dict(stock)
+    probe["direction"] = new_dir
+    br = evaluate_sq_for_stock(
+        db=db,
+        stock=probe,
+        session_date=session_date,
+        candles=candles,
+        garuda_meta=garuda_meta,
+        rs_meta=rs_meta,
+    )
+    if not br or not br.get("meets_threshold"):
+        out["reason"] = "sq_below_threshold_or_ineligible"
+        out["sq"] = br
+        return out
+
+    stock["direction"] = new_dir
+    stock["direction_flip_from"] = old_dir
+    stock["direction_flip_promotion"] = True
+    pre = stock.get("trade_state")
+    stock["sq_pre_state"] = pre
+    _promote_stock_via_sq(stock, br, already=False, path="direction_flip_promotion")
+    gate = apply_vwap_side_gate(stock, candles)
+    if gate.get("demoted"):
+        out["reason"] = "vwap_side_demoted_after_flip"
+        return out
+    _log_promotion(db, session_date, stock, br, pre_state=pre)
+    logger.info(
+        "direction_flip_promotion symbol=%s %s→%s total=%.1f",
+        sym,
+        old_dir,
+        new_dir,
+        float(br.get("total") or 0),
+    )
+    out["promoted"] = True
+    out["old_direction"] = old_dir
+    out["new_direction"] = new_dir
+    out["sq_total"] = br.get("total")
+    return out
 
 
 def ensure_sq_consistency_rows(

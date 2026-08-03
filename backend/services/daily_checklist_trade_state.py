@@ -1993,6 +1993,16 @@ def enrich_stocks_trade_state(
                 )
             s["trade_entry_window_open"] = entry_window_open_ist()
 
+            # Hard VWAP-side gate (close vs session VWAP on last closed bar).
+            try:
+                from backend.services.vwap_side_gate import apply_vwap_side_gate
+
+                side_gate = apply_vwap_side_gate(s, candles)
+                if side_gate.get("demoted"):
+                    gate_applied = True
+            except Exception as exc:
+                logger.debug("vwap side gate skipped %s: %s", sym, exc)
+
             lock_mismatch = bool(is_ready_pre and not in_lock)
             # Defer write until after warning-stack so rendered_state matches UI.
             if is_ready_pre or lock_mismatch or gate_applied:
@@ -2226,12 +2236,13 @@ def enrich_stocks_trade_state(
                 session_date=session_date,
                 candle_cache=candle_cache,
             )
-            if sq_stats.get("promoted") or sq_stats.get("already_ready"):
+            if sq_stats.get("promoted") or sq_stats.get("already_ready") or sq_stats.get("injected"):
                 logger.info("SQ READY promotions: %s", sq_stats)
             # Consistency collection runs before SQ; append rows for SQ-only
             # promotes so daily diagnostics see READY/take without multi-table joins.
             from backend.services.structural_quality_ready import (
                 ensure_sq_consistency_rows,
+                try_opposite_side_sq_promotion,
             )
 
             sq_cons_n = ensure_sq_consistency_rows(
@@ -2239,6 +2250,47 @@ def enrich_stocks_trade_state(
             )
             if sq_cons_n:
                 sq_stats["consistency_appended"] = sq_cons_n
+
+            # Post-SQ: re-apply VWAP-side gate; on demotion try opposite-side SQ.
+            flip_n = 0
+            for s in stocks:
+                sym_u = (s.get("symbol") or "").upper()
+                candles = candle_cache.get(sym_u) or []
+                try:
+                    from backend.services.vwap_side_gate import apply_vwap_side_gate
+
+                    was_ready = str(s.get("trade_state") or "").upper() in (
+                        "READY",
+                        "READY(RECHECK)",
+                    )
+                    gate = apply_vwap_side_gate(s, candles)
+                    if gate.get("demoted") or (
+                        not was_ready
+                        and (s.get("vwap_side_gate") or {}).get("reason") == "vwap_side_gate_reject"
+                    ):
+                        # Thesis break / wrong-side: attempt opposite SQ (Fix 3).
+                        flip = try_opposite_side_sq_promotion(
+                            s,
+                            db=db,
+                            session_date=session_date,
+                            candle_cache=candle_cache,
+                        )
+                        if flip.get("promoted"):
+                            flip_n += 1
+                            if not any(
+                                (r.get("symbol") or "").upper() == sym_u
+                                for r in consistency_rows
+                            ):
+                                s["sq_promoted_this_cycle"] = True
+                                ensure_sq_consistency_rows(
+                                    consistency_rows, [s], session_date=session_date
+                                )
+                except Exception as exc:
+                    logger.debug("post-SQ vwap/flip skipped %s: %s", sym_u, exc)
+            if flip_n:
+                sq_stats["direction_flips"] = flip_n
+                logger.info("direction_flip_promotions: %s", flip_n)
+
             from backend.services.structural_quality_ready import update_sq_lifecycle_outcomes
 
             update_sq_lifecycle_outcomes(stocks, db=db, session_date=session_date)
