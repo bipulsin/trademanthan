@@ -1,8 +1,8 @@
 """SQ ≥75 READY NOW promotion + lifecycle tracking.
 
-On each checklist enrich: for Garuda Top-6 + grade A/B symbols, if additive
-Total ≥ threshold, force READY (bypass pullback/expired/secondary blocked),
-stamp promoted_via_structural_score + score breakdown, and log lifecycle row.
+Full-universe Garuda ``rank_score`` + grade A/B + SQ Total ≥ threshold + VWAP-side.
+Garuda Top-6 / RS Top-10 are display-only — not screening gates. Forces READY
+(bypass pullback/expired/secondary blocked), stamps promoted_via_structural_score.
 """
 from __future__ import annotations
 
@@ -75,12 +75,10 @@ def ensure_sq_ready_promotion_log() -> None:
     _ENSURED = True
 
 
-def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
-    """Latest Garuda Top-6 for SQ: rank/score from last Top-6 bar; side from latest bar.
+def load_latest_garuda_scores(db, session_date: str) -> Dict[str, Dict[str, Any]]:
+    """Latest Garuda row per symbol with ``rank_score`` (full screened universe).
 
-    Side uses the most recent ``garuda_screener_log`` row (any rank) so a symbol that
-    drops out of Top-6 but later prints the opposite side is not stuck on morning
-    Top-6 LOCF direction. Rank/score still LOCF from last Top-6 appearance.
+    ``top6_rank`` is optional display metadata — never required for SQ eligibility.
     """
     out: Dict[str, Dict[str, Any]] = {}
     try:
@@ -90,27 +88,12 @@ def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
         rows = db.execute(
             text(
                 """
-                WITH top6 AS (
-                    SELECT DISTINCT ON (UPPER(symbol))
-                           UPPER(symbol) AS symbol,
-                           top6_rank, rank_score, side AS top6_side, bar_end AS top6_bar_end
-                    FROM garuda_screener_log
-                    WHERE session_date = CAST(:d AS date)
-                      AND top6_rank IS NOT NULL
-                    ORDER BY UPPER(symbol), bar_end DESC
-                ),
-                latest_side AS (
-                    SELECT DISTINCT ON (UPPER(symbol))
-                           UPPER(symbol) AS symbol, side, bar_end AS side_bar_end
-                    FROM garuda_screener_log
-                    WHERE session_date = CAST(:d AS date)
-                    ORDER BY UPPER(symbol), bar_end DESC
-                )
-                SELECT t.symbol, t.top6_rank, t.rank_score, t.top6_bar_end,
-                       COALESCE(l.side, t.top6_side) AS side,
-                       l.side_bar_end
-                FROM top6 t
-                LEFT JOIN latest_side l ON l.symbol = t.symbol
+                SELECT DISTINCT ON (UPPER(symbol))
+                       UPPER(symbol) AS symbol, side, top6_rank, rank_score, bar_end
+                FROM garuda_screener_log
+                WHERE session_date = CAST(:d AS date)
+                  AND rank_score IS NOT NULL
+                ORDER BY UPPER(symbol), bar_end DESC
                 """
             ),
             {"d": session_date},
@@ -120,15 +103,24 @@ def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
                 "top6_rank": int(r["top6_rank"]) if r["top6_rank"] is not None else None,
                 "rank_score": float(r["rank_score"]) if r["rank_score"] is not None else None,
                 "side": r["side"],
-                "bar_end": r["side_bar_end"] or r["top6_bar_end"],
-                "top6_bar_end": r["top6_bar_end"],
+                "bar_end": r["bar_end"],
             }
     except Exception as exc:
-        logger.debug("garuda top6 load skipped: %s", exc)
+        logger.debug("garuda universe scores load skipped: %s", exc)
     return out
 
 
+def load_latest_garuda_top6(db, session_date: str) -> Dict[str, Dict[str, Any]]:
+    """Display helper: Top-6 membership subset only (UI / badges — not an SQ gate)."""
+    return {
+        sym: meta
+        for sym, meta in load_latest_garuda_scores(db, session_date).items()
+        if meta.get("top6_rank") is not None
+    }
+
+
 def load_universe_rs_scores(db, session_date: str, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Latest full-universe RS row per symbol from ``rs_universe_score_snapshot`` (not Top-10)."""
     if not symbols:
         return {}
     out: Dict[str, Dict[str, Any]] = {}
@@ -140,7 +132,7 @@ def load_universe_rs_scores(db, session_date: str, symbols: List[str]) -> Dict[s
                 """
                 SELECT DISTINCT ON (UPPER(symbol))
                        UPPER(symbol) AS symbol, trade_score, relative_strength,
-                       confidence_grade, market_regime
+                       confidence_grade, market_regime, ranking_type
                 FROM rs_universe_score_snapshot
                 WHERE session_date = CAST(:d AS date)
                   AND UPPER(symbol) IN :syms
@@ -187,8 +179,7 @@ def evaluate_sq_for_stock(
     garuda_meta: Optional[Dict[str, Any]],
     rs_meta: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    if not garuda_meta or garuda_meta.get("top6_rank") is None:
-        return None
+    """Score SQ. Requires Garuda rank_score + grade A/B — not Top-6 membership."""
     grade = (
         (rs_meta or {}).get("confidence_grade")
         or stock.get("confidence")
@@ -201,12 +192,12 @@ def evaluate_sq_for_stock(
         rs_score = stock.get("trade_score")
     if rs_score is None:
         return None
-    garuda_score = garuda_meta.get("rank_score")
+    garuda_score = (garuda_meta or {}).get("rank_score")
     if garuda_score is None:
         garuda_score = _locf_garuda_rank(db, session_date, stock.get("symbol") or "")
     if garuda_score is None:
         return None
-    side = garuda_meta.get("side") or stock.get("direction")
+    side = (garuda_meta or {}).get("side") or stock.get("direction")
     dir_sign = _dir_sign(side)
     if dir_sign == 0:
         dir_sign = _dir_sign(stock.get("direction"))
@@ -222,7 +213,7 @@ def evaluate_sq_for_stock(
     )
     if not breakdown:
         return None
-    breakdown["garuda_top6_rank"] = garuda_meta.get("top6_rank")
+    breakdown["garuda_top6_rank"] = (garuda_meta or {}).get("top6_rank")
     breakdown["meets_threshold"] = breakdown["total"] >= promote_threshold()
     breakdown["threshold"] = promote_threshold()
     return breakdown
@@ -235,38 +226,44 @@ def _garuda_side_to_direction(side: Any) -> str:
     return "LONG"
 
 
+def _make_sq_stub(sym: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "symbol": sym,
+        "direction": _garuda_side_to_direction(meta.get("side")),
+        "trade_state": "WATCHING",
+        "in_lock": False,
+        "sq_direct_candidate": True,
+        "lock_rank": meta.get("top6_rank"),
+    }
+
+
+def _ensure_candles(sym: str, candle_cache: Dict[str, Any], db) -> List[Dict[str, Any]]:
+    if sym in candle_cache:
+        return candle_cache.get(sym) or []
+    try:
+        from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
+
+        candle_cache[sym] = _load_candles_for_symbol(db, sym) or []
+    except Exception:
+        candle_cache[sym] = []
+    return candle_cache.get(sym) or []
+
+
 def _ensure_sq_candidates_on_board(
     stocks: List[Dict[str, Any]],
-    top6: Dict[str, Dict[str, Any]],
+    candidates: Dict[str, Dict[str, Any]],
     *,
     candle_cache: Dict[str, Any],
     db,
 ) -> int:
-    """Inject Garuda Top-6 symbols missing from checklist so SQ can promote without lock.
-
-    Returns number of stubs appended. Direction comes from Garuda side (not lock).
-    """
+    """Deprecated inject-all helper — kept for callers; prefer promote-time inject."""
     by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
     n = 0
-    for sym, meta in top6.items():
+    for sym, meta in candidates.items():
         if sym in by_sym:
             continue
-        direction = _garuda_side_to_direction(meta.get("side"))
-        stub: Dict[str, Any] = {
-            "symbol": sym,
-            "direction": direction,
-            "trade_state": "WATCHING",
-            "in_lock": False,
-            "sq_direct_candidate": True,
-            "lock_rank": meta.get("top6_rank"),
-        }
-        if sym not in candle_cache:
-            try:
-                from backend.services.daily_checklist_snapshot import _load_candles_for_symbol
-
-                candle_cache[sym] = _load_candles_for_symbol(db, sym) or []
-            except Exception:
-                candle_cache[sym] = []
+        stub = _make_sq_stub(sym, meta)
+        _ensure_candles(sym, candle_cache, db)
         stocks.append(stub)
         by_sym[sym] = stub
         n += 1
@@ -322,10 +319,10 @@ def apply_sq_ready_promotions(
     session_date: str,
     candle_cache: Dict[str, Any],
 ) -> Dict[str, int]:
-    """Force READY when SQ Total ≥ threshold for Garuda Top-6 + grade A/B + VWAP-side.
+    """Force READY when SQ Total ≥ threshold (full Garuda universe + grade A/B + VWAP).
 
-    Does **not** require prior lock/checklist membership — Top-6 symbols are
-    injected onto the board when missing (``sq_direct`` path).
+    Top-6 membership is not required. Non-board symbols are injected only when
+    they actually promote (``sq_direct``).
     """
     from backend.services.vwap_side_gate import apply_vwap_side_gate, vwap_side_ok
 
@@ -338,46 +335,46 @@ def apply_sq_ready_promotions(
         "injected": 0,
         "vwap_side_rejected": 0,
         "sq_direct": 0,
+        "universe": 0,
     }
     if not promote_enabled():
         return stats
     ensure_sq_ready_promotion_log()
-    top6 = load_latest_garuda_top6(db, session_date)
-    if not top6:
+    universe = load_latest_garuda_scores(db, session_date)
+    if not universe:
         return stats
-    stats["injected"] = _ensure_sq_candidates_on_board(
-        stocks, top6, candle_cache=candle_cache, db=db
-    )
-    syms = list(top6.keys())
-    rs_map = load_universe_rs_scores(db, session_date, syms)
+    stats["universe"] = len(universe)
+    rs_map = load_universe_rs_scores(db, session_date, list(universe.keys()))
+    by_sym = {(s.get("symbol") or "").upper(): s for s in stocks}
 
-    for s in stocks:
-        sym = (s.get("symbol") or "").upper()
-        if not sym or sym not in top6:
-            continue
-        # Align checklist direction with Garuda side when SQ-direct (no lock).
-        gside = _garuda_side_to_direction((top6.get(sym) or {}).get("side"))
-        if s.get("sq_direct_candidate") or not s.get("direction"):
+    for sym, gmeta in universe.items():
+        s = by_sym.get(sym)
+        ephemeral = False
+        if not s:
+            s = _make_sq_stub(sym, gmeta)
+            ephemeral = True
+        gside = _garuda_side_to_direction(gmeta.get("side"))
+        if s.get("sq_direct_candidate") or ephemeral or not s.get("direction"):
             s["direction"] = gside
         stats["checked"] += 1
-        candles = candle_cache.get(sym) or []
+        candles = _ensure_candles(sym, candle_cache, db)
         br = evaluate_sq_for_stock(
             db=db,
             stock=s,
             session_date=session_date,
             candles=candles,
-            garuda_meta=top6.get(sym),
+            garuda_meta=gmeta,
             rs_meta=rs_map.get(sym),
         )
         if not br:
             continue
         stats["eligible"] += 1
-        s["structural_quality"] = br
-        s["sq_total"] = br["total"]
+        if not ephemeral:
+            s["structural_quality"] = br
+            s["sq_total"] = br["total"]
         if not br.get("meets_threshold"):
             continue
 
-        # Hard VWAP-side gate — necessary in addition to SQ ≥75.
         side_check = vwap_side_ok(s.get("direction"), candles)
         s["vwap_side_gate"] = side_check
         if not side_check.get("ok"):
@@ -388,20 +385,28 @@ def apply_sq_ready_promotions(
                 s.get("direction"),
                 side_check.get("detail"),
             )
-            # Fix 3: wrong-side for assigned dir — try opposite on same cycle.
             flip = try_opposite_side_sq_promotion(
                 s,
                 db=db,
                 session_date=session_date,
                 candle_cache=candle_cache,
-                top6=top6,
+                garuda_map=universe,
                 rs_map=rs_map,
             )
             if flip.get("promoted"):
+                if ephemeral and s not in stocks:
+                    stocks.append(s)
+                    by_sym[sym] = s
+                    stats["injected"] += 1
                 stats["promoted"] += 1
                 stats["direction_flips"] = stats.get("direction_flips", 0) + 1
                 stats["logged"] += 1
             continue
+
+        if ephemeral:
+            stocks.append(s)
+            by_sym[sym] = s
+            stats["injected"] += 1
 
         pre = s.get("trade_state")
         s["sq_pre_state"] = pre
@@ -415,7 +420,6 @@ def apply_sq_ready_promotions(
             stats["promoted"] += 1
             if path == "sq_direct":
                 stats["sq_direct"] += 1
-        # Re-assert VWAP gate after promote (defense in depth).
         gate = apply_vwap_side_gate(s, candles)
         if gate.get("demoted"):
             stats["vwap_side_rejected"] += 1
@@ -432,13 +436,14 @@ def try_opposite_side_sq_promotion(
     db,
     session_date: str,
     candle_cache: Dict[str, Any],
+    garuda_map: Optional[Dict[str, Dict[str, Any]]] = None,
     top6: Optional[Dict[str, Dict[str, Any]]] = None,
     rs_map: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """After VWAP-side thesis break: evaluate opposite direction for SQ READY.
 
-    Uses Garuda Top-6 for the flipped side when available; otherwise RS universe
-    ranking_type as directional fallback. Returns result dict (promoted bool).
+    Uses full-universe Garuda score/side when available; RS ranking_type as
+    directional fallback. Top-6 membership is not required.
     """
     from backend.services.vwap_side_gate import (
         apply_vwap_side_gate,
@@ -453,18 +458,17 @@ def try_opposite_side_sq_promotion(
         return out
     old_dir = stock.get("direction")
     new_dir = opposite_direction(old_dir)
-    candles = candle_cache.get(sym) or []
-    # Must already be on the new side of VWAP.
+    candles = candle_cache.get(sym) or _ensure_candles(sym, candle_cache, db)
     side_check = vwap_side_ok(new_dir, candles)
     if not side_check.get("ok"):
         out["reason"] = "opposite_vwap_side_fail"
         out["vwap_side"] = side_check
         return out
 
-    top6 = top6 if top6 is not None else load_latest_garuda_top6(db, session_date)
+    gmap = garuda_map if garuda_map is not None else top6
+    gmap = gmap if gmap is not None else load_latest_garuda_scores(db, session_date)
     rs_map = rs_map if rs_map is not None else load_universe_rs_scores(db, session_date, [sym])
-    gmeta = top6.get(sym)
-    # Prefer Garuda side matching flip; else allow if RS ranking_type matches.
+    gmeta = gmap.get(sym)
     rs_meta = dict(rs_map.get(sym) or {})
     g_dir = _garuda_side_to_direction((gmeta or {}).get("side")) if gmeta else None
     ranking = str(rs_meta.get("ranking_type") or "").upper()
@@ -472,7 +476,6 @@ def try_opposite_side_sq_promotion(
     if gmeta and g_dir == new_dir:
         garuda_meta = gmeta
     elif gmeta and g_dir != new_dir:
-        # Wrong Garuda side — try RS-only if rank_score still usable via LOCF.
         if rs_dir != new_dir:
             out["reason"] = "no_opposite_directional_anchor"
             return out
@@ -484,11 +487,14 @@ def try_opposite_side_sq_promotion(
             "flip_fallback": "rs_ranking",
         }
     elif rs_dir == new_dir:
-        # No Top-6 — cannot meet Top-6 gate in evaluate_sq_for_stock.
-        out["reason"] = "no_garuda_top6_for_flip"
+        out["reason"] = "no_garuda_score_for_flip"
         return out
     else:
         out["reason"] = "no_opposite_directional_anchor"
+        return out
+
+    if garuda_meta.get("rank_score") is None:
+        out["reason"] = "no_garuda_score_for_flip"
         return out
 
     probe = dict(stock)
