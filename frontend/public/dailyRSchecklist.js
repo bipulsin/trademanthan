@@ -509,7 +509,7 @@
 
     function ensureExitNowCardAudio() {
         if (!exitNowCardAudio) {
-            exitNowCardAudio = new Audio("audio/exit.mp3");
+            exitNowCardAudio = new Audio("audio/exit_now.mp3");
             exitNowCardAudio.preload = "auto";
             exitNowCardAudio.volume = 1;
         }
@@ -565,7 +565,7 @@
     }
 
     /**
-     * Play exit.mp3 once when a READY card newly surfaces exit_now_alert.active.
+     * Play exit_now.mp3 once when a READY card newly surfaces exit_now_alert.active.
      * Silent while the alert stays active; clears when condition clears so a later
      * re-trigger can alert again.
      */
