@@ -2228,6 +2228,17 @@ def enrich_stocks_trade_state(
             )
             if sq_stats.get("promoted") or sq_stats.get("already_ready"):
                 logger.info("SQ READY promotions: %s", sq_stats)
+            # Consistency collection runs before SQ; append rows for SQ-only
+            # promotes so daily diagnostics see READY/take without multi-table joins.
+            from backend.services.structural_quality_ready import (
+                ensure_sq_consistency_rows,
+            )
+
+            sq_cons_n = ensure_sq_consistency_rows(
+                consistency_rows, stocks, session_date=session_date
+            )
+            if sq_cons_n:
+                sq_stats["consistency_appended"] = sq_cons_n
             from backend.services.structural_quality_ready import update_sq_lifecycle_outcomes
 
             update_sq_lifecycle_outcomes(stocks, db=db, session_date=session_date)

@@ -252,11 +252,13 @@ def apply_sq_ready_promotions(
             continue
 
         pre = s.get("trade_state")
+        s["sq_pre_state"] = pre
         already = str(pre or "").upper() in ("READY", "READY(RECHECK)")
         if already:
             stats["already_ready"] += 1
             s["promoted_via_structural_score"] = True
             s["also_organic_ready"] = True
+            s["sq_promoted_this_cycle"] = False
             badges = list(s.get("gate_badges") or [])
             if "SQ" not in badges:
                 badges.insert(0, "SQ")
@@ -273,6 +275,7 @@ def apply_sq_ready_promotions(
         )
         s["promoted_via_structural_score"] = True
         s["also_organic_ready"] = False
+        s["sq_promoted_this_cycle"] = True
         s["trade_take_enabled"] = True
         s["trade_take_disable_reason"] = None
         # Entry from live EMA5 when available
@@ -295,6 +298,62 @@ def apply_sq_ready_promotions(
         if _log_promotion(db, session_date, s, br, pre_state=pre):
             stats["logged"] += 1
     return stats
+
+
+def ensure_sq_consistency_rows(
+    consistency_rows: List[Dict[str, Any]],
+    stocks: List[Dict[str, Any]],
+    *,
+    session_date: str,
+) -> int:
+    """Append consistency-log stubs for SQ-only promotes missing from pre-SQ collection.
+
+    Organic READY rows are already queued before SQ runs; SQ-only promotions
+    otherwise never appear in ``kavach_ready_consistency_log``. Finalize pass
+    fills take/entry/score the same way as organic rows.
+    """
+    existing = {(r.get("symbol") or "").upper() for r in consistency_rows}
+    n = 0
+    for s in stocks:
+        if not s.get("sq_promoted_this_cycle"):
+            continue
+        sym = (s.get("symbol") or "").upper()
+        if not sym or sym in existing:
+            continue
+        vq = s.get("vwap_quality") if isinstance(s.get("vwap_quality"), dict) else {}
+        pre = s.get("sq_pre_state")
+        consistency_rows.append(
+            {
+                "session_date": session_date,
+                "symbol": sym,
+                "direction": s.get("direction"),
+                "rendered_state": s.get("trade_state"),
+                "pre_gate_state": pre,
+                "pre_stack_state": pre,
+                "in_lock": bool(s.get("in_lock")),
+                "lock_rank": s.get("lock_rank"),
+                "lock_direction": s.get("lock_direction"),
+                "lock_mismatch": False,
+                "vwap_slope_score": vq.get("slope_score"),
+                "steep_ok": vq.get("steep_ok"),
+                "flip_flop": vq.get("flip_flop"),
+                "whipsaw_crosses": vq.get("whipsaw_crosses"),
+                "quality_pass": vq.get("quality_pass"),
+                "vwap_gate_enabled": None,
+                "vwap_would_block": False,
+                "vwap_gate_applied": False,
+                "vwap_extension_pct": None,
+                "inputs": {
+                    "confidence": s.get("confidence") or s.get("dashboard_kavach"),
+                    "trade_entry": s.get("trade_entry"),
+                    "trade_sl": s.get("trade_sl"),
+                    "sq_appended_post_promote": True,
+                },
+            }
+        )
+        existing.add(sym)
+        n += 1
+    return n
 
 
 def _log_promotion(

@@ -1,0 +1,590 @@
+{
+  "cycles_full": [
+    {
+      "scan_ist": "2026-08-03T09:25:06.218035",
+      "n": 200,
+      "scored": 193,
+      "pct": 96.5
+    },
+    {
+      "scan_ist": "2026-08-03T09:35:01.983667",
+      "n": 200,
+      "scored": 32,
+      "pct": 16.0
+    },
+    {
+      "scan_ist": "2026-08-03T09:45:10.911544",
+      "n": 200,
+      "scored": 184,
+      "pct": 92.0
+    },
+    {
+      "scan_ist": "2026-08-03T09:55:05.265952",
+      "n": 200,
+      "scored": 151,
+      "pct": 75.5
+    },
+    {
+      "scan_ist": "2026-08-03T10:05:03.417148",
+      "n": 200,
+      "scored": 91,
+      "pct": 45.5
+    },
+    {
+      "scan_ist": "2026-08-03T10:15:06.646621",
+      "n": 200,
+      "scored": 170,
+      "pct": 85.0
+    },
+    {
+      "scan_ist": "2026-08-03T10:25:03.400071",
+      "n": 200,
+      "scored": 96,
+      "pct": 48.0
+    },
+    {
+      "scan_ist": "2026-08-03T10:35:01.632516",
+      "n": 200,
+      "scored": 41,
+      "pct": 20.5
+    },
+    {
+      "scan_ist": "2026-08-03T10:45:08.033965",
+      "n": 200,
+      "scored": 175,
+      "pct": 87.5
+    },
+    {
+      "scan_ist": "2026-08-03T10:55:05.617634",
+      "n": 200,
+      "scored": 148,
+      "pct": 74.0
+    },
+    {
+      "scan_ist": "2026-08-03T11:05:03.761128",
+      "n": 200,
+      "scored": 93,
+      "pct": 46.5
+    },
+    {
+      "scan_ist": "2026-08-03T11:15:07.014718",
+      "n": 200,
+      "scored": 162,
+      "pct": 81.0
+    },
+    {
+      "scan_ist": "2026-08-03T11:25:07.570407",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T11:35:01.407811",
+      "n": 200,
+      "scored": 35,
+      "pct": 17.5
+    },
+    {
+      "scan_ist": "2026-08-03T11:45:05.337022",
+      "n": 200,
+      "scored": 119,
+      "pct": 59.5
+    },
+    {
+      "scan_ist": "2026-08-03T11:55:10.712819",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T12:05:09.373756",
+      "n": 200,
+      "scored": 196,
+      "pct": 98.0
+    },
+    {
+      "scan_ist": "2026-08-03T12:15:08.456940",
+      "n": 200,
+      "scored": 187,
+      "pct": 93.5
+    },
+    {
+      "scan_ist": "2026-08-03T12:25:08.946895",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T12:35:09.814445",
+      "n": 200,
+      "scored": 198,
+      "pct": 99.0
+    },
+    {
+      "scan_ist": "2026-08-03T12:45:08.673125",
+      "n": 200,
+      "scored": 189,
+      "pct": 94.5
+    },
+    {
+      "scan_ist": "2026-08-03T12:55:09.122519",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T13:05:10.018767",
+      "n": 200,
+      "scored": 194,
+      "pct": 97.0
+    },
+    {
+      "scan_ist": "2026-08-03T13:15:09.145843",
+      "n": 200,
+      "scored": 183,
+      "pct": 91.5
+    },
+    {
+      "scan_ist": "2026-08-03T13:25:09.441552",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T13:35:10.390945",
+      "n": 200,
+      "scored": 196,
+      "pct": 98.0
+    },
+    {
+      "scan_ist": "2026-08-03T13:45:09.606336",
+      "n": 200,
+      "scored": 187,
+      "pct": 93.5
+    },
+    {
+      "scan_ist": "2026-08-03T13:55:09.880592",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T14:05:13.887532",
+      "n": 200,
+      "scored": 198,
+      "pct": 99.0
+    },
+    {
+      "scan_ist": "2026-08-03T14:15:09.932955",
+      "n": 200,
+      "scored": 199,
+      "pct": 99.5
+    },
+    {
+      "scan_ist": "2026-08-03T14:25:10.030195",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T14:35:08.773733",
+      "n": 200,
+      "scored": 176,
+      "pct": 88.0
+    },
+    {
+      "scan_ist": "2026-08-03T14:45:02.971836",
+      "n": 200,
+      "scored": 46,
+      "pct": 23.0
+    },
+    {
+      "scan_ist": "2026-08-03T14:55:11.678031",
+      "n": 200,
+      "scored": 166,
+      "pct": 83.0
+    },
+    {
+      "scan_ist": "2026-08-03T15:05:09.315234",
+      "n": 200,
+      "scored": 151,
+      "pct": 75.5
+    },
+    {
+      "scan_ist": "2026-08-03T15:15:04.832690",
+      "n": 200,
+      "scored": 68,
+      "pct": 34.0
+    },
+    {
+      "scan_ist": "2026-08-03T15:32:21.536492",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    },
+    {
+      "scan_ist": "2026-08-03T15:37:21.294777",
+      "n": 200,
+      "scored": 200,
+      "pct": 100.0
+    }
+  ],
+  "low_cov": [
+    {
+      "scan_ist": "2026-08-03T09:35:01.983667",
+      "n": 200,
+      "scored": 32,
+      "pct": 16.0
+    },
+    {
+      "scan_ist": "2026-08-03T10:05:03.417148",
+      "n": 200,
+      "scored": 91,
+      "pct": 45.5
+    },
+    {
+      "scan_ist": "2026-08-03T10:25:03.400071",
+      "n": 200,
+      "scored": 96,
+      "pct": 48.0
+    },
+    {
+      "scan_ist": "2026-08-03T10:35:01.632516",
+      "n": 200,
+      "scored": 41,
+      "pct": 20.5
+    },
+    {
+      "scan_ist": "2026-08-03T10:55:05.617634",
+      "n": 200,
+      "scored": 148,
+      "pct": 74.0
+    },
+    {
+      "scan_ist": "2026-08-03T11:05:03.761128",
+      "n": 200,
+      "scored": 93,
+      "pct": 46.5
+    },
+    {
+      "scan_ist": "2026-08-03T11:35:01.407811",
+      "n": 200,
+      "scored": 35,
+      "pct": 17.5
+    },
+    {
+      "scan_ist": "2026-08-03T11:45:05.337022",
+      "n": 200,
+      "scored": 119,
+      "pct": 59.5
+    },
+    {
+      "scan_ist": "2026-08-03T14:45:02.971836",
+      "n": 200,
+      "scored": 46,
+      "pct": 23.0
+    },
+    {
+      "scan_ist": "2026-08-03T15:15:04.832690",
+      "n": 200,
+      "scored": 68,
+      "pct": 34.0
+    }
+  ],
+  "candle_deny": [
+    {
+      "log_utc": "2026-08-03 03:55:11",
+      "ist": "2026-08-03 09:25:11",
+      "execution": "scheduled_10m",
+      "deny_pct": 40.5,
+      "elapsed_sec": 611.15,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 04:15:36",
+      "ist": "2026-08-03 09:45:36",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 636.6,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 04:16:37",
+      "ist": "2026-08-03 09:46:37",
+      "execution": "scheduled_stock_next_vwap_ema_hourly",
+      "deny_pct": 31.5,
+      "elapsed_sec": 1597.0,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 04:40:10",
+      "ist": "2026-08-03 10:10:10",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 910.55,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 04:46:33",
+      "ist": "2026-08-03 10:16:33",
+      "execution": "scheduled_10m",
+      "deny_pct": 57.5,
+      "elapsed_sec": 93.3,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 05:12:25",
+      "ist": "2026-08-03 10:42:25",
+      "execution": "scheduled_10m",
+      "deny_pct": 1.5,
+      "elapsed_sec": 1045.84,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 05:16:32",
+      "ist": "2026-08-03 10:46:32",
+      "execution": "scheduled_stock_next_vwap_ema_hourly",
+      "deny_pct": 3.2,
+      "elapsed_sec": 1592.58,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 05:16:37",
+      "ist": "2026-08-03 10:46:37",
+      "execution": "scheduled_10m",
+      "deny_pct": 67.5,
+      "elapsed_sec": 96.98,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 05:38:12",
+      "ist": "2026-08-03 11:08:12",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 792.34,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 05:49:01",
+      "ist": "2026-08-03 11:19:01",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 241.45,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:11:07",
+      "ist": "2026-08-03 11:41:07",
+      "execution": "scheduled_10m",
+      "deny_pct": 27.5,
+      "elapsed_sec": 967.2,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:11:08",
+      "ist": "2026-08-03 11:41:08",
+      "execution": "scheduled_stock_next_vwap_ema_hourly",
+      "deny_pct": 27.8,
+      "elapsed_sec": 1268.91,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:18:29",
+      "ist": "2026-08-03 11:48:29",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 209.31,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:33:09",
+      "ist": "2026-08-03 12:03:09",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 489.63,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:41:08",
+      "ist": "2026-08-03 12:11:08",
+      "execution": "scheduled_10m",
+      "deny_pct": 16.5,
+      "elapsed_sec": 368.78,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:49:04",
+      "ist": "2026-08-03 12:19:04",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 244.11,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 06:50:28",
+      "ist": "2026-08-03 12:20:28",
+      "execution": "scheduled_stock_next_vwap_ema_hourly",
+      "deny_pct": 95.0,
+      "elapsed_sec": 28.92,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:03:09",
+      "ist": "2026-08-03 12:33:09",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.5,
+      "elapsed_sec": 489.41,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:11:07",
+      "ist": "2026-08-03 12:41:07",
+      "execution": "scheduled_10m",
+      "deny_pct": 15.5,
+      "elapsed_sec": 367.15,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:18:32",
+      "ist": "2026-08-03 12:48:32",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 212.41,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:33:10",
+      "ist": "2026-08-03 13:03:10",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 489.99,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:41:09",
+      "ist": "2026-08-03 13:11:09",
+      "execution": "scheduled_10m",
+      "deny_pct": 15.5,
+      "elapsed_sec": 369.9,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:49:06",
+      "ist": "2026-08-03 13:19:06",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 246.2,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 07:50:28",
+      "ist": "2026-08-03 13:20:28",
+      "execution": "scheduled_stock_next_vwap_ema_hourly",
+      "deny_pct": 95.5,
+      "elapsed_sec": 28.43,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:02:10",
+      "ist": "2026-08-03 13:32:10",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 430.81,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:11:11",
+      "ist": "2026-08-03 13:41:11",
+      "execution": "scheduled_10m",
+      "deny_pct": 16.0,
+      "elapsed_sec": 371.3,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:18:29",
+      "ist": "2026-08-03 13:48:29",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 209.37,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:33:11",
+      "ist": "2026-08-03 14:03:11",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 491.26,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:41:09",
+      "ist": "2026-08-03 14:11:09",
+      "execution": "scheduled_10m",
+      "deny_pct": 7.5,
+      "elapsed_sec": 369.69,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:49:02",
+      "ist": "2026-08-03 14:19:02",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 242.05,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 08:50:29",
+      "ist": "2026-08-03 14:20:29",
+      "execution": "scheduled_stock_next_vwap_ema_hourly",
+      "deny_pct": 95.2,
+      "elapsed_sec": 28.92,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 09:06:40",
+      "ist": "2026-08-03 14:36:40",
+      "execution": "scheduled_10m",
+      "deny_pct": 2.5,
+      "elapsed_sec": 695.91,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 09:20:29",
+      "ist": "2026-08-03 14:50:29",
+      "execution": "scheduled_10m",
+      "deny_pct": 19.0,
+      "elapsed_sec": 329.66,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 09:39:13",
+      "ist": "2026-08-03 15:09:13",
+      "execution": "scheduled_10m",
+      "deny_pct": 1.5,
+      "elapsed_sec": 853.54,
+      "requested": null
+    },
+    {
+      "log_utc": "2026-08-03 09:59:15",
+      "ist": "2026-08-03 15:29:15",
+      "execution": "scheduled_10m",
+      "deny_pct": 0.0,
+      "elapsed_sec": 255.73,
+      "requested": null
+    }
+  ],
+  "rs_dur_raw_n": 2,
+  "rs_dur_sample": [
+    {
+      "utc": "2026-08-03 10:02:23",
+      "duration_sec": 23.6,
+      "snip": "LFOOD', 'LTM', 'PAYTM', 'SIEMENS', 'ABB', 'KPITTECH', 'NATIONALUM', 'IREDA', 'MPHASIS', 'INFY'], 'top10_bear': ['GAIL', 'BSE', 'DELHIVERY', 'AUROPHARMA', 'LICHSGFIN', 'OIL', 'MAXHEALTH', 'ALKEM', 'GLENMARK', 'IDEA']}, 'rs_skipped_count': 0}"
+    },
+    {
+      "utc": "2026-08-03 10:07:22",
+      "duration_sec": 22.6,
+      "snip": "LFOOD', 'LTM', 'PAYTM', 'SIEMENS', 'ABB', 'KPITTECH', 'NATIONALUM', 'IREDA', 'MPHASIS', 'INFY'], 'top10_bear': ['GAIL', 'BSE', 'DELHIVERY', 'AUROPHARMA', 'LICHSGFIN', 'OIL', 'MAXHEALTH', 'GLENMARK', 'ALKEM', 'IDEA']}, 'rs_skipped_count': 0}"
+    }
+  ],
+  "ew_events": []
+}

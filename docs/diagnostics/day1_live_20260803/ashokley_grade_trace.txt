@@ -1,0 +1,58 @@
+paperclip SSH ready: paperclip (ubuntu@140.245.14.17)
+SQ {'t': '2026-08-03T12:25:34.580558', 'id': 22, 'session_date': '2026-08-03', 'symbol': 'ASHOKLEY', 'direction': 'LONG', 'promoted_at': '2026-08-03T06:55:34.580558+00:00', 'total_score': 81.5523, 'rs_score': 85.0, 'garuda_score': 73.47, 'ow': 51.879, 'vw': 100.0, 'ew': 100.0, 'grade_bonus': 20.0, 'confidence_grade': 'A', 'garuda_top6_rank': 3, 'also_organic': False, 'pre_state': 'WAIT FOR PULLBACK', 'rendered_state': 'READY', 'score_breakdown': {'EW': 100.0, 'OW': 51.879, 'VW': 100.0, 'total': 81.5523, 'bar_end': '2026-08-03 12:15:00+05:30', 'bar_hhmm': '12:15', 'dir_sign': 1, 'ew_armed': True, 'ew_event': None, 'rs_score': 85.0, 'threshold': 75.0, 'grade_bonus': 20.0, 'stretch_pct': 2.8873, 'ema_reliable': True, 'garuda_score': 73.47, 'meets_threshold': True, 'confidence_grade': 'A', 'garuda_top6_rank': 3, 'vw_classification': 'same_side'}, 'outcome_favorable': None, 'outcome_note': None, 'rule15_2candle_ok': None, 'exit_kind': None, 'closed_at': None, 'logged_at': '2026-08-03T06:55:34.162794+00:00'}
+SQ_BD_KEYS ['EW', 'OW', 'VW', 'bar_end', 'bar_hhmm', 'confidence_grade', 'dir_sign', 'ema_reliable', 'ew_armed', 'ew_event', 'garuda_score', 'garuda_top6_rank', 'grade_bonus', 'meets_threshold', 'rs_score', 'stretch_pct', 'threshold', 'total', 'vw_classification']
+SQ_BD {"EW": 100.0, "OW": 51.879, "VW": 100.0, "total": 81.5523, "bar_end": "2026-08-03 12:15:00+05:30", "bar_hhmm": "12:15", "dir_sign": 1, "ew_armed": true, "ew_event": null, "rs_score": 85.0, "threshold": 75.0, "grade_bonus": 20.0, "stretch_pct": 2.8873, "ema_reliable": true, "garuda_score": 73.47, "meets_threshold": true, "confidence_grade": "A", "garuda_top6_rank": 3, "vw_classification": "same_side"}
+STALE n 55
+STALE 2026-08-03T12:25:35.680601 READY take True grade D! ts 35.0 evt initial_promotion keys ['entry_vs_ema5_pts', 'ready_visible_since', 'trade_sl', 'trade_state_reason']
+STALE 2026-08-03T12:30:18.569641 READY take True grade A ts 85.0 evt recheck keys ['entry_vs_ema5_pts', 'ready_visible_since', 'trade_sl', 'trade_state_reason']
+STALE 2026-08-03T12:36:20.825523 READY take True grade A ts 85.0 evt recheck keys ['entry_vs_ema5_pts', 'ready_visible_since', 'trade_sl', 'trade_state_reason']
+STALE 2026-08-03T12:40:32.518794 READY take True grade B ts 77.0 evt recheck keys ['entry_vs_ema5_pts', 'ready_visible_since', 'trade_sl', 'trade_state_reason']
+STALE 2026-08-03T14:56:44.110037 READY take True grade A ts 85.0 evt initial_promotion keys ['entry_vs_ema5_pts', 'ready_visible_since', 'trade_sl', 'trade_state_reason']
+Traceback (most recent call last):
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.UndefinedColumn: column "rs_score" does not exist
+LINE 3:            rs_score, exclusion_reason, stretch_pct, dist_ema...
+                   ^
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<string>", line 39, in <module>
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 526, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "/opt/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 951, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.UndefinedColumn) column "rs_score" does not exist
+LINE 3:            rs_score, exclusion_reason, stretch_pct, dist_ema...
+                   ^
+
+[SQL: 
+    SELECT scan_time AT TIME ZONE 'Asia/Kolkata' AS t, confidence_grade, trade_score,
+           rs_score, exclusion_reason, stretch_pct, dist_ema10_pct
+    FROM rs_universe_score_snapshot
+    WHERE session_date=%(d)s AND UPPER(symbol)='ASHOKLEY'
+      AND scan_time AT TIME ZONE 'Asia/Kolkata' BETWEEN '2026-08-03 12:00' AND '2026-08-03 13:00'
+    ORDER BY scan_time
+  ]
+[parameters: {'d': datetime.date(2026, 8, 3)}]
+(Background on this error at: https://sqlalche.me/e/20/f405)

@@ -105,7 +105,7 @@ def _last_badge_row(db, session_date: str, symbol: str) -> Optional[Any]:
     return db.execute(
         text(
             """
-            SELECT logged_at, gate_badges, persistence,
+            SELECT logged_at, gate_badges, persistence, trade_state,
                    whipsaw_active, dir_conflict_active,
                    regime_unstable_active, churn_active
             FROM kavach_badge_input_log
@@ -197,9 +197,16 @@ def should_log_badge_audit(
     symbol: str,
     active: Set[str],
     *,
+    trade_state: Optional[str] = None,
     now: Optional[datetime] = None,
     force: bool = False,
 ) -> bool:
+    """Return True when a badge audit row should be written.
+
+    Always write on ``trade_state`` change (READY transitions must not be
+    swallowed by the 4-minute debounce). Badge-set changes also force a write.
+    Unchanged state+badges still respect ``_LOG_MIN_INTERVAL``.
+    """
     if force:
         return True
     now = now or datetime.now(IST)
@@ -207,6 +214,10 @@ def should_log_badge_audit(
         now = IST.localize(now)
     prev = _last_badge_row(db, session_date, symbol)
     if prev is None:
+        return True
+    cur_state = (trade_state or "").strip().upper() or None
+    prev_state = (getattr(prev, "trade_state", None) or "").strip().upper() or None
+    if cur_state != prev_state:
         return True
     prev_active: Set[str] = set()
     if prev.whipsaw_active:
@@ -358,7 +369,15 @@ def log_badge_inputs(
         atr=atr,
     )
     active = set(payload.get("active") or [])
-    if not should_log_badge_audit(db, session_date, sym, active, now=now, force=force):
+    if not should_log_badge_audit(
+        db,
+        session_date,
+        sym,
+        active,
+        trade_state=payload.get("trade_state") or stock.get("trade_state"),
+        now=now,
+        force=force,
+    ):
         return None
 
     prev = _last_badge_row(db, session_date, sym)
