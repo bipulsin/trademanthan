@@ -110,6 +110,18 @@ _denied = 0
 # Thread-local: BTST bulk prefetch waits longer for a slot instead of denying at 90s.
 _bt_local = threading.local()
 
+# Process-wide max_wait override (e.g. hourly stock+nextmth warm). Unlike thread-local,
+# this is visible to ThreadPoolExecutor workers. Safe while candle-warm jobs are mutexed.
+_max_wait_override: float | None = None
+_max_wait_override_lock = threading.Lock()
+
+
+def set_candle_rl_max_wait_override(seconds: float | None) -> None:
+    """Set/clear a process-wide acquire max_wait for candle slots (None = use default)."""
+    global _max_wait_override
+    with _max_wait_override_lock:
+        _max_wait_override = None if seconds is None else float(seconds)
+
 
 def _build_limiter() -> SlidingWindowRateLimiter:
     from backend.config import settings
@@ -159,7 +171,11 @@ def acquire_candle_slot() -> bool:
 
         if not getattr(settings, "UPSTOX_CANDLE_RATE_LIMIT_ENABLED", True):
             return True
-        if _is_backtest_bulk_prefetch():
+        with _max_wait_override_lock:
+            override = _max_wait_override
+        if override is not None and override > 0:
+            max_wait = float(override)
+        elif _is_backtest_bulk_prefetch():
             max_wait = float(getattr(settings, "UPSTOX_BTST_PREFETCH_RL_MAX_WAIT", 300) or 300)
         else:
             max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 90) or 90)

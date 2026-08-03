@@ -194,7 +194,7 @@
 
         let html =
           "<table><thead><tr>" +
-          "<th>Time (IST)</th><th>Exec</th><th>Requested</th><th>OK</th><th>Errors</th>" +
+          "<th>Time (IST)</th><th>Started</th><th>Exec</th><th>Overlap</th><th>Requested</th><th>OK</th><th>Errors</th>" +
           "<th>Deny %</th><th>Denied symbols</th><th>RL (acq/den)</th><th>Elapsed</th>" +
           "</tr></thead><tbody>";
 
@@ -206,6 +206,8 @@
           const syms = c.candle_denied_symbols || [];
           const byStock = c.candle_denied_by_stock || {};
           const rl = c.candle_rl || {};
+          const overlap = !!c.concurrent_job_overlap_detected;
+          const overlapWith = (c.overlapping_with || []).join(", ") || "";
           const symLabel = syms.length
             ? syms
                 .map((s) => {
@@ -219,8 +221,22 @@
             '<td class="mono">' +
             esc(c.updated_at_ist || c.recorded_at_ist || "—") +
             "</td>" +
+            '<td class="mono">' +
+            esc(c.started_at_ist || "—") +
+            "</td>" +
             "<td>" +
             esc(c.execution || "—") +
+            "</td>" +
+            "<td>" +
+            (overlap
+              ? '<span class="pill bad" title="' +
+                esc(overlapWith) +
+                '">YES' +
+                (c.candle_warm_lock_wait_sec
+                  ? " (" + c.candle_warm_lock_wait_sec + "s)"
+                  : "") +
+                "</span>"
+              : '<span class="pill ok">no</span>') +
             "</td>" +
             '<td class="mono">' +
             req +

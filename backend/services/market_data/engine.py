@@ -3,13 +3,17 @@ Centralized market data refresh for arbitrage_master.
 
 Single entry point for LTP + 5m VWAP/EMA(5) persistence. Algos read via ``reads`` module.
 
-REST candle warm is **curr-month futures only** (~200 keys). Stock and next-month
-LTP refresh via WebSocket every 30 minutes; stock/next VWAP+EMA5 refresh via a
-separate hourly REST candle job at :20 IST.
+REST candle warm is **curr-month futures only** (~200 keys) on the 10m job. Stock and
+next-month LTP refresh via WebSocket every 30 minutes; stock/next VWAP+EMA5 refresh via
+a separate hourly REST candle job (scheduled away from the 10m marks).
+
+Candle fetches for the 10m and hourly jobs share one process-wide Upstox candle
+rate-limit bucket and are mutually excluded so they never race the same budget.
 """
 from __future__ import annotations
 
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -39,9 +43,39 @@ IST = pytz.timezone("Asia/Kolkata")
 DEFAULT_CANDLE_LEGS: Tuple[str, ...] = ("currmth",)
 ALL_LEGS: Tuple[str, ...] = ("stock", "currmth", "nextmth")
 
+# Serialize candle-warm ThreadPools across 10m currmth and hourly stock+nextmth.
+_CANDLE_WARM_LOCK = threading.Lock()
+_ACTIVE_WARM_LOCK = threading.Lock()
+_ACTIVE_WARM_EXECUTIONS: Set[str] = set()
+
+# Hourly stock+next (~400 keys @ 5/s ≈ 80s+) needs a longer acquire wait than the
+# default 90s used by the smaller 10m currmth warm.
+_HOURLY_CANDLE_RL_MAX_WAIT = 300.0
+
 
 def _now_ist() -> datetime:
     return datetime.now(IST)
+
+
+def _rotate_universe_rows(
+    rows: List[Dict[str, Any]], *, execution: str
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Rotate starting index each cycle so rate-limit denials don't always hit the same tail.
+
+    Universe SQL is ``ORDER BY stock`` (alphabetical). Without rotation, when the
+    shared candle budget exhausts mid-batch, the same back-half symbols starve.
+    """
+    n = len(rows)
+    if n <= 1:
+        return list(rows), 0
+    now = _now_ist()
+    # Minute bucket + execution salt → different offset per job/cycle.
+    bucket = int(now.timestamp()) // 60
+    salt = sum(ord(c) for c in (execution or "")) & 0xFFFF
+    offset = (bucket + salt) % n
+    if offset == 0:
+        return list(rows), 0
+    return list(rows[offset:]) + list(rows[:offset]), offset
 
 
 def _f(v: Any) -> Optional[float]:
@@ -282,7 +316,8 @@ def refresh_stock_next_vwap_ema_hourly(
     REST 5m candles for stock + next-month → ``stock_vwap`` / ``stock_ema5`` /
     ``nextmth_future_vwap`` / ``nextmth_future_ema5``.
 
-    Does **not** write LTP columns (owned by the 30m WS job). Cadence: hourly at :20 IST.
+    Does **not** write LTP columns (owned by the 30m WS job). Cadence: hourly,
+    scheduled between 10m marks (see smart_future_algo cron).
     """
     return refresh_arbitrage_master_market_data(
         execution=execution,
@@ -345,17 +380,29 @@ def refresh_curr_month_aux_candles(
         except Exception:
             return interval, False
 
-    with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
-        futs = []
-        for ik in keys:
-            for interval, days_back in specs:
-                futs.append(pool.submit(_one, ik, interval, days_back))
-        for fut in as_completed(futs):
-            interval, ok = fut.result()
-            if ok:
-                ok_by[interval] = ok_by.get(interval, 0) + 1
-            else:
-                err += 1
+    with _ACTIVE_WARM_LOCK:
+        overlapping_with = sorted(_ACTIVE_WARM_EXECUTIONS)
+        overlap_detected = bool(overlapping_with)
+        _ACTIVE_WARM_EXECUTIONS.add(execution)
+    lock_t0 = _now_ist()
+    _CANDLE_WARM_LOCK.acquire()
+    lock_wait_sec = round((_now_ist() - lock_t0).total_seconds(), 2)
+    try:
+        with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
+            futs = []
+            for ik in keys:
+                for interval, days_back in specs:
+                    futs.append(pool.submit(_one, ik, interval, days_back))
+            for fut in as_completed(futs):
+                interval, ok = fut.result()
+                if ok:
+                    ok_by[interval] = ok_by.get(interval, 0) + 1
+                else:
+                    err += 1
+    finally:
+        _CANDLE_WARM_LOCK.release()
+        with _ACTIVE_WARM_LOCK:
+            _ACTIVE_WARM_EXECUTIONS.discard(execution)
 
     summary = {
         "success": True,
@@ -363,6 +410,9 @@ def refresh_curr_month_aux_candles(
         "keys": len(keys),
         "ok_by_interval": ok_by,
         "errors": err,
+        "concurrent_job_overlap_detected": overlap_detected or lock_wait_sec > 0.05,
+        "overlapping_with": overlapping_with,
+        "candle_warm_lock_wait_sec": lock_wait_sec,
         "elapsed_sec": round((_now_ist() - started).total_seconds(), 2),
         "updated_at_ist": _now_ist().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -389,16 +439,21 @@ def refresh_arbitrage_master_market_data(
     """
     ensure_market_data_columns()
     started = _now_ist()
+    started_at_ist = started.strftime("%Y-%m-%d %H:%M:%S")
     rows = load_universe_rows()
     if stocks:
         want = {str(s or "").strip().upper() for s in stocks if str(s or "").strip()}
         rows = [r for r in rows if str(r.get("stock") or "").strip().upper() in want]
+    rotate_offset = 0
+    if rows and fetch_candles:
+        rows, rotate_offset = _rotate_universe_rows(rows, execution=execution)
     if not rows:
         return {
             "success": True,
             "rows": 0,
             "execution": execution,
             "message": "empty_universe",
+            "started_at_ist": started_at_ist,
         }
 
     try:
@@ -407,13 +462,19 @@ def refresh_arbitrage_master_market_data(
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     except Exception as e:
         logger.error("market_data: Upstox init failed: %s", e)
-        return {"success": False, "execution": execution, "error": str(e)}
+        return {
+            "success": False,
+            "execution": execution,
+            "error": str(e),
+            "started_at_ist": started_at_ist,
+        }
 
     if not getattr(upstox, "access_token", None):
         return {
             "success": False,
             "execution": execution,
             "error": "upstox_not_connected",
+            "started_at_ist": started_at_ist,
         }
 
     legs_for_ltp: Sequence[str] = tuple(ltp_legs) if ltp_legs is not None else ALL_LEGS
@@ -437,22 +498,66 @@ def refresh_arbitrage_master_market_data(
     indicators_by_key: Dict[str, Dict[str, float]] = {}
     candle_errors = 0
     candle_failed_iks: List[str] = []
+    overlap_detected = False
+    overlapping_with: List[str] = []
+    lock_wait_sec = 0.0
     if fetch_candles and candle_keys:
-        unique_iks = list({ik for _, _, ik in candle_keys})
-        with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
-            futs = {pool.submit(_fetch_5m_indicators, upstox, ik): ik for ik in unique_iks}
-            for fut in as_completed(futs):
-                ik = futs[fut]
+        # Preserve submission order (rotated alphabetical) — dict keeps insertion order.
+        unique_iks = list(dict.fromkeys(ik for _, _, ik in candle_keys))
+        is_hourly_stock_next = set(legs_for_candles) == {"stock", "nextmth"} or (
+            "stock" in legs_for_candles and "nextmth" in legs_for_candles and "currmth" not in legs_for_candles
+        )
+
+        with _ACTIVE_WARM_LOCK:
+            overlapping_with = sorted(_ACTIVE_WARM_EXECUTIONS)
+            overlap_detected = bool(overlapping_with)
+            _ACTIVE_WARM_EXECUTIONS.add(execution)
+        lock_wait_t0 = _now_ist()
+        _CANDLE_WARM_LOCK.acquire()
+        lock_wait_sec = round((_now_ist() - lock_wait_t0).total_seconds(), 2)
+        if lock_wait_sec > 0.05:
+            overlap_detected = True
+        try:
+            if is_hourly_stock_next:
                 try:
-                    ind = fut.result()
-                    if ind:
-                        indicators_by_key[ik] = ind
-                    else:
-                        candle_errors += 1
-                        candle_failed_iks.append(ik)
+                    from backend.services.upstox_rate_limiter import (
+                        set_candle_rl_max_wait_override,
+                    )
+
+                    set_candle_rl_max_wait_override(_HOURLY_CANDLE_RL_MAX_WAIT)
                 except Exception:
-                    candle_errors += 1
-                    candle_failed_iks.append(ik)
+                    pass
+            try:
+                with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
+                    futs = {
+                        pool.submit(_fetch_5m_indicators, upstox, ik): ik for ik in unique_iks
+                    }
+                    for fut in as_completed(futs):
+                        ik = futs[fut]
+                        try:
+                            ind = fut.result()
+                            if ind:
+                                indicators_by_key[ik] = ind
+                            else:
+                                candle_errors += 1
+                                candle_failed_iks.append(ik)
+                        except Exception:
+                            candle_errors += 1
+                            candle_failed_iks.append(ik)
+            finally:
+                if is_hourly_stock_next:
+                    try:
+                        from backend.services.upstox_rate_limiter import (
+                            set_candle_rl_max_wait_override,
+                        )
+
+                        set_candle_rl_max_wait_override(None)
+                    except Exception:
+                        pass
+        finally:
+            _CANDLE_WARM_LOCK.release()
+            with _ACTIVE_WARM_LOCK:
+                _ACTIVE_WARM_EXECUTIONS.discard(execution)
 
     now = _now_ist()
     updates: List[Dict[str, Any]] = []
@@ -574,6 +679,7 @@ def refresh_arbitrage_master_market_data(
     summary = {
         "success": True,
         "execution": execution,
+        "started_at_ist": started_at_ist,
         "rows_total": len(rows),
         "rows_updated": written,
         "ltp_keys": len(ltp_map),
@@ -587,6 +693,10 @@ def refresh_arbitrage_master_market_data(
         "candle_denied_symbols": denied_symbols,
         "candle_denied_by_stock": denied_by_stock,
         "candle_rl": rl_stats,
+        "symbol_rotate_offset": rotate_offset,
+        "concurrent_job_overlap_detected": overlap_detected,
+        "overlapping_with": overlapping_with,
+        "candle_warm_lock_wait_sec": lock_wait_sec,
         "status_ok": ok_rows,
         "status_partial": partial_rows,
         "status_failed": failed_rows,

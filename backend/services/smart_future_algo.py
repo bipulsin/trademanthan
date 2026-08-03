@@ -703,7 +703,7 @@ class SmartFutureAlgoScheduler:
                 except Exception:
                     pass
 
-            # Clock-aligned :05/:15/… so hourly stock/next VWAP/EMA at :20 never overlaps.
+            # Clock-aligned :05/:15/…; hourly stock/next VWAP/EMA at :08 (between marks).
             self.scheduler.add_job(
                 run_centralized_market_data_refresh,
                 trigger=CronTrigger(
@@ -755,7 +755,9 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Stock/next WS LTP (every 30 min, 9:15–15:35 IST)"
             )
 
-            # 2b — Stock/next VWAP+EMA5 via REST candles hourly at :20 (additive; no LTP writes).
+            # 2b — Stock/next VWAP+EMA5 via REST candles hourly at :08 (between 10m :05/:15).
+            # Mutual exclusion in market_data.engine also serializes candle warms if a
+            # prior cycle overruns; :08 keeps nominal start clear of 10m marks.
             def run_stock_next_vwap_ema_hourly():
                 if _skip_ist_non_trading_job("stock/next VWAP/EMA hourly"):
                     return
@@ -764,7 +766,7 @@ class SmartFutureAlgoScheduler:
                 t = now.time()
                 if t < dt_time(9, 15) or t > dt_time(15, 30):
                     return
-                logger.info("🔧 Triggering stock/next VWAP/EMA5 REST refresh (hourly :20)...")
+                logger.info("🔧 Triggering stock/next VWAP/EMA5 REST refresh (hourly :08)...")
                 try:
                     from backend.services.market_data.scheduler import (
                         run_stock_next_vwap_ema_hourly_job,
@@ -780,18 +782,24 @@ class SmartFutureAlgoScheduler:
                 trigger=CronTrigger(
                     day_of_week="mon-fri",
                     hour="9-15",
-                    minute=20,
+                    minute=8,
                     timezone="Asia/Kolkata",
                 ),
-                id="stock_next_vwap_ema_hourly_20",
-                name="Stock/next VWAP+EMA5 (hourly :20 IST)",
+                id="stock_next_vwap_ema_hourly_08",
+                name="Stock/next VWAP+EMA5 (hourly :08 IST)",
                 replace_existing=True,
                 max_instances=1,
                 misfire_grace_time=300,
                 coalesce=True,
             )
+            # Drop legacy :20 job id if still present from prior deploys.
+            try:
+                if self.scheduler.get_job("stock_next_vwap_ema_hourly_20"):
+                    self.scheduler.remove_job("stock_next_vwap_ema_hourly_20")
+            except Exception:
+                pass
             logger.info(
-                "✅ Scheduled: Stock/next VWAP+EMA5 at 09:20–15:20 IST hourly"
+                "✅ Scheduled: Stock/next VWAP+EMA5 at 09:08–15:08 IST hourly"
             )
 
             def run_curr_month_aux_warm():
