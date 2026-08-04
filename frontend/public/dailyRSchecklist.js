@@ -2444,6 +2444,18 @@
         }
     }
 
+    function applyOpenTradesPanel(panel) {
+        if (!state || !panel || panel.error) return;
+        state.open_trades_panel = {
+            session_date: panel.session_date || (state && state.session_date),
+            open_trades: panel.open_trades || [],
+            closed_trades: panel.closed_trades || [],
+            exit_now_symbols: panel.exit_now_symbols || [],
+            plan_exit_symbols: panel.plan_exit_symbols || []
+        };
+        renderOpenTrades();
+    }
+
     function takeTrade(symbol) {
         var stock = currentStock(symbol);
         if (!stock) return;
@@ -2481,15 +2493,31 @@
                 }
             })
         }).then(function (res) {
-            if (!res.ok) { toast(res.error || "Take trade failed"); return; }
+            if (!res || !res.ok) {
+                toast((res && res.error) || "Take trade failed");
+                return;
+            }
+            // Take response already includes the session panel — paint immediately.
+            // Do NOT wait on /data (can take 10–200s under load); that made Open Trades
+            // look empty even after a successful insert.
+            applyOpenTradesPanel(res);
             if (res.take_warning) {
                 toast("⚠ " + res.take_warning);
                 showTakeWarningBanner(symbol, res.take_warning);
             } else {
                 toast(symbol + " → Open Trades");
             }
-            return api("/data");
-        }).then(function (s) { if (s) applyState(s); }).catch(function () { toast("Take trade failed"); });
+            // Background checklist refresh; failure must not undo a successful take.
+            api("/data").then(function (s) {
+                if (!s || s.error) return;
+                var keep = state && state.open_trades_panel;
+                applyState(s);
+                if (keep && (!s.open_trades_panel || !(s.open_trades_panel.open_trades || []).length)
+                    && (keep.open_trades || []).length) {
+                    applyOpenTradesPanel(keep);
+                }
+            }).catch(function () { /* take already applied */ });
+        }).catch(function () { toast("Take trade failed"); });
     }
 
     function showTakeWarningBanner(symbol, msg) {
@@ -3204,13 +3232,13 @@
         }, 60000);
         fetchGaruda();
         setInterval(fetchGaruda, 10 * 60 * 1000);
-        // Live LTP / PnL for open trades (state machine still candle-close gated server-side)
+        // Live LTP / PnL for open trades (state machine still candle-close gated server-side).
+        // Always poll — previously skipped when panel was empty, so a successful Take Trade
+        // that missed the immediate paint never appeared until a full /data refresh.
         setInterval(function () {
-            if (!state || !state.open_trades_panel || !(state.open_trades_panel.open_trades || []).length) return;
+            if (!state) return;
             api("/open-trades").then(function (p) {
-                if (!p || p.error) return;
-                state.open_trades_panel = p;
-                renderOpenTrades();
+                applyOpenTradesPanel(p);
             }).catch(function () {});
         }, 20000);
     }
