@@ -258,3 +258,46 @@ Full arc closed in code on **31-Jul**; first live co-verification is the **next 
 1. Deny clusters at prior failure windows (~11:32, 13:42, 14:17 IST)? Y/N + notes
 2. Any READY/READY-family card with stale tip treated as fresh entry in those windows? (expect **no**)
 3. Session deny-rate baseline under Phase 1 + tip-stale together
+
+---
+
+## Candle-warm shared rate-limit bug (infra, `bb9a819`) — resolved via hourly pause
+
+**Category:** Infrastructure (not scoring / RS selection).  
+**Full writeup:** `docs/diagnostics/checkpoint_22jul_followup/candle_warm_rate_limit_bb9a819/README.md`
+
+| | |
+|---|---|
+| **Root cause** | 10m + hourly warms shared one Upstox candle RL bucket with no cross-job mutex; hourly `max_wait=90s` + 10-wide pool → ~95% deny; `:20` hourly spilled into `:25` 10m; alphabetical order starved the same B–S tail |
+| **Fix (bb9a819)** | Mutex (block/queue, never skip), hourly `:08`, `max_wait` 300s, symbol rotation, overlap/`lock_wait` log fields |
+| **2026-08-04 live** | Mutex worked but queued 10m behind hourly (~400 keys): `scheduled_10m` deny **94–99.5%** in 13:00–15:30 IST overlap windows; RS `10m_warm` skips up to **195/200**; 10m elapsed up to **633s**; `lock_wait` attributable to hourly |
+| **Resolution (8-Aug)** | **Pause** `stock_next_vwap_ema_hourly_08` (`STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED=false` default). Code + DB columns retained. See section below. |
+| **Status** | Contention root removed by pausing dead-reader job; verify 1–2 sessions vs Aug-4 baseline |
+
+---
+
+## Pause hourly stock/next VWAP·EMA5 job (8-Aug checkpoint)
+
+**Category:** Confirmed-dead-code cleanup (budget remnant post-`c115a77` SF/Vajra removal).  
+**Not** a new-signal change — ships without extended shadow per standing rule.  
+**Investigation:** code-level usage trace + full dashboard-page audit (conversation thread) — `stock_vwap`, `stock_ema5`, `nextmth_future_vwap`, `nextmth_future_ema5` on `arbitrage_master` have **zero live readers** (no algo, no screen).
+
+| | |
+|---|---|
+| **Change** | Pause APScheduler `stock_next_vwap_ema_hourly_08` / `scheduled_stock_next_vwap_ema_hourly`. Env: `STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED` (default **false**). Do not delete engine/scheduler functions or drop columns. |
+| **Rollback** | Set `STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED=true` and redeploy — pause-only, no data loss. |
+| **Health** | `market_data/health.py` freshness uses `market_data_last_updated` / `currmth_future_last_updated` only — **not** the four paused columns. No false-staleness expected. |
+| **Mutex / RL** | `_CANDLE_WARM_LOCK` + shared `SlidingWindowRateLimiter` remain for `scheduled_10m` (and any other candle warms). No job assumes the hourly job must run; absence only frees budget. |
+
+### Before / after metrics (verify next 1–2 trading sessions)
+
+Baseline: **2026-08-04** overlap windows (hourly still live).
+
+| Metric | Before (2026-08-04) | After (fill post-deploy) | Expect |
+|---|---|---|---|
+| `scheduled_10m` deny% (13:00–15:30 IST) | **94–99.5%** during overlap | _TBD_ | Near-zero |
+| RS `10m_warm` cycle skips | Up to **195/200** worst cycles | _TBD_ | Near-zero |
+| `scheduled_10m` elapsed | Up to **633s** | _TBD_ | ~230–330s (non-overlap baseline) |
+| `candle_warm_lock_wait_sec` from hourly | Observed under contention | _TBD_ | **None** attributable to hourly (job paused) |
+
+**Refs:** candle-warm RL writeup (`bb9a819`); SF/Vajra removal `c115a77`; this pause ships with the 8-Aug checkpoint logging above.

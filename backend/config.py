@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     # instead of bursting over the limit; skipped symbols refresh on a later cycle.
     UPSTOX_CANDLE_RL_MAX_WAIT: float = float(os.getenv("UPSTOX_CANDLE_RL_MAX_WAIT", "90"))
 
+    # Stock/next VWAP+EMA5 hourly REST warm (arbitrage_master stock_* / nextmth_*).
+    # Default OFF: those four columns have no live readers after SF/Vajra removal
+    # (c115a77); the job contended with scheduled_10m on the shared candle RL.
+    # Re-enable: STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED=true (code retained).
+    STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED: bool = os.getenv(
+        "STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED", "false"
+    ).lower() in ("1", "true", "yes")
+
     # Process-wide shared candle cache so all jobs fetch each (instrument,
     # interval) once per TTL instead of once per job. Only the live fetch path
     # (range_end_date unset) is cached; exits/backtests/premarket that pass an

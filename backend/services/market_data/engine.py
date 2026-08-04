@@ -316,8 +316,8 @@ def refresh_stock_next_vwap_ema_hourly(
     REST 5m candles for stock + next-month → ``stock_vwap`` / ``stock_ema5`` /
     ``nextmth_future_vwap`` / ``nextmth_future_ema5``.
 
-    Does **not** write LTP columns (owned by the 30m WS job). Cadence: hourly,
-    scheduled between 10m marks (see smart_future_algo cron).
+    Does **not** write LTP columns (owned by the 30m WS job). Cadence: hourly
+    between 10m marks when ``STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED`` (default off).
     """
     return refresh_arbitrage_master_market_data(
         execution=execution,

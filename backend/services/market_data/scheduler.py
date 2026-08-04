@@ -33,7 +33,8 @@ def run_market_data_refresh_job() -> dict:
     Curr-month REST candle + LTP warm (every 10 min, clock-aligned :05/:15/…).
 
     Stock/next LTP → ``run_stock_next_ws_ltp_job`` (30m).
-    Stock/next VWAP/EMA5 → ``run_stock_next_vwap_ema_hourly_job`` (:08).
+    Stock/next VWAP/EMA5 → ``run_stock_next_vwap_ema_hourly_job`` (:08;
+    paused unless ``STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED``).
     """
     skipped = _scheduler_window_ok()
     if skipped is not None:
@@ -60,7 +61,8 @@ def run_stock_next_vwap_ema_hourly_job() -> dict:
     """
     Stock + next-month REST 5m → VWAP/EMA5 at :08 IST hourly.
 
-    Does not write LTP (WS @ 30m owns those columns).
+    Does not write LTP (WS @ 30m owns those columns). Schedule paused by
+    default (``STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED``); function kept for rollback.
     """
     skipped = _scheduler_window_ok()
     if skipped is not None:

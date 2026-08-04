@@ -755,9 +755,10 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: Stock/next WS LTP (every 30 min, 9:15–15:35 IST)"
             )
 
-            # 2b — Stock/next VWAP+EMA5 via REST candles hourly at :08 (between 10m :05/:15).
-            # Mutual exclusion in market_data.engine also serializes candle warms if a
-            # prior cycle overruns; :08 keeps nominal start clear of 10m marks.
+            # 2b — Stock/next VWAP+EMA5 via REST candles hourly at :08.
+            # Paused by default (STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED): columns have
+            # no live readers; job contended with scheduled_10m on shared candle RL.
+            # Code + DB columns retained — set env true to re-schedule.
             def run_stock_next_vwap_ema_hourly():
                 if _skip_ist_non_trading_job("stock/next VWAP/EMA hourly"):
                     return
@@ -777,30 +778,48 @@ class SmartFutureAlgoScheduler:
                 except Exception as e:
                     logger.error("❌ Stock/next VWAP/EMA5 refresh failed: %s", e, exc_info=True)
 
-            self.scheduler.add_job(
-                run_stock_next_vwap_ema_hourly,
-                trigger=CronTrigger(
-                    day_of_week="mon-fri",
-                    hour="9-15",
-                    minute=8,
-                    timezone="Asia/Kolkata",
-                ),
-                id="stock_next_vwap_ema_hourly_08",
-                name="Stock/next VWAP+EMA5 (hourly :08 IST)",
-                replace_existing=True,
-                max_instances=1,
-                misfire_grace_time=300,
-                coalesce=True,
+            _hourly_vwap_ema_on = bool(
+                getattr(settings, "STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED", False)
             )
+            if _hourly_vwap_ema_on:
+                self.scheduler.add_job(
+                    run_stock_next_vwap_ema_hourly,
+                    trigger=CronTrigger(
+                        day_of_week="mon-fri",
+                        hour="9-15",
+                        minute=8,
+                        timezone="Asia/Kolkata",
+                    ),
+                    id="stock_next_vwap_ema_hourly_08",
+                    name="Stock/next VWAP+EMA5 (hourly :08 IST)",
+                    replace_existing=True,
+                    max_instances=1,
+                    misfire_grace_time=300,
+                    coalesce=True,
+                )
+                logger.info(
+                    "✅ Scheduled: Stock/next VWAP+EMA5 at 09:08–15:08 IST hourly"
+                )
+            else:
+                for _jid in (
+                    "stock_next_vwap_ema_hourly_08",
+                    "stock_next_vwap_ema_hourly_20",
+                ):
+                    try:
+                        if self.scheduler.get_job(_jid):
+                            self.scheduler.remove_job(_jid)
+                    except Exception:
+                        pass
+                logger.info(
+                    "⏸️ Paused: Stock/next VWAP+EMA5 hourly "
+                    "(STOCK_NEXT_VWAP_EMA_HOURLY_ENABLED=false)"
+                )
             # Drop legacy :20 job id if still present from prior deploys.
             try:
                 if self.scheduler.get_job("stock_next_vwap_ema_hourly_20"):
                     self.scheduler.remove_job("stock_next_vwap_ema_hourly_20")
             except Exception:
                 pass
-            logger.info(
-                "✅ Scheduled: Stock/next VWAP+EMA5 at 09:08–15:08 IST hourly"
-            )
 
             def run_curr_month_aux_warm():
                 if _skip_ist_non_trading_job("curr-month aux candles"):
