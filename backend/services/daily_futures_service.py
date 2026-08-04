@@ -258,132 +258,147 @@ def ensure_daily_futures_tables() -> None:
     );
     CREATE INDEX IF NOT EXISTS idx_df_decision_log_td_sym ON daily_futures_decision_log (trade_date, symbol, created_at DESC);
     """
-        with engine.begin() as conn:
-            conn.execute(text(ddl))
-            # Safe additive migrations for existing databases.
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_oi_leg NUMERIC(8,2)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_vwap_leg NUMERIC(8,2)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS session_vwap NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS total_oi BIGINT"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS oi_change_pct NUMERIC(18,6)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_ltp NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_session_vwap NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS stock_prev_close NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_prev_close NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS stock_change_pct NUMERIC(18,6)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_change_pct NUMERIC(18,6)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS snapshotted_at TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_time TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_conviction_score NUMERIC(8,2)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_oi_leg NUMERIC(8,2)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_vwap_leg NUMERIC(8,2)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS scan_candle_confirmation BOOLEAN NOT NULL DEFAULT FALSE"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS trigger_candle_high NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS trigger_candle_low NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS atr_14_15m NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_target_price NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_window_expires_at TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_status VARCHAR(24) NOT NULL DEFAULT 'WAITING'"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS qualifying_scan_streak INTEGER NOT NULL DEFAULT 0"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_start TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_end TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS effective_conviction NUMERIC(5,1)"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_momentum_pass BOOLEAN"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_evaluated_at TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_is_green BOOLEAN"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_high BOOLEAN"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_low BOOLEAN"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_breakdown_json JSONB"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
-            conn.execute(text("UPDATE daily_futures_screening SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
-            conn.execute(text("UPDATE daily_futures_screening SET conviction_score = 0 WHERE conviction_score IS NULL"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET DEFAULT 0"))
-            conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET NOT NULL"))
-            conn.execute(
-                text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS position_atr NUMERIC(18,4)")
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_trail_armed BOOLEAN NOT NULL DEFAULT FALSE"
+        try:
+            with engine.begin() as conn:
+                # Never block the app for hours if another session holds locks on these
+                # tables (idle-in-transaction). Prefer skip-migrate over a hung pool.
+                conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+                conn.execute(text(ddl))
+                # Safe additive migrations for existing databases.
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_oi_leg NUMERIC(8,2)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_vwap_leg NUMERIC(8,2)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS session_vwap NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS total_oi BIGINT"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS oi_change_pct NUMERIC(18,6)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_ltp NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_session_vwap NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS stock_prev_close NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_prev_close NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS stock_change_pct NUMERIC(18,6)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS nifty_change_pct NUMERIC(18,6)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS snapshotted_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_time TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_conviction_score NUMERIC(8,2)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_oi_leg NUMERIC(8,2)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_vwap_leg NUMERIC(8,2)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_stock_change_pct NUMERIC(18,6)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS second_scan_nifty_change_pct NUMERIC(18,6)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS scan_candle_confirmation BOOLEAN NOT NULL DEFAULT FALSE"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS trigger_candle_high NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS trigger_candle_low NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS atr_14_15m NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_target_price NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_window_expires_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS pullback_status VARCHAR(24) NOT NULL DEFAULT 'WAITING'"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS qualifying_scan_streak INTEGER NOT NULL DEFAULT 0"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_start TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS entry_window_end TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS effective_conviction NUMERIC(5,1)"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_momentum_pass BOOLEAN"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS last_5m_evaluated_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_is_green BOOLEAN"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_high BOOLEAN"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS candle_higher_low BOOLEAN"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS conviction_breakdown_json JSONB"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
+                conn.execute(text("UPDATE daily_futures_screening SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
+                conn.execute(text("UPDATE daily_futures_screening SET conviction_score = 0 WHERE conviction_score IS NULL"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET DEFAULT 0"))
+                conn.execute(text("ALTER TABLE daily_futures_screening ALTER COLUMN conviction_score SET NOT NULL"))
+                conn.execute(
+                    text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS position_atr NUMERIC(18,4)")
                 )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS nifty_structure_weakening BOOLEAN NOT NULL DEFAULT FALSE"
-                )
-            )
-            conn.execute(
-                text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trail_stop_hit BOOLEAN NOT NULL DEFAULT FALSE")
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE"
-                )
-            )
-            conn.execute(
-                text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_unrealized_pnl_rupees NUMERIC(18,4)")
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_giveback_breach BOOLEAN NOT NULL DEFAULT FALSE"
-                )
-            )
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_signal_count INTEGER NOT NULL DEFAULT 0"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_conditions_active TEXT"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_bearish_evaluated_at TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS indicator_decision TEXT"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_indicator_candle_ts TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_amber_alert_at TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_hard_exit_alert_at TIMESTAMPTZ"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS atr_at_entry NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS hard_sl_price NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS indicator_exit_combo VARCHAR(16)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trailing_stop_active BOOLEAN NOT NULL DEFAULT FALSE"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_ltp NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_pnl_pct NUMERIC(8,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS exit_reason VARCHAR(32)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
-            conn.execute(text("UPDATE daily_futures_user_trade SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
-            # SHORT leg prices (optional; LONG uses entry_ / exit_ as today)
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_price NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_time VARCHAR(16)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_price NUMERIC(18,4)"))
-            conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_time VARCHAR(16)"))
-            # Allow same underlying on one day for LONG vs SHORT parallel screeners
-            try:
                 conn.execute(
                     text(
-                        "ALTER TABLE daily_futures_screening DROP CONSTRAINT IF EXISTS daily_futures_screening_trade_date_underlying_key"
+                        "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_trail_armed BOOLEAN NOT NULL DEFAULT FALSE"
                     )
                 )
-            except Exception:
-                pass
-            conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_futures_screening_td_und_dir "
-                    "ON daily_futures_screening (trade_date, (UPPER(TRIM(underlying))), (UPPER(TRIM(direction_type))))"
-                )
-            )
-            conn.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS daily_futures_decision_log (
-                        id BIGSERIAL PRIMARY KEY,
-                        trade_date DATE NOT NULL,
-                        symbol VARCHAR(64) NOT NULL,
-                        decision_type VARCHAR(32) NOT NULL,
-                        decision_outcome VARCHAR(16) NOT NULL,
-                        payload_json JSONB,
-                        created_at TIMESTAMPTZ DEFAULT NOW()
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS nifty_structure_weakening BOOLEAN NOT NULL DEFAULT FALSE"
                     )
-                    """
                 )
-            )
-        _DF_TABLES_READY = True
+                conn.execute(
+                    text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trail_stop_hit BOOLEAN NOT NULL DEFAULT FALSE")
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS momentum_exhausting BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+                )
+                conn.execute(
+                    text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_unrealized_pnl_rupees NUMERIC(18,4)")
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS profit_giveback_breach BOOLEAN NOT NULL DEFAULT FALSE"
+                    )
+                )
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_signal_count INTEGER NOT NULL DEFAULT 0"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS bearish_conditions_active TEXT"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_bearish_evaluated_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS indicator_decision TEXT"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS last_indicator_candle_ts TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_amber_alert_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS first_hard_exit_alert_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS atr_at_entry NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS hard_sl_price NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS indicator_exit_combo VARCHAR(16)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trailing_stop_active BOOLEAN NOT NULL DEFAULT FALSE"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_ltp NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS peak_pnl_pct NUMERIC(8,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS exit_reason VARCHAR(32)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS direction_type VARCHAR(16)"))
+                conn.execute(text("UPDATE daily_futures_user_trade SET direction_type = 'LONG' WHERE direction_type IS NULL OR TRIM(direction_type) = ''"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ALTER COLUMN direction_type SET DEFAULT 'LONG'"))
+                # SHORT leg prices (optional; LONG uses entry_ / exit_ as today)
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_price NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_time VARCHAR(16)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_price NUMERIC(18,4)"))
+                conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_time VARCHAR(16)"))
+                # Allow same underlying on one day for LONG vs SHORT parallel screeners
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE daily_futures_screening DROP CONSTRAINT IF EXISTS daily_futures_screening_trade_date_underlying_key"
+                        )
+                    )
+                except Exception:
+                    pass
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_futures_screening_td_und_dir "
+                        "ON daily_futures_screening (trade_date, (UPPER(TRIM(underlying))), (UPPER(TRIM(direction_type))))"
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS daily_futures_decision_log (
+                            id BIGSERIAL PRIMARY KEY,
+                            trade_date DATE NOT NULL,
+                            symbol VARCHAR(64) NOT NULL,
+                            decision_type VARCHAR(32) NOT NULL,
+                            decision_outcome VARCHAR(16) NOT NULL,
+                            payload_json JSONB,
+                            created_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                        """
+                    )
+                )
+            _DF_TABLES_READY = True
+        except Exception as e:
+            logger.exception("ensure_daily_futures_tables failed: %s", e)
+            # Avoid per-request DDL retry storms when another session holds locks
+            # (root cause of 2026-08-04 checklist outage: hung ALTER for ~10h).
+            err = str(e).lower()
+            if "lock timeout" in err or "canceling statement due to lock" in err:
+                _DF_TABLES_READY = True
+                logger.error(
+                    "ensure_daily_futures_tables: skipping further DDL this process "
+                    "after lock timeout (tables likely already exist)"
+                )
 
 
 def _safe_float(v: Any) -> Optional[float]:
