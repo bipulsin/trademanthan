@@ -1232,8 +1232,41 @@
         if (g.indexOf("A") === 0) return 1;
         if (g.indexOf("B") === 0) return 2;
         if (g.indexOf("C") === 0) return 3;
+        if (g.indexOf("D!") === 0) return 5;
         if (g.indexOf("D") === 0) return 4;
         return 9;
+    }
+
+    /** Trade / Combined Score used on READY cards (same field as card body). */
+    function readyNowTradeScore(stock) {
+        if (stock.trade_score != null && stock.trade_score !== "") return Number(stock.trade_score);
+        if (stock.dashboard_score != null && stock.dashboard_score !== "") return Number(stock.dashboard_score);
+        return null;
+    }
+
+    /**
+     * Display-only: keep at most 4 live READY NOW cards.
+     * Rank: trade_take_enabled (true first) → score desc → grade A+…D! → prior order.
+     * Does not mutate stocks or persist a rank field; rank 5+ stay in payload/logs.
+     */
+    function limitReadyNowDisplay(list) {
+        if (!list || list.length <= 4) return list;
+        var decorated = list.map(function (s, i) { return { s: s, i: i }; });
+        decorated.sort(function (a, b) {
+            var ta = a.s.trade_take_enabled === true ? 0 : 1;
+            var tb = b.s.trade_take_enabled === true ? 0 : 1;
+            if (ta !== tb) return ta - tb;
+            var sa = readyNowTradeScore(a.s);
+            var sb = readyNowTradeScore(b.s);
+            if (sa != null && sb != null && sa !== sb) return sb - sa;
+            if (sa != null && sb == null) return -1;
+            if (sa == null && sb != null) return 1;
+            var ga = gradeRank(a.s);
+            var gb = gradeRank(b.s);
+            if (ga !== gb) return ga - gb;
+            return a.i - b.i;
+        });
+        return decorated.slice(0, 4).map(function (x) { return x.s; });
     }
 
     function sortStocks(list) {
@@ -2005,7 +2038,8 @@
         var afterClose = afterSquareOffIST();
         var readyAll = sortStocks(stocks.filter(function (s) { return isReadyState(s.trade_state); }));
         // After 14:30 / 15:15: do not present READY under the live READY NOW heading.
-        var readyLive = (!windowOpen || afterClose) ? [] : readyAll;
+        // Display cap: top 4 by take-enabled → score → grade (render-time only; data/alerts untouched).
+        var readyLive = (!windowOpen || afterClose) ? [] : limitReadyNowDisplay(readyAll);
         var readyPast = (windowOpen && !afterClose) ? [] : readyAll;
         var expired = sortStocks(stocks.filter(function (s) { return isExpiredCard(s.trade_state); }));
         var watching = sortStocks(stocks.filter(function (s) {
