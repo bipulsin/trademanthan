@@ -35,6 +35,11 @@ from backend.services.market_data.constants import (
 from backend.services.market_data.indicators import indicators_from_5m_candles
 from backend.services.market_data.repository import bulk_update_market_data, load_universe_rows
 from backend.services.market_data.schema import ensure_market_data_columns
+from backend.services.upstox_rate_limiter import (
+    candle_warm_execution,
+    is_scheduled_warm_execution,
+    scheduled_candle_worker,
+)
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -47,10 +52,6 @@ ALL_LEGS: Tuple[str, ...] = ("stock", "currmth", "nextmth")
 _CANDLE_WARM_LOCK = threading.Lock()
 _ACTIVE_WARM_LOCK = threading.Lock()
 _ACTIVE_WARM_EXECUTIONS: Set[str] = set()
-
-# Hourly stock+next (~400 keys @ 5/s ≈ 80s+) needs a longer acquire wait than the
-# default 90s used by the smaller 10m currmth warm.
-_HOURLY_CANDLE_RL_MAX_WAIT = 300.0
 
 
 def _now_ist() -> datetime:
@@ -372,13 +373,19 @@ def refresh_curr_month_aux_candles(
     err = 0
 
     def _one(ik: str, interval: str, days_back: int) -> Tuple[str, bool]:
-        try:
-            bars = upstox.get_historical_candles_by_instrument_key(
-                ik, interval=interval, days_back=days_back
-            )
-            return interval, bool(bars)
-        except Exception:
-            return interval, False
+        def _fetch() -> Tuple[str, bool]:
+            try:
+                bars = upstox.get_historical_candles_by_instrument_key(
+                    ik, interval=interval, days_back=days_back
+                )
+                return interval, bool(bars)
+            except Exception:
+                return interval, False
+
+        if is_scheduled_warm_execution(execution):
+            with scheduled_candle_worker():
+                return _fetch()
+        return _fetch()
 
     with _ACTIVE_WARM_LOCK:
         overlapping_with = sorted(_ACTIVE_WARM_EXECUTIONS)
@@ -388,17 +395,18 @@ def refresh_curr_month_aux_candles(
     _CANDLE_WARM_LOCK.acquire()
     lock_wait_sec = round((_now_ist() - lock_t0).total_seconds(), 2)
     try:
-        with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
-            futs = []
-            for ik in keys:
-                for interval, days_back in specs:
-                    futs.append(pool.submit(_one, ik, interval, days_back))
-            for fut in as_completed(futs):
-                interval, ok = fut.result()
-                if ok:
-                    ok_by[interval] = ok_by.get(interval, 0) + 1
-                else:
-                    err += 1
+        with candle_warm_execution(execution):
+            with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
+                futs = []
+                for ik in keys:
+                    for interval, days_back in specs:
+                        futs.append(pool.submit(_one, ik, interval, days_back))
+                for fut in as_completed(futs):
+                    interval, ok = fut.result()
+                    if ok:
+                        ok_by[interval] = ok_by.get(interval, 0) + 1
+                    else:
+                        err += 1
     finally:
         _CANDLE_WARM_LOCK.release()
         with _ACTIVE_WARM_LOCK:
@@ -504,9 +512,7 @@ def refresh_arbitrage_master_market_data(
     if fetch_candles and candle_keys:
         # Preserve submission order (rotated alphabetical) — dict keeps insertion order.
         unique_iks = list(dict.fromkeys(ik for _, _, ik in candle_keys))
-        is_hourly_stock_next = set(legs_for_candles) == {"stock", "nextmth"} or (
-            "stock" in legs_for_candles and "nextmth" in legs_for_candles and "currmth" not in legs_for_candles
-        )
+        scheduled_warm = is_scheduled_warm_execution(execution)
 
         with _ACTIVE_WARM_LOCK:
             overlapping_with = sorted(_ACTIVE_WARM_EXECUTIONS)
@@ -518,19 +524,16 @@ def refresh_arbitrage_master_market_data(
         if lock_wait_sec > 0.05:
             overlap_detected = True
         try:
-            if is_hourly_stock_next:
-                try:
-                    from backend.services.upstox_rate_limiter import (
-                        set_candle_rl_max_wait_override,
-                    )
+            with candle_warm_execution(execution):
+                def _one(ik: str) -> Optional[Dict[str, float]]:
+                    if scheduled_warm:
+                        with scheduled_candle_worker():
+                            return _fetch_5m_indicators(upstox, ik)
+                    return _fetch_5m_indicators(upstox, ik)
 
-                    set_candle_rl_max_wait_override(_HOURLY_CANDLE_RL_MAX_WAIT)
-                except Exception:
-                    pass
-            try:
                 with ThreadPoolExecutor(max_workers=CANDLE_FETCH_WORKERS) as pool:
                     futs = {
-                        pool.submit(_fetch_5m_indicators, upstox, ik): ik for ik in unique_iks
+                        pool.submit(_one, ik): ik for ik in unique_iks
                     }
                     for fut in as_completed(futs):
                         ik = futs[fut]
@@ -544,16 +547,6 @@ def refresh_arbitrage_master_market_data(
                         except Exception:
                             candle_errors += 1
                             candle_failed_iks.append(ik)
-            finally:
-                if is_hourly_stock_next:
-                    try:
-                        from backend.services.upstox_rate_limiter import (
-                            set_candle_rl_max_wait_override,
-                        )
-
-                        set_candle_rl_max_wait_override(None)
-                    except Exception:
-                        pass
         finally:
             _CANDLE_WARM_LOCK.release()
             with _ACTIVE_WARM_LOCK:

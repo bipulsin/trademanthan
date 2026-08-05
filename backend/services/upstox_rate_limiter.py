@@ -15,6 +15,11 @@ workers.
 
 Scope: only the candle endpoints are gated (that is where the storm is); order,
 position and quote calls are unaffected.
+
+Priority: ``scheduled_10m`` (and other scheduled warm executions) run with a
+longer per-slot wait and block discretionary callers while active. Discretionary
+callers also yield when the 30-min window is near cap (headroom reserved for the
+next scheduled warm).
 """
 from __future__ import annotations
 
@@ -22,9 +27,23 @@ import bisect
 import logging
 import threading
 import time
-from typing import List, Tuple
+from contextlib import contextmanager
+from typing import Iterator, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Executions that receive scheduled priority (long wait + block discretionary).
+SCHEDULED_WARM_EXECUTIONS = frozenset(
+    {
+        "scheduled_10m",
+        "scheduled_aux_0905",
+        "scheduled_stock_next_vwap_ema_hourly",
+    }
+)
+
+
+def is_scheduled_warm_execution(execution: str) -> bool:
+    return str(execution or "") in SCHEDULED_WARM_EXECUTIONS
 
 
 class SlidingWindowRateLimiter:
@@ -49,13 +68,15 @@ class SlidingWindowRateLimiter:
         self._last_grant: float = 0.0
         self._lock = threading.Lock()
 
-    def _wait_needed(self, now: float) -> float:
-        """Seconds to wait before a slot frees up (0.0 if free now). Caller holds lock."""
-        # Drop events older than the widest window.
+    def _prune(self, now: float) -> None:
         cutoff = now - self._max_window
         drop = bisect.bisect_left(self._events, cutoff)
         if drop:
             del self._events[:drop]
+
+    def _wait_needed(self, now: float) -> float:
+        """Seconds to wait before a slot frees up (0.0 if free now). Caller holds lock."""
+        self._prune(now)
 
         wait = 0.0
         if self._min_interval > 0.0 and self._last_grant:
@@ -69,6 +90,15 @@ class SlidingWindowRateLimiter:
                 exit_event = self._events[len(self._events) - max_count]
                 wait = max(wait, exit_event + window - now)
         return wait
+
+    def count_in_window(self, window_seconds: float) -> int:
+        """Grants recorded in the last ``window_seconds`` (for headroom checks)."""
+        with self._lock:
+            now = time.monotonic()
+            self._prune(now)
+            start = now - float(window_seconds)
+            j = bisect.bisect_left(self._events, start)
+            return len(self._events) - j
 
     def acquire(self, max_wait: float = 90.0) -> Tuple[bool, float]:
         """Try to reserve a slot, waiting up to ``max_wait`` s.
@@ -106,12 +136,18 @@ _acquired = 0
 _total_wait = 0.0
 _throttled = 0
 _denied = 0
+_denied_yield_scheduled = 0
+_denied_yield_headroom = 0
+_scheduled_acquired = 0
 
-# Thread-local: BTST bulk prefetch waits longer for a slot instead of denying at 90s.
-_bt_local = threading.local()
+# Thread-local: worker threads inside a scheduled warm pool mark themselves.
+_tls = threading.local()
 
-# Process-wide max_wait override (e.g. hourly stock+nextmth warm). Unlike thread-local,
-# this is visible to ThreadPoolExecutor workers. Safe while candle-warm jobs are mutexed.
+# Active scheduled warm depth (main thread holds context; workers use tls).
+_scheduled_warm_depth = 0
+_scheduled_warm_depth_lock = threading.Lock()
+
+# Process-wide max_wait override (legacy hourly path). Prefer candle_warm_execution().
 _max_wait_override: float | None = None
 _max_wait_override_lock = threading.Lock()
 
@@ -121,6 +157,44 @@ def set_candle_rl_max_wait_override(seconds: float | None) -> None:
     global _max_wait_override
     with _max_wait_override_lock:
         _max_wait_override = None if seconds is None else float(seconds)
+
+
+@contextmanager
+def scheduled_candle_worker() -> Iterator[None]:
+    """Mark the current thread as a scheduled warm worker (ThreadPoolExecutor child)."""
+    prev = getattr(_tls, "scheduled_worker", False)
+    _tls.scheduled_worker = True
+    try:
+        yield
+    finally:
+        _tls.scheduled_worker = prev
+
+
+@contextmanager
+def candle_warm_execution(execution: str) -> Iterator[None]:
+    """Wrap a scheduled candle warm: priority mode + long max_wait for workers."""
+    global _scheduled_warm_depth
+    is_scheduled = is_scheduled_warm_execution(execution)
+    if is_scheduled:
+        with _scheduled_warm_depth_lock:
+            _scheduled_warm_depth += 1
+        set_candle_rl_max_wait_override(_scheduled_max_wait())
+    try:
+        yield
+    finally:
+        if is_scheduled:
+            set_candle_rl_max_wait_override(None)
+            with _scheduled_warm_depth_lock:
+                _scheduled_warm_depth -= 1
+
+
+def _scheduled_warm_active() -> bool:
+    with _scheduled_warm_depth_lock:
+        return _scheduled_warm_depth > 0
+
+
+def _is_scheduled_worker() -> bool:
+    return bool(getattr(_tls, "scheduled_worker", False))
 
 
 def _build_limiter() -> SlidingWindowRateLimiter:
@@ -149,6 +223,36 @@ def _get_limiter() -> SlidingWindowRateLimiter:
     return _LIMITER
 
 
+def _scheduled_max_wait() -> float:
+    from backend.config import settings
+
+    return float(getattr(settings, "UPSTOX_CANDLE_RL_SCHEDULED_MAX_WAIT", 300) or 300)
+
+
+def _default_max_wait() -> float:
+    from backend.config import settings
+
+    if _is_backtest_bulk_prefetch():
+        return float(getattr(settings, "UPSTOX_BTST_PREFETCH_RL_MAX_WAIT", 300) or 300)
+    return float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 90) or 90)
+
+
+def _headroom_exhausted() -> bool:
+    """True when discretionary callers should yield to the next scheduled_10m."""
+    from backend.config import settings
+
+    cap = int(getattr(settings, "UPSTOX_CANDLE_RL_PER_30MIN", 1500))
+    headroom = int(getattr(settings, "SCHEDULED_CANDLE_RL_HEADROOM", 220))
+    if cap <= 0 or headroom <= 0:
+        return False
+    used = _get_limiter().count_in_window(1800.0)
+    return used >= max(0, cap - headroom)
+
+
+# Thread-local: BTST bulk prefetch waits longer for a slot instead of denying at 90s.
+_bt_local = threading.local()
+
+
 def set_backtest_bulk_prefetch_mode(enabled: bool) -> None:
     """When True, candle acquire waits up to 5 min (BTST bulk prefetch only)."""
     _bt_local.backtest_bulk = bool(enabled)
@@ -166,21 +270,37 @@ def acquire_candle_slot() -> bool:
     True when disabled via ``UPSTOX_CANDLE_RATE_LIMIT_ENABLED``.
     """
     global _acquired, _total_wait, _throttled, _denied
+    global _denied_yield_scheduled, _denied_yield_headroom, _scheduled_acquired
     try:
         from backend.config import settings
 
         if not getattr(settings, "UPSTOX_CANDLE_RATE_LIMIT_ENABLED", True):
             return True
+    except Exception:
+        pass
+
+    scheduled_worker = _is_scheduled_worker()
+    if _scheduled_warm_active() and not scheduled_worker:
+        _denied += 1
+        _denied_yield_scheduled += 1
+        return False
+
+    if not scheduled_worker and _headroom_exhausted():
+        _denied += 1
+        _denied_yield_headroom += 1
+        return False
+
+    try:
         with _max_wait_override_lock:
             override = _max_wait_override
         if override is not None and override > 0:
             max_wait = float(override)
-        elif _is_backtest_bulk_prefetch():
-            max_wait = float(getattr(settings, "UPSTOX_BTST_PREFETCH_RL_MAX_WAIT", 300) or 300)
+        elif scheduled_worker:
+            max_wait = _scheduled_max_wait()
         else:
-            max_wait = float(getattr(settings, "UPSTOX_CANDLE_RL_MAX_WAIT", 90) or 90)
+            max_wait = _default_max_wait()
     except Exception:
-        max_wait = 300.0 if _is_backtest_bulk_prefetch() else 90.0
+        max_wait = _scheduled_max_wait() if scheduled_worker else 90.0
 
     granted, waited = _get_limiter().acquire(max_wait=max_wait)
     _total_wait += waited
@@ -188,21 +308,40 @@ def acquire_candle_slot() -> bool:
         _denied += 1
     else:
         _acquired += 1
+        if scheduled_worker:
+            _scheduled_acquired += 1
         if waited > 0.01:
             _throttled += 1
     # Periodic visibility into pacing + how much demand is being shed.
     if (_acquired + _denied) % 500 == 0:
         logger.info(
-            "candle rate limiter: %d granted, %d denied(skipped), %d throttled, %.1fs total wait",
-            _acquired, _denied, _throttled, _total_wait,
+            "candle rate limiter: %d granted, %d denied(skipped), %d throttled, "
+            "%.1fs total wait (yield_sched=%d yield_headroom=%d scheduled_grants=%d)",
+            _acquired,
+            _denied,
+            _throttled,
+            _total_wait,
+            _denied_yield_scheduled,
+            _denied_yield_headroom,
+            _scheduled_acquired,
         )
     return granted
 
 
 def stats() -> dict:
-    return {
+    out = {
         "acquired": _acquired,
         "denied": _denied,
         "throttled": _throttled,
         "total_wait_sec": round(_total_wait, 1),
+        "denied_yield_to_scheduled": _denied_yield_scheduled,
+        "denied_yield_headroom": _denied_yield_headroom,
+        "scheduled_acquired": _scheduled_acquired,
+        "scheduled_warm_active": _scheduled_warm_active(),
     }
+    try:
+        lim = _get_limiter()
+        out["window_30min_used"] = lim.count_in_window(1800.0)
+    except Exception:
+        pass
+    return out

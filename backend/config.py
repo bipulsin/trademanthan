@@ -61,6 +61,13 @@ class Settings(BaseSettings):
     # no Upstox call). Sheds excess demand during the :00/:15/:30/:45 job pileups
     # instead of bursting over the limit; skipped symbols refresh on a later cycle.
     UPSTOX_CANDLE_RL_MAX_WAIT: float = float(os.getenv("UPSTOX_CANDLE_RL_MAX_WAIT", "90"))
+    # Scheduled candle-warm jobs (scheduled_10m, aux 09:05, …) may wait longer per slot.
+    UPSTOX_CANDLE_RL_SCHEDULED_MAX_WAIT: float = float(
+        os.getenv("UPSTOX_CANDLE_RL_SCHEDULED_MAX_WAIT", "300")
+    )
+    # Reserve this many 30-min-window slots for the next scheduled_10m (~200 keys + buffer).
+    # Discretionary fetches deny when usage would exceed (per_30min - headroom).
+    SCHEDULED_CANDLE_RL_HEADROOM: int = int(os.getenv("SCHEDULED_CANDLE_RL_HEADROOM", "220"))
 
     # Stock/next VWAP+EMA5 hourly REST warm (arbitrage_master stock_* / nextmth_*).
     # Default OFF: those four columns have no live readers after SF/Vajra removal
