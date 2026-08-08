@@ -1,10 +1,11 @@
 """
-Futures Trading Report API (Daily Futures + Smart Futures sold trades), grouped by date.
+Futures Trading Report API (Daily Futures + Smart Futures + Kavach trade_log),
+grouped by date.
 """
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -20,6 +21,10 @@ from backend.services.smart_futures_picker.position_sizing import (
 
 router = APIRouter(prefix="/futures-reports", tags=["futures-reports"])
 
+SOURCE_DAILY = "Daily Futures"
+SOURCE_SMART = "Smart Futures"
+SOURCE_KAVACH = "Kavach Trade"
+
 
 def _auth_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     return get_user_from_token(token, db)
@@ -29,6 +34,30 @@ def _parse_ymd(v: Optional[str]) -> Optional[datetime.date]:
     if not v:
         return None
     return datetime.strptime(v, "%Y-%m-%d").date()
+
+
+def _fmt_clock(val: Any) -> Optional[str]:
+    """Format TIME / datetime / string as HH:MM for report columns."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.strftime("%H:%M")
+    if isinstance(val, time):
+        return val.strftime("%H:%M")
+    s = str(val).strip()
+    if not s:
+        return None
+    # "11:26:00" / "11:26" / ISO fragments
+    if "T" in s:
+        s = s.split("T", 1)[1]
+    s = s.split("+", 1)[0].split(".", 1)[0]
+    parts = s.split(":")
+    if len(parts) >= 2:
+        try:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        except ValueError:
+            return s[:5]
+    return s
 
 
 def _fetch_merged_sold_rows(
@@ -42,7 +71,7 @@ def _fetch_merged_sold_rows(
     ed = _parse_ymd(end_date)
 
     out: List[Dict[str, Any]] = []
-    source_norm = (source or "").strip().lower()
+    source_norm = (source or "").strip().lower().replace("-", "_").replace(" ", "_")
 
     if source_norm in ("", "all", "daily", "daily_futures"):
         daily_sql = """
@@ -86,13 +115,13 @@ def _fetch_merged_sold_rows(
             out.append(
                 {
                     "date": str(r["trade_date"]),
-                    "source": "Daily Futures",
+                    "source": SOURCE_DAILY,
                     "symbol": r["symbol"],
                     "direction_type": str(r.get("direction_type") or "LONG").strip().upper(),
                     "qty": int(r["qty"]) if r["qty"] is not None else None,
-                    "entry_time": r["entry_time"],
+                    "entry_time": _fmt_clock(r["entry_time"]),
                     "entry_price": float(r["entry_price"]) if r["entry_price"] is not None else None,
-                    "exit_time": r["exit_time"],
+                    "exit_time": _fmt_clock(r["exit_time"]),
                     "exit_price": float(r["exit_price"]) if r["exit_price"] is not None else None,
                     "pnl": float(r["pnl"]) if r["pnl"] is not None else None,
                 }
@@ -144,15 +173,72 @@ def _fetch_merged_sold_rows(
             out.append(
                 {
                     "date": str(r["trade_date"]),
-                    "source": "Smart Futures",
+                    "source": SOURCE_SMART,
                     "symbol": r["symbol"],
                     "direction_type": side,
                     "qty": int(qty_units),
-                    "entry_time": r["entry_time"],
+                    "entry_time": _fmt_clock(r["entry_time"]),
                     "entry_price": entry_price,
-                    "exit_time": r["exit_time"],
+                    "exit_time": _fmt_clock(r["exit_time"]),
                     "exit_price": exit_price,
                     "pnl": round(pnl, 2) if pnl is not None else None,
+                }
+            )
+
+    # Kavach Rule-27 journal (trade_log) — closed rows only; same report columns.
+    if source_norm in ("", "all", "kavach", "kavach_trade", "kavach_trades"):
+        try:
+            from backend.services.rule27_trade_log import ensure_trade_log_table
+
+            ensure_trade_log_table()
+        except Exception:
+            pass
+        kavach_sql = """
+            SELECT
+                t.session_date::date AS trade_date,
+                COALESCE(NULLIF(TRIM(t.symbol), ''), t.contract)::text AS symbol,
+                COALESCE(t.direction, 'LONG')::text AS direction,
+                t.qty::integer AS qty,
+                t.entry_time AS entry_time,
+                t.entry_price::numeric AS entry_price,
+                t.exit_time AS exit_time,
+                t.exit_price::numeric AS exit_price,
+                t.points_captured::numeric AS points_captured
+            FROM trade_log t
+            WHERE t.exit_price IS NOT NULL
+              AND t.exit_time IS NOT NULL
+              AND (:sd IS NULL OR t.session_date >= :sd)
+              AND (:ed IS NULL OR t.session_date <= :ed)
+            ORDER BY t.session_date DESC, t.entry_time DESC NULLS LAST, t.id DESC
+        """
+        try:
+            rows = db.execute(text(kavach_sql), {"sd": sd, "ed": ed}).mappings().all()
+        except Exception:
+            rows = []
+        for r in rows:
+            entry_price = float(r["entry_price"]) if r["entry_price"] is not None else None
+            exit_price = float(r["exit_price"]) if r["exit_price"] is not None else None
+            qty = int(r["qty"]) if r["qty"] is not None else None
+            side = str(r.get("direction") or "LONG").strip().upper()
+            pnl = None
+            pts = r.get("points_captured")
+            if pts is not None and qty is not None:
+                pnl = round(float(pts) * float(qty), 2)
+            elif entry_price is not None and exit_price is not None and qty is not None:
+                points = (entry_price - exit_price) if side == "SHORT" else (exit_price - entry_price)
+                pnl = round(float(points) * float(qty), 2)
+            out.append(
+                {
+                    "date": str(r["trade_date"]),
+                    "source": SOURCE_KAVACH,
+                    "symbol": r["symbol"],
+                    "direction_type": side,
+                    "qty": qty,
+                    "entry_time": _fmt_clock(r["entry_time"]),
+                    "entry_price": entry_price,
+                    "exit_time": _fmt_clock(r["exit_time"]),
+                    "exit_price": exit_price,
+                    "pnl": pnl,
                 }
             )
 
@@ -164,7 +250,7 @@ def _fetch_merged_sold_rows(
 def futures_trading_report(
     start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
-    source: Optional[str] = Query("all", description="all|daily|smart"),
+    source: Optional[str] = Query("all", description="all|daily|smart|kavach"),
     user: User = Depends(_auth_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -184,10 +270,13 @@ def futures_trading_report(
             p = r.get("pnl")
             if p is not None:
                 day_pnl += float(p)
-            if r.get("source") == "Daily Futures":
+            src = r.get("source")
+            if src == SOURCE_DAILY:
                 daily_count += 1
-            else:
+            elif src == SOURCE_SMART:
                 smart_count += 1
+            # Kavach Trade counted in total_trades / P&L / win rate only
+            # (day table keeps predefined Premium + Smart columns).
         total_pnl += day_pnl
         tot = len(day_rows)
         wins = sum(1 for r in day_rows if (r.get("pnl") is not None and float(r["pnl"]) > 0))
@@ -220,7 +309,7 @@ def futures_trading_report(
 @router.get("/daily-trades/{trade_date}")
 def futures_daily_trades(
     trade_date: str,
-    source: Optional[str] = Query("all", description="all|daily|smart"),
+    source: Optional[str] = Query("all", description="all|daily|smart|kavach"),
     user: User = Depends(_auth_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:

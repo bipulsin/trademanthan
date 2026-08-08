@@ -1,5 +1,5 @@
 /**
- * Futures Trading Report (Premium Futures + Smart Futures sold trades).
+ * Futures Trading Report (Premium Futures + Smart Futures + Kavach trade_log).
  */
 (function () {
   const API_BASE =
@@ -207,6 +207,7 @@
     if (!s) return "-";
     if (s === "daily" || s === "daily futures") return "Prem Futures";
     if (s === "smart" || s === "smart futures") return "Smart Futures";
+    if (s === "kavach" || s === "kavach trade" || s === "kavach_trade") return "Kavach Trade";
     return String(v);
   }
 
