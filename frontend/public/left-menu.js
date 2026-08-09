@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener/.test(path);
     }
 
     getCurrentPage() {
@@ -57,6 +57,7 @@ class LeftMenu {
         if (path.includes('admintwc')) return 'admin';
         if (path.includes('kavachIgnitionDiag')) return 'kavachIgnitionDiag';
         if (path.includes('rs-journey')) return 'rs-journey';
+        if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         return 'dashboard';
     }
 
@@ -278,6 +279,7 @@ class LeftMenu {
                 <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true"><i class="fas fa-university"></i><span>Broker Management</span></li>
                 <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
+                <li class="nav-item" data-page="future_screener.html"><i class="fas fa-filter"></i><span>Future Screener</span></li>
                 <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
                 <li class="nav-item nav-item-admin" data-page="kavachIgnitionDiag.html" style="display: none;" title="Administrator only"><i class="fas fa-bolt"></i><span>Ignition Diag</span></li>
@@ -780,6 +782,7 @@ class LeftMenu {
             case 'arbitrage': return 'arbitrage.html';
             case 'settings': return 'settings.html';
             case 'admin': return 'admintwc.html';
+            case 'future_screener': return 'future_screener.html';
             default: return 'dashboard.html';
         }
     }

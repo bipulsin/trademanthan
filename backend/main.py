@@ -35,6 +35,7 @@ import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
 import backend.routers.daily_checklist as daily_checklist
+import backend.routers.future_screener as future_screener
 import backend.routers.garuda_screener as garuda_screener
 import backend.routers.garuda_export as garuda_export
 import backend.routers.rs_confidence_divergence as rs_confidence_divergence
@@ -340,6 +341,8 @@ app.include_router(relative_strength.router)
 app.include_router(relative_strength.router, prefix="/scan")
 app.include_router(daily_checklist.router)
 app.include_router(daily_checklist.router, prefix="/scan")
+app.include_router(future_screener.router)
+app.include_router(future_screener.router, prefix="/scan")
 app.include_router(garuda_screener.router)
 app.include_router(garuda_screener.router, prefix="/scan")
 app.include_router(garuda_export.router)

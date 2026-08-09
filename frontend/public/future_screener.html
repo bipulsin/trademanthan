@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Future Screener - TradeWithCTO</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+  <script src="auth-check.js?v=1"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="settings.css" />
+  <link rel="stylesheet" href="left-menu.css?v=3.25" />
+  <link rel="stylesheet" href="theme.css?v=1.3" />
+  <link rel="stylesheet" href="future_screener.css?v=1.0" />
+</head>
+<body>
+  <div class="app-container app-with-left-menu">
+    <div id="left-menu-container"></div>
+    <main class="right-panel main-content-area">
+      <div class="fs-wrap">
+        <header class="fs-head">
+          <div>
+            <h1><i class="fas fa-filter"></i> Future Screener</h1>
+            <p class="fs-sub">
+              Full tracked universe from the latest RS 10m snapshot (same grade/score source as checklist cards).
+              Adjust filters — no per-symbol TradingView clicks needed.
+            </p>
+          </div>
+          <div class="fs-meta">
+            <div id="fsScanMeta">Scan: —</div>
+            <button type="button" id="fsRefreshBtn" class="fs-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
+          </div>
+        </header>
+
+        <section class="fs-filters" aria-label="Screener filters">
+          <div class="fs-filter-group">
+            <label>Confidence Grade</label>
+            <div id="fsGradeOptions" class="fs-chip-row" role="group" aria-label="Confidence Grade multi-select"></div>
+          </div>
+          <div class="fs-filter-group">
+            <label>Readiness</label>
+            <div id="fsReadinessOptions" class="fs-chip-row" role="group" aria-label="Readiness multi-select"></div>
+          </div>
+          <div class="fs-filter-group fs-score-group">
+            <label>Trade Score</label>
+            <div class="fs-score-inputs">
+              <span>Score &gt;=</span>
+              <input type="number" id="fsScoreMin" step="1" min="0" max="100" placeholder="min" />
+              <span>Score &lt;=</span>
+              <input type="number" id="fsScoreMax" step="1" min="0" max="100" placeholder="max" />
+            </div>
+          </div>
+          <div class="fs-filter-actions">
+            <button type="button" id="fsClearBtn" class="fs-btn fs-btn-muted">Clear filters</button>
+          </div>
+        </section>
+
+        <div class="fs-count-row">
+          <strong id="fsMatchCount">0 symbols match</strong>
+          <span id="fsUniverseHint" class="fs-hint"></span>
+        </div>
+
+        <div id="fsLoading" class="fs-status">Loading screener…</div>
+        <div id="fsEmpty" class="fs-status" hidden>No symbols match the current filters</div>
+        <div id="fsError" class="fs-status fs-error" hidden></div>
+
+        <div id="fsTableWrap" class="fs-table-wrap" hidden>
+          <table class="fs-table" id="fsTable">
+            <thead>
+              <tr>
+                <th data-sort="symbol">Symbol</th>
+                <th data-sort="confidence_grade">Confidence Grade</th>
+                <th data-sort="readiness">Readiness</th>
+                <th data-sort="trade_score" class="num">Trade Score</th>
+                <th data-sort="adx" class="num">ADX</th>
+                <th data-sort="pct_from_open" class="num" id="fsPctHeader">% from P.Close</th>
+                <th data-sort="pullback_number" class="num">Pullback #</th>
+                <th data-sort="candle_ts">Candle timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="fsTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="left-menu.js?v=3.25"></script>
+  <script src="future_screener.js?v=1.0"></script>
+</body>
+</html>

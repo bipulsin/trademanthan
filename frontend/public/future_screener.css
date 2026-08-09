@@ -1,0 +1,120 @@
+/* Future Screener — matches app theme variables */
+.fs-wrap { max-width: 1280px; margin: 0 auto; padding: 8px 4px 40px; }
+.fs-head {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px;
+  margin-bottom: 14px; align-items: flex-start;
+}
+.fs-head h1 {
+  margin: 0; font-size: 1.25rem; display: flex; align-items: center; gap: 8px;
+  color: var(--theme-text, #0f172a);
+}
+.fs-sub {
+  margin: 6px 0 0; font-size: 0.88rem; color: var(--theme-muted, #64748b); max-width: 70ch;
+}
+.fs-meta {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  font-size: 0.82rem; color: var(--theme-muted, #64748b);
+}
+.fs-filters {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 1fr auto;
+  gap: 12px 16px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: var(--theme-card, rgba(255,255,255,0.95));
+  border: 1px solid var(--theme-border, #e2e8f0);
+  border-radius: 12px;
+  align-items: start;
+}
+.fs-filter-group label {
+  display: block; font-size: 0.78rem; font-weight: 600;
+  color: var(--theme-muted, #64748b); margin-bottom: 6px; text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.fs-chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.fs-chip {
+  border: 1px solid var(--theme-border, #cbd5e1);
+  background: transparent;
+  color: var(--theme-text, #0f172a);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font: inherit;
+}
+.fs-chip:hover { border-color: #0d9488; }
+.fs-chip.is-on {
+  background: rgba(13, 148, 136, 0.12);
+  border-color: #0d9488;
+  color: #0f766e;
+  font-weight: 600;
+}
+.fs-score-inputs {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 0.85rem; color: var(--theme-text, #0f172a);
+}
+.fs-score-inputs input {
+  width: 72px; padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--theme-border, #cbd5e1);
+  background: var(--theme-input-bg, #fff);
+  color: var(--theme-text, #0f172a);
+  font: inherit;
+}
+.fs-filter-actions { display: flex; align-items: flex-end; height: 100%; padding-top: 18px; }
+.fs-btn {
+  background: var(--theme-card, #fff);
+  color: var(--theme-text, #0f172a);
+  border: 1px solid var(--theme-border, #cbd5e1);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.fs-btn:hover { border-color: #0d9488; }
+.fs-btn-muted { color: var(--theme-muted, #64748b); }
+.fs-count-row {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+  margin: 4px 0 10px; color: var(--theme-text, #0f172a);
+}
+.fs-hint { font-size: 0.8rem; color: var(--theme-muted, #64748b); }
+.fs-status {
+  padding: 28px 16px; text-align: center;
+  color: var(--theme-muted, #64748b);
+  background: var(--theme-card, rgba(255,255,255,0.95));
+  border: 1px solid var(--theme-border, #e2e8f0);
+  border-radius: 12px;
+}
+.fs-error { color: #b91c1c; }
+.fs-table-wrap {
+  overflow-x: auto;
+  background: var(--theme-card, rgba(255,255,255,0.95));
+  border: 1px solid var(--theme-border, #e2e8f0);
+  border-radius: 12px;
+}
+table.fs-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+table.fs-table th, table.fs-table td {
+  border-bottom: 1px solid var(--theme-border, #e2e8f0);
+  text-align: left; padding: 8px 10px; white-space: nowrap;
+}
+table.fs-table th {
+  color: var(--theme-muted, #64748b); font-weight: 600;
+  cursor: pointer; user-select: none; position: sticky; top: 0;
+  background: var(--theme-card, #fff);
+}
+table.fs-table th:hover { color: #0d9488; }
+table.fs-table th.is-sorted::after { content: " ▾"; font-size: 0.75em; }
+table.fs-table th.is-sorted.asc::after { content: " ▴"; }
+table.fs-table td.num, table.fs-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.fs-table tbody tr:hover { background: rgba(13, 148, 136, 0.06); }
+.fs-grade { font-weight: 700; }
+.fs-ready-long { color: #059669; font-weight: 600; }
+.fs-ready-short { color: #dc2626; font-weight: 600; }
+.fs-watching { color: #d97706; }
+.fs-not-ready { color: var(--theme-muted, #64748b); }
+
+@media (max-width: 960px) {
+  .fs-filters { grid-template-columns: 1fr; }
+  .fs-filter-actions { padding-top: 0; }
+  .fs-meta { align-items: flex-start; }
+}
