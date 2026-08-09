@@ -699,6 +699,7 @@ class LeftMenu {
             broker: 'Broker Management',
             strategy: 'Strategy Management',
             reports: 'Trading Reports',
+            future_screener: 'Future Screener',
             settings: 'Settings',
             algo: 'Algo Trading',
             admin: 'Admin',
