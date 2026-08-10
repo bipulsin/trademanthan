@@ -1,0 +1,421 @@
+{
+  "generated_at": "2026-08-10",
+  "live_changes": false,
+  "source": "docs/diagnostics/pp_followup_hdfc_clean_worse_DEF_20260810.json",
+  "definition": "Hypothesis D: adverse extreme of a 10m candle breaches BOTH EMA10 and VWAP intrabar (low < both for LONG; high > both for SHORT). Scan = all candles entry\u2192exit (not only after peak). Simulated exit = that candle's close.",
+  "verdict": {
+    "any_of_3_fired": false,
+    "summary": "Hypothesis D did not fire on any of the three A/C failure cases. Each showed at most a single-level breach (EMA10-only on UNITDSPR and KALYANKJIL; MUTHOOTFIN breached neither EMA10 nor VWAP on the adverse dip). D therefore correctly stayed out of these failure modes by design."
+  },
+  "trades": [
+    {
+      "id": 27,
+      "symbol": "UNITDSPR",
+      "session_date": "2026-07-23",
+      "direction": "LONG",
+      "failure_mode_prior": "V-recovery after dip (A/C sold 10:35 dip; next bar recovered)",
+      "entry": {
+        "time": "10:17:00",
+        "price": 1424.0,
+        "risk_pts": 4.02,
+        "qty": 400
+      },
+      "peak": {
+        "price": 1441.1,
+        "time": "2026-07-23 05:05:00+00:00",
+        "r": 4.2537,
+        "pnl_inr": 6839.95
+      },
+      "actual_exit": {
+        "time": "10:40:00",
+        "price": 1432.9,
+        "trigger": "discretionary",
+        "r": 2.2139,
+        "pnl_inr": 3560.0
+      },
+      "rule_A_C_exits": {
+        "A_floor_1_5R": {
+          "fired": true,
+          "label": "A",
+          "bar_at": "2026-07-23T10:35:00+05:30",
+          "exit_price": 1428.8,
+          "exit_r": 1.194,
+          "reason": "Faster ratchet close beyond peak\u2212giveback stop",
+          "exit_pnl_inr": 1920.0
+        },
+        "C_arm_1_5R": {
+          "fired": true,
+          "label": "C15",
+          "bar_at": "2026-07-23T10:35:00+05:30",
+          "exit_price": 1428.8,
+          "exit_r": 1.194,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "exit_pnl_inr": 1920.0
+        },
+        "C_arm_2_0R": {
+          "fired": true,
+          "label": "C20",
+          "bar_at": "2026-07-23T10:35:00+05:30",
+          "exit_price": 1428.8,
+          "exit_r": 1.194,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "exit_pnl_inr": 1920.0
+        }
+      },
+      "hypothesis_D": {
+        "fired": false,
+        "note": "No candle from entry\u2192exit showed adverse intrabar dual-breach of BOTH EMA10 and VWAP. Hypothesis D would not have exited; stayed out of this A/C failure mode by design."
+      },
+      "comparison": {
+        "dual_breach_occurred": false,
+        "vs_actual": null,
+        "vs_rules_A_C": "N/A \u2014 Hyp D did not fire; A/C did fire and underperformed actual",
+        "first_ema10_only_breach": {
+          "bar": "2026-07-23T10:35:00+05:30",
+          "extreme": 1428.8,
+          "ema10": 1430.8902,
+          "vwap": 1427.9774
+        },
+        "first_vwap_only_breach": null
+      },
+      "candles_10m": [
+        {
+          "bar_end_ist": "2026-07-23T10:25:00+05:30",
+          "o": 1432.0,
+          "h": 1435.6,
+          "l": 1432.0,
+          "c": 1433.4,
+          "ema10": 1431.3547,
+          "vwap": 1427.7597,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 2.3383,
+          "r_at_high": 2.8856,
+          "r_at_low": null
+        },
+        {
+          "bar_end_ist": "2026-07-23T10:35:00+05:30",
+          "o": 1433.1,
+          "h": 1434.8,
+          "l": 1428.8,
+          "c": 1428.8,
+          "ema10": 1430.8902,
+          "vwap": 1427.9774,
+          "ema10_breach_intrabar": true,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 1.194,
+          "r_at_high": 2.6866,
+          "r_at_low": null
+        },
+        {
+          "bar_end_ist": "2026-07-23T10:45:00+05:30",
+          "o": 1430.6,
+          "h": 1443.0,
+          "l": 1429.5,
+          "c": 1441.2,
+          "ema10": 1432.7647,
+          "vwap": 1428.8109,
+          "ema10_breach_intrabar": true,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 4.2786,
+          "r_at_high": 4.7264,
+          "r_at_low": null
+        }
+      ],
+      "ohlc_quality": "clean (from prior reconstruction; no gaps flagged)"
+    },
+    {
+      "id": 17,
+      "symbol": "MUTHOOTFIN",
+      "session_date": "2026-07-21",
+      "direction": "LONG",
+      "failure_mode_prior": "V-recovery after dip (C sold weak close; next bar continued)",
+      "entry": {
+        "time": "13:26:00",
+        "price": 3076.0,
+        "risk_pts": 7.0,
+        "qty": 275
+      },
+      "peak": {
+        "price": 3090.0,
+        "time": "2026-07-21 07:55:00+00:00",
+        "r": 2.0,
+        "pnl_inr": 3850.0
+      },
+      "actual_exit": {
+        "time": "13:45:00",
+        "price": 3090.6,
+        "trigger": null,
+        "r": 2.09,
+        "pnl_inr": 4015.0
+      },
+      "rule_A_C_exits": {
+        "A_floor_1_5R": {
+          "fired": false,
+          "label": "A"
+        },
+        "C_arm_1_5R": {
+          "fired": true,
+          "label": "C15",
+          "bar_at": "2026-07-21T13:45:00+05:30",
+          "exit_price": 3087.3,
+          "exit_r": 1.6143,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "exit_pnl_inr": 3107.5
+        },
+        "C_arm_2_0R": {
+          "fired": true,
+          "label": "C20",
+          "bar_at": "2026-07-21T13:45:00+05:30",
+          "exit_price": 3087.3,
+          "exit_r": 1.6143,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "exit_pnl_inr": 3107.5
+        }
+      },
+      "hypothesis_D": {
+        "fired": false,
+        "note": "No candle from entry\u2192exit showed adverse intrabar dual-breach of BOTH EMA10 and VWAP. Hypothesis D would not have exited; stayed out of this A/C failure mode by design."
+      },
+      "comparison": {
+        "dual_breach_occurred": false,
+        "vs_actual": null,
+        "vs_rules_A_C": "N/A \u2014 Hyp D did not fire; A/C did fire and underperformed actual",
+        "first_ema10_only_breach": null,
+        "first_vwap_only_breach": null
+      },
+      "candles_10m": [
+        {
+          "bar_end_ist": "2026-07-21T13:35:00+05:30",
+          "o": 3090.0,
+          "h": 3090.0,
+          "l": 3088.7,
+          "c": 3088.7,
+          "ema10": 3078.871,
+          "vwap": 3059.1308,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 1.8143,
+          "r_at_high": 2.0,
+          "r_at_low": null
+        },
+        {
+          "bar_end_ist": "2026-07-21T13:45:00+05:30",
+          "o": 3088.8,
+          "h": 3090.0,
+          "l": 3084.2,
+          "c": 3087.3,
+          "ema10": 3080.4035,
+          "vwap": 3060.5357,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 1.6143,
+          "r_at_high": 2.0,
+          "r_at_low": null
+        },
+        {
+          "bar_end_ist": "2026-07-21T13:55:00+05:30",
+          "o": 3087.2,
+          "h": 3103.8,
+          "l": 3087.0,
+          "c": 3103.8,
+          "ema10": 3084.6574,
+          "vwap": 3062.7466,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 3.9714,
+          "r_at_high": 3.9714,
+          "r_at_low": null
+        }
+      ],
+      "ohlc_quality": "clean (from prior reconstruction; no gaps flagged)"
+    },
+    {
+      "id": 45,
+      "symbol": "KALYANKJIL",
+      "session_date": "2026-08-05",
+      "direction": "SHORT",
+      "failure_mode_prior": "Early adverse spike then trend continues (A/C exited first candle)",
+      "entry": {
+        "time": "11:41:39",
+        "price": 578.3,
+        "risk_pts": 0.35,
+        "qty": 1350
+      },
+      "peak": {
+        "price": 574.15,
+        "time": "2026-08-05 06:45:00+00:00",
+        "r": 11.8571,
+        "pnl_inr": 5602.48
+      },
+      "actual_exit": {
+        "time": "12:19:53",
+        "price": 574.15,
+        "trigger": "discretionary",
+        "r": 9.3,
+        "pnl_inr": 5602.5
+      },
+      "rule_A_C_exits": {
+        "A_floor_1_5R": {
+          "fired": true,
+          "label": "A",
+          "bar_at": "2026-08-05T11:45:00+05:30",
+          "exit_price": 578.0,
+          "exit_r": 0.8571,
+          "reason": "Faster ratchet close beyond peak\u2212giveback stop",
+          "exit_pnl_inr": 405.0
+        },
+        "C_arm_1_5R": {
+          "fired": true,
+          "label": "C15",
+          "bar_at": "2026-08-05T11:45:00+05:30",
+          "exit_price": 578.0,
+          "exit_r": 0.8571,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "exit_pnl_inr": 405.0
+        },
+        "C_arm_2_0R": {
+          "fired": true,
+          "label": "C20",
+          "bar_at": "2026-08-05T11:45:00+05:30",
+          "exit_price": 578.0,
+          "exit_r": 0.8571,
+          "reason": "Intrabar EMA5 pierce + weak/beyond close after \u2265arm R",
+          "exit_pnl_inr": 405.0
+        }
+      },
+      "hypothesis_D": {
+        "fired": false,
+        "note": "No candle from entry\u2192exit showed adverse intrabar dual-breach of BOTH EMA10 and VWAP. Hypothesis D would not have exited; stayed out of this A/C failure mode by design."
+      },
+      "comparison": {
+        "dual_breach_occurred": false,
+        "vs_actual": null,
+        "vs_rules_A_C": "N/A \u2014 Hyp D did not fire; A/C did fire and underperformed actual",
+        "first_ema10_only_breach": {
+          "bar": "2026-08-05T11:45:00+05:30",
+          "extreme": 578.9,
+          "ema10": 578.4299,
+          "vwap": 582.6588
+        },
+        "first_vwap_only_breach": null
+      },
+      "candles_10m": [
+        {
+          "bar_end_ist": "2026-08-05T11:45:00+05:30",
+          "o": 575.7,
+          "h": 578.9,
+          "l": 574.95,
+          "c": 578.0,
+          "ema10": 578.4299,
+          "vwap": 582.6588,
+          "ema10_breach_intrabar": true,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 0.8571,
+          "r_at_high": null,
+          "r_at_low": 9.5714
+        },
+        {
+          "bar_end_ist": "2026-08-05T11:55:00+05:30",
+          "o": 577.75,
+          "h": 577.75,
+          "l": 574.5,
+          "c": 574.95,
+          "ema10": 577.7972,
+          "vwap": 582.4858,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 9.5714,
+          "r_at_high": null,
+          "r_at_low": 10.8571
+        },
+        {
+          "bar_end_ist": "2026-08-05T12:05:00+05:30",
+          "o": 574.65,
+          "h": 576.45,
+          "l": 574.55,
+          "c": 576.0,
+          "ema10": 577.4704,
+          "vwap": 582.4286,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 6.5714,
+          "r_at_high": null,
+          "r_at_low": 10.7143
+        },
+        {
+          "bar_end_ist": "2026-08-05T12:15:00+05:30",
+          "o": 575.9,
+          "h": 576.25,
+          "l": 575.25,
+          "c": 575.6,
+          "ema10": 577.1303,
+          "vwap": 582.3509,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 7.7143,
+          "r_at_high": null,
+          "r_at_low": 8.7143
+        },
+        {
+          "bar_end_ist": "2026-08-05T12:25:00+05:30",
+          "o": 575.5,
+          "h": 575.8,
+          "l": 572.85,
+          "c": 572.95,
+          "ema10": 576.3703,
+          "vwap": 582.1641,
+          "ema10_breach_intrabar": false,
+          "vwap_breach_intrabar": false,
+          "dual_breach_intrabar": false,
+          "r_at_close": 15.2857,
+          "r_at_high": null,
+          "r_at_low": 15.5714
+        }
+      ],
+      "ohlc_quality": "clean (from prior reconstruction; no gaps flagged)"
+    }
+  ],
+  "section2_shadow_standup": {
+    "table": "kavach_dual_breach_exit_shadow",
+    "live_gating": false,
+    "module": "backend/services/kavach_dual_breach_exit_shadow.py",
+    "hook": "backend/services/kavach_open_trades.py evaluate_open_trades + close backfill",
+    "requires_new_realtime_computation": false,
+    "detection_mode_implemented": "confirmed_10m_bar_hl_vs_ema10_vwap",
+    "derives_from_existing_pipeline": [
+      "_confirmed_10m_levels already returns high/low/close/ema10/vwap",
+      "Same open-trade eval cadence as kavach_exit_candidate_shadow_log"
+    ],
+    "not_implemented_pending_rt_pass": {
+      "description": "Mid-bar / forming-candle dual-breach with instantaneous LTP exit price",
+      "why": "Would need new tick or 1m LTP vs live EMA10+VWAP while candle is open"
+    },
+    "fields_logged_on_fire": [
+      "symbol",
+      "session_date",
+      "bar_at",
+      "direction",
+      "unrealized_r",
+      "peak_r",
+      "hyp_d_sim_exit_price",
+      "hyp_d_sim_exit_r",
+      "hyp_d_sim_exit_pnl_inr",
+      "ema10",
+      "vwap",
+      "ema10_breached",
+      "vwap_breached"
+    ],
+    "actual_outcome_backfill": "On checklist trade close: actual_exit_price/time/r/pnl_inr"
+  }
+}

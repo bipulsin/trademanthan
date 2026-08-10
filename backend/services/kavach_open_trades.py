@@ -886,6 +886,108 @@ def _log_exit_candidate_shadow_eval(
     )
 
 
+def _log_dual_breach_exit_shadow_eval(
+    db,
+    *,
+    trade: Dict[str, Any],
+    session_date: str,
+    tid: str,
+    sym: str,
+    state: str,
+    is_long: bool,
+    entry: Optional[float],
+    close: float,
+    ema10: Optional[float],
+    vwap: Optional[float],
+    peak_r: float,
+    bar_at: Any,
+    bar_high: Optional[float],
+    bar_low: Optional[float],
+) -> None:
+    """Research-only Hypothesis D dual EMA10+VWAP breach log. Never changes state."""
+    from backend.services.kavach_dual_breach_exit_shadow import (
+        evaluate_dual_breach,
+        log_dual_breach_exit_shadow,
+    )
+
+    if entry is None:
+        return
+    initial_risk_inr = _f(trade.get("initial_sl_inr")) or 0.0
+    qty = max(int(trade.get("entry_qty") or 1), 1)
+    risk_pts = (initial_risk_inr / qty) if initial_risk_inr > 0 else 0.0
+    if risk_pts <= 0 and ema10 is not None:
+        risk_pts = abs(float(entry) - float(ema10))
+    if risk_pts <= 0:
+        return
+
+    snapshot = evaluate_dual_breach(
+        is_long=is_long,
+        entry=float(entry),
+        risk_pts=float(risk_pts),
+        qty=qty,
+        bar_high=float(bar_high if bar_high is not None else close),
+        bar_low=float(bar_low if bar_low is not None else close),
+        bar_close=float(close),
+        ema10=ema10,
+        vwap=vwap,
+        peak_r=float(peak_r or 0),
+    )
+
+    # Sticky meta in snapshot (observation only).
+    snap_ctx = trade.get("state_context_snapshot")
+    if isinstance(snap_ctx, str):
+        try:
+            snap_ctx = json.loads(snap_ctx)
+        except Exception:
+            snap_ctx = {}
+    if not isinstance(snap_ctx, dict):
+        snap_ctx = {}
+    dual_meta = {
+        "last_dual_breach": bool(snapshot.get("dual_breach")),
+        "last_ema10_breached": bool(snapshot.get("ema10_breached")),
+        "last_vwap_breached": bool(snapshot.get("vwap_breached")),
+        "last_hyp_d_sim_exit_r": snapshot.get("hyp_d_sim_exit_r"),
+        "detection_mode": snapshot.get("detection_mode"),
+        "shadow_mode": True,
+    }
+    snap_ctx = dict(snap_ctx)
+    snap_ctx["dual_breach_exit_shadow"] = dual_meta
+    trade["state_context_snapshot"] = snap_ctx
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE kavach_checklist_trades
+                SET state_context_snapshot = COALESCE(state_context_snapshot, '{}'::jsonb)
+                    || CAST(:patch AS jsonb),
+                    updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {
+                "patch": json.dumps({"dual_breach_exit_shadow": dual_meta}),
+                "id": tid,
+            },
+        )
+    except Exception as exc:
+        logger.debug("dual breach shadow meta persist failed %s: %s", sym, exc)
+
+    bat = _parse_ts(bar_at) if bar_at else None
+    log_dual_breach_exit_shadow(
+        db,
+        session_date=session_date,
+        symbol=sym,
+        snapshot=snapshot,
+        trade_id=tid,
+        direction=trade.get("direction") or ("LONG" if is_long else "SHORT"),
+        entry_price=float(entry),
+        risk_pts=float(risk_pts),
+        qty=qty,
+        live_state=state,
+        bar_at=bat,
+    )
+
+
 def _bar_hm(bar_at: Any) -> str:
     """Format confirmed-bar timestamp as HH:MM IST."""
     if not bar_at:
@@ -1786,6 +1888,24 @@ def exit_trade(
                 "inr": inr,
             },
         )
+        # Shadow-only: backfill actual outcome onto Hyp D dual-breach rows.
+        try:
+            from backend.services.kavach_dual_breach_exit_shadow import (
+                backfill_dual_breach_actual_outcome,
+            )
+
+            initial_risk = _f(t.get("initial_sl_inr")) or 0.0
+            actual_r = (inr / initial_risk) if initial_risk > 0 else None
+            backfill_dual_breach_actual_outcome(
+                db,
+                trade_id=str(trade_id),
+                actual_exit_price=px,
+                actual_exit_time=et,
+                actual_exit_r=round(float(actual_r), 4) if actual_r is not None else None,
+                actual_exit_pnl_inr=float(inr),
+            )
+        except Exception as exc:
+            logger.debug("dual breach outcome backfill skipped %s: %s", trade_id, exc)
         db.commit()
         return get_trade(trade_id)
     except Exception:
@@ -2209,6 +2329,28 @@ def evaluate_open_trades(db, session_date: str) -> List[str]:
                     )
                 except Exception as exc:
                     logger.debug("exit candidate shadow skipped %s: %s", sym, exc)
+
+                # Shadow-only Hypothesis D dual EMA10+VWAP breach. Never mutates state.
+                try:
+                    _log_dual_breach_exit_shadow_eval(
+                        db,
+                        trade=t,
+                        session_date=session_date,
+                        tid=str(tid),
+                        sym=sym,
+                        state=state,
+                        is_long=is_long,
+                        entry=entry,
+                        close=close,
+                        ema10=ema10,
+                        vwap=_f(bar.get("vwap")),
+                        peak_r=peak,
+                        bar_at=bar_at,
+                        bar_high=_f(bar.get("high")) or close,
+                        bar_low=_f(bar.get("low")) or close,
+                    )
+                except Exception as exc:
+                    logger.debug("dual breach exit shadow skipped %s: %s", sym, exc)
         elif not lock_exit:
             continue
 
