@@ -43,6 +43,7 @@ import backend.routers.rs_journey as rs_journey
 import backend.routers.kavach_ignition_diagnostics as kavach_ignition_diagnostics
 import backend.routers.ready_shadow_review as ready_shadow_review
 import backend.routers.top10_vs_ready_now as top10_vs_ready_now
+import backend.routers.sambhav as sambhav
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -67,6 +68,10 @@ from backend.services.iron_condor_snapshot_scheduler import (
 from backend.services.atr_daily_precompute_scheduler import (
     start_atr_daily_precompute_scheduler,
     stop_atr_daily_precompute_scheduler,
+)
+from backend.services.sambhav.scheduler import (
+    start_sambhav_scheduler,
+    stop_sambhav_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -192,6 +197,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ ATR daily precompute scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without ATR daily precompute scheduler")
 
+        try:
+            logger.info("Starting Sambhav NIFTY probability scheduler...")
+            start_sambhav_scheduler()
+            logger.info("✅ Sambhav scheduler: STARTED (10m+1m IST weekdays, prediction-only)")
+        except Exception as e:
+            logger.error(f"❌ Sambhav scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Sambhav scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -270,6 +283,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ ATR daily precompute scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping ATR daily precompute scheduler: {e}", exc_info=True)
+
+    try:
+        stop_sambhav_scheduler()
+        logger.info("✅ Sambhav scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Sambhav scheduler: {e}", exc_info=True)
 
     logger.info("✅ Shutdown complete")
 
@@ -355,6 +374,8 @@ app.include_router(kavach_ignition_diagnostics.router, prefix="/api/kavach-ignit
 app.include_router(kavach_ignition_diagnostics.router, prefix="/kavach-ignition-diagnostics")
 app.include_router(ready_shadow_review.router)
 app.include_router(top10_vs_ready_now.router)
+app.include_router(sambhav.router, prefix="/api/sambhav")
+app.include_router(sambhav.router, prefix="/sambhav")
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).

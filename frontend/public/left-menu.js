@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|Sambhav/.test(path);
     }
 
     getCurrentPage() {
@@ -58,6 +58,7 @@ class LeftMenu {
         if (path.includes('kavachIgnitionDiag')) return 'kavachIgnitionDiag';
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
+        if (path.includes('Sambhav')) return 'Sambhav';
         return 'dashboard';
     }
 
@@ -209,7 +210,7 @@ class LeftMenu {
 
     /** Redirect non-admins away from admin-only pages (direct URL access). */
     enforceAdminOnlyPageAccess() {
-        const adminOnly = new Set(['settings', 'admin', 'kavachIgnitionDiag', 'rs-journey']);
+        const adminOnly = new Set(['settings', 'admin', 'kavachIgnitionDiag', 'rs-journey', 'Sambhav']);
         if (!adminOnly.has(this.currentPage)) return;
         let user = {};
         try {
@@ -285,6 +286,7 @@ class LeftMenu {
                 <li class="nav-item nav-item-admin" data-page="kavachIgnitionDiag.html" style="display: none;" title="Administrator only"><i class="fas fa-bolt"></i><span>Ignition Diag</span></li>
                 <li class="nav-item nav-item-admin" data-page="rs-journey.html" style="display: none;" title="Administrator only"><i class="fas fa-route"></i><span>RS Journey</span></li>
                 <li class="nav-item nav-item-admin" data-page="candle-warm-deny.html" style="display: none;" title="Administrator only"><i class="fas fa-chart-area"></i><span>Candle Deny</span></li>
+                <li class="nav-item nav-item-admin" data-page="Sambhav.html" style="display: none;" title="Administrator only"><i class="fas fa-percent"></i><span>Sambhav</span></li>
             </ul>
         </nav>
         <div class="panel-footer">
@@ -703,6 +705,7 @@ class LeftMenu {
             settings: 'Settings',
             algo: 'Algo Trading',
             admin: 'Admin',
+            Sambhav: 'Sambhav',
         };
 
         mobileTitle.textContent = pageTitles[this.currentPage] || 'Tradentical';
@@ -784,6 +787,9 @@ class LeftMenu {
             case 'settings': return 'settings.html';
             case 'admin': return 'admintwc.html';
             case 'future_screener': return 'future_screener.html';
+            case 'kavachIgnitionDiag': return 'kavachIgnitionDiag.html';
+            case 'rs-journey': return 'rs-journey.html';
+            case 'Sambhav': return 'Sambhav.html';
             default: return 'dashboard.html';
         }
     }
