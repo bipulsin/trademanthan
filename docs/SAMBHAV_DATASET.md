@@ -16,13 +16,14 @@
 | Session | **Regular NSE sessions only** |
 | Interval | 10 minutes |
 | Historical period | 2022-01-03 → 2026-08-12 |
-| Regular sessions | 1,137 |
-| Regular candles | 1,137 × 38 = 43,206 |
+| Regular sessions | 1,134 |
+| Regular candles | 1,134 × 38 = 43,092 |
 | Source | Upstox V3 historical candles (`minutes/10`) |
 
 ### Included
 
 - Regular weekday NSE sessions with the full 38-bar grid: **09:15 … 15:25** IST
+- Note: three weekend dates with 38 vendor bars are `EXCLUDED_SPECIAL` (not V1 regular)
 
 ### Excluded (preserved in raw table, not used in V1)
 
