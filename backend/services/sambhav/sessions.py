@@ -47,14 +47,23 @@ def classify_session_type(
     grid_ok: bool = False,
     holiday_dates: Optional[Set[date]] = None,
 ) -> Tuple[str, str]:
-    """Return (session_type, notes). Does not invent candles."""
+    """Return (session_type, notes). Does not invent candles.
+
+    Full 38-bar validated sessions are REGULAR even if a holiday calendar
+    incorrectly lists the date (market data is authoritative for V1).
+    Known muhurat/special exclusions always win.
+    """
     holidays = holiday_dates or set()
-    iso = session_date.isoformat()
 
     if session_date in V1_EXCLUDED_MUHURAT_DATES:
         return SESSION_TYPE_EXCLUDED_MUHURAT, "Diwali muhurat / special short session"
     if session_date in V1_EXCLUDED_SPECIAL_DATES:
         return SESSION_TYPE_EXCLUDED_SPECIAL, "Non-regular special session (preserved, excluded from V1)"
+
+    # Authoritative: complete regular grid → V1 include (before holiday check).
+    if candle_count == EXPECTED_10M_PER_SESSION and grid_ok and session_date.weekday() < 5:
+        return SESSION_TYPE_REGULAR, "Regular NSE session — included in Sambhav V1"
+
     if session_date in holidays:
         return SESSION_TYPE_EXCLUDED_HOLIDAY, "NSE holiday — excluded from V1 (no missing-candle)"
 
@@ -63,8 +72,6 @@ def classify_session_type(
             return SESSION_TYPE_EXCLUDED_SPECIAL, "Weekend bars present — excluded from V1"
         return SESSION_TYPE_EXCLUDED_SPECIAL, "Weekend — not a regular session"
 
-    if candle_count == EXPECTED_10M_PER_SESSION and grid_ok:
-        return SESSION_TYPE_REGULAR, "Regular NSE session — included in Sambhav V1"
     if candle_count == 0:
         return SESSION_TYPE_UNKNOWN, "Weekday with no candles — review before use"
     return SESSION_TYPE_UNKNOWN, f"Weekday with {candle_count} bars (expected {EXPECTED_10M_PER_SESSION}) — review"
