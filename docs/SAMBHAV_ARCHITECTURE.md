@@ -20,8 +20,8 @@
 - **Schema style:** Mix of SQLAlchemy models and **`CREATE TABLE IF NOT EXISTS` + `ensure_*()`** helpers (Daily Futures, Iron Condor, Kavach shadows). Alembic is listed in requirements but day-to-day tables are mostly ensure-on-first-use.
 - **Sambhav approach:** `sambhav_`-prefixed tables only, `ensure_sambhav_tables()` in `backend/services/sambhav/tables.py`. No alterations to Kavach / RS / trade_log tables.
 - **Suggested tables:**
-  - `sambhav_raw_candles` — 1m OHLCV
-  - `sambhav_10m_candles` — unique `(instrument_key, candle_start)`
+  - `sambhav_raw_candles` — retained for a possible V2 1-minute study; **V1 does not populate this**
+  - `sambhav_10m_candles` — unique `(instrument_key, candle_start)`; V1 source = Upstox V3 `minutes/10`
   - `sambhav_predictions` — immutable audit (`PENDING` / `RESOLVED`)
   - `sambhav_models` — registry (artifact path, status RESEARCH/VALIDATED/LIVE — never auto-VALIDATED)
   - `sambhav_metrics` — walk-forward / live metrics snapshots
@@ -31,11 +31,13 @@
 
 - **Client:** `backend.services.upstox_service.UpstoxService`
 - **Auth:** API key/secret from settings; token refresh inside `make_api_request`.
-- **Historical candles:** V2 + V3 paths; `get_historical_candles_by_instrument_key(...)`, `_fetch_historical_v2_candles`, `_fetch_historical_v3_candles`, intraday merge for today.
-- **Interval span caps:** 1m historical ~31 calendar days per request → Sambhav importer must **chunk + resume**.
-- **NIFTY key (canonical):** `NSE_INDEX|Nifty 50` (`UpstoxService.NIFTY50_KEY`).
-- **Reuse:** Call UpstoxService only; do not fork auth or candle HTTP clients.
-- **Note:** Existing `_aggregate_1m_to_n_minute` uses **wall-clock** floor (`minute // n`). Sambhav **must not** reuse that for 10m bars — V1 requires **NSE 09:15-aligned** buckets (see candle convention below).
+- **Historical candles (V1):** Upstox V3 Historical Candle API, interval `minutes/10`, NIFTY 50 index. Do **not** download 1-minute history for V1.
+- **Endpoint:** `GET https://api.upstox.com/v3/historical-candle/{instrument_key}/minutes/10/{to_date}/{from_date}`
+- **Interval span caps:** V3 minutes 1–15 ≈ 1 month per request → Sambhav importer **chunks + resumes**. Never send a multi-year request.
+- **Throttle:** `SAMBHAV_HISTORICAL_REQUEST_DELAY_SECONDS` (default 2s) between historical requests; exponential backoff on HTTP 429; retry 5xx; stop on auth failure.
+- **NIFTY key (canonical):** `NSE_INDEX|Nifty 50` (`UpstoxService.NIFTY50_KEY` / instrument master).
+- **Reuse:** UpstoxService for authentication/headers/token reload; do not fork credentials.
+- **1-minute aggregation** is unused by V1. 1-minute data may be added in a future Sambhav V2 feature-enhancement study.
 
 ## 4. Scheduler / background jobs
 
@@ -77,20 +79,25 @@ if (getattr(user, "is_admin", None) or "").strip() != "Yes":
 
 ---
 
-## Candle boundary convention (NSE 09:15 aligned)
+## Candle boundary convention (Upstox V3 10-minute open timestamps)
 
 Session: **09:15–15:30 IST**.
 
-For a 1m bar timestamp `t` (IST), minutes from session open:
+V1 persists the **exact candle-open timestamp returned by Upstox V3** (`minutes/10`).
+Inspected on 2025-01-01 → 2025-01-31 (NIFTY 50):
 
 ```
-m = (t.hour * 60 + t.minute) - (9 * 60 + 15)
-candle_start = session_date 09:15 + floor(m / 10) * 10 minutes
+09:15, 09:25, 09:35, …, 15:15, 15:25   (38 bars / regular session)
 ```
 
-Examples: 09:15–09:24 → start 09:15; 09:25–09:34 → 09:25; … last full 10m before 15:30 ends at 15:25 (15:25–15:29). Incomplete buckets at session edge are dropped or marked incomplete consistently for hist/live/backtest.
+`candle_end` = `candle_start + 10 minutes`. The 15:25 bar is the last regular bar
+(covers 15:25–15:35; cash session ends 15:30). Overnight / pre-open bars are rejected.
 
-This convention is **identical** for historical import, live scheduler, and backtest.
+This `candle_start` is **identical** for historical import, feature generation,
+backtesting, and live prediction. Do not re-bucket.
+
+1-minute → 10-minute aggregation remains in `sambhav.candles` for a possible V2
+study and is **not** used by the V1 importer.
 
 ---
 
@@ -124,8 +131,11 @@ backend/venv/bin/pip install scikit-learn==1.6.1 xgboost==2.1.4 joblib==1.4.2
 # Tests (core + API smoke)
 PYTHONPATH=. python3 -m pytest backend/test_sambhav_core.py backend/test_sambhav_api.py -q
 
-# Import history → build 10m
-PYTHONPATH=. python scripts/sambhav_import.py --from-date 2025-01-01 --to-date 2025-06-30
+# Pilot 10m import (required before multi-year)
+PYTHONPATH=. python scripts/sambhav_import.py --from-date 2025-01-01 --to-date 2025-01-31
+
+# Full history (only after pilot PASS)
+PYTHONPATH=. python scripts/sambhav_import.py --from-date 2022-01-01
 
 # Train RESEARCH model + walk-forward
 PYTHONPATH=. python scripts/sambhav_train.py

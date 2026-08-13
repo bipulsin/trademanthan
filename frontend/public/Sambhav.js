@@ -39,8 +39,43 @@
     return `<span class="sb-badge ${cls}">${s}</span>`;
   }
 
+  function qualityBadge(status) {
+    const s = String(status || 'NOT_IMPORTED').toUpperCase().replace(/_/g, ' ');
+    let cls = 'research';
+    if (s === 'PASS') cls = 'validated';
+    if (s === 'IMPORTING') cls = 'live';
+    if (s === 'WARNING') cls = 'research';
+    if (s === 'FAIL' || s === 'NOT IMPORTED' || s.includes('INSUFFICIENT')) cls = 'poor';
+    return `<span class="sb-badge ${cls}">${s}</span>`;
+  }
+
+  function renderImportProgress(j, jobId) {
+    const el = document.getElementById('importProgress');
+    if (!el) return;
+    if (!j) {
+      el.innerHTML = kv({ status: 'No import running.' });
+      return;
+    }
+    const chunk = j.current_chunk != null && j.total_chunks != null
+      ? `${j.current_chunk} / ${j.total_chunks}`
+      : '—';
+    const period = j.chunk_from && j.chunk_to ? `${j.chunk_from} → ${j.chunk_to}` : '—';
+    const imported = j.candles_imported != null ? Number(j.candles_imported).toLocaleString() : '—';
+    const errN = Array.isArray(j.errors) ? j.errors.length : (j.error ? 1 : 0);
+    el.innerHTML = kv({
+      'job ID': jobId || j.job_id || '—',
+      status: String(j.status || '—').toUpperCase(),
+      chunk: chunk,
+      period: period,
+      'completed chunks': j.completed_chunks != null ? j.completed_chunks : '—',
+      'candles imported': imported,
+      errors: errN,
+      'final status': j.result && j.result.ok === false ? 'ERROR' : (j.status || '—'),
+    });
+  }
+
   async function loadAll() {
-    const [status, current, hist, perf, cal, model, tv] = await Promise.all([
+    const [status, current, hist, perf, cal, model, tv, dataStatus] = await Promise.all([
       api('/status'),
       api('/current'),
       api('/history?limit=40'),
@@ -48,6 +83,7 @@
       api('/calibration'),
       api('/model'),
       api('/tradingview-stub'),
+      api('/data-status'),
     ]);
 
     document.getElementById('liveBody').innerHTML = current.ok
@@ -83,12 +119,27 @@
       verdict: badge(perf.verdict || 'MODEL NOT VALIDATED'),
     });
 
-    const buckets = (cal.calibration_buckets && cal.calibration_buckets.status) || cal.status;
+    const calN = Number((cal.n != null ? cal.n : (cal.calibration_buckets && cal.calibration_buckets.n)) || 0);
+    const calStatus = calN > 0 ? (cal.status || 'OK') : 'INSUFFICIENT DATA';
+    const calEce = calN > 0 ? (cal.ece != null ? cal.ece : (cal.calibration_buckets && cal.calibration_buckets.ece)) : '—';
     document.getElementById('calBody').innerHTML = kv({
-      status: badge(buckets || 'INSUFFICIENT DATA'),
-      ece: cal.calibration_buckets && cal.calibration_buckets.ece,
-      n: cal.calibration_buckets && cal.calibration_buckets.n,
+      status: badge(calStatus),
+      ece: calEce == null ? '—' : calEce,
+      n: calN,
       model_id: cal.model_id,
+    });
+
+    const ds = dataStatus || {};
+    const range = ds.start_date && ds.end_date ? `${ds.start_date} → ${ds.end_date}` : '—';
+    document.getElementById('dataStatusBody').innerHTML = kv({
+      Instrument: ds.instrument || 'NIFTY 50',
+      Interval: '10 minutes',
+      'Historical range': range,
+      '10-minute candles': ds.candle_count != null ? Number(ds.candle_count).toLocaleString() : 0,
+      'Trading days': ds.trading_days != null ? ds.trading_days : 0,
+      'Missing candles': ds.missing_candles != null ? ds.missing_candles : 0,
+      'Data quality': qualityBadge(ds.status || 'NOT_IMPORTED'),
+      'Current phase': ds.phase || 'DATA COLLECTION',
     });
 
     const tbody = document.querySelector('#histTable tbody');
@@ -112,11 +163,14 @@
 
   async function pollJob(jobId) {
     const log = document.getElementById('jobLog');
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 400; i++) {
       const j = await api(`/jobs/${jobId}`);
+      renderImportProgress(j, jobId);
       log.textContent = JSON.stringify(j, null, 2);
-      if (j.status === 'done' || j.status === 'error') {
+      const st = String(j.status || '').toLowerCase();
+      if (st === 'done' || st === 'error' || st === 'fail') {
         await loadAll();
+        renderImportProgress(j, jobId);
         return j;
       }
       await new Promise((r) => setTimeout(r, 2500));
@@ -139,8 +193,10 @@
       const from_date = document.getElementById('importFrom').value;
       const to_date = document.getElementById('importTo').value || null;
       if (!from_date) return alert('Set import from date');
-      const body = { from_date, to_date, rebuild_10m: true };
+      const body = { from_date, to_date, resume: true };
       const { job_id } = await api('/import', { method: 'POST', body: JSON.stringify(body) });
+      document.getElementById('jobLog').textContent = `job_id=${job_id}\nIMPORTING…`;
+      renderImportProgress({ status: 'IMPORTING', candles_imported: 0, current_chunk: 0, total_chunks: 0, errors: [] }, job_id);
       await pollJob(job_id);
     } catch (e) {
       alert(e.message);

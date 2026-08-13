@@ -12,9 +12,19 @@ from backend.database import engine
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
-_READY = False
+_READY_VERSION = 0
+_SCHEMA_VERSION = 2
+
+# sambhav_raw_candles is retained for a possible Sambhav V2 1-minute study.
+# V1 does not download or import 1-minute historical candles.
+_ALTER = """
+ALTER TABLE sambhav_10m_candles ADD COLUMN IF NOT EXISTS open_interest DOUBLE PRECISION;
+ALTER TABLE sambhav_10m_candles ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upstox';
+"""
 
 _DDL = """
+-- 1-minute data may be added in a future Sambhav V2 feature-enhancement study.
+-- V1 does not populate this table.
 CREATE TABLE IF NOT EXISTS sambhav_raw_candles (
     id BIGSERIAL PRIMARY KEY,
     instrument_key TEXT NOT NULL,
@@ -41,6 +51,8 @@ CREATE TABLE IF NOT EXISTS sambhav_10m_candles (
     low DOUBLE PRECISION NOT NULL,
     close DOUBLE PRECISION NOT NULL,
     volume DOUBLE PRECISION NOT NULL DEFAULT 0,
+    open_interest DOUBLE PRECISION,
+    source TEXT NOT NULL DEFAULT 'upstox',
     n_1m INTEGER NOT NULL DEFAULT 0,
     is_complete BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -117,15 +129,16 @@ CREATE TABLE IF NOT EXISTS sambhav_import_state (
 
 
 def ensure_sambhav_tables() -> None:
-    global _READY
-    if _READY:
+    global _READY_VERSION
+    if _READY_VERSION >= _SCHEMA_VERSION:
         return
     with _LOCK:
-        if _READY:
+        if _READY_VERSION >= _SCHEMA_VERSION:
             return
         if engine is None:
             raise RuntimeError("Database engine not initialized")
         with engine.begin() as conn:
             conn.execute(text(_DDL))
-        _READY = True
-        logger.info("sambhav tables ensured")
+            conn.execute(text(_ALTER))
+        _READY_VERSION = _SCHEMA_VERSION
+        logger.info("sambhav tables ensured (schema v%s)", _SCHEMA_VERSION)

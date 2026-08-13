@@ -48,7 +48,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <link rel="stylesheet" href="left-menu.css?v=3.24">
   <link rel="stylesheet" href="theme.css?v=1.3">
-  <link rel="stylesheet" href="Sambhav.css?v=1">
+  <link rel="stylesheet" href="Sambhav.css?v=2">
 </head>
 <body class="theme-page app-with-left-menu">
   <div id="left-menu-container"></div>
@@ -91,6 +91,12 @@
         </article>
       </section>
 
+      <section class="sb-panel" id="dataStatusPanel">
+        <h2>Historical Dataset</h2>
+        <p class="sb-hint">Current phase: DATA COLLECTION — native 10-minute candles (no 1-minute history)</p>
+        <div class="sb-kv" id="dataStatusBody">Loading…</div>
+      </section>
+
       <section class="sb-panel sb-admin" id="adminPanel">
         <h2>Admin / research controls</h2>
         <div class="sb-controls">
@@ -100,6 +106,8 @@
           <button type="button" class="sb-btn" id="btnTrain">Train XGB</button>
           <button type="button" class="sb-btn" id="btnBacktest">Walk-forward</button>
         </div>
+        <p class="sb-hint">Pilot range: 2025-01-01 → 2025-01-31. Full history: 2022-01-01 → today. Do not start the multi-year import until the pilot passes.</p>
+        <div class="sb-kv" id="importProgress">No import running.</div>
         <pre class="sb-job" id="jobLog">No jobs yet.</pre>
       </section>
 
@@ -130,6 +138,6 @@
     </div>
   </main>
   <script src="left-menu.js?v=3.24"></script>
-  <script src="Sambhav.js?v=1"></script>
+  <script src="Sambhav.js?v=2"></script>
 </body>
 </html>

@@ -1,23 +1,45 @@
-"""Historical 1m NIFTY importer — chunked, restartable, deduped via UNIQUE upsert."""
+"""Sambhav historical importer.
+
+V1 uses Upstox V3 10-minute candles directly (no 1-minute download, no
+1-minute → 10-minute aggregation).
+
+1-minute data may be added in a future Sambhav V2 feature-enhancement study.
+The 1m helpers below are retained but are not called by the V1 import path.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.services.sambhav.candles import to_ist, validate_ohlc
+from backend.services.sambhav.candles import to_ist, upsert_10m_candles, validate_ohlc
 from backend.services.sambhav.config import (
+    HISTORICAL_SOURCE,
     IMPORT_CHUNK_DAYS,
+    IMPORT_CHUNK_DAYS_1M,
     INSTRUMENT_KEY,
     IST,
+)
+from backend.services.sambhav.historical import (
+    SambhavAuthError,
+    SambhavFetchError,
+    chunk_date_range,
+    fetch_upstox_v3_10m,
+    filter_valid_10m_candles,
+    HistoricalThrottle,
+    resolve_nifty_instrument_key,
+    to_10m_row,
 )
 from backend.services.sambhav.tables import ensure_sambhav_tables
 
 logger = logging.getLogger(__name__)
+
+ProgressCb = Callable[[Dict[str, Any]], None]
 
 
 def _get_upstox():
@@ -61,7 +83,7 @@ def _set_import_state(
             "lf": last_from,
             "lt": last_to,
             "st": status,
-            "detail": detail[:2000] if detail else "",
+            "detail": detail[:4000] if detail else "",
         },
     )
     db.commit()
@@ -80,13 +102,21 @@ def get_import_state(db: Session, instrument_key: str = INSTRUMENT_KEY) -> Dict[
     ).fetchone()
     if not row:
         return {"instrument_key": instrument_key, "status": "idle"}
+    detail = row.detail or ""
+    parsed: Any = None
+    if detail.startswith("{") or detail.startswith("["):
+        try:
+            parsed = json.loads(detail)
+        except json.JSONDecodeError:
+            parsed = None
     return {
         "instrument_key": row.instrument_key,
         "last_imported_ts": row.last_imported_ts.isoformat() if row.last_imported_ts else None,
         "last_from_date": str(row.last_from_date) if row.last_from_date else None,
         "last_to_date": str(row.last_to_date) if row.last_to_date else None,
         "status": row.status,
-        "detail": row.detail,
+        "detail": detail,
+        "progress": parsed if isinstance(parsed, dict) else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
@@ -97,6 +127,7 @@ def upsert_raw_candles(
     instrument_key: str = INSTRUMENT_KEY,
     source: str = "upstox",
 ) -> int:
+    """Unused by V1. 1-minute data may be added in a future Sambhav V2 feature-enhancement study."""
     ensure_sambhav_tables()
     sql = text(
         """
@@ -140,7 +171,7 @@ def upsert_raw_candles(
 
 
 def _fetch_chunk(upstox, instrument_key: str, from_d: date, to_d: date) -> List[Dict[str, Any]]:
-    """Fetch 1m candles for [from_d, to_d] inclusive via V2 then V3 fallback."""
+    """Unused by V1. 1-minute data may be added in a future Sambhav V2 feature-enhancement study."""
     from_s = from_d.strftime("%Y-%m-%d")
     to_s = to_d.strftime("%Y-%m-%d")
     candles = upstox._fetch_historical_v2_candles(instrument_key, "1minute", to_s, from_s)
@@ -155,11 +186,34 @@ def import_historical_1m(
     from_date: date,
     to_date: Optional[date] = None,
     instrument_key: str = INSTRUMENT_KEY,
-    chunk_days: int = IMPORT_CHUNK_DAYS,
+    chunk_days: int = IMPORT_CHUNK_DAYS_1M,
     rebuild_10m: bool = True,
 ) -> Dict[str, Any]:
+    """Unused by V1. 1-minute data may be added in a future Sambhav V2 feature-enhancement study."""
+    raise RuntimeError(
+        "Sambhav V1 does not download 1-minute historical candles. "
+        "Use import_historical_10m (Upstox V3 minutes/10). "
+        "1-minute data may be added in a future Sambhav V2 feature-enhancement study."
+    )
+
+
+def import_historical_10m(
+    db: Session,
+    *,
+    from_date: date,
+    to_date: Optional[date] = None,
+    instrument_key: Optional[str] = None,
+    chunk_days: int = IMPORT_CHUNK_DAYS,
+    resume: bool = True,
+    progress_cb: Optional[ProgressCb] = None,
+    upstox: Any = None,
+    throttle: Optional[HistoricalThrottle] = None,
+    http_get: Any = None,
+) -> Dict[str, Any]:
     """
-    Chunked restartable import of NIFTY 1m history into sambhav_raw_candles.
+    Chunked, restartable import of NIFTY 10-minute history via Upstox V3.
+
+    Does not download 1-minute candles and does not aggregate.
     """
     ensure_sambhav_tables()
     if to_date is None:
@@ -167,77 +221,169 @@ def import_historical_1m(
     if from_date > to_date:
         raise ValueError("from_date must be <= to_date")
 
-    upstox = _get_upstox()
-    _set_import_state(db, instrument_key, status="running", detail=f"import {from_date}..{to_date}")
+    ux = upstox or _get_upstox()
+    ik = instrument_key or resolve_nifty_instrument_key(ux)
+    chunks = chunk_date_range(from_date, to_date, chunk_days=chunk_days)
+    thr = throttle or HistoricalThrottle()
 
-    total = 0
-    chunks = 0
+    start_idx = 0
+    if resume:
+        state = get_import_state(db, ik)
+        last_to = state.get("last_to_date")
+        st = (state.get("status") or "").lower()
+        if last_to and st in ("running", "importing", "error"):
+            try:
+                last_d = date.fromisoformat(str(last_to)[:10])
+            except ValueError:
+                last_d = None
+            if last_d is not None:
+                for i, (_a, b) in enumerate(chunks):
+                    if b <= last_d:
+                        start_idx = i + 1
+
+    total_written = 0
+    total_received = 0
+    reject_counts: Dict[str, int] = {}
     errors: List[str] = []
-    cursor = from_date
     last_ts: Optional[datetime] = None
+    completed = start_idx
+    auth_stopped = False
+
+    def _progress(**extra: Any) -> Dict[str, Any]:
+        payload = {
+            "status": extra.pop("status", "IMPORTING"),
+            "current_chunk": extra.get("current_chunk", completed),
+            "completed_chunks": extra.get("completed_chunks", completed),
+            "total_chunks": len(chunks),
+            "chunk_from": extra.get("chunk_from"),
+            "chunk_to": extra.get("chunk_to"),
+            "candles_imported": total_written,
+            "candles_received": total_received,
+            "errors": list(errors),
+            "reject_counts": dict(reject_counts),
+            "interval": "10m",
+            "instrument_key": ik,
+        }
+        payload.update(extra)
+        if progress_cb:
+            progress_cb(payload)
+        return payload
+
+    _set_import_state(
+        db,
+        ik,
+        status="running",
+        detail=json.dumps(_progress(status="IMPORTING", current_chunk=start_idx)),
+    )
+    _progress(status="IMPORTING", current_chunk=start_idx)
 
     try:
-        while cursor <= to_date:
-            chunk_end = min(cursor + timedelta(days=chunk_days - 1), to_date)
+        for i in range(start_idx, len(chunks)):
+            cursor, chunk_end = chunks[i]
+            chunk_no = i + 1
+            _progress(
+                status="IMPORTING",
+                current_chunk=chunk_no,
+                completed_chunks=completed,
+                chunk_from=str(cursor),
+                chunk_to=str(chunk_end),
+            )
             try:
-                candles = _fetch_chunk(upstox, instrument_key, cursor, chunk_end)
-                written = upsert_raw_candles(db, candles, instrument_key=instrument_key)
-                total += written
-                chunks += 1
-                if candles:
-                    for c in candles:
-                        ts = to_ist(c.get("timestamp"))
-                        if ts and (last_ts is None or ts > last_ts):
-                            last_ts = ts
+                raw = fetch_upstox_v3_10m(
+                    ux,
+                    cursor,
+                    chunk_end,
+                    instrument_key=ik,
+                    throttle=thr,
+                    http_get=http_get,
+                )
+                total_received += len(raw or [])
+                valid, reasons = filter_valid_10m_candles(raw or [])
+                for k, v in reasons.items():
+                    reject_counts[k] = reject_counts.get(k, 0) + v
+                rows = [to_10m_row(c, source=HISTORICAL_SOURCE) for c in valid]
+                written = upsert_10m_candles(db, rows, instrument_key=ik) if rows else 0
+                total_written += written
+                completed = chunk_no
+                if rows:
+                    last_ts = rows[-1]["candle_start"]
+                detail = _progress(
+                    status="IMPORTING",
+                    current_chunk=chunk_no,
+                    completed_chunks=completed,
+                    chunk_from=str(cursor),
+                    chunk_to=str(chunk_end),
+                    chunk_written=written,
+                    chunk_received=len(raw or []),
+                )
                 _set_import_state(
                     db,
-                    instrument_key,
+                    ik,
                     status="running",
-                    detail=f"ok {cursor}..{chunk_end} wrote={written}",
+                    detail=json.dumps(detail, default=str),
                     last_imported_ts=last_ts,
                     last_from=cursor,
                     last_to=chunk_end,
                 )
                 logger.info(
-                    "sambhav import chunk %s..%s candles=%s written=%s",
+                    "sambhav 10m import chunk %s/%s %s..%s received=%s written=%s rejected=%s",
+                    chunk_no,
+                    len(chunks),
                     cursor,
                     chunk_end,
-                    len(candles),
+                    len(raw or []),
                     written,
+                    reasons,
                 )
-            except Exception as exc:
+            except SambhavAuthError as exc:
+                auth_stopped = True
+                msg = f"{cursor}..{chunk_end}: AUTH {exc}"
+                errors.append(msg)
+                logger.error("sambhav 10m import stopped on auth error: %s", msg)
+                _set_import_state(db, ik, status="error", detail=msg)
+                break
+            except (SambhavFetchError, Exception) as exc:
                 msg = f"{cursor}..{chunk_end}: {exc}"
                 errors.append(msg)
-                logger.exception("sambhav import chunk failed: %s", msg)
-                _set_import_state(db, instrument_key, status="error", detail=msg)
-            cursor = chunk_end + timedelta(days=1)
+                logger.exception("sambhav 10m import chunk failed: %s", msg)
+                _set_import_state(db, ik, status="error", detail=msg)
+                # Continue to the next chunk unless it was an auth failure.
 
+        final_status = "done" if not errors else "error"
         result: Dict[str, Any] = {
             "ok": len(errors) == 0,
-            "instrument_key": instrument_key,
+            "instrument_key": ik,
+            "interval": "10m",
+            "source": HISTORICAL_SOURCE,
             "from_date": str(from_date),
             "to_date": str(to_date),
-            "chunks": chunks,
-            "upserted_1m": total,
+            "chunks": len(chunks),
+            "completed_chunks": completed,
+            "upserted_10m": total_written,
+            "received": total_received,
+            "reject_counts": reject_counts,
             "errors": errors,
+            "auth_stopped": auth_stopped,
+            "resumed_from_chunk": start_idx + 1 if start_idx else None,
         }
-
-        if rebuild_10m and total > 0:
-            from backend.services.sambhav.candles import build_10m_candles
-
-            agg = build_10m_candles(db, instrument_key=instrument_key, require_complete=True)
-            result["agg_10m"] = agg
-
         _set_import_state(
             db,
-            instrument_key,
-            status="done" if not errors else "error",
-            detail=f"upserted_1m={total} errors={len(errors)}",
+            ik,
+            status=final_status,
+            detail=json.dumps({**result, "status": "DONE" if result["ok"] else "ERROR"}, default=str),
             last_imported_ts=last_ts,
             last_from=from_date,
             last_to=to_date,
         )
+        _progress(
+            status="DONE" if result["ok"] else "ERROR",
+            current_chunk=completed,
+            completed_chunks=completed,
+            chunk_from=str(from_date),
+            chunk_to=str(to_date),
+            result=result,
+        )
         return result
     except Exception as exc:
-        _set_import_state(db, instrument_key, status="error", detail=str(exc))
+        _set_import_state(db, ik, status="error", detail=str(exc))
         raise

@@ -12,12 +12,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.services.sambhav.candles import (
-    build_10m_candles,
     load_10m_df_rows,
     to_ist,
+    upsert_10m_candles,
 )
 from backend.services.sambhav.config import (
     FEATURE_NAMES,
+    HISTORICAL_INTERVAL,
+    HISTORICAL_SOURCE,
     HORIZON_MINUTES,
     INSTRUMENT_KEY,
     IST,
@@ -26,7 +28,13 @@ from backend.services.sambhav.config import (
     TF_MINUTES,
 )
 from backend.services.sambhav.features import compute_features, bars_to_dataframe
-from backend.services.sambhav.importer import _fetch_chunk, _get_upstox, upsert_raw_candles
+from backend.services.sambhav.historical import (
+    fetch_upstox_v3_10m,
+    filter_valid_10m_candles,
+    resolve_nifty_instrument_key,
+    to_10m_row,
+)
+from backend.services.sambhav.importer import _get_upstox
 from backend.services.sambhav.tables import ensure_sambhav_tables
 from backend.services.sambhav.train import get_active_model_row, load_artifact
 
@@ -255,20 +263,29 @@ def resolve_pending_predictions(
     return {"resolved": resolved, "checked": len(pending)}
 
 
-def refresh_recent_1m_and_10m(db: Session, *, days_back: int = 3) -> Dict[str, Any]:
-    """Pull recent 1m from Upstox and rebuild 10m (for live scheduler)."""
+def refresh_recent_10m(db: Session, *, days_back: int = 3) -> Dict[str, Any]:
+    """Pull recent native 10m candles from Upstox V3 (live scheduler).
+
+    1-minute data may be added in a future Sambhav V2 feature-enhancement study.
+    """
     ensure_sambhav_tables()
     upstox = _get_upstox()
+    ik = resolve_nifty_instrument_key(upstox)
     to_d = datetime.now(IST).date()
     from_d = to_d - timedelta(days=days_back)
-    candles = _fetch_chunk(upstox, INSTRUMENT_KEY, from_d, to_d)
-    # Also try intraday for today
+    candles = fetch_upstox_v3_10m(upstox, from_d, to_d, instrument_key=ik)
     try:
-        intra = upstox._fetch_intraday_candles_v3(INSTRUMENT_KEY, "minutes/1")
+        intra = upstox._fetch_intraday_candles_v3(ik, HISTORICAL_INTERVAL)
         if intra:
             candles = (candles or []) + list(intra)
     except Exception:
-        logger.debug("sambhav intraday merge skipped", exc_info=True)
-    written = upsert_raw_candles(db, candles or [], instrument_key=INSTRUMENT_KEY)
-    agg = build_10m_candles(db, instrument_key=INSTRUMENT_KEY, require_complete=True)
-    return {"upserted_1m": written, "agg": agg}
+        logger.debug("sambhav 10m intraday merge skipped", exc_info=True)
+    valid, reasons = filter_valid_10m_candles(candles or [])
+    rows = [to_10m_row(c, source=HISTORICAL_SOURCE) for c in valid]
+    written = upsert_10m_candles(db, rows, instrument_key=ik) if rows else 0
+    return {"upserted_10m": written, "rejected": reasons, "received": len(candles or [])}
+
+
+def refresh_recent_1m_and_10m(db: Session, *, days_back: int = 3) -> Dict[str, Any]:
+    """V1 wrapper: live refresh uses 10-minute candles, not 1-minute history."""
+    return refresh_recent_10m(db, days_back=days_back)
