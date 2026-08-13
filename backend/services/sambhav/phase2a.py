@@ -467,6 +467,13 @@ def run_phase2a(
     built = build_phase2a_frame(bars)
     research = built["research"]
     written = 0
+    research["persisted"] = bool(persist)
+    research["status"] = (
+        "PASS"
+        if research["lookahead_tests"].get("features_v1") == "PASS"
+        and research["lookahead_tests"].get("same_session_targets") == "PASS"
+        else "FAIL"
+    )
     if persist:
         # Persist all resolvable-target rows (features may still be warming up)
         written = persist_phase2a_features(
@@ -478,11 +485,4 @@ def run_phase2a(
         )
         research["rows_persisted"] = written
         save_research_status(db, research)
-    research["persisted"] = bool(persist)
-    research["status"] = (
-        "PASS"
-        if research["lookahead_tests"].get("features_v1") == "PASS"
-        and research["lookahead_tests"].get("same_session_targets") == "PASS"
-        else "FAIL"
-    )
     return research
