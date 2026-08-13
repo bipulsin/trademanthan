@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
 _READY_VERSION = 0
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 # sambhav_raw_candles is retained for a possible Sambhav V2 1-minute study.
 # V1 does not download or import 1-minute historical candles.
@@ -33,6 +33,15 @@ ALTER TABLE sambhav_10m_candles ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DE
 ALTER TABLE sambhav_models ADD COLUMN IF NOT EXISTS dataset_version TEXT;
 ALTER TABLE sambhav_models ADD COLUMN IF NOT EXISTS feature_version TEXT;
 ALTER TABLE sambhav_models ADD COLUMN IF NOT EXISTS model_version TEXT;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS candle_close TIMESTAMPTZ;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS current_price DOUBLE PRECISION;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS target_future_close DOUBLE PRECISION;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS target_future_return DOUBLE PRECISION;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS target_direction TEXT;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS target_timestamp TIMESTAMPTZ;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS session_date DATE;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS volume_available BOOLEAN;
+ALTER TABLE sambhav_features ADD COLUMN IF NOT EXISTS features_complete BOOLEAN;
 """
 
 _DDL = """
@@ -110,19 +119,34 @@ CREATE TABLE IF NOT EXISTS sambhav_dataset_versions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Feature store (separate from source OHLC). Not populated in this phase.
+-- Feature store (separate from source OHLC).
 CREATE TABLE IF NOT EXISTS sambhav_features (
     id BIGSERIAL PRIMARY KEY,
     instrument_key TEXT NOT NULL,
     candle_start TIMESTAMPTZ NOT NULL,
+    candle_close TIMESTAMPTZ,
     feature_version TEXT NOT NULL,
     dataset_version TEXT,
+    current_price DOUBLE PRECISION,
     features_json JSONB NOT NULL,
+    target_future_close DOUBLE PRECISION,
+    target_future_return DOUBLE PRECISION,
+    target_direction TEXT,
+    target_timestamp TIMESTAMPTZ,
+    session_date DATE,
+    volume_available BOOLEAN,
+    features_complete BOOLEAN,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (instrument_key, candle_start, feature_version)
 );
 CREATE INDEX IF NOT EXISTS idx_sambhav_features_ik_start
     ON sambhav_features (instrument_key, candle_start);
+
+CREATE TABLE IF NOT EXISTS sambhav_research_status (
+    phase TEXT PRIMARY KEY,
+    status_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS sambhav_models (
     id SERIAL PRIMARY KEY,

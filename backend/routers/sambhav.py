@@ -125,6 +125,14 @@ def sambhav_data_status(
     return compute_data_status(db, refresh_sessions=refresh)
 
 
+@router.get("/phase2a")
+def sambhav_phase2a_status(user: User = Depends(_require_user), db: Session = Depends(get_db)):
+    """Phase 2A research status — features/targets only; no model training."""
+    from backend.services.sambhav.phase2a import get_phase2a_status
+
+    return get_phase2a_status(db)
+
+
 @router.get("/current")
 def sambhav_current(user: User = Depends(_require_user), db: Session = Depends(get_db)):
     ensure_sambhav_tables()

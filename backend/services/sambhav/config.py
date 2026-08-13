@@ -28,8 +28,8 @@ EXPECTED_10M_PER_SESSION = 38  # 09:15, 09:25, …, 15:25 IST (inspected Upstox 
 
 # --- Sambhav V1 dataset definition ---
 DATASET_VERSION_V1 = "sambhav_dataset_v1_20260813"
-FEATURES_VERSION_V1 = "sambhav_features_v1"  # reserved; features not generated in this phase
-MODEL_VERSION_XGB_V1 = "sambhav_xgb_v1"  # reserved; do not train in this phase
+FEATURES_VERSION_V1 = "sambhav_features_v1"
+MODEL_VERSION_XGB_V1 = "sambhav_xgb_v1"  # reserved; do not train in Phase 2A
 
 SESSION_TYPE_REGULAR = "REGULAR"
 SESSION_TYPE_EXCLUDED_HOLIDAY = "EXCLUDED_HOLIDAY"

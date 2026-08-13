@@ -25,6 +25,8 @@ ALLOWED_SOURCE_WRITERS = frozenset(
 
 FEATURE_ML_MODULES = (
     "backend/services/sambhav/features.py",
+    "backend/services/sambhav/features_v1.py",
+    "backend/services/sambhav/phase2a.py",
     "backend/services/sambhav/targets.py",
     "backend/services/sambhav/train.py",
     "backend/services/sambhav/baselines.py",

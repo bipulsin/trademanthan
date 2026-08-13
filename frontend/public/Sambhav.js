@@ -41,7 +41,7 @@
   }
 
   async function loadAll() {
-    const [status, current, hist, perf, cal, model, tv] = await Promise.all([
+    const [status, current, hist, perf, cal, model, tv, phase2a] = await Promise.all([
       api('/status'),
       api('/current'),
       api('/history?limit=40'),
@@ -49,6 +49,7 @@
       api('/calibration'),
       api('/model'),
       api('/tradingview-stub'),
+      api('/phase2a'),
     ]);
 
     const ds = status.dataset || {};
@@ -67,6 +68,16 @@
     document.getElementById('datasetNote').textContent =
       ds.note ||
       'Special sessions, Muhurat sessions and NSE holidays are intentionally excluded from Sambhav V1 analysis.';
+
+    document.getElementById('phase2aBody').innerHTML = kv({
+      'Source observations': phase2a.source_candles ?? 43092,
+      'Usable prediction observations': phase2a.usable_target_observations ?? '—',
+      'Feature version': phase2a.feature_version || 'sambhav_features_v1',
+      Features: phase2a.feature_count ?? '—',
+      Target: phase2a.target_status || 'UNDER RESEARCH',
+      Model: phase2a.model_status || 'NOT TRAINED',
+      Validation: phase2a.validation_status || 'NOT STARTED',
+    });
 
     document.getElementById('liveBody').innerHTML = current.ok
       ? kv({
