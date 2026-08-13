@@ -35,11 +35,11 @@ def _tick() -> None:
         ensure_sambhav_tables()
         from backend.services.sambhav.predict import (
             predict_latest,
-            refresh_recent_1m_and_10m,
+            refresh_recent_10m,
             resolve_pending_predictions,
         )
 
-        refresh_recent_1m_and_10m(db, days_back=2)
+        refresh_recent_10m(db, days_back=2)
         resolve_pending_predictions(db)
         out = predict_latest(db, source="live")
         logger.info("sambhav predict tick: %s", {k: out.get(k) for k in ("ok", "candle_start", "p_up_calibrated", "status", "message")})
@@ -70,7 +70,7 @@ def start_sambhav_scheduler() -> None:
     )
     sch.start()
     _scheduler = sch
-    logger.info("Sambhav prediction scheduler started (10m+1m IST weekdays)")
+    logger.info("Sambhav prediction scheduler started (native 10m IST weekdays)")
 
 
 def stop_sambhav_scheduler() -> None:

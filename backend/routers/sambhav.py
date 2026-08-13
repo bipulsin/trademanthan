@@ -16,7 +16,14 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
-from backend.services.sambhav.config import INSTRUMENT_KEY, IST, STATUS_RESEARCH, STATUS_VALIDATED, STATUS_LIVE
+from backend.services.sambhav.config import (
+    INSTRUMENT_DISPLAY,
+    INSTRUMENT_KEY,
+    IST,
+    STATUS_LIVE,
+    STATUS_RESEARCH,
+    STATUS_VALIDATED,
+)
 from backend.services.sambhav.tables import ensure_sambhav_tables
 
 logger = logging.getLogger(__name__)
@@ -39,7 +46,8 @@ def _require_admin(user: User = Depends(_require_user)) -> User:
 class ImportBody(BaseModel):
     from_date: date
     to_date: Optional[date] = None
-    rebuild_10m: bool = True
+    rebuild_10m: bool = False  # ignored: V1 imports native 10m candles
+    resume: bool = True
 
 
 class TrainBody(BaseModel):
@@ -72,8 +80,7 @@ def _job_set(job_id: str, **kwargs: Any) -> None:
 @router.get("/status")
 def sambhav_status(user: User = Depends(_require_user), db: Session = Depends(get_db)):
     ensure_sambhav_tables()
-    raw_n = db.execute(text("SELECT COUNT(*) FROM sambhav_raw_candles WHERE instrument_key = :ik"), {"ik": INSTRUMENT_KEY}).scalar()
-    c10 = db.execute(text("SELECT COUNT(*) FROM sambhav_10m_candles WHERE instrument_key = :ik AND is_complete"), {"ik": INSTRUMENT_KEY}).scalar()
+    c10 = db.execute(text("SELECT COUNT(*) FROM sambhav_10m_candles WHERE instrument_key = :ik"), {"ik": INSTRUMENT_KEY}).scalar()
     pred_n = db.execute(text("SELECT COUNT(*) FROM sambhav_predictions WHERE instrument_key = :ik"), {"ik": INSTRUMENT_KEY}).scalar()
     models = db.execute(text("SELECT COUNT(*) FROM sambhav_models")).scalar()
     from backend.services.sambhav.importer import get_import_state
@@ -82,8 +89,9 @@ def sambhav_status(user: User = Depends(_require_user), db: Session = Depends(ge
     return {
         "module": "TWCTO Sambhav",
         "subtitle": "NIFTY 10-Minute → 30-Minute ML Probability Engine",
+        "instrument": INSTRUMENT_DISPLAY,
         "instrument_key": INSTRUMENT_KEY,
-        "raw_1m_count": int(raw_n or 0),
+        "interval": "10m",
         "complete_10m_count": int(c10 or 0),
         "predictions_count": int(pred_n or 0),
         "models_count": int(models or 0),
@@ -96,6 +104,18 @@ def sambhav_status(user: User = Depends(_require_user), db: Session = Depends(ge
         "now_ist": datetime.now(IST).isoformat(),
         "user": getattr(user, "email", None),
     }
+
+
+@router.get("/data-status")
+def sambhav_data_status(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    from backend.services.sambhav.data_status import compute_data_status
+
+    return compute_data_status(db, start_date=start_date, end_date=end_date)
 
 
 @router.get("/current")
@@ -247,16 +267,16 @@ def sambhav_calibration(user: User = Depends(_require_user), db: Session = Depen
             """
         )
     ).fetchone()
+    from backend.services.sambhav.data_status import calibration_status_payload
+
     if not row:
-        return {"status": "INSUFFICIENT DATA", "buckets": []}
-    return {
-        "status": "OK",
-        "model_id": row.model_id,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "calibration_buckets": row.calibration_buckets_json,
-        "metrics": row.metrics_json,
-        "note": "If ECE is high, UI should show CALIBRATION POOR.",
-    }
+        return calibration_status_payload(buckets=None)
+    return calibration_status_payload(
+        buckets=row.calibration_buckets_json,
+        metrics=row.metrics_json,
+        model_id=row.model_id,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+    )
 
 
 @router.get("/model")
@@ -336,15 +356,27 @@ def sambhav_job(job_id: str, user: User = Depends(_require_user)):
     return job
 
 
-def _run_import_job(job_id: str, from_date: date, to_date: Optional[date], rebuild_10m: bool) -> None:
+def _run_import_job(job_id: str, from_date: date, to_date: Optional[date], resume: bool) -> None:
     db = SessionLocal()
     try:
-        from backend.services.sambhav.importer import import_historical_1m
+        from backend.services.sambhav.importer import import_historical_10m
 
-        result = import_historical_1m(
-            db, from_date=from_date, to_date=to_date, rebuild_10m=rebuild_10m
+        def _progress(info: Dict[str, Any]) -> None:
+            _job_set(job_id, **info)
+
+        result = import_historical_10m(
+            db, from_date=from_date, to_date=to_date, resume=resume, progress_cb=_progress
         )
-        _job_set(job_id, status="done" if result.get("ok") else "error", result=result, finished_at=datetime.now(IST).isoformat())
+        _job_set(
+            job_id,
+            status="done" if result.get("ok") else "error",
+            result=result,
+            candles_imported=result.get("upserted_10m"),
+            completed_chunks=result.get("completed_chunks"),
+            total_chunks=result.get("chunks"),
+            errors=result.get("errors") or [],
+            finished_at=datetime.now(IST).isoformat(),
+        )
     except Exception as exc:
         logger.exception("sambhav import job failed")
         _job_set(job_id, status="error", error=str(exc), finished_at=datetime.now(IST).isoformat())
@@ -357,17 +389,23 @@ def sambhav_import(body: ImportBody, admin: User = Depends(_require_admin)):
     job_id = str(uuid.uuid4())
     _job_set(
         job_id,
-        status="running",
+        status="IMPORTING",
         started_at=datetime.now(IST).isoformat(),
         parameters=body.model_dump(mode="json"),
+        interval="10m",
+        candles_imported=0,
+        current_chunk=0,
+        completed_chunks=0,
+        total_chunks=0,
+        errors=[],
     )
     t = threading.Thread(
         target=_run_import_job,
-        args=(job_id, body.from_date, body.to_date, body.rebuild_10m),
+        args=(job_id, body.from_date, body.to_date, body.resume),
         daemon=True,
     )
     t.start()
-    return {"job_id": job_id, "status": "running"}
+    return {"job_id": job_id, "status": "IMPORTING"}
 
 
 def _run_train_job(job_id: str, body: TrainBody) -> None:
