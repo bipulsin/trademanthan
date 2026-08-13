@@ -33,9 +33,10 @@
   function badge(status) {
     const s = String(status || 'RESEARCH').toUpperCase();
     let cls = 'research';
-    if (s === 'VALIDATED') cls = 'validated';
+    if (s === 'VALIDATED' || s === 'PASS' || s === 'OK') cls = 'validated';
     if (s === 'LIVE') cls = 'live';
-    if (s.includes('POOR') || s.includes('INSUFFICIENT') || s.includes('NOT VALIDATED')) cls = 'poor';
+    if (s.includes('POOR') || s.includes('INSUFFICIENT') || s.includes('NOT VALIDATED') || s === 'FAIL' || s === 'WARNING')
+      cls = 'poor';
     return `<span class="sb-badge ${cls}">${s}</span>`;
   }
 
@@ -49,6 +50,23 @@
       api('/model'),
       api('/tradingview-stub'),
     ]);
+
+    const ds = status.dataset || {};
+    document.getElementById('datasetBody').innerHTML = kv({
+      Status: badge(ds.status || ds.data_integrity || '—'),
+      Instrument: ds.instrument || 'NIFTY 50',
+      Interval: ds.interval || '10m',
+      Period: ds.period || ((ds.start_date && ds.end_date) ? `${ds.start_date} → ${ds.end_date}` : '—'),
+      'Regular trading sessions': ds.regular_trading_sessions ?? ds.regular_session_count,
+      'Regular candles': ds.regular_candles ?? ds.regular_candle_count,
+      'Excluded sessions': ds.excluded_session_count,
+      Source: ds.source || 'Upstox V3',
+      'Dataset version': ds.dataset_version || '—',
+      'Data integrity': badge(ds.data_integrity || ds.status || '—'),
+    });
+    document.getElementById('datasetNote').textContent =
+      ds.note ||
+      'Special sessions, Muhurat sessions and NSE holidays are intentionally excluded from Sambhav V1 analysis.';
 
     document.getElementById('liveBody').innerHTML = current.ok
       ? kv({
@@ -84,10 +102,12 @@
     });
 
     const buckets = (cal.calibration_buckets && cal.calibration_buckets.status) || cal.status;
+    const eceVal = cal.calibration_buckets && cal.calibration_buckets.ece;
+    const nVal = (cal.calibration_buckets && cal.calibration_buckets.n) ?? cal.n ?? 0;
     document.getElementById('calBody').innerHTML = kv({
       status: badge(buckets || 'INSUFFICIENT DATA'),
-      ece: cal.calibration_buckets && cal.calibration_buckets.ece,
-      n: cal.calibration_buckets && cal.calibration_buckets.n,
+      ece: eceVal == null ? '—' : eceVal,
+      n: nVal,
       model_id: cal.model_id,
     });
 

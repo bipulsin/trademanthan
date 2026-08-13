@@ -1,4 +1,14 @@
-"""Sambhav PostgreSQL tables — ensure_* pattern, sambhav_ prefix only."""
+"""Sambhav PostgreSQL tables — ensure_* pattern, sambhav_ prefix only.
+
+SOURCE DATA (immutable for ML):
+  sambhav_10m_candles — canonical Upstox V3 10m OHLC (never mutated by features/train)
+  sambhav_raw_candles — reserved for optional V2 1m study
+
+DERIVED:
+  sambhav_sessions — session classification (REGULAR / EXCLUDED_*)
+  sambhav_dataset_versions — reproducible dataset snapshots
+  sambhav_features — future feature store (separate from source OHLC)
+"""
 
 from __future__ import annotations
 
@@ -12,9 +22,22 @@ from backend.database import engine
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
-_READY = False
+_READY_VERSION = 0
+_SCHEMA_VERSION = 3
+
+# sambhav_raw_candles is retained for a possible Sambhav V2 1-minute study.
+# V1 does not download or import 1-minute historical candles.
+_ALTER = """
+ALTER TABLE sambhav_10m_candles ADD COLUMN IF NOT EXISTS open_interest DOUBLE PRECISION;
+ALTER TABLE sambhav_10m_candles ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'upstox';
+ALTER TABLE sambhav_models ADD COLUMN IF NOT EXISTS dataset_version TEXT;
+ALTER TABLE sambhav_models ADD COLUMN IF NOT EXISTS feature_version TEXT;
+ALTER TABLE sambhav_models ADD COLUMN IF NOT EXISTS model_version TEXT;
+"""
 
 _DDL = """
+-- 1-minute data may be added in a future Sambhav V2 feature-enhancement study.
+-- V1 does not populate this table.
 CREATE TABLE IF NOT EXISTS sambhav_raw_candles (
     id BIGSERIAL PRIMARY KEY,
     instrument_key TEXT NOT NULL,
@@ -31,6 +54,7 @@ CREATE TABLE IF NOT EXISTS sambhav_raw_candles (
 CREATE INDEX IF NOT EXISTS idx_sambhav_raw_ik_ts
     ON sambhav_raw_candles (instrument_key, candle_ts);
 
+-- SOURCE / IMMUTABLE OHLC for Sambhav V1 (features live in sambhav_features).
 CREATE TABLE IF NOT EXISTS sambhav_10m_candles (
     id BIGSERIAL PRIMARY KEY,
     instrument_key TEXT NOT NULL,
@@ -41,6 +65,8 @@ CREATE TABLE IF NOT EXISTS sambhav_10m_candles (
     low DOUBLE PRECISION NOT NULL,
     close DOUBLE PRECISION NOT NULL,
     volume DOUBLE PRECISION NOT NULL DEFAULT 0,
+    open_interest DOUBLE PRECISION,
+    source TEXT NOT NULL DEFAULT 'upstox',
     n_1m INTEGER NOT NULL DEFAULT 0,
     is_complete BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -48,6 +74,55 @@ CREATE TABLE IF NOT EXISTS sambhav_10m_candles (
 );
 CREATE INDEX IF NOT EXISTS idx_sambhav_10m_ik_start
     ON sambhav_10m_candles (instrument_key, candle_start);
+
+CREATE TABLE IF NOT EXISTS sambhav_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    instrument_key TEXT NOT NULL,
+    session_date DATE NOT NULL,
+    session_type TEXT NOT NULL,
+    included_in_sambhav_v1 BOOLEAN NOT NULL DEFAULT FALSE,
+    candle_count INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (instrument_key, session_date)
+);
+CREATE INDEX IF NOT EXISTS idx_sambhav_sessions_v1
+    ON sambhav_sessions (instrument_key, included_in_sambhav_v1, session_date);
+CREATE INDEX IF NOT EXISTS idx_sambhav_sessions_type
+    ON sambhav_sessions (instrument_key, session_type);
+
+CREATE TABLE IF NOT EXISTS sambhav_dataset_versions (
+    dataset_version TEXT PRIMARY KEY,
+    instrument TEXT NOT NULL,
+    instrument_key TEXT NOT NULL,
+    interval TEXT NOT NULL DEFAULT '10m',
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    regular_session_count INTEGER NOT NULL DEFAULT 0,
+    regular_candle_count INTEGER NOT NULL DEFAULT 0,
+    total_candle_count INTEGER NOT NULL DEFAULT 0,
+    excluded_session_count INTEGER NOT NULL DEFAULT 0,
+    excluded_holiday_count INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'upstox_v3_10m',
+    meta_json JSONB,
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Feature store (separate from source OHLC). Not populated in this phase.
+CREATE TABLE IF NOT EXISTS sambhav_features (
+    id BIGSERIAL PRIMARY KEY,
+    instrument_key TEXT NOT NULL,
+    candle_start TIMESTAMPTZ NOT NULL,
+    feature_version TEXT NOT NULL,
+    dataset_version TEXT,
+    features_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (instrument_key, candle_start, feature_version)
+);
+CREATE INDEX IF NOT EXISTS idx_sambhav_features_ik_start
+    ON sambhav_features (instrument_key, candle_start);
 
 CREATE TABLE IF NOT EXISTS sambhav_models (
     id SERIAL PRIMARY KEY,
@@ -60,6 +135,9 @@ CREATE TABLE IF NOT EXISTS sambhav_models (
     train_end TIMESTAMPTZ,
     metrics_json JSONB,
     calibration_method TEXT,
+    dataset_version TEXT,
+    feature_version TEXT,
+    model_version TEXT,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -117,15 +195,16 @@ CREATE TABLE IF NOT EXISTS sambhav_import_state (
 
 
 def ensure_sambhav_tables() -> None:
-    global _READY
-    if _READY:
+    global _READY_VERSION
+    if _READY_VERSION >= _SCHEMA_VERSION:
         return
     with _LOCK:
-        if _READY:
+        if _READY_VERSION >= _SCHEMA_VERSION:
             return
         if engine is None:
             raise RuntimeError("Database engine not initialized")
         with engine.begin() as conn:
             conn.execute(text(_DDL))
-        _READY = True
-        logger.info("sambhav tables ensured")
+            conn.execute(text(_ALTER))
+        _READY_VERSION = _SCHEMA_VERSION
+        logger.info("sambhav tables ensured (schema v%s)", _SCHEMA_VERSION)

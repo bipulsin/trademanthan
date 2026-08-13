@@ -1,8 +1,10 @@
 # TWCTO Sambhav — Architecture Assessment & Integration Plan
 
-**Status:** Research module (V1)  
-**Scope:** NIFTY 50 index only · 10-minute bars · 30-minute horizon · NSE 09:15–15:30 IST  
+**Status:** Research module (V1) — historical dataset finalized as `sambhav_dataset_v1_20260813`  
+**Scope:** NIFTY 50 index only · 10-minute bars · 30-minute horizon · NSE regular sessions only  
 **Constraint:** Completely separate from Kavach / RS / Daily Futures trading logic.
+
+See also: `docs/SAMBHAV_DATASET.md`, `docs/SAMBHAV_DATA_BACKUP.md`.
 
 ---
 

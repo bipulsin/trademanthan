@@ -72,13 +72,25 @@ def _job_set(job_id: str, **kwargs: Any) -> None:
 @router.get("/status")
 def sambhav_status(user: User = Depends(_require_user), db: Session = Depends(get_db)):
     ensure_sambhav_tables()
-    raw_n = db.execute(text("SELECT COUNT(*) FROM sambhav_raw_candles WHERE instrument_key = :ik"), {"ik": INSTRUMENT_KEY}).scalar()
-    c10 = db.execute(text("SELECT COUNT(*) FROM sambhav_10m_candles WHERE instrument_key = :ik AND is_complete"), {"ik": INSTRUMENT_KEY}).scalar()
-    pred_n = db.execute(text("SELECT COUNT(*) FROM sambhav_predictions WHERE instrument_key = :ik"), {"ik": INSTRUMENT_KEY}).scalar()
-    models = db.execute(text("SELECT COUNT(*) FROM sambhav_models")).scalar()
+    from backend.services.sambhav.data_status import compute_data_status
+    from backend.services.sambhav.dataset import get_active_dataset_version
     from backend.services.sambhav.importer import get_import_state
     from backend.services.sambhav.train import get_active_model_row
 
+    raw_n = db.execute(
+        text("SELECT COUNT(*) FROM sambhav_raw_candles WHERE instrument_key = :ik"),
+        {"ik": INSTRUMENT_KEY},
+    ).scalar()
+    c10 = db.execute(
+        text("SELECT COUNT(*) FROM sambhav_10m_candles WHERE instrument_key = :ik"),
+        {"ik": INSTRUMENT_KEY},
+    ).scalar()
+    pred_n = db.execute(
+        text("SELECT COUNT(*) FROM sambhav_predictions WHERE instrument_key = :ik"),
+        {"ik": INSTRUMENT_KEY},
+    ).scalar()
+    models = db.execute(text("SELECT COUNT(*) FROM sambhav_models")).scalar()
+    dataset = compute_data_status(db, refresh_sessions=False)
     return {
         "module": "TWCTO Sambhav",
         "subtitle": "NIFTY 10-Minute → 30-Minute ML Probability Engine",
@@ -89,6 +101,9 @@ def sambhav_status(user: User = Depends(_require_user), db: Session = Depends(ge
         "models_count": int(models or 0),
         "import_state": get_import_state(db),
         "active_model": get_active_model_row(db),
+        "dataset": dataset,
+        "active_dataset_version": get_active_dataset_version(db),
+        "model_status": "MODEL NOT VALIDATED",
         "disclaimer": (
             "Research probability engine. Not trading advice. "
             "Raw probabilities are not claimed accurate. Never auto-VALIDATED."
@@ -96,6 +111,18 @@ def sambhav_status(user: User = Depends(_require_user), db: Session = Depends(ge
         "now_ist": datetime.now(IST).isoformat(),
         "user": getattr(user, "email", None),
     }
+
+
+@router.get("/data-status")
+def sambhav_data_status(
+    refresh: bool = Query(False),
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    """Sambhav V1 dataset quality — REGULAR sessions only."""
+    from backend.services.sambhav.data_status import compute_data_status
+
+    return compute_data_status(db, refresh_sessions=refresh)
 
 
 @router.get("/current")
@@ -237,6 +264,8 @@ def sambhav_performance(user: User = Depends(_require_user), db: Session = Depen
 @router.get("/calibration")
 def sambhav_calibration(user: User = Depends(_require_user), db: Session = Depends(get_db)):
     ensure_sambhav_tables()
+    from backend.services.sambhav.data_status import calibration_status_payload
+
     row = db.execute(
         text(
             """
@@ -248,15 +277,13 @@ def sambhav_calibration(user: User = Depends(_require_user), db: Session = Depen
         )
     ).fetchone()
     if not row:
-        return {"status": "INSUFFICIENT DATA", "buckets": []}
-    return {
-        "status": "OK",
-        "model_id": row.model_id,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "calibration_buckets": row.calibration_buckets_json,
-        "metrics": row.metrics_json,
-        "note": "If ECE is high, UI should show CALIBRATION POOR.",
-    }
+        return calibration_status_payload(buckets={"n": 0, "ece": None, "buckets": []})
+    return calibration_status_payload(
+        buckets=row.calibration_buckets_json,
+        metrics=row.metrics_json,
+        model_id=row.model_id,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+    )
 
 
 @router.get("/model")
@@ -339,12 +366,25 @@ def sambhav_job(job_id: str, user: User = Depends(_require_user)):
 def _run_import_job(job_id: str, from_date: date, to_date: Optional[date], rebuild_10m: bool) -> None:
     db = SessionLocal()
     try:
-        from backend.services.sambhav.importer import import_historical_1m
+        from backend.services.sambhav.importer import import_historical_10m, import_incremental_10m
+        from backend.services.sambhav.sessions import classify_and_persist_sessions
 
-        result = import_historical_1m(
-            db, from_date=from_date, to_date=to_date, rebuild_10m=rebuild_10m
+        # rebuild_10m retained for API compat; V1 always uses native 10m (never 1m).
+        _ = rebuild_10m
+        if from_date is None:
+            result = import_incremental_10m(db, to_date=to_date)
+        else:
+            result = import_historical_10m(
+                db, from_date=from_date, to_date=to_date, resume=True
+            )
+            if result.get("ok"):
+                classify_and_persist_sessions(db)
+        _job_set(
+            job_id,
+            status="done" if result.get("ok") else "error",
+            result=result,
+            finished_at=datetime.now(IST).isoformat(),
         )
-        _job_set(job_id, status="done" if result.get("ok") else "error", result=result, finished_at=datetime.now(IST).isoformat())
     except Exception as exc:
         logger.exception("sambhav import job failed")
         _job_set(job_id, status="error", error=str(exc), finished_at=datetime.now(IST).isoformat())

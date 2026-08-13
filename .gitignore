@@ -62,6 +62,10 @@ data/*
 # Local DB exports (keep exports/ via .gitkeep)
 exports/*.txt
 
+# Sambhav / DB backups (never commit dumps)
+backups/
+*.dump
+
 # PEM files (SSH keys)
 *.pem
 

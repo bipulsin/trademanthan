@@ -1,4 +1,13 @@
-"""1m → 10m aggregation with NSE 09:15-aligned boundaries (hist/live/backtest identical)."""
+"""10m candle helpers.
+
+V1 historical/live data uses native Upstox V3 10-minute candles (see
+``backend.services.sambhav.historical``). Boundaries are the API open
+timestamps: 09:15, 09:25, …, 15:25 IST.
+
+``aggregate_1m_to_10m`` / ``build_10m_candles`` are retained but unused by the
+V1 importer. 1-minute data may be added in a future Sambhav V2
+feature-enhancement study.
+"""
 
 from __future__ import annotations
 
@@ -157,15 +166,17 @@ def upsert_10m_candles(
     rows: Iterable[Dict[str, Any]],
     instrument_key: str = INSTRUMENT_KEY,
 ) -> int:
+    """Idempotent upsert on (instrument_key, candle_start). Prevents duplicates."""
     ensure_sambhav_tables()
     n = 0
     sql = text(
         """
         INSERT INTO sambhav_10m_candles (
             instrument_key, candle_start, candle_end,
-            open, high, low, close, volume, n_1m, is_complete
+            open, high, low, close, volume, open_interest, source,
+            n_1m, is_complete
         ) VALUES (
-            :ik, :cs, :ce, :o, :h, :l, :c, :v, :n1, :comp
+            :ik, :cs, :ce, :o, :h, :l, :c, :v, :oi, :src, :n1, :comp
         )
         ON CONFLICT (instrument_key, candle_start) DO UPDATE SET
             candle_end = EXCLUDED.candle_end,
@@ -174,6 +185,8 @@ def upsert_10m_candles(
             low = EXCLUDED.low,
             close = EXCLUDED.close,
             volume = EXCLUDED.volume,
+            open_interest = COALESCE(EXCLUDED.open_interest, sambhav_10m_candles.open_interest),
+            source = EXCLUDED.source,
             n_1m = EXCLUDED.n_1m,
             is_complete = EXCLUDED.is_complete
         """
@@ -190,12 +203,15 @@ def upsert_10m_candles(
                 "l": r["low"],
                 "c": r["close"],
                 "v": r["volume"],
+                "oi": r.get("open_interest"),
+                "src": r.get("source") or "upstox",
                 "n1": int(r.get("n_1m") or 0),
-                "comp": bool(r.get("is_complete")),
+                "comp": bool(r.get("is_complete", True)),
             },
         )
         n += 1
-    db.commit()
+    if n:
+        db.commit()
     return n
 
 
@@ -207,7 +223,10 @@ def build_10m_candles(
     to_ts: Optional[datetime] = None,
     require_complete: bool = True,
 ) -> Dict[str, Any]:
-    """Load 1m from DB, aggregate, upsert 10m. Returns summary counts."""
+    """1m → 10m aggregation. Unused by V1 importer.
+
+    1-minute data may be added in a future Sambhav V2 feature-enhancement study.
+    """
     ensure_sambhav_tables()
     params: Dict[str, Any] = {"ik": instrument_key}
     clauses = ["instrument_key = :ik"]
