@@ -115,8 +115,8 @@ def export_html(
             meta_note = (
                 f"<div class='sub' style='margin:0 0 10px'>Meta-filter + fractional Kelly kept "
                 f"<strong>{sel_n}</strong> of <strong>{raw_n}</strong> raw candidates "
-                f"(absolute floor P≥0.50, EMA5≤0.35×ATR, RSI gate, ₹3k risk cap; "
-                f"structural EMA10/VWAP stop + 2.5R target; 2.0×ATR trail after +1R).</div>"
+                f"(relative daily top-K, EMA5≤0.70×ATR / EMA20≤1.80×ATR, RSI 25/75, ₹8k risk; "
+                f"vol-buffered EMA20/VWAP stop (1.4–2.0×ATR) + 2.2R/3×ATR target; 2.0×ATR trail after +1R).</div>"
             )
         cmp_section = f"""
     <div class="panel">

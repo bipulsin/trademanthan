@@ -56,7 +56,9 @@ def enrich_features(df: pd.DataFrame) -> pd.DataFrame:
     out["range_pct"] = (out["high"] - out["low"]) / c.replace(0, np.nan)
     out["ema_5"] = c.ewm(span=5, adjust=False).mean()
     out["ema_10"] = c.ewm(span=10, adjust=False).mean()
+    out["ema_20"] = c.ewm(span=20, adjust=False).mean()
     out["ema5_dist_atr"] = (c - out["ema_5"]).abs() / out["safe_atr"].replace(0, np.nan)
+    out["ema20_dist_atr"] = (c - out["ema_20"]).abs() / out["safe_atr"].replace(0, np.nan)
     oi = out["oi"] if "oi" in out.columns else pd.Series(0.0, index=out.index)
     out["oi_chg_pct"] = oi.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return out
@@ -66,43 +68,48 @@ def compute_structural_stop_target(
     *,
     side: str,
     entry_price: float,
-    ema_10: Optional[float],
-    vwap: Optional[float],
+    ema_10: Optional[float] = None,
+    ema_20: Optional[float] = None,
+    vwap: Optional[float] = None,
     safe_atr: float,
 ) -> Dict[str, float]:
     """
-    Structural stop from EMA10/VWAP anchors; target = max(2.5×|entry−SL|, 2.5×ATR).
+    Volatility-buffered structural stop (EMA20/VWAP) with 1.4–2.0×ATR band.
 
-    SELL: SL = min(EMA10, VWAP) among levels above entry (else entry + 1×ATR).
-    BUY:  SL = max(EMA10, VWAP) among levels below entry (else entry − 1×ATR).
+    SELL: SL = max(entry+1.4ATR, min(struct, entry+2.0ATR))
+          struct = max(EMA20, VWAP) if above entry else entry+1.4ATR
+    BUY:  SL = min(entry-1.4ATR, max(struct, entry-2.0ATR))
+          struct = min(EMA20, VWAP) if below entry else entry-1.4ATR
+    Target = entry ± max(2.2×|entry−SL|, 3.0×ATR)
     """
     side_u = str(side).upper()
     entry = float(entry_price)
     atr = float(safe_atr) if safe_atr and safe_atr > 0 else abs(entry) * 0.005
-    e10 = float(ema_10) if ema_10 is not None and np.isfinite(float(ema_10)) else None
+    e20 = float(ema_20) if ema_20 is not None and np.isfinite(float(ema_20)) else None
+    # Backward-compat: callers that only pass ema_10 still work as a structural hint
+    if e20 is None and ema_10 is not None and np.isfinite(float(ema_10)):
+        e20 = float(ema_10)
     vw = float(vwap) if vwap is not None and np.isfinite(float(vwap)) else None
 
     if side_u in ("SELL", "SHORT"):
-        above = [x for x in (e10, vw) if x is not None and x > entry]
-        if above:
-            stop_loss = float(min(above))
-            stop_kind = "structural"
-        else:
-            stop_loss = entry + 1.0 * atr
-            stop_kind = "atr_fallback"
+        candidates = [x for x in (e20, vw) if x is not None and x > entry]
+        structural = float(max(candidates)) if candidates else (entry + 1.4 * atr)
+        floor_sl = entry + 1.4 * atr
+        cap_sl = entry + 2.0 * atr
+        stop_loss = max(floor_sl, min(structural, cap_sl))
+        stop_kind = "vol_buffered" if candidates else "atr_floor"
         stop_dist = abs(stop_loss - entry)
-        target_dist = max(2.5 * stop_dist, 2.5 * atr)
+        target_dist = max(2.2 * stop_dist, 3.0 * atr)
         take_profit = entry - target_dist
     else:
-        below = [x for x in (e10, vw) if x is not None and x < entry]
-        if below:
-            stop_loss = float(max(below))
-            stop_kind = "structural"
-        else:
-            stop_loss = entry - 1.0 * atr
-            stop_kind = "atr_fallback"
+        candidates = [x for x in (e20, vw) if x is not None and x < entry]
+        structural = float(min(candidates)) if candidates else (entry - 1.4 * atr)
+        floor_sl = entry - 1.4 * atr  # closest allowed (highest price for long SL)
+        cap_sl = entry - 2.0 * atr  # farthest allowed
+        stop_loss = min(floor_sl, max(structural, cap_sl))
+        stop_kind = "vol_buffered" if candidates else "atr_floor"
         stop_dist = abs(entry - stop_loss)
-        target_dist = max(2.5 * stop_dist, 2.5 * atr)
+        target_dist = max(2.2 * stop_dist, 3.0 * atr)
         take_profit = entry + target_dist
 
     return {
@@ -110,7 +117,7 @@ def compute_structural_stop_target(
         "take_profit": float(take_profit),
         "stop_distance": float(stop_dist),
         "target_distance": float(target_dist),
-        "stop_kind": 1.0 if stop_kind == "structural" else 0.0,
+        "stop_kind": 1.0 if stop_kind == "vol_buffered" else 0.0,
     }
 
 

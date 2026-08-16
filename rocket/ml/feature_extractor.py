@@ -75,6 +75,7 @@ class RocketFeatureExtractor:
         out["dist_ema200_atr"] = (out["close"] - out["ema_200"]) / out["safe_atr"]
         out["ema_spread_atr"] = (out["ema_5"] - out["ema_20"]) / out["safe_atr"]
         out["ema5_dist_atr"] = (out["close"] - out["ema_5"]).abs() / out["safe_atr"]
+        out["ema20_dist_atr"] = (out["close"] - out["ema_20"]).abs() / out["safe_atr"]
 
         # Session VWAP (reset each calendar day in IST)
         ts_ist = out["timestamp"].dt.tz_convert("Asia/Kolkata")
@@ -194,9 +195,11 @@ class RocketFeatureExtractor:
             "dow": _f("dow"),
             # Gate / structural fields (not in meta FEATURE_COLUMNS)
             "ema5_dist_atr": _f("ema5_dist_atr"),
+            "ema20_dist_atr": _f("ema20_dist_atr"),
             "raw_rsi_14": rsi,
             "ema_5": _f("ema_5"),
             "ema_10": _f("ema_10"),
+            "ema_20": _f("ema_20"),
             "vwap": _f("vwap"),
             "safe_atr": _f("safe_atr"),
         }

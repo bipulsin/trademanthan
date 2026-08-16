@@ -1,4 +1,4 @@
-"""Daily top-K allocator: P≥0.50 floor, EMA5/RSI gates, structural SL, ₹3k risk cap."""
+"""Relative daily top-K allocator with vol-buffered stops and ₹8k risk budget."""
 
 from __future__ import annotations
 
@@ -13,23 +13,24 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-TIER1_PROB = 0.62  # high conviction
-TIER2_PROB = 0.50  # absolute soft-fill floor / standard
-HARD_FLOOR = 0.50  # never select below this
+ANOMALY_FLOOR = 0.30  # skip day only if best score < this
 DEFAULT_KELLY_FACTOR = 0.35
+DEFAULT_MIN_TRADES_PER_DAY = 2
 DEFAULT_MAX_TRADES_PER_DAY = 3
-MAX_RISK_RUPEES = 3000.0
-EMA5_MAX_DIST_ATR = 0.35
-RSI_OVERSOLD = 30.0
-RSI_OVERBOUGHT = 70.0
+MAX_RISK_RUPEES = 8000.0  # 0.08% of ₹1Cr
+EMA5_MAX_DIST_ATR = 0.70
+EMA20_MAX_DIST_ATR = 1.80
+RSI_OVERSOLD = 25.0
+RSI_OVERBOUGHT = 75.0
+
+# Back-compat aliases for older imports/tests
+HARD_FLOOR = ANOMALY_FLOOR
+TIER1_PROB = 0.62
+TIER2_PROB = ANOMALY_FLOOR
 
 
 def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = DEFAULT_KELLY_FACTOR) -> float:
-    """
-    Fractional Kelly fraction.
-
-    f* = clip( (P·R − (1−P)) / R , 0, 1 ) × kelly_factor
-    """
+    """f* = clip( (P·R − (1−P)) / R , 0, 1 ) × kelly_factor"""
     p = float(np.clip(p_win, 0.0, 1.0))
     r = float(reward_risk)
     if r <= 0:
@@ -50,29 +51,28 @@ def _atr_from_row(row: Dict[str, Any], entry: float) -> float:
 
 
 def _raw_rsi(row: Dict[str, Any]) -> Optional[float]:
-    for key in ("raw_rsi_14",):
-        val = row.get(key)
-        if val is not None and np.isfinite(float(val)):
-            return float(val)
-    # Side-flipped rsi_14 is not usable for exhaustion gates
+    val = row.get("raw_rsi_14")
+    if val is not None and np.isfinite(float(val)):
+        return float(val)
     return None
 
 
-def _ema5_dist(row: Dict[str, Any], entry: float, atr: float) -> float:
-    val = row.get("ema5_dist_atr")
+def _dist_atr(row: Dict[str, Any], key: str, entry: float, atr: float, level_key: str) -> float:
+    val = row.get(key)
     if val is not None and np.isfinite(float(val)):
         return float(val)
-    ema5 = row.get("ema_5")
-    if ema5 is not None and atr > 0 and np.isfinite(float(ema5)):
-        return abs(entry - float(ema5)) / atr
+    level = row.get(level_key)
+    if level is not None and atr > 0 and np.isfinite(float(level)):
+        return abs(entry - float(level)) / atr
     return 0.0
 
 
 def entry_gate_reject_reason(row: Dict[str, Any], *, side: str, entry: float, atr: float) -> Optional[str]:
     """Return rejection code or None if gates pass."""
-    dist = _ema5_dist(row, entry, atr)
-    if dist > EMA5_MAX_DIST_ATR:
+    if _dist_atr(row, "ema5_dist_atr", entry, atr, "ema_5") > EMA5_MAX_DIST_ATR:
         return "REJECT_MID_AIR_CHASE"
+    if _dist_atr(row, "ema20_dist_atr", entry, atr, "ema_20") > EMA20_MAX_DIST_ATR:
+        return "REJECT_EMA20_EXTENSION"
 
     raw_rsi = _raw_rsi(row)
     if raw_rsi is not None:
@@ -87,21 +87,23 @@ def apply_tiered_sizing(
     row: Dict[str, Any],
     *,
     kelly_factor: float = DEFAULT_KELLY_FACTOR,
-    tier1_prob: float = TIER1_PROB,
-    soft_floor: float = TIER2_PROB,
-    hard_floor: float = HARD_FLOOR,
+    anomaly_floor: float = ANOMALY_FLOOR,
     max_risk_rupees: float = MAX_RISK_RUPEES,
+    is_top_rank: bool = False,
+    # Unused legacy kwargs kept so older call sites don't break
+    tier1_prob: float = TIER1_PROB,
+    soft_floor: float = ANOMALY_FLOOR,
+    hard_floor: float = ANOMALY_FLOOR,
 ) -> Optional[Dict[str, Any]]:
     """
-    Enrich a scored signal with tier, structural SL/TP, and ₹risk-capped lots.
+    Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
 
-    Tier 1 (P ≥ 0.62): up to 2 lots if 2×risk ≤ ₹3,000
-    Tier 2 (0.50 ≤ P < 0.62): 1 lot if risk ≤ ₹3,000
-    P < 0.50 / mid-air / RSI exhaustion / risk > ₹3,000 → discard
+    Relative ranking decides inclusion; this only enforces anomaly floor, gates,
+    and monetary risk. 2 lots only when ``is_top_rank`` and 2×risk ≤ ₹8,000.
     """
+    _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
-    floor = max(float(hard_floor), float(soft_floor), HARD_FLOOR)
-    if p < floor:
+    if p < float(anomaly_floor):
         return None
 
     side = str(row.get("side") or row.get("bias") or "BUY").upper()
@@ -123,6 +125,7 @@ def apply_tiered_sizing(
     levels = compute_structural_stop_target(
         side=side,
         entry_price=entry,
+        ema_20=row.get("ema_20"),
         ema_10=row.get("ema_10"),
         vwap=row.get("vwap"),
         safe_atr=atr,
@@ -131,7 +134,7 @@ def apply_tiered_sizing(
     take_profit = float(levels["take_profit"])
     stop_dist = float(levels["stop_distance"])
     target_dist = float(levels["target_distance"])
-    rr = (target_dist / stop_dist) if stop_dist > 0 else 2.5
+    rr = (target_dist / stop_dist) if stop_dist > 0 else 2.2
     f_star = fractional_kelly(p, rr, kelly_factor=kelly_factor)
 
     lot_size = int(row.get("lot_size") or 0)
@@ -148,12 +151,9 @@ def apply_tiered_sizing(
         )
         return None
 
-    if p >= tier1_prob:
+    if is_top_rank and (risk_per_lot * 2) <= float(max_risk_rupees) and f_star > 0:
         tier = 1
-        if (risk_per_lot * 2) <= float(max_risk_rupees) and f_star > 0:
-            lots = 2
-        else:
-            lots = 1
+        lots = 2
     else:
         tier = 2
         lots = 1
@@ -163,6 +163,7 @@ def apply_tiered_sizing(
         {
             "side": side,
             "tier": tier,
+            "is_top_rank": bool(is_top_rank),
             "kelly_fraction": round(f_star, 6),
             "reward_risk": round(rr, 4),
             "lots": int(lots),
@@ -177,32 +178,44 @@ def apply_tiered_sizing(
             "target_distance": round(target_dist, 6),
             "risk_per_lot": round(risk_per_lot, 2),
             "total_risk": round(risk_per_lot * lots, 2),
-            "stop_kind": "structural" if levels.get("stop_kind", 0) >= 1.0 else "atr_fallback",
-            "ema5_dist_atr": round(_ema5_dist(row, entry, atr), 6),
+            "stop_kind": "vol_buffered" if levels.get("stop_kind", 0) >= 1.0 else "atr_floor",
+            "ema5_dist_atr": round(_dist_atr(row, "ema5_dist_atr", entry, atr, "ema_5"), 6),
+            "ema20_dist_atr": round(_dist_atr(row, "ema20_dist_atr", entry, atr, "ema_20"), 6),
         }
     )
     return out
 
 
 class DailyTradeRanker:
-    """Daily top-K (≤3) with absolute P≥0.50 floor (no soft-fill below 0.50)."""
+    """
+    Relative daily top-K (2–3/day) by walk-forward score.
+
+    Skips a day only when its best raw score is below the anomaly floor (0.30).
+    """
 
     def __init__(
         self,
         meta_filter: Optional[RocketMetaFilter] = None,
         *,
-        min_probability_threshold: float = TIER2_PROB,
-        hard_floor: float = HARD_FLOOR,
-        min_trades_per_day: int = 2,
+        min_probability_threshold: float = ANOMALY_FLOOR,
+        hard_floor: float = ANOMALY_FLOOR,
+        min_trades_per_day: int = DEFAULT_MIN_TRADES_PER_DAY,
         max_trades_per_day: int = DEFAULT_MAX_TRADES_PER_DAY,
         kelly_factor: float = DEFAULT_KELLY_FACTOR,
         high_conviction_prob: float = TIER1_PROB,
         max_risk_rupees: float = MAX_RISK_RUPEES,
+        anomaly_floor: Optional[float] = None,
     ):
         self.meta_filter = meta_filter
-        # Absolute floor: never below 0.50 even if caller passes a lower value
-        self.min_prob = max(float(min_probability_threshold), HARD_FLOOR)
-        self.hard_floor = max(float(hard_floor), HARD_FLOOR)
+        # Relative ranking: anomaly floor defaults to 0.30. Older callers that
+        # pass 0.50/0.55 as min_probability are remapped to 0.30 so we don't starve.
+        raw_floor = float(anomaly_floor if anomaly_floor is not None else min_probability_threshold)
+        if anomaly_floor is None and raw_floor > ANOMALY_FLOOR:
+            self.anomaly_floor = ANOMALY_FLOOR
+        else:
+            self.anomaly_floor = max(0.0, raw_floor)
+        self.min_prob = self.anomaly_floor
+        self.hard_floor = self.anomaly_floor
         self.min_trades = int(min_trades_per_day)
         self.max_trades = int(max_trades_per_day)
         self.kelly_factor = float(kelly_factor)
@@ -236,30 +249,38 @@ class DailyTradeRanker:
                 ascending=[False, False],
                 na_position="last",
             )
-            # One position per symbol per day
             g = g.drop_duplicates(subset=["symbol"], keep="first")
-
-            # Absolute floor P≥0.50 — soft-fill cannot go below hard_floor
-            floor = max(self.min_prob, self.hard_floor, HARD_FLOOR)
-            pool = g[g["win_probability"] >= floor]
-            if pool.empty:
+            if g.empty:
                 continue
 
-            # Walk the full ranked pool so gate/risk rejects don't starve the day
+            best = float(g["win_probability"].max())
+            if best < self.anomaly_floor:
+                # Extreme anomaly day — skip entirely
+                continue
+
+            # Relative pool: keep scores ≥ anomaly floor when available; otherwise
+            # still take the day's top ranks (best already ≥ floor).
+            pool = g[g["win_probability"] >= self.anomaly_floor]
+            if pool.empty:
+                pool = g
+
             day_picks: List[Dict[str, Any]] = []
             for _, row in pool.iterrows():
                 if len(day_picks) >= self.max_trades:
                     break
+                is_top = len(day_picks) == 0
                 sized = apply_tiered_sizing(
                     row.to_dict(),
                     kelly_factor=self.kelly_factor,
-                    tier1_prob=self.high_conviction_prob,
-                    soft_floor=self.min_prob,
-                    hard_floor=self.hard_floor,
+                    anomaly_floor=self.anomaly_floor,
                     max_risk_rupees=self.max_risk_rupees,
+                    is_top_rank=is_top,
                 )
                 if sized is not None:
+                    # Prefer filling toward min_trades; hard-cap max_trades
                     day_picks.append(sized)
+
+            # If we got fewer than min_trades, keep what we have (gates/risk may thin the day)
             selected.extend(day_picks)
 
         return selected

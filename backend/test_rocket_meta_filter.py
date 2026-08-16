@@ -140,70 +140,74 @@ def test_stagnation_time_exit():
 
 
 def test_fractional_kelly_and_tier_sizing():
-    f = fractional_kelly(0.80, 2.5, kelly_factor=0.35)
+    f = fractional_kelly(0.80, 2.2, kelly_factor=0.35)
     assert 0.0 < f <= 0.35
 
-    # Near EMA5, mid RSI, small lot → Tier1 2 lots with structural/fallback SL
     high = apply_tiered_sizing(
         {
-            "win_probability": 0.80,
+            "win_probability": 0.40,
             "side": "BUY",
             "entry_price": 1000.0,
             "atr": 10.0,
             "safe_atr": 10.0,
             "ema_5": 1001.0,
-            "ema_10": 990.0,
+            "ema_20": 990.0,
             "vwap": 985.0,
             "ema5_dist_atr": 0.1,
+            "ema20_dist_atr": 1.0,
             "raw_rsi_14": 55.0,
             "lot_size": 50,
-        }
+        },
+        is_top_rank=True,
     )
     assert high is not None
     assert high["tier"] == 1
     assert high["lots"] == 2
-    assert high["stop_loss"] == 990.0  # max(ema10,vwap) below entry
-    assert high["total_risk"] <= 3000.0
+    # Long: struct=min(990,985)=985; SL=min(986, max(985,980))=985
+    assert abs(high["stop_loss"] - 985.0) < 1e-6
+    assert high["total_risk"] <= 8000.0
 
     mid = apply_tiered_sizing(
         {
-            "win_probability": 0.55,
+            "win_probability": 0.35,
             "side": "SELL",
             "entry_price": 1000.0,
             "atr": 10.0,
             "safe_atr": 10.0,
             "ema_5": 999.0,
-            "ema_10": 1010.0,
-            "vwap": 1015.0,
+            "ema_20": 1015.0,
+            "vwap": 1012.0,
             "ema5_dist_atr": 0.1,
+            "ema20_dist_atr": 1.5,
             "raw_rsi_14": 45.0,
             "lot_size": 50,
-        }
+        },
+        is_top_rank=False,
     )
     assert mid is not None
     assert mid["tier"] == 2
     assert mid["lots"] == 1
-    assert mid["stop_loss"] == 1010.0  # min(ema10,vwap) above entry
+    # Short: struct=max(1015,1012)=1015; SL=max(1014, min(1015,1020))=1015
+    assert abs(mid["stop_loss"] - 1015.0) < 1e-6
 
     assert apply_tiered_sizing(
         {
-            "win_probability": 0.50,
+            "win_probability": 0.30,
             "side": "BUY",
             "entry_price": 1000.0,
             "atr": 10.0,
-            "ema_5": 1000.0,
             "ema5_dist_atr": 0.1,
+            "ema20_dist_atr": 0.5,
             "raw_rsi_14": 50.0,
             "lot_size": 50,
-            "ema_10": 990.0,
+            "ema_20": 990.0,
             "vwap": 990.0,
         }
     ) is not None
-    assert apply_tiered_sizing({"win_probability": 0.49, "entry_price": 1000.0, "atr": 10.0}) is None
+    assert apply_tiered_sizing({"win_probability": 0.29, "entry_price": 1000.0, "atr": 10.0}) is None
 
 
 def test_gates_and_risk_cap():
-    # Mid-air chase
     assert (
         apply_tiered_sizing(
             {
@@ -213,15 +217,15 @@ def test_gates_and_risk_cap():
                 "atr": 1.76,
                 "safe_atr": 1.76,
                 "ema5_dist_atr": 2.73,
+                "ema20_dist_atr": 1.0,
                 "raw_rsi_14": 45.0,
                 "lot_size": 5000,
-                "ema_10": 172.0,
+                "ema_20": 172.0,
                 "vwap": 173.0,
             }
         )
         is None
     )
-    # RSI exhaustion short
     assert (
         apply_tiered_sizing(
             {
@@ -230,15 +234,15 @@ def test_gates_and_risk_cap():
                 "entry_price": 1000.0,
                 "atr": 10.0,
                 "ema5_dist_atr": 0.1,
+                "ema20_dist_atr": 0.5,
                 "raw_rsi_14": 20.0,
                 "lot_size": 50,
-                "ema_10": 1010.0,
+                "ema_20": 1010.0,
                 "vwap": 1010.0,
             }
         )
         is None
     )
-    # ASHOKLEY-like: 1 lot × 1.8ATR risk ≈ ₹15.8k → reject
     assert (
         apply_tiered_sizing(
             {
@@ -248,9 +252,10 @@ def test_gates_and_risk_cap():
                 "atr": 1.76,
                 "safe_atr": 1.76,
                 "ema5_dist_atr": 0.2,
+                "ema20_dist_atr": 0.5,
                 "raw_rsi_14": 45.0,
                 "lot_size": 5000,
-                "ema_10": 174.13,
+                "ema_20": 174.13,
                 "vwap": 175.0,
             }
         )
@@ -261,8 +266,7 @@ def test_gates_and_risk_cap():
 def test_dynamic_soft_fill_hits_min_per_day():
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
-    # Day with only weak scores below 0.50 → no soft-fill
-    for i, p in enumerate([0.40, 0.35, 0.30, 0.12]):
+    for i, p in enumerate([0.40, 0.35, 0.32, 0.31]):
         rows.append(
             {
                 "timestamp": base,
@@ -274,42 +278,41 @@ def test_dynamic_soft_fill_hits_min_per_day():
                 "entry_price": 1000.0,
                 "atr": 10.0,
                 "ema5_dist_atr": 0.1,
+                "ema20_dist_atr": 0.5,
                 "raw_rsi_14": 50.0,
                 "lot_size": 50,
-                "ema_10": 990.0,
+                "ema_20": 990.0,
                 "vwap": 990.0,
             }
         )
-    # Day with strong scores → prefer floor band, cap at 3
-    for i, p in enumerate([0.80, 0.70, 0.60, 0.58, 0.56]):
+    for i, p in enumerate([0.20, 0.15]):
         rows.append(
             {
                 "timestamp": base + timedelta(days=1),
                 "trade_date": "2026-08-04",
-                "symbol": f"S{i}",
+                "symbol": f"A{i}",
                 "side": "BUY",
                 "win_probability": p,
                 "strategy_confidence": 0.6,
                 "entry_price": 1000.0,
                 "atr": 10.0,
                 "ema5_dist_atr": 0.1,
+                "ema20_dist_atr": 0.5,
                 "raw_rsi_14": 50.0,
                 "lot_size": 50,
-                "ema_10": 990.0,
+                "ema_20": 990.0,
                 "vwap": 990.0,
             }
         )
     selected = DailyTradeRanker(
-        None, min_probability_threshold=0.50, max_trades_per_day=3, min_trades_per_day=2
+        None, anomaly_floor=0.30, max_trades_per_day=3, min_trades_per_day=2
     ).rank_and_select(rows)
-    by_day: dict = {}
+    by_day = {}
     for s in selected:
         by_day.setdefault(s["trade_date"], []).append(s)
-    assert "2026-08-03" not in by_day  # nothing ≥ 0.50
-    assert len(by_day["2026-08-04"]) == 3
-    assert all(s["win_probability"] >= 0.50 for s in by_day["2026-08-04"])
-    assert by_day["2026-08-04"][0]["tier"] == 1
-    assert by_day["2026-08-04"][0]["lots"] == 2
+    assert len(by_day["2026-08-03"]) == 3
+    assert by_day["2026-08-03"][0]["lots"] == 2
+    assert "2026-08-04" not in by_day
 
 
 def test_path_label_and_walk_forward_selector():
@@ -319,8 +322,8 @@ def test_path_label_and_walk_forward_selector():
         idx = 30 + day_offset * 20
         close = float(df.iloc[idx]["close"])
         atr = float(df.iloc[idx]["safe_atr"])
-        sl = close - 1.8 * atr if side == "BUY" else close + 1.8 * atr
-        tp = close + 3.2 * atr if side == "BUY" else close - 3.2 * atr
+        sl = close - 1.4 * atr if side == "BUY" else close + 1.4 * atr
+        tp = close + 3.0 * atr if side == "BUY" else close - 3.0 * atr
         label = path_label_signal(df, idx, side, sl, tp, close)
         feats = RocketFeatureExtractor.extract_trade_features(df, idx, side)
         rows.append(
@@ -342,20 +345,21 @@ def test_path_label_and_walk_forward_selector():
     big["symbol"] = [f"S{i%30}" for i in range(len(big))]
     big["trade_date"] = pd.to_datetime(big["timestamp"]).dt.date
 
-    meta = RocketMetaFilter(MetaModelConfig(min_train_samples=10, scoring_threshold=0.55))
+    meta = RocketMetaFilter(MetaModelConfig(min_train_samples=10, scoring_threshold=0.30))
     scored = meta.score_walk_forward(big)
     assert "win_probability" in scored.columns
     assert scored["win_probability"].notna().all()
 
     scored = scored.copy()
-    scored["win_probability"] = 0.58
+    scored["win_probability"] = 0.40
     scored["ema5_dist_atr"] = 0.1
+    scored["ema20_dist_atr"] = 0.5
     scored["raw_rsi_14"] = 50.0
     scored["lot_size"] = 50
-    scored["ema_10"] = scored["entry_price"] - 10.0
+    scored["ema_20"] = scored["entry_price"] - 10.0
     scored["vwap"] = scored["entry_price"] - 10.0
     scored["safe_atr"] = scored["atr"]
-    selected = DailyTradeRanker(meta, min_probability_threshold=0.50, max_trades_per_day=3).rank_and_select(
+    selected = DailyTradeRanker(meta, anomaly_floor=0.30, max_trades_per_day=3).rank_and_select(
         scored
     )
     assert isinstance(selected, list)

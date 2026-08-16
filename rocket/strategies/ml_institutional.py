@@ -77,6 +77,7 @@ class MLInstitutionalStrategy(BaseStrategy):
             levels = compute_structural_stop_target(
                 side="BUY" if bias == Bias.LONG else "SELL",
                 entry_price=close,
+                ema_20=bar.get("ema_20"),
                 ema_10=bar.get("ema_10"),
                 vwap=bar.get("vwap"),
                 safe_atr=atr,
