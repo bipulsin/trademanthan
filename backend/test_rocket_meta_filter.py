@@ -28,6 +28,8 @@ def _buy_confluence(**extra):
         "rvol_raw": 1.5,
         "ema_20_15m": 990.0,
         "vwap": 995.0,
+        "clv": 0.60,
+        "market_breadth": 0.60,
         "timestamp": IST.localize(datetime(2026, 8, 3, 10, 0)),
     }
     row.update(extra)
@@ -41,6 +43,8 @@ def _sell_confluence(**extra):
         "rvol_raw": 1.5,
         "ema_20_15m": 1015.0,
         "vwap": 1012.0,
+        "clv": -0.60,
+        "market_breadth": 0.40,
         "timestamp": IST.localize(datetime(2026, 8, 3, 10, 0)),
     }
     row.update(extra)
@@ -84,6 +88,7 @@ def test_feature_extractor_columns():
     assert "ema5_dist_atr" in df.columns
     assert "ema_20_15m" in df.columns
     assert "rvol" in df.columns
+    assert "clv" in df.columns
     assert "is_open_drive" in df.columns
     feats = RocketFeatureExtractor.extract_trade_features(df, 40, "BUY")
     for col in FEATURE_COLUMNS:
@@ -93,6 +98,7 @@ def test_feature_extractor_columns():
     assert "raw_rsi_14" in feats
     assert "ema_20_15m" in feats
     assert "rvol_raw" in feats
+    assert "clv" in feats
 
 
 def test_trailing_stop_ratchet():
@@ -221,7 +227,7 @@ def test_fractional_kelly_and_tier_sizing():
     assert (
         apply_tiered_sizing(
             _buy_confluence(
-                win_probability=0.38,
+                win_probability=0.42,
                 side="BUY",
                 entry_price=1000.0,
                 atr=10.0,
@@ -234,7 +240,43 @@ def test_fractional_kelly_and_tier_sizing():
         )
         is not None
     )
-    assert apply_tiered_sizing({"win_probability": 0.21, "entry_price": 1000.0, "atr": 10.0}) is None
+    assert apply_tiered_sizing({"win_probability": 0.37, "entry_price": 1000.0, "atr": 10.0}) is None
+    # Weak CLV rejected
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.55,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                clv=0.10,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is None
+    )
+    # Choppy breadth rejected
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.55,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                market_breadth=0.50,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is None
+    )
     # Low RVOL rejected
     assert (
         apply_tiered_sizing(
@@ -366,10 +408,10 @@ def test_gates_and_risk_cap():
 
 
 def test_ordinal_daily_selection_with_curfew():
-    """0.28≤P≤0.85 ordinal 0–3/day with HTF+RVOL; empty days stay empty."""
+    """0.38≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
-    day1_probs = [0.55, 0.48, 0.42, 0.38, 0.35, 0.95, 0.18]
+    day1_probs = [0.55, 0.48, 0.42, 0.39, 0.35, 0.95, 0.18]
     for i, p in enumerate(day1_probs):
         rows.append(
             _buy_confluence(
@@ -405,7 +447,7 @@ def test_ordinal_daily_selection_with_curfew():
             ema_20=990.0,
         )
     )
-    for i, p in enumerate([0.95, 0.90, 0.15, 0.10]):
+    for i, p in enumerate([0.95, 0.90, 0.30, 0.20]):
         rows.append(
             _buy_confluence(
                 timestamp=base + timedelta(days=1),
@@ -433,7 +475,7 @@ def test_ordinal_daily_selection_with_curfew():
     assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
     assert by_day["2026-08-03"][0]["symbol"] == "W0"
-    assert all(0.28 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.38 <= float(s["win_probability"]) <= 0.85 for s in selected)
     assert all(s["symbol"] != "LATE" for s in selected)
     assert "2026-08-04" not in by_day
 
@@ -475,7 +517,7 @@ def test_path_label_and_walk_forward_selector():
 
     scored = scored.copy()
     rng = np.random.default_rng(42)
-    scored["win_probability"] = 0.28 + rng.random(len(scored)) * 0.35
+    scored["win_probability"] = 0.38 + rng.random(len(scored)) * 0.30
     scored.loc[scored.index[:5], "win_probability"] = 0.95
     scored["timestamp"] = IST.localize(datetime(2026, 8, 3, 10, 30))
     scored["side"] = "BUY"
@@ -484,6 +526,8 @@ def test_path_label_and_walk_forward_selector():
     scored["rvol_raw"] = 1.5
     scored["ema_20_15m"] = scored["entry_price"] - 10.0
     scored["vwap"] = scored["entry_price"] - 5.0
+    scored["clv"] = 0.60
+    scored["market_breadth"] = 0.60
     scored["ema5_dist_atr"] = 0.1
     scored["ema20_dist_atr"] = 0.5
     scored["raw_rsi_14"] = 50.0
@@ -496,7 +540,7 @@ def test_path_label_and_walk_forward_selector():
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
-    assert all(0.28 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.38 <= float(s["win_probability"]) <= 0.85 for s in selected)
 
     cmp = build_comparison_table(
         {

@@ -14,7 +14,7 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-MIN_PROB = 0.28  # continuous-bulk floor after confluence filters
+MIN_PROB = 0.38  # top-quartile continuous-bulk floor
 MAX_PROB = 0.85  # discard calibration artifact spike
 VALID_PROB_MIN = MIN_PROB
 VALID_PROB_MAX = MAX_PROB
@@ -30,6 +30,12 @@ EMA20_MAX_DIST_ATR = 1.80
 RSI_OVERSOLD = 25.0
 RSI_OVERBOUGHT = 75.0
 MIN_RVOL = 1.25
+MIN_CLV_LONG = 0.40
+MAX_CLV_SHORT = -0.40
+BREADTH_LONG_MIN = 0.55
+BREADTH_SHORT_MAX = 0.45
+BREADTH_CHOP_LO = 0.45
+BREADTH_CHOP_HI = 0.55
 
 # Back-compat aliases
 ANOMALY_FLOOR = MIN_PROB
@@ -112,6 +118,26 @@ def entry_gate_reject_reason(row: Dict[str, Any], *, side: str, entry: float, at
     if curfew:
         return curfew
 
+    breadth = row.get("market_breadth")
+    if breadth is None or not np.isfinite(float(breadth)):
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+    b = float(breadth)
+    if BREADTH_CHOP_LO < b < BREADTH_CHOP_HI:
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+    if side in ("BUY", "LONG") and b < BREADTH_LONG_MIN:
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+    if side in ("SELL", "SHORT") and b > BREADTH_SHORT_MAX:
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+
+    clv = row.get("clv")
+    if clv is None or not np.isfinite(float(clv)):
+        return "REJECT_WEAK_CANDLE_CLOSE"
+    c_clv = float(clv)
+    if side in ("BUY", "LONG") and c_clv < MIN_CLV_LONG:
+        return "REJECT_WEAK_CANDLE_CLOSE"
+    if side in ("SELL", "SHORT") and c_clv > MAX_CLV_SHORT:
+        return "REJECT_WEAK_CANDLE_CLOSE"
+
     rvol = row.get("rvol_raw", row.get("rvol"))
     if rvol is None or not np.isfinite(float(rvol)) or float(rvol) < MIN_RVOL:
         return "REJECT_LOW_RVOL"
@@ -160,8 +186,8 @@ def apply_tiered_sizing(
     """
     Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
 
-    Ordinal ranking decides inclusion; this enforces ``0.28 ≤ P ≤ 0.85``,
-    HTF+RVOL confluence, session curfew, proximity gates, and monetary risk.
+    Ordinal ranking decides inclusion; this enforces ``0.38 ≤ P ≤ 0.85``,
+    breadth+CLV+HTF+RVOL confluence, session curfew, proximity gates, and monetary risk.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
@@ -256,8 +282,8 @@ class DailyTradeRanker:
     """
     Dynamic 0–3 ordinal daily allocator on high-confluence setups.
 
-    Days with zero candidates that pass HTF + RVOL + proximity + curfew +
-    ``0.28 ≤ P ≤ 0.85`` produce **zero trades** (no soft-fill quota).
+    Days with zero candidates that pass breadth + CLV + HTF + RVOL + proximity + curfew +
+    ``0.38 ≤ P ≤ 0.85`` produce **zero trades** (no soft-fill quota).
     """
 
     def __init__(
@@ -277,7 +303,7 @@ class DailyTradeRanker:
     ):
         self.meta_filter = meta_filter
         _ = (z_score_min, hard_floor, anomaly_floor, min_probability_threshold)
-        # Ordinal bulk floor is always 0.28; remap legacy CLI floors.
+        # Ordinal bulk floor is always 0.38; remap legacy CLI floors.
         self.min_prob = MIN_PROB
         self.max_prob = float(max_probability)
         self.anomaly_floor = self.min_prob

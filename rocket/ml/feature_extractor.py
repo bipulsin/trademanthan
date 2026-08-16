@@ -157,6 +157,12 @@ class RocketFeatureExtractor:
         out["rvol"] = np.where(out["vol_sma20"] > 0, vol / out["vol_sma20"], 1.0)
         out["vol_surge"] = np.where(out["rvol"] >= 2.0, 1, 0)
 
+        # Close Location Value: +1 close at high, -1 close at low
+        bar_range = (out["high"] - out["low"]).replace(0, np.nan)
+        out["clv"] = (
+            ((out["close"] - out["low"]) - (out["high"] - out["close"])) / bar_range
+        ).fillna(0.0).clip(-1.0, 1.0)
+
         # --- 15-minute HTF structure (no lookahead: only completed 15m bars) ---
         out = RocketFeatureExtractor._attach_htf_15m(out)
 
@@ -260,9 +266,48 @@ class RocketFeatureExtractor:
             "ema_20_15m": _f("ema_20_15m"),
             "vwap_15m": _f("vwap_15m"),
             "close_15m": _f("close_15m"),
+            "clv": _f("clv", 0.0),
+            "market_breadth": _f("market_breadth", 0.5),
         }
 
     @classmethod
+    def attach_market_breadth(cls, series: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """
+        Cross-sectional share of symbols with close > session VWAP at each timestamp.
+
+        ``market_breadth = mean(I(close > vwap))`` over the enriched universe.
+        """
+        if not series:
+            return series
+        frames: list[pd.DataFrame] = []
+        for sym, df in series.items():
+            if df is None or df.empty or "vwap" not in df.columns:
+                continue
+            tmp = df[["timestamp", "close", "vwap"]].copy()
+            tmp["above_vwap"] = (tmp["close"].astype(float) > tmp["vwap"].astype(float)).astype(float)
+            frames.append(tmp)
+        if not frames:
+            return series
+        panel = pd.concat(frames, ignore_index=True)
+        breadth = (
+            panel.groupby("timestamp", sort=True)["above_vwap"]
+            .mean()
+            .rename("market_breadth")
+            .reset_index()
+        )
+        out: Dict[str, pd.DataFrame] = {}
+        for sym, df in series.items():
+            if df is None or df.empty:
+                out[sym] = df
+                continue
+            merged = df.drop(columns=["market_breadth"], errors="ignore").merge(
+                breadth, on="timestamp", how="left"
+            )
+            out[sym] = merged
+        return out
+
+    @classmethod
     def enrich_universe(cls, series: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
-        """Return a new dict of symbol → indicator-enriched frames."""
-        return {sym: cls.calculate_indicators(df) for sym, df in series.items() if not df.empty}
+        """Return a new dict of symbol → indicator-enriched frames (+ market breadth)."""
+        enriched = {sym: cls.calculate_indicators(df) for sym, df in series.items() if not df.empty}
+        return cls.attach_market_breadth(enriched)
