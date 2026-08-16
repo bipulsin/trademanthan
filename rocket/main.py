@@ -74,12 +74,16 @@ def backtest(
     meta_filter: bool = typer.Option(
         True,
         "--meta-filter/--no-meta-filter",
-        help="Run ML meta-filter (breadth+CLV+HTF+RVOL, 0–3/day, P≥0.38)",
+        help="Run ML meta-filter (breadth+CLV+HTF+RVOL, 0–3/day, P≥0.34)",
     ),
-    min_prob: float = typer.Option(0.38, "--min-prob", help="Top-quartile continuous-bulk floor (spikes >0.85 discarded)"),
+    min_prob: float = typer.Option(0.34, "--min-prob", help="Continuous-bulk floor (spikes >0.85 discarded)"),
     max_per_day: int = typer.Option(3, "--max-per-day", help="Max selected trades per day"),
     min_per_day: int = typer.Option(0, "--min-per-day", help="Min trades/day (0 = allow empty days)"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor", help="Fractional Kelly multiplier"),
+    clv_threshold: float = typer.Option(0.20, "--clv-threshold", help="|CLV| minimum for directional close"),
+    breadth_long_min: float = typer.Option(0.50, "--breadth-long-min", help="Min universe breadth for BUY"),
+    breadth_short_max: float = typer.Option(0.50, "--breadth-short-max", help="Max universe breadth for SELL"),
+    rvol_min: float = typer.Option(1.15, "--rvol-min", help="Minimum relative volume"),
     time_exit_bars: Optional[int] = typer.Option(
         4, "--time-exit-bars", help="Stagnation exit bar count (None/0 disables)"
     ),
@@ -104,7 +108,15 @@ def backtest(
 
     if meta_filter:
         from rocket.ml.pipeline import print_comparison, run_comparative_meta_backtest
+        from rocket.ml.trade_selector import ConfluenceGatesConfig
 
+        gates = ConfluenceGatesConfig(
+            p_min=float(min_prob),
+            clv_threshold=float(clv_threshold),
+            breadth_long_min=float(breadth_long_min),
+            breadth_short_max=float(breadth_short_max),
+            rvol_min=float(rvol_min),
+        )
         result = run_comparative_meta_backtest(
             bt,
             _parse_date(start_date),
@@ -113,6 +125,7 @@ def backtest(
             min_per_day=min_per_day,
             max_per_day=max_per_day,
             kelly_factor=kelly_factor,
+            gates=gates,
         )
         metrics = dict(result["filtered"])
         metrics["comparison"] = result["comparison"]
@@ -120,6 +133,7 @@ def backtest(
         metrics["raw_signal_count"] = result.get("raw_signal_count")
         metrics["selected_count"] = result.get("selected_count")
         metrics["meta_metrics"] = result.get("meta_metrics")
+        metrics["confluence_gates"] = gates.as_dict()
         print_tearsheet(metrics, console)
         print_comparison(result["comparison"], console)
         title = (
@@ -150,7 +164,7 @@ def compare_timeframes(
     capital: float = typer.Option(10_000_000.0, "--capital"),
     limit: int = typer.Option(200, "--limit"),
     output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
-    min_prob: float = typer.Option(0.38, "--min-prob"),
+    min_prob: float = typer.Option(0.34, "--min-prob"),
     max_per_day: int = typer.Option(3, "--max-per-day"),
     min_per_day: int = typer.Option(0, "--min-per-day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
@@ -202,7 +216,7 @@ def compare_time_exits(
         "--meta-filter/--no-meta-filter",
         help="Use ML meta-filter selected entries for the sweep",
     ),
-    min_prob: float = typer.Option(0.38, "--min-prob"),
+    min_prob: float = typer.Option(0.34, "--min-prob"),
     max_per_day: int = typer.Option(3, "--max-per-day"),
     min_per_day: int = typer.Option(0, "--min-per-day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
@@ -253,6 +267,56 @@ def compare_time_exits(
     title = (
         f"ML Meta + Time Exits · {start_date} → {end_date} · {interval} · "
         f"bars={','.join(str(b) for b in bar_list)} · {metrics.get('universe_size', 0)} symbols"
+    )
+    path = export_html(metrics, out, title=title)
+    _mirror_html(path)
+
+
+@app.command("sweep-confluence")
+def sweep_confluence(
+    start_date: str = typer.Option(..., "--start-date", help="YYYY-MM-DD"),
+    end_date: str = typer.Option(..., "--end-date", help="YYYY-MM-DD"),
+    interval: str = typer.Option("5minute", "--interval"),
+    capital: float = typer.Option(10_000_000.0, "--capital"),
+    limit: int = typer.Option(200, "--limit"),
+    output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
+    max_per_day: int = typer.Option(3, "--max-per-day"),
+    min_per_day: int = typer.Option(0, "--min-per-day"),
+    kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
+    time_exit_bars: Optional[int] = typer.Option(4, "--time-exit-bars"),
+    time_exit_atr_min: float = typer.Option(0.5, "--time-exit-atr-min"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Grid-search confluence gates; pick 18–35 trades with highest profit factor."""
+    _setup_logging(verbose)
+    from rocket.ml.pipeline import print_confluence_sweep, run_confluence_sweep
+
+    settings = get_settings()
+    out = Path(output) if output else settings.rocket_output_html
+    te_bars = int(time_exit_bars) if time_exit_bars and int(time_exit_bars) > 0 else None
+    result = run_confluence_sweep(
+        start=_parse_date(start_date),
+        end=_parse_date(end_date),
+        interval=interval,
+        capital=capital,
+        limit=limit,
+        kelly_factor=kelly_factor,
+        min_per_day=min_per_day,
+        max_per_day=max_per_day,
+        time_exit_bars=te_bars,
+        time_exit_atr_min=time_exit_atr_min,
+    )
+    print_confluence_sweep(result.get("rows") or [], console)
+    metrics = dict(result.get("primary_metrics") or {})
+    metrics["confluence_sweep_rows"] = [
+        {k: v for k, v in r.items() if k not in ("filtered", "gates", "comparison")}
+        for r in (result.get("rows") or [])
+    ]
+    print_tearsheet(metrics, console)
+    best = result.get("best") or {}
+    title = (
+        f"Confluence Sweep · {start_date} → {end_date} · {interval} · "
+        f"best={best.get('label', 'n/a')}"
     )
     path = export_html(metrics, out, title=title)
     _mirror_html(path)

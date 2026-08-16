@@ -42,6 +42,12 @@ FEATURE_COLUMNS = (
     "dow",
 )
 
+# Default confluence thresholds (enforced via trade_selector.ConfluenceGatesConfig)
+DEFAULT_CLV_THRESHOLD = 0.20
+DEFAULT_BREADTH_LONG_MIN = 0.50
+DEFAULT_BREADTH_SHORT_MAX = 0.50
+DEFAULT_RVOL_MIN = 1.15
+
 
 class RocketFeatureExtractor:
     """Computes technical, structural, and session-context features for 5m candles."""

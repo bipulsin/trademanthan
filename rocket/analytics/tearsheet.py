@@ -112,10 +112,18 @@ def export_html(
         sel_n = metrics.get("selected_count")
         meta_note = ""
         if raw_n is not None and sel_n is not None:
+            g = metrics.get("confluence_gates") or {}
+            p_min = g.get("p_min", 0.34)
+            p_max = g.get("p_max", 0.85)
+            clv = g.get("clv_threshold", 0.20)
+            b_lo = g.get("breadth_long_min", 0.50)
+            b_hi = g.get("breadth_short_max", 0.50)
+            rvol = g.get("rvol_min", 1.15)
             meta_note = (
                 f"<div class='sub' style='margin:0 0 10px'>Meta-filter + fractional Kelly kept "
                 f"<strong>{sel_n}</strong> of <strong>{raw_n}</strong> raw candidates "
-                f"(breadth≥0.55/≤0.45 + CLV±0.40 + HTF 15m + RVOL≥1.25, ordinal 0–3/day on 0.38≤P≤0.85, "
+                f"(breadth≥{b_lo}/≤{b_hi} + CLV±{clv} + HTF 15m + RVOL≥{rvol}, ordinal 0–3/day on "
+                f"{p_min}≤P≤{p_max}, "
                 f"09:20–12:25 IST signal curfew → fills ≤12:30, "
                 f"EMA5≤0.70×ATR / EMA20≤1.80×ATR, RSI 25/75, ₹8k risk; "
                 f"vol-buffered EMA20/VWAP stop (1.2–1.6×ATR) + 1.8R/2.2×ATR target; "

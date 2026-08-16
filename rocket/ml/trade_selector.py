@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict, dataclass, replace
 from datetime import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,7 +15,30 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-MIN_PROB = 0.38  # top-quartile continuous-bulk floor
+
+@dataclass(frozen=True)
+class ConfluenceGatesConfig:
+    """High-confluence entry gates (calibrated baseline defaults)."""
+
+    p_min: float = 0.34
+    p_max: float = 0.85
+    clv_threshold: float = 0.20
+    breadth_long_min: float = 0.50
+    breadth_short_max: float = 0.50
+    rvol_min: float = 1.15
+
+    def label(self) -> str:
+        return (
+            f"P≥{self.p_min:.2f}/CLV±{self.clv_threshold:.2f}/"
+            f"B{self.breadth_long_min:.2f}/{self.breadth_short_max:.2f}/"
+            f"RVOL≥{self.rvol_min:.2f}"
+        )
+
+    def as_dict(self) -> Dict[str, float]:
+        return asdict(self)
+
+
+MIN_PROB = 0.34  # calibrated continuous-bulk floor
 MAX_PROB = 0.85  # discard calibration artifact spike
 VALID_PROB_MIN = MIN_PROB
 VALID_PROB_MAX = MAX_PROB
@@ -29,13 +53,13 @@ EMA5_MAX_DIST_ATR = 0.70
 EMA20_MAX_DIST_ATR = 1.80
 RSI_OVERSOLD = 25.0
 RSI_OVERBOUGHT = 75.0
-MIN_RVOL = 1.25
-MIN_CLV_LONG = 0.40
-MAX_CLV_SHORT = -0.40
-BREADTH_LONG_MIN = 0.55
-BREADTH_SHORT_MAX = 0.45
-BREADTH_CHOP_LO = 0.45
-BREADTH_CHOP_HI = 0.55
+MIN_RVOL = 1.15
+MIN_CLV_LONG = 0.20
+MAX_CLV_SHORT = -0.20
+BREADTH_LONG_MIN = 0.50
+BREADTH_SHORT_MAX = 0.50
+BREADTH_CHOP_LO = 0.50
+BREADTH_CHOP_HI = 0.50
 
 # Back-compat aliases
 ANOMALY_FLOOR = MIN_PROB
@@ -43,6 +67,8 @@ HARD_FLOOR = MIN_PROB
 TIER1_PROB = 0.62
 TIER2_PROB = MIN_PROB
 Z_SCORE_MIN = 0.0
+
+DEFAULT_GATES = ConfluenceGatesConfig()
 
 
 def in_valid_prob_band(p_win: float, *, lo: float = VALID_PROB_MIN, hi: float = VALID_PROB_MAX) -> bool:
@@ -112,8 +138,28 @@ def _dist_atr(row: Dict[str, Any], key: str, entry: float, atr: float, level_key
     return 0.0
 
 
-def entry_gate_reject_reason(row: Dict[str, Any], *, side: str, entry: float, atr: float) -> Optional[str]:
+def _breadth_reject(b: float, side: str, gates: ConfluenceGatesConfig) -> Optional[str]:
+    lo = float(gates.breadth_short_max)
+    hi = float(gates.breadth_long_min)
+    if lo < hi and lo < b < hi:
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+    if side in ("BUY", "LONG") and b < hi:
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+    if side in ("SELL", "SHORT") and b > lo:
+        return "REJECT_CHOPPY_MARKET_BREADTH"
+    return None
+
+
+def entry_gate_reject_reason(
+    row: Dict[str, Any],
+    *,
+    side: str,
+    entry: float,
+    atr: float,
+    gates: Optional[ConfluenceGatesConfig] = None,
+) -> Optional[str]:
     """Return rejection code or None if gates pass."""
+    cfg = gates or DEFAULT_GATES
     curfew = entry_curfew_reject_reason(row.get("timestamp"))
     if curfew:
         return curfew
@@ -121,25 +167,22 @@ def entry_gate_reject_reason(row: Dict[str, Any], *, side: str, entry: float, at
     breadth = row.get("market_breadth")
     if breadth is None or not np.isfinite(float(breadth)):
         return "REJECT_CHOPPY_MARKET_BREADTH"
-    b = float(breadth)
-    if BREADTH_CHOP_LO < b < BREADTH_CHOP_HI:
-        return "REJECT_CHOPPY_MARKET_BREADTH"
-    if side in ("BUY", "LONG") and b < BREADTH_LONG_MIN:
-        return "REJECT_CHOPPY_MARKET_BREADTH"
-    if side in ("SELL", "SHORT") and b > BREADTH_SHORT_MAX:
-        return "REJECT_CHOPPY_MARKET_BREADTH"
+    br = _breadth_reject(float(breadth), side, cfg)
+    if br:
+        return br
 
     clv = row.get("clv")
     if clv is None or not np.isfinite(float(clv)):
         return "REJECT_WEAK_CANDLE_CLOSE"
     c_clv = float(clv)
-    if side in ("BUY", "LONG") and c_clv < MIN_CLV_LONG:
+    thr = float(cfg.clv_threshold)
+    if side in ("BUY", "LONG") and c_clv < thr:
         return "REJECT_WEAK_CANDLE_CLOSE"
-    if side in ("SELL", "SHORT") and c_clv > MAX_CLV_SHORT:
+    if side in ("SELL", "SHORT") and c_clv > -thr:
         return "REJECT_WEAK_CANDLE_CLOSE"
 
     rvol = row.get("rvol_raw", row.get("rvol"))
-    if rvol is None or not np.isfinite(float(rvol)) or float(rvol) < MIN_RVOL:
+    if rvol is None or not np.isfinite(float(rvol)) or float(rvol) < float(cfg.rvol_min):
         return "REJECT_LOW_RVOL"
 
     close = float(row.get("close") or entry)
@@ -174,24 +217,28 @@ def apply_tiered_sizing(
     row: Dict[str, Any],
     *,
     kelly_factor: float = DEFAULT_KELLY_FACTOR,
-    anomaly_floor: float = MIN_PROB,
-    max_probability: float = MAX_PROB,
+    anomaly_floor: Optional[float] = None,
+    max_probability: Optional[float] = None,
     max_risk_rupees: float = MAX_RISK_RUPEES,
     is_top_rank: bool = False,
     tier1_prob: float = TIER1_PROB,
     soft_floor: float = MIN_PROB,
     hard_floor: float = MIN_PROB,
     require_positive_ev: bool = False,
+    gates: Optional[ConfluenceGatesConfig] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
 
-    Ordinal ranking decides inclusion; this enforces ``0.38 ≤ P ≤ 0.85``,
+    Ordinal ranking decides inclusion; this enforces calibrated P-band,
     breadth+CLV+HTF+RVOL confluence, session curfew, proximity gates, and monetary risk.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
+    cfg = gates or DEFAULT_GATES
+    p_lo = float(anomaly_floor) if anomaly_floor is not None else float(cfg.p_min)
+    p_hi = float(max_probability) if max_probability is not None else float(cfg.p_max)
     p = float(row.get("win_probability") or 0.0)
-    if p < float(anomaly_floor) or p > float(max_probability):
+    if p < p_lo or p > p_hi:
         return None
 
     side = str(row.get("side") or row.get("bias") or "BUY").upper()
@@ -205,7 +252,7 @@ def apply_tiered_sizing(
         return None
     atr = _atr_from_row(row, entry)
 
-    reject = entry_gate_reject_reason(row, side=side, entry=entry, atr=atr)
+    reject = entry_gate_reject_reason(row, side=side, entry=entry, atr=atr, gates=cfg)
     if reject:
         logger.debug("%s %s @ %.2f — %s", side, row.get("symbol"), entry, reject)
         return None
@@ -282,15 +329,15 @@ class DailyTradeRanker:
     """
     Dynamic 0–3 ordinal daily allocator on high-confluence setups.
 
-    Days with zero candidates that pass breadth + CLV + HTF + RVOL + proximity + curfew +
-    ``0.38 ≤ P ≤ 0.85`` produce **zero trades** (no soft-fill quota).
+    Days with zero candidates that pass confluence + proximity + curfew + P-band
+    produce **zero trades** (no soft-fill quota).
     """
 
     def __init__(
         self,
         meta_filter: Optional[RocketMetaFilter] = None,
         *,
-        min_probability_threshold: float = MIN_PROB,
+        min_probability_threshold: Optional[float] = None,
         hard_floor: float = MIN_PROB,
         min_trades_per_day: int = DEFAULT_MIN_TRADES_PER_DAY,
         max_trades_per_day: int = DEFAULT_MAX_TRADES_PER_DAY,
@@ -299,13 +346,19 @@ class DailyTradeRanker:
         max_risk_rupees: float = MAX_RISK_RUPEES,
         anomaly_floor: Optional[float] = None,
         z_score_min: float = Z_SCORE_MIN,
-        max_probability: float = MAX_PROB,
+        max_probability: Optional[float] = None,
+        gates: Optional[ConfluenceGatesConfig] = None,
     ):
         self.meta_filter = meta_filter
-        _ = (z_score_min, hard_floor, anomaly_floor, min_probability_threshold)
-        # Ordinal bulk floor is always 0.38; remap legacy CLI floors.
-        self.min_prob = MIN_PROB
-        self.max_prob = float(max_probability)
+        _ = (z_score_min, hard_floor, anomaly_floor)
+        cfg = gates or DEFAULT_GATES
+        if min_probability_threshold is not None:
+            cfg = replace(cfg, p_min=float(min_probability_threshold))
+        if max_probability is not None:
+            cfg = replace(cfg, p_max=float(max_probability))
+        self.gates = cfg
+        self.min_prob = float(cfg.p_min)
+        self.max_prob = float(cfg.p_max)
         self.anomaly_floor = self.min_prob
         self.hard_floor = self.min_prob
         self.min_trades = int(min_trades_per_day)
@@ -357,6 +410,7 @@ class DailyTradeRanker:
                     max_risk_rupees=self.max_risk_rupees,
                     is_top_rank=False,
                     require_positive_ev=False,
+                    gates=self.gates,
                 )
                 if sized is not None:
                     pool.append(sized)
@@ -386,6 +440,7 @@ class DailyTradeRanker:
                         max_risk_rupees=self.max_risk_rupees,
                         is_top_rank=True,
                         require_positive_ev=False,
+                        gates=self.gates,
                     )
                     day_picks.append(top if top is not None else cand)
                 else:

@@ -12,6 +12,7 @@ from rocket.ml.feature_extractor import FEATURE_COLUMNS, RocketFeatureExtractor
 from rocket.ml.meta_filter import MetaModelConfig, RocketMetaFilter
 from rocket.ml.pipeline import build_comparison_table, path_label_signal
 from rocket.ml.trade_selector import (
+    ConfluenceGatesConfig,
     DailyTradeRanker,
     apply_tiered_sizing,
     fractional_kelly,
@@ -241,7 +242,24 @@ def test_fractional_kelly_and_tier_sizing():
         is not None
     )
     assert apply_tiered_sizing({"win_probability": 0.37, "entry_price": 1000.0, "atr": 10.0}) is None
-    # Weak CLV rejected
+    # Below calibrated floor
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.33,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is None
+    )
+    # Weak CLV rejected (below ±0.20)
     assert (
         apply_tiered_sizing(
             _buy_confluence(
@@ -259,7 +277,25 @@ def test_fractional_kelly_and_tier_sizing():
         )
         is None
     )
-    # Choppy breadth rejected
+    # Breadth below long min rejected
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.55,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                market_breadth=0.49,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is None
+    )
+    # Asymmetric breadth chop zone rejected
     assert (
         apply_tiered_sizing(
             _buy_confluence(
@@ -273,7 +309,8 @@ def test_fractional_kelly_and_tier_sizing():
                 raw_rsi_14=50.0,
                 lot_size=50,
                 ema_20=990.0,
-            )
+            ),
+            gates=ConfluenceGatesConfig(breadth_long_min=0.52, breadth_short_max=0.48),
         )
         is None
     )
@@ -408,7 +445,7 @@ def test_gates_and_risk_cap():
 
 
 def test_ordinal_daily_selection_with_curfew():
-    """0.38≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
+    """0.34≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
     day1_probs = [0.55, 0.48, 0.42, 0.39, 0.35, 0.95, 0.18]
@@ -475,7 +512,7 @@ def test_ordinal_daily_selection_with_curfew():
     assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
     assert by_day["2026-08-03"][0]["symbol"] == "W0"
-    assert all(0.38 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.34 <= float(s["win_probability"]) <= 0.85 for s in selected)
     assert all(s["symbol"] != "LATE" for s in selected)
     assert "2026-08-04" not in by_day
 
@@ -517,7 +554,7 @@ def test_path_label_and_walk_forward_selector():
 
     scored = scored.copy()
     rng = np.random.default_rng(42)
-    scored["win_probability"] = 0.38 + rng.random(len(scored)) * 0.30
+    scored["win_probability"] = 0.34 + rng.random(len(scored)) * 0.30
     scored.loc[scored.index[:5], "win_probability"] = 0.95
     scored["timestamp"] = IST.localize(datetime(2026, 8, 3, 10, 30))
     scored["side"] = "BUY"
@@ -540,7 +577,37 @@ def test_path_label_and_walk_forward_selector():
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
-    assert all(0.38 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.34 <= float(s["win_probability"]) <= 0.85 for s in selected)
+
+    from rocket.ml.pipeline import iter_confluence_sweep_grid, pick_best_confluence_config
+
+    grid = iter_confluence_sweep_grid()
+    assert len(grid) == 36
+    fake_rows = [
+        {
+            "label": "a",
+            "total_trades": 10,
+            "profit_factor": 1.5,
+            "profit_factor_num": 1.5,
+            "in_target_band": False,
+        },
+        {
+            "label": "b",
+            "total_trades": 24,
+            "profit_factor": 0.9,
+            "profit_factor_num": 0.9,
+            "in_target_band": True,
+        },
+        {
+            "label": "c",
+            "total_trades": 28,
+            "profit_factor": 1.2,
+            "profit_factor_num": 1.2,
+            "in_target_band": True,
+        },
+    ]
+    best = pick_best_confluence_config(fake_rows)
+    assert best is not None and best["label"] == "c"
 
     cmp = build_comparison_table(
         {

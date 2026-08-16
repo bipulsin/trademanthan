@@ -14,7 +14,12 @@ from rocket.engine.order_book import Side
 from rocket.engine.portfolio import Position
 from rocket.ml.feature_extractor import RocketFeatureExtractor
 from rocket.ml.meta_filter import MetaModelConfig, RocketMetaFilter
-from rocket.ml.trade_selector import DailyTradeRanker, ENTRY_CURFEW_END, ENTRY_CURFEW_START
+from rocket.ml.trade_selector import (
+    ConfluenceGatesConfig,
+    DailyTradeRanker,
+    ENTRY_CURFEW_END,
+    ENTRY_CURFEW_START,
+)
 from rocket.strategies.base_strategy import Bias, Signal
 from rocket.strategies.ml_institutional import MLInstitutionalStrategy
 
@@ -354,11 +359,12 @@ def run_comparative_meta_backtest(
     start: date,
     end: date,
     *,
-    min_probability: float = 0.38,
+    min_probability: float = 0.34,
     min_per_day: int = 2,
     max_per_day: int = 3,
     min_confidence: float = 0.58,
     kelly_factor: float = 0.35,
+    gates: Optional[ConfluenceGatesConfig] = None,
 ) -> Dict[str, Any]:
     """
     1) Baseline backtest (existing strategy truncation)
@@ -366,6 +372,13 @@ def run_comparative_meta_backtest(
     3) Walk-forward score + daily top-K with Kelly sizing
     4) Filtered backtest reusing same engine/PnL path
     """
+    cfg = gates if gates is not None else ConfluenceGatesConfig(p_min=float(min_probability))
+    if gates is not None and min_probability is not None and abs(float(min_probability) - float(gates.p_min)) > 1e-12:
+        # Explicit CLI --min-prob overrides gates.p_min
+        from dataclasses import replace as _replace
+
+        cfg = _replace(gates, p_min=float(min_probability))
+
     if not bt.series:
         bt.fetch_data(start, end)
 
@@ -388,11 +401,12 @@ def run_comparative_meta_backtest(
 
     # --- Harvest + score ---
     raw = harvest_raw_signals(bt, start, end, min_confidence=min_confidence)
-    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=min_probability))
+    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=cfg.p_min))
     if raw.empty:
         filtered = dict(baseline)
         filtered["label"] = "ml_filtered"
         filtered["total_trades"] = 0
+        filtered["confluence_gates"] = cfg.as_dict()
         return {
             "baseline": baseline,
             "filtered": filtered,
@@ -400,23 +414,26 @@ def run_comparative_meta_backtest(
             "meta_metrics": {"note": "no_raw_signals"},
             "selected_count": 0,
             "raw_signal_count": 0,
+            "gates": cfg,
         }
 
     scored = meta.score_walk_forward(raw)
     ranker = DailyTradeRanker(
         meta,
-        min_probability_threshold=min_probability,
+        min_probability_threshold=cfg.p_min,
         min_trades_per_day=min_per_day,
         max_trades_per_day=max_per_day,
         kelly_factor=kelly_factor,
+        gates=cfg,
     )
     selected = ranker.rank_and_select(scored)
     by_key = ranker.selected_by_key(selected)
     logger.info(
-        "Meta selected %s / %s signals (%.1f%%); tier1=%s tier2=%s avg_lots=%.2f",
+        "Meta selected %s / %s signals (%.1f%%); gates=%s; tier1=%s tier2=%s avg_lots=%.2f",
         len(selected),
         len(raw),
         100.0 * len(selected) / max(1, len(raw)),
+        cfg.label(),
         sum(1 for s in selected if int(s.get("tier") or 0) == 1),
         sum(1 for s in selected if int(s.get("tier") or 0) == 2),
         float(np.mean([s.get("lots") or 1 for s in selected])) if selected else 0.0,
@@ -437,6 +454,7 @@ def run_comparative_meta_backtest(
     filtered["selected_signals"] = len(selected)
     filtered["raw_signals"] = len(raw)
     filtered["kelly_factor"] = kelly_factor
+    filtered["confluence_gates"] = cfg.as_dict()
 
     comparison = build_comparison_table(baseline, filtered)
     return {
@@ -449,6 +467,7 @@ def run_comparative_meta_backtest(
         "selected_trades": selected,
         "avg_trades_per_day_baseline": _avg_trades_per_day(baseline),
         "avg_trades_per_day_filtered": _avg_trades_per_day(filtered),
+        "gates": cfg,
     }
 
 
@@ -459,7 +478,7 @@ def run_timeframe_comparison(
     intervals: Sequence[str] = ("5minute", "15minute"),
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.38,
+    min_probability: float = 0.34,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -480,6 +499,7 @@ def run_timeframe_comparison(
             min_per_day=min_per_day,
             max_per_day=max_per_day,
             kelly_factor=kelly_factor,
+            gates=ConfluenceGatesConfig(p_min=float(min_probability)),
         )
 
     timeframe_comparison = build_timeframe_comparison_table(results)
@@ -578,7 +598,7 @@ def run_time_exit_comparison(
     interval: str = "5minute",
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.38,
+    min_probability: float = 0.34,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -590,6 +610,7 @@ def run_time_exit_comparison(
     Harvest + score once, then replay the same meta-selected signals under each
     stagnation horizon (and optionally a no-time-exit control).
     """
+    gates = ConfluenceGatesConfig(p_min=float(min_probability))
     bt = RocketBacktester(
         interval=interval,
         capital=capital,
@@ -615,7 +636,7 @@ def run_time_exit_comparison(
     baseline["label"] = "raw_baseline"
 
     raw = harvest_raw_signals(bt, start, end, min_confidence=min_confidence)
-    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=min_probability))
+    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=gates.p_min))
     if raw.empty:
         empty = dict(baseline)
         empty["label"] = "ml_filtered"
@@ -630,10 +651,11 @@ def run_time_exit_comparison(
     scored = meta.score_walk_forward(raw)
     ranker = DailyTradeRanker(
         meta,
-        min_probability_threshold=min_probability,
+        min_probability_threshold=gates.p_min,
         min_trades_per_day=min_per_day,
         max_trades_per_day=max_per_day,
         kelly_factor=kelly_factor,
+        gates=gates,
     )
     selected = ranker.rank_and_select(scored)
     by_key = ranker.selected_by_key(selected)
@@ -742,6 +764,257 @@ def print_time_exit_comparison(
     for row in comparison:
         table.add_row(str(row["metric"]), *[str(row.get(h, "—")) for h in horizons])
     con.print(table)
+
+
+# Calibrated confluence sweep grid (Jul 15–Aug 14 tuning matrix)
+CONFLUENCE_SWEEP_P_MIN = (0.33, 0.34, 0.36)
+CONFLUENCE_SWEEP_CLV = (0.15, 0.20, 0.25)
+CONFLUENCE_SWEEP_BREADTH = ((0.50, 0.50), (0.52, 0.48))
+CONFLUENCE_SWEEP_RVOL = (1.15, 1.25)
+TARGET_TRADE_LO = 18
+TARGET_TRADE_HI = 35
+
+
+def iter_confluence_sweep_grid() -> List[ConfluenceGatesConfig]:
+    grid: List[ConfluenceGatesConfig] = []
+    for p_min in CONFLUENCE_SWEEP_P_MIN:
+        for clv in CONFLUENCE_SWEEP_CLV:
+            for b_long, b_short in CONFLUENCE_SWEEP_BREADTH:
+                for rvol in CONFLUENCE_SWEEP_RVOL:
+                    grid.append(
+                        ConfluenceGatesConfig(
+                            p_min=float(p_min),
+                            p_max=0.85,
+                            clv_threshold=float(clv),
+                            breadth_long_min=float(b_long),
+                            breadth_short_max=float(b_short),
+                            rvol_min=float(rvol),
+                        )
+                    )
+    return grid
+
+
+def _pf_numeric(m: Dict[str, Any]) -> float:
+    pf = m.get("profit_factor")
+    if pf is None and m.get("profit_factor_raw") == float("inf"):
+        return float("inf")
+    try:
+        return float(pf) if pf is not None else float("-inf")
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
+def pick_best_confluence_config(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    trade_lo: int = TARGET_TRADE_LO,
+    trade_hi: int = TARGET_TRADE_HI,
+) -> Optional[Dict[str, Any]]:
+    """Prefer 18–35 trades with highest PF; else closest trade count then highest PF."""
+    in_band = [r for r in rows if trade_lo <= int(r.get("total_trades") or 0) <= trade_hi]
+    pool = in_band if in_band else list(rows)
+    if not pool:
+        return None
+
+    def _key(r: Dict[str, Any]) -> Tuple[float, float, int]:
+        n = int(r.get("total_trades") or 0)
+        pf = float(r.get("profit_factor_num") or _pf_numeric(r))
+        if in_band:
+            return (pf, -abs(n - 26), n)
+        # Outside band: minimize distance to midpoint, then maximize PF
+        mid = 0.5 * (trade_lo + trade_hi)
+        return (-abs(n - mid), pf, n)
+
+    return max(pool, key=_key)
+
+
+def run_confluence_sweep(
+    *,
+    start: date,
+    end: date,
+    interval: str = "5minute",
+    capital: float = 10_000_000.0,
+    limit: int = 200,
+    kelly_factor: float = 0.35,
+    min_per_day: int = 0,
+    max_per_day: int = 3,
+    min_confidence: float = 0.58,
+    time_exit_bars: Optional[int] = 4,
+    time_exit_atr_min: float = 0.5,
+    grid: Optional[Sequence[ConfluenceGatesConfig]] = None,
+) -> Dict[str, Any]:
+    """
+    Harvest + walk-forward score once, then replay each confluence gate combo.
+    Identifies the config in the 18–35 trade band with the highest profit factor.
+    """
+    configs = list(grid) if grid is not None else iter_confluence_sweep_grid()
+    te_bars = int(time_exit_bars) if time_exit_bars and int(time_exit_bars) > 0 else None
+
+    bt = RocketBacktester(
+        interval=interval,
+        capital=capital,
+        max_symbols=limit,
+        time_exit_bars=te_bars,
+        time_exit_atr_min=time_exit_atr_min,
+    )
+    bt.load_universe()
+    bt.fetch_data(start, end)
+    bt.series = RocketFeatureExtractor.enrich_universe(bt.series)
+
+    baseline_strategy = MLInstitutionalStrategy(
+        min_confidence=min_confidence,
+        max_signals_per_bar=3,
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
+    )
+    bt.strategy = baseline_strategy
+    bt.signal_filter = None
+    baseline = bt.run(start, end)
+    baseline["label"] = "raw_baseline"
+
+    raw = harvest_raw_signals(bt, start, end, min_confidence=min_confidence)
+    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=0.34))
+    if raw.empty:
+        return {
+            "baseline": baseline,
+            "rows": [],
+            "best": None,
+            "raw_signal_count": 0,
+            "primary_metrics": baseline,
+        }
+
+    scored = meta.score_walk_forward(raw)
+    filtered_strategy = MLInstitutionalStrategy(
+        min_confidence=min_confidence,
+        max_signals_per_bar=10_000,
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
+    )
+
+    rows: List[Dict[str, Any]] = []
+    by_label: Dict[str, Any] = {}
+    for i, cfg in enumerate(configs, start=1):
+        label = cfg.label()
+        logger.info("=== Confluence sweep %s/%s: %s ===", i, len(configs), label)
+        ranker = DailyTradeRanker(
+            meta,
+            min_probability_threshold=cfg.p_min,
+            min_trades_per_day=min_per_day,
+            max_trades_per_day=max_per_day,
+            kelly_factor=kelly_factor,
+            gates=cfg,
+        )
+        selected = ranker.rank_and_select(scored)
+        by_key = ranker.selected_by_key(selected)
+        bt.strategy = filtered_strategy
+        bt.signal_filter = SizedSignalGate(by_key)
+        bt.time_exit_bars = te_bars
+        bt.time_exit_atr_min = float(time_exit_atr_min)
+        filtered = bt.run(start, end)
+        filtered["label"] = f"sweep_{label}"
+        filtered["selected_signals"] = len(selected)
+        filtered["raw_signals"] = len(raw)
+        filtered["kelly_factor"] = kelly_factor
+        filtered["confluence_gates"] = cfg.as_dict()
+
+        n_trades = int(filtered.get("total_trades") or 0)
+        pf_num = _pf_numeric(filtered)
+        row = {
+            "label": label,
+            "p_min": cfg.p_min,
+            "clv": cfg.clv_threshold,
+            "breadth_long": cfg.breadth_long_min,
+            "breadth_short": cfg.breadth_short_max,
+            "rvol_min": cfg.rvol_min,
+            "selected": len(selected),
+            "total_trades": n_trades,
+            "win_rate_pct": filtered.get("win_rate_pct"),
+            "profit_factor": filtered.get("profit_factor"),
+            "profit_factor_num": pf_num,
+            "net_return_pct": filtered.get("net_return_pct"),
+            "max_drawdown_pct": filtered.get("max_drawdown_pct"),
+            "expectancy": filtered.get("expectancy"),
+            "in_target_band": TARGET_TRADE_LO <= n_trades <= TARGET_TRADE_HI,
+            "gates": cfg,
+            "filtered": filtered,
+            "comparison": build_comparison_table(baseline, filtered),
+        }
+        rows.append(row)
+        by_label[label] = row
+
+    best = pick_best_confluence_config(rows)
+    if best is not None:
+        logger.info(
+            "Best confluence config: %s | trades=%s PF=%s in_band=%s",
+            best["label"],
+            best["total_trades"],
+            best.get("profit_factor"),
+            best.get("in_target_band"),
+        )
+
+    primary = dict((best or rows[0])["filtered"]) if (best or rows) else dict(baseline)
+    if best or rows:
+        chosen = best or rows[0]
+        primary["comparison"] = chosen["comparison"]
+        primary["baseline"] = baseline
+        primary["raw_signal_count"] = int(len(raw))
+        primary["selected_count"] = chosen.get("selected")
+        primary["confluence_gates"] = chosen["gates"].as_dict()
+        primary["confluence_sweep_best"] = chosen["label"]
+        primary["meta_metrics"] = meta.train_metrics
+
+    return {
+        "baseline": baseline,
+        "rows": rows,
+        "best": best,
+        "by_label": by_label,
+        "raw_signal_count": int(len(raw)),
+        "primary_metrics": primary,
+        "meta_metrics": meta.train_metrics,
+        "grid_size": len(configs),
+    }
+
+
+def print_confluence_sweep(rows: Sequence[Dict[str, Any]], console: Any = None) -> None:
+    from rich.console import Console
+    from rich.table import Table
+
+    con = console or Console()
+    table = Table(title="Rocket — Confluence Gate Sweep", show_header=True)
+    table.add_column("P_min", justify="right")
+    table.add_column("CLV±", justify="right")
+    table.add_column("Breadth L/S", justify="right")
+    table.add_column("RVOL", justify="right")
+    table.add_column("Selected", justify="right")
+    table.add_column("Trades", justify="right")
+    table.add_column("WR%", justify="right")
+    table.add_column("PF", justify="right")
+    table.add_column("Net%", justify="right")
+    table.add_column("Band", justify="center")
+    for r in rows:
+        band = "✓" if r.get("in_target_band") else ""
+        pf = r.get("profit_factor")
+        pf_s = "∞" if pf is None and r.get("profit_factor_num") == float("inf") else str(pf if pf is not None else "—")
+        table.add_row(
+            f"{float(r['p_min']):.2f}",
+            f"{float(r['clv']):.2f}",
+            f"{float(r['breadth_long']):.2f}/{float(r['breadth_short']):.2f}",
+            f"{float(r['rvol_min']):.2f}",
+            str(r.get("selected")),
+            str(r.get("total_trades")),
+            str(r.get("win_rate_pct") if r.get("win_rate_pct") is not None else "—"),
+            pf_s,
+            str(r.get("net_return_pct") if r.get("net_return_pct") is not None else "—"),
+            band,
+        )
+    con.print(table)
+    best = pick_best_confluence_config(rows)
+    if best is not None:
+        con.print(
+            f"[bold green]Best[/bold green] {best['label']} · "
+            f"trades={best['total_trades']} · PF={best.get('profit_factor')} · "
+            f"in_band={best.get('in_target_band')}"
+        )
 
 
 def _avg_trades_per_day(metrics: Dict[str, Any]) -> float:
