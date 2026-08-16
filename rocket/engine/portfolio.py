@@ -23,6 +23,8 @@ class Position:
     take_profit: Optional[float] = None
     opened_at: Optional[datetime] = None
     confidence: float = 0.0
+    atr: Optional[float] = None
+    trail_activated: bool = False
 
     @property
     def direction(self) -> int:
@@ -30,6 +32,36 @@ class Position:
 
     def unrealized_pnl(self, mark: float) -> float:
         return (mark - self.avg_price) * self.quantity * self.direction
+
+    def update_trailing_stop(
+        self,
+        *,
+        high: float,
+        low: float,
+        activate_at_r: float = 1.0,
+        trail_atr_mult: float = 2.0,
+    ) -> None:
+        """
+        After +activate_at_r × ATR favorable move, ratchet stop by trail_atr_mult × ATR
+        from the bar extreme (long: high − 2ATR; short: low + 2ATR).
+        """
+        if self.atr is None or self.atr <= 0:
+            return
+        atr = float(self.atr)
+        if self.side == Side.BUY:
+            if (high - self.avg_price) >= activate_at_r * atr:
+                self.trail_activated = True
+            if self.trail_activated:
+                trail = high - trail_atr_mult * atr
+                if self.stop_loss is None or trail > self.stop_loss:
+                    self.stop_loss = trail
+        else:
+            if (self.avg_price - low) >= activate_at_r * atr:
+                self.trail_activated = True
+            if self.trail_activated:
+                trail = low + trail_atr_mult * atr
+                if self.stop_loss is None or trail < self.stop_loss:
+                    self.stop_loss = trail
 
 
 @dataclass
@@ -114,6 +146,7 @@ class Portfolio:
         take_profit: Optional[float] = None,
         confidence: float = 0.0,
         reason: str = "",
+        atr: Optional[float] = None,
     ) -> Optional[CostBreakdown]:
         slip_rupees = fill.slippage_per_unit * fill.quantity
         cost = self.cost_model.compute(
@@ -143,6 +176,7 @@ class Portfolio:
                 take_profit=take_profit,
                 opened_at=fill.timestamp,
                 confidence=confidence,
+                atr=atr,
             )
             return cost
 
@@ -185,6 +219,7 @@ class Portfolio:
                     take_profit=take_profit,
                     opened_at=fill.timestamp,
                     confidence=confidence,
+                    atr=atr,
                 )
             return cost
 

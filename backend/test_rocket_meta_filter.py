@@ -61,8 +61,38 @@ def test_feature_extractor_columns():
         assert np.isfinite(feats[col])
 
 
+def test_trailing_stop_ratchet():
+    from rocket.engine.order_book import Side
+    from rocket.engine.portfolio import Position
+
+    pos = Position(
+        symbol="ABC",
+        instrument_key="NSE_FO|ABC",
+        side=Side.BUY,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        stop_loss=1000.0 - 1.8 * 10.0,
+        take_profit=1000.0 + 3.2 * 10.0,
+        atr=10.0,
+    )
+    # Not enough favorable move yet
+    pos.update_trailing_stop(high=1005.0, low=998.0, activate_at_r=1.0, trail_atr_mult=2.0)
+    assert pos.trail_activated is False
+    assert abs(pos.stop_loss - 982.0) < 1e-6
+
+    # +1.0×ATR: activate and ratchet to high − 2ATR
+    pos.update_trailing_stop(high=1010.0, low=1000.0, activate_at_r=1.0, trail_atr_mult=2.0)
+    assert pos.trail_activated is True
+    assert abs(pos.stop_loss - (1010.0 - 20.0)) < 1e-6
+
+    # Further high ratchets stop up only
+    pos.update_trailing_stop(high=1020.0, low=1005.0, activate_at_r=1.0, trail_atr_mult=2.0)
+    assert abs(pos.stop_loss - (1020.0 - 20.0)) < 1e-6
+
+
 def test_fractional_kelly_and_tier_sizing():
-    f = fractional_kelly(0.80, 3.2 / 1.2, kelly_factor=0.35)
+    f = fractional_kelly(0.80, 3.2 / 1.8, kelly_factor=0.35)
     assert 0.0 < f <= 0.35
 
     high = apply_tiered_sizing(
@@ -75,13 +105,13 @@ def test_fractional_kelly_and_tier_sizing():
     )
     assert high is not None
     assert high["tier"] == 1
-    assert high["lots"] in (2, 3)
-    assert abs(high["stop_loss"] - (1000.0 - 1.2 * 10.0)) < 1e-6
+    assert high["lots"] == 2
+    assert abs(high["stop_loss"] - (1000.0 - 1.8 * 10.0)) < 1e-6
     assert abs(high["take_profit"] - (1000.0 + 3.2 * 10.0)) < 1e-6
 
     mid = apply_tiered_sizing(
         {
-            "win_probability": 0.70,
+            "win_probability": 0.58,
             "side": "SELL",
             "entry_price": 1000.0,
             "atr": 10.0,
@@ -92,7 +122,53 @@ def test_fractional_kelly_and_tier_sizing():
     assert mid["lots"] == 1
     assert abs(mid["stop_loss"] - (1000.0 + 1.8 * 10.0)) < 1e-6
 
-    assert apply_tiered_sizing({"win_probability": 0.50, "entry_price": 1000.0, "atr": 10.0}) is None
+    assert apply_tiered_sizing({"win_probability": 0.50, "entry_price": 1000.0, "atr": 10.0}) is not None
+    assert apply_tiered_sizing({"win_probability": 0.10, "entry_price": 1000.0, "atr": 10.0}) is None
+
+
+def test_dynamic_soft_fill_hits_min_per_day():
+    rows = []
+    base = IST.localize(datetime(2026, 8, 3, 10, 0))
+    # Day with only weak scores → soft-fill to min_trades
+    for i, p in enumerate([0.40, 0.35, 0.30, 0.12]):
+        rows.append(
+            {
+                "timestamp": base,
+                "trade_date": "2026-08-03",
+                "symbol": f"W{i}",
+                "side": "BUY",
+                "win_probability": p,
+                "strategy_confidence": 0.6,
+                "entry_price": 1000.0,
+                "atr": 10.0,
+            }
+        )
+    # Day with strong scores → prefer soft-floor band, cap at 3
+    for i, p in enumerate([0.80, 0.70, 0.60, 0.58, 0.56]):
+        rows.append(
+            {
+                "timestamp": base + timedelta(days=1),
+                "trade_date": "2026-08-04",
+                "symbol": f"S{i}",
+                "side": "BUY",
+                "win_probability": p,
+                "strategy_confidence": 0.6,
+                "entry_price": 1000.0,
+                "atr": 10.0,
+            }
+        )
+    selected = DailyTradeRanker(
+        None, min_probability_threshold=0.55, max_trades_per_day=3, min_trades_per_day=2
+    ).rank_and_select(rows)
+    by_day: dict = {}
+    for s in selected:
+        by_day.setdefault(s["trade_date"], []).append(s)
+    assert len(by_day["2026-08-03"]) == 2
+    assert all(s["win_probability"] >= 0.20 for s in by_day["2026-08-03"])
+    assert len(by_day["2026-08-04"]) == 3
+    assert all(s["win_probability"] >= 0.55 for s in by_day["2026-08-04"])
+    assert by_day["2026-08-04"][0]["tier"] == 1
+    assert by_day["2026-08-04"][0]["lots"] == 2
 
 
 def test_path_label_and_walk_forward_selector():
@@ -131,8 +207,8 @@ def test_path_label_and_walk_forward_selector():
     assert scored["win_probability"].notna().all()
 
     scored = scored.copy()
-    scored["win_probability"] = 0.70
-    selected = DailyTradeRanker(meta, min_probability_threshold=0.65, max_trades_per_day=4).rank_and_select(
+    scored["win_probability"] = 0.58
+    selected = DailyTradeRanker(meta, min_probability_threshold=0.55, max_trades_per_day=3).rank_and_select(
         scored
     )
     assert isinstance(selected, list)

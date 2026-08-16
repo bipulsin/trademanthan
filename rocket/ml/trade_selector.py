@@ -1,4 +1,4 @@
-"""Daily top-K allocator with volatility-adjusted fractional Kelly sizing."""
+"""Daily top-K allocator with calibrated soft-floor and fixed 1.8×ATR stops."""
 
 from __future__ import annotations
 
@@ -9,20 +9,21 @@ import pandas as pd
 
 from rocket.ml.meta_filter import RocketMetaFilter
 
-# Tier ATR multiples (structural invalidation + reward)
-TIER1_STOP_ATR = 1.2
-TIER1_TARGET_ATR = 3.2
-TIER2_STOP_ATR = 1.8
-TIER2_TARGET_ATR = 3.2
+# Fixed stop/target for all tiers (no 1.2× tightening)
+STOP_ATR = 1.8
+TARGET_ATR = 3.2
 
-TIER1_PROB = 0.75
-TIER2_PROB = 0.65
+TIER1_PROB = 0.62  # high conviction
+TIER2_PROB = 0.55  # preferred soft floor / standard
+# Absolute discard when soft-filling toward min_trades/day (isotonic OOF is bimodal)
+HARD_FLOOR = 0.20
 DEFAULT_KELLY_FACTOR = 0.35
+DEFAULT_MAX_TRADES_PER_DAY = 3
 
 
 def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = DEFAULT_KELLY_FACTOR) -> float:
     """
-    Half/fractional Kelly fraction.
+    Fractional Kelly fraction.
 
     f* = clip( (P·R − (1−P)) / R , 0, 1 ) × kelly_factor
     """
@@ -41,7 +42,6 @@ def _atr_from_row(row: Dict[str, Any], entry: float) -> float:
             return float(val)
     atr_pct = row.get("atr_pct")
     if atr_pct is not None and np.isfinite(float(atr_pct)) and float(atr_pct) > 0:
-        # atr_pct in feature extractor is percent of price
         return abs(entry) * float(atr_pct) / 100.0
     return abs(entry) * 0.005
 
@@ -50,16 +50,19 @@ def apply_tiered_sizing(
     row: Dict[str, Any],
     *,
     kelly_factor: float = DEFAULT_KELLY_FACTOR,
-    max_lots_tier1: int = 3,
-    min_lots_tier1: int = 2,
+    tier1_prob: float = TIER1_PROB,
+    soft_floor: float = TIER2_PROB,
+    hard_floor: float = HARD_FLOOR,
 ) -> Optional[Dict[str, Any]]:
     """
-    Enrich a scored signal with tier, Kelly fraction, lots, and recalibrated SL/TP.
+    Enrich a scored signal with tier, Kelly fraction, lots, and fixed 1.8/3.2 ATR levels.
 
-    Returns None when P < Tier-2 threshold (discard).
+    Tier 1 (P ≥ 0.62): 2 lots (Kelly-capped)
+    Tier 2 (hard_floor ≤ P < 0.62): 1 lot  — includes soft-fill below preferred 0.55
+    Below hard_floor: discard
     """
     p = float(row.get("win_probability") or 0.0)
-    if p < TIER2_PROB:
+    if p < hard_floor:
         return None
 
     side = str(row.get("side") or row.get("bias") or "BUY").upper()
@@ -74,20 +77,20 @@ def apply_tiered_sizing(
         return None
     atr = _atr_from_row(row, entry)
 
-    if p >= TIER1_PROB:
+    stop_mult, target_mult = STOP_ATR, TARGET_ATR
+    rr = target_mult / stop_mult  # ≈ 1.778
+    f_star = fractional_kelly(p, rr, kelly_factor=kelly_factor)
+
+    if p >= tier1_prob:
         tier = 1
-        stop_mult, target_mult = TIER1_STOP_ATR, TIER1_TARGET_ATR
-        rr = target_mult / stop_mult  # ≈ 2.667
-        f_star = fractional_kelly(p, rr, kelly_factor=kelly_factor)
-        # Map f* into 2–3 lots (higher conviction / Kelly → 3)
-        lots = max_lots_tier1 if f_star >= (kelly_factor * 0.35) else min_lots_tier1
-        lots = int(np.clip(lots, min_lots_tier1, max_lots_tier1))
+        lots = 2
+        if f_star <= 0:
+            lots = 1
     else:
+        # Preferred band is soft_floor→tier1; soft-filled marginals stay 1 lot
         tier = 2
-        stop_mult, target_mult = TIER2_STOP_ATR, TIER2_TARGET_ATR
-        rr = target_mult / stop_mult  # ≈ 1.778
-        f_star = fractional_kelly(p, rr, kelly_factor=kelly_factor)
         lots = 1
+        _ = soft_floor  # documented preferred floor; sizing uses hard_floor gate
 
     stop_dist = stop_mult * atr
     target_dist = target_mult * atr
@@ -118,20 +121,27 @@ def apply_tiered_sizing(
 
 
 class DailyTradeRanker:
-    """Keep 2–4 highest-conviction signals per session day with Kelly sizing."""
+    """
+    Daily top-K (≤3) with calibrated soft-floor.
+
+    Prefer P ≥ 0.55; if a day is short of min_trades, soft-fill from next-best
+    scores down to HARD_FLOOR so the window stays near 20–35 trades.
+    """
 
     def __init__(
         self,
         meta_filter: Optional[RocketMetaFilter] = None,
         *,
         min_probability_threshold: float = TIER2_PROB,
+        hard_floor: float = HARD_FLOOR,
         min_trades_per_day: int = 2,
-        max_trades_per_day: int = 4,
+        max_trades_per_day: int = DEFAULT_MAX_TRADES_PER_DAY,
         kelly_factor: float = DEFAULT_KELLY_FACTOR,
         high_conviction_prob: float = TIER1_PROB,
     ):
         self.meta_filter = meta_filter
         self.min_prob = float(min_probability_threshold)
+        self.hard_floor = float(hard_floor)
         self.min_trades = int(min_trades_per_day)
         self.max_trades = int(max_trades_per_day)
         self.kelly_factor = float(kelly_factor)
@@ -141,13 +151,6 @@ class DailyTradeRanker:
         self,
         scored_signals: List[Dict[str, Any]] | pd.DataFrame,
     ) -> List[Dict[str, Any]]:
-        """
-        Parameters
-        ----------
-        scored_signals
-            Rows must include ``win_probability``, ``timestamp``, ``symbol``,
-            and price/ATR context for sizing.
-        """
         if scored_signals is None:
             return []
         df = (
@@ -166,32 +169,41 @@ class DailyTradeRanker:
 
         selected: List[Dict[str, Any]] = []
         for _date, group in df.groupby("trade_date", sort=True):
-            # Tier-3 discard: hard floor at min_prob (default 0.65)
-            g = group[group["win_probability"] >= self.min_prob].copy()
-            if g.empty:
-                continue
-            g = g.sort_values(
+            g = group.sort_values(
                 ["win_probability", "strategy_confidence"],
                 ascending=[False, False],
                 na_position="last",
             )
+            # One position per symbol per day
             g = g.drop_duplicates(subset=["symbol"], keep="first")
 
-            n = min(self.max_trades, len(g))
-            if n < self.min_trades and len(g) >= self.min_trades:
-                n = self.min_trades
-            n = min(n, len(g), self.max_trades)
-            alloc = g.head(n)
+            preferred = g[g["win_probability"] >= self.min_prob]
+            if len(preferred) >= self.min_trades:
+                pick = preferred.head(self.max_trades)
+            else:
+                # Dynamic soft-fill: keep preferred, then next-best ≥ hard_floor
+                pool = g[g["win_probability"] >= self.hard_floor]
+                if pool.empty:
+                    continue
+                # Prefer filling to min_trades when possible; never exceed max
+                n = min(self.max_trades, max(self.min_trades, len(preferred)), len(pool))
+                n = min(self.max_trades, max(n, min(self.min_trades, len(pool))))
+                pick = pool.head(n)
 
-            for _, row in alloc.iterrows():
-                sized = apply_tiered_sizing(row.to_dict(), kelly_factor=self.kelly_factor)
+            for _, row in pick.iterrows():
+                sized = apply_tiered_sizing(
+                    row.to_dict(),
+                    kelly_factor=self.kelly_factor,
+                    tier1_prob=self.high_conviction_prob,
+                    soft_floor=self.min_prob,
+                    hard_floor=self.hard_floor,
+                )
                 if sized is not None:
                     selected.append(sized)
 
         return selected
 
     def selected_keys(self, selected: List[Dict[str, Any]]) -> set[Tuple[str, str, str]]:
-        """Stable identity for backtester gate: (symbol, signal_ts_iso, side)."""
         keys: set[Tuple[str, str, str]] = set()
         for row in selected:
             ts = row.get("timestamp")

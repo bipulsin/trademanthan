@@ -26,6 +26,7 @@ class Signal:
     lots: int = 1
     reason: str = ""
     features: Optional[Dict[str, float]] = None
+    atr: Optional[float] = None
 
 
 class BaseStrategy(ABC):

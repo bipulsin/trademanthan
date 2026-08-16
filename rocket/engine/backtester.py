@@ -215,6 +215,7 @@ class RocketBacktester:
                         take_profit=sig.target,
                         confidence=sig.confidence,
                         reason="entry",
+                        atr=getattr(sig, "atr", None),
                     )
             pending_entries = still_pending
 
@@ -242,16 +243,29 @@ class RocketBacktester:
                 bar = snapshot[sym]
                 hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
                 c = contract_by_sym[sym]
+                # After +1.0×ATR profit, ratchet stop to 2.0×ATR from bar extreme
+                pos.update_trailing_stop(
+                    high=hi,
+                    low=lo,
+                    activate_at_r=1.0,
+                    trail_atr_mult=2.0,
+                )
                 exit_px = None
                 reason = ""
                 if pos.side == Side.BUY:
                     if pos.stop_loss is not None and lo <= pos.stop_loss:
-                        exit_px, reason = pos.stop_loss, "stop_loss"
+                        exit_px, reason = (
+                            pos.stop_loss,
+                            "trailing_stop" if pos.trail_activated else "stop_loss",
+                        )
                     elif pos.take_profit is not None and hi >= pos.take_profit:
                         exit_px, reason = pos.take_profit, "take_profit"
                 else:
                     if pos.stop_loss is not None and hi >= pos.stop_loss:
-                        exit_px, reason = pos.stop_loss, "stop_loss"
+                        exit_px, reason = (
+                            pos.stop_loss,
+                            "trailing_stop" if pos.trail_activated else "stop_loss",
+                        )
                     elif pos.take_profit is not None and lo <= pos.take_profit:
                         exit_px, reason = pos.take_profit, "take_profit"
                 # flatten near session end

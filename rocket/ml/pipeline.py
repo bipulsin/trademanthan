@@ -143,6 +143,13 @@ class SizedSignalGate:
                 sig.target = float(meta["target_price"])
             if meta.get("win_probability") is not None:
                 sig.confidence = float(meta["win_probability"])
+            if meta.get("atr") is not None:
+                try:
+                    atr_v = float(meta["atr"])
+                    if atr_v > 0:
+                        sig.atr = atr_v
+                except (TypeError, ValueError):
+                    pass
             tier = meta.get("tier")
             sig.reason = f"ml_meta_kelly_t{tier}" if tier is not None else "ml_meta_kelly"
             kept.append(sig)
@@ -254,9 +261,9 @@ def run_comparative_meta_backtest(
     start: date,
     end: date,
     *,
-    min_probability: float = 0.65,
+    min_probability: float = 0.55,
     min_per_day: int = 2,
-    max_per_day: int = 4,
+    max_per_day: int = 3,
     min_confidence: float = 0.58,
     kelly_factor: float = 0.35,
 ) -> Dict[str, Any]:
@@ -359,10 +366,10 @@ def run_timeframe_comparison(
     intervals: Sequence[str] = ("5minute", "15minute"),
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.65,
+    min_probability: float = 0.55,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
-    max_per_day: int = 4,
+    max_per_day: int = 3,
 ) -> Dict[str, Any]:
     """Run meta-filtered Kelly backtests across intervals and build a side-by-side report."""
     results: Dict[str, Any] = {}
