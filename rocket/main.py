@@ -74,19 +74,30 @@ def backtest(
     meta_filter: bool = typer.Option(
         True,
         "--meta-filter/--no-meta-filter",
-        help="Run ML meta-filter (daily z-score≥1.65 + P≥0.20, max 3/day) and comparative report",
+        help="Run ML meta-filter (EV ranking, P≥0.40, max 3/day) and comparative report",
     ),
-    min_prob: float = typer.Option(0.20, "--min-prob", help="Absolute win-probability floor (with z≥1.65)"),
+    min_prob: float = typer.Option(0.40, "--min-prob", help="Absolute sigmoid win-probability floor"),
     max_per_day: int = typer.Option(3, "--max-per-day", help="Max selected trades per day"),
     min_per_day: int = typer.Option(2, "--min-per-day", help="Soft minimum trades per day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor", help="Fractional Kelly multiplier"),
+    time_exit_bars: Optional[int] = typer.Option(
+        4, "--time-exit-bars", help="Stagnation exit bar count (None/0 disables)"
+    ),
+    time_exit_atr_min: float = typer.Option(0.5, "--time-exit-atr-min"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run Rocket backtest and write rocket.html tear sheet."""
     _setup_logging(verbose)
     settings = get_settings()
     out = Path(output) if output else settings.rocket_output_html
-    bt = RocketBacktester(interval=interval, capital=capital, max_symbols=limit)
+    te_bars = int(time_exit_bars) if time_exit_bars and int(time_exit_bars) > 0 else None
+    bt = RocketBacktester(
+        interval=interval,
+        capital=capital,
+        max_symbols=limit,
+        time_exit_bars=te_bars,
+        time_exit_atr_min=time_exit_atr_min,
+    )
     bt.load_universe()
     _ = skip_fetch
     bt.fetch_data(_parse_date(start_date), _parse_date(end_date))
@@ -139,7 +150,7 @@ def compare_timeframes(
     capital: float = typer.Option(10_000_000.0, "--capital"),
     limit: int = typer.Option(200, "--limit"),
     output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
-    min_prob: float = typer.Option(0.20, "--min-prob"),
+    min_prob: float = typer.Option(0.40, "--min-prob"),
     max_per_day: int = typer.Option(3, "--max-per-day"),
     min_per_day: int = typer.Option(2, "--min-per-day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
@@ -191,7 +202,7 @@ def compare_time_exits(
         "--meta-filter/--no-meta-filter",
         help="Use ML meta-filter selected entries for the sweep",
     ),
-    min_prob: float = typer.Option(0.20, "--min-prob"),
+    min_prob: float = typer.Option(0.40, "--min-prob"),
     max_per_day: int = typer.Option(3, "--max-per-day"),
     min_per_day: int = typer.Option(2, "--min-per-day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor"),

@@ -1,4 +1,4 @@
-"""Daily cross-sectional z-score allocator with vol-buffered stops and ₹8k risk."""
+"""Daily Expected-Value allocator with vol-buffered stops and ₹8k risk."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-MIN_PROB = 0.20  # absolute floor alongside z-score
-Z_SCORE_MIN = 1.65  # ~top ~5% one-sided under normality
+MIN_PROB = 0.40  # sigmoid floor for EV selection
 DEFAULT_KELLY_FACTOR = 0.35
 DEFAULT_MIN_TRADES_PER_DAY = 2
 DEFAULT_MAX_TRADES_PER_DAY = 3
@@ -29,6 +28,7 @@ ANOMALY_FLOOR = MIN_PROB
 HARD_FLOOR = MIN_PROB
 TIER1_PROB = 0.62
 TIER2_PROB = MIN_PROB
+Z_SCORE_MIN = 0.0  # unused; kept for older imports
 
 
 def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = DEFAULT_KELLY_FACTOR) -> float:
@@ -39,6 +39,13 @@ def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = 
         return 0.0
     raw = (p * r - (1.0 - p)) / r
     return float(np.clip(raw, 0.0, 1.0) * float(kelly_factor))
+
+
+def expected_value(p_win: float, reward_risk: float) -> float:
+    """EV in R-units: (P × R) − (1 − P)."""
+    p = float(np.clip(p_win, 0.0, 1.0))
+    r = float(reward_risk)
+    return (p * r) - (1.0 - p)
 
 
 def _atr_from_row(row: Dict[str, Any], entry: float) -> float:
@@ -95,12 +102,14 @@ def apply_tiered_sizing(
     tier1_prob: float = TIER1_PROB,
     soft_floor: float = MIN_PROB,
     hard_floor: float = MIN_PROB,
+    require_positive_ev: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
-    Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
+    Enrich a scored signal with vol-buffered SL/TP, EV, and ₹8k risk-capped lots.
 
-    Inclusion is decided by daily z-score ranking; this enforces P≥0.20, proximity
-    gates, and monetary risk. 2 lots only when ``is_top_rank`` and 2×risk ≤ ₹8,000.
+    Inclusion is decided by daily EV ranking; this enforces P≥0.40, EV>0 (optional),
+    proximity gates, and monetary risk. 2 lots only when ``is_top_rank`` and
+    2×risk ≤ ₹8,000.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
@@ -135,7 +144,10 @@ def apply_tiered_sizing(
     take_profit = float(levels["take_profit"])
     stop_dist = float(levels["stop_distance"])
     target_dist = float(levels["target_distance"])
-    rr = (target_dist / stop_dist) if stop_dist > 0 else 2.5
+    rr = (target_dist / stop_dist) if stop_dist > 0 else 1.8
+    ev = expected_value(p, rr)
+    if require_positive_ev and ev <= 0.0:
+        return None
     f_star = fractional_kelly(p, rr, kelly_factor=kelly_factor)
 
     lot_size = int(row.get("lot_size") or 0)
@@ -167,6 +179,7 @@ def apply_tiered_sizing(
             "is_top_rank": bool(is_top_rank),
             "kelly_fraction": round(f_star, 6),
             "reward_risk": round(rr, 4),
+            "expected_value": round(ev, 6),
             "lots": int(lots),
             "lot_size": lot_size,
             "quantity": int(lots) * lot_size,
@@ -182,7 +195,6 @@ def apply_tiered_sizing(
             "stop_kind": "vol_buffered" if levels.get("stop_kind", 0) >= 1.0 else "atr_floor",
             "ema5_dist_atr": round(_dist_atr(row, "ema5_dist_atr", entry, atr, "ema_5"), 6),
             "ema20_dist_atr": round(_dist_atr(row, "ema20_dist_atr", entry, atr, "ema_20"), 6),
-            "z_score": float(row["z_score"]) if row.get("z_score") is not None else None,
         }
     )
     return out
@@ -190,10 +202,10 @@ def apply_tiered_sizing(
 
 class DailyTradeRanker:
     """
-    Daily cross-sectional z-score top-K (2–3/day).
+    Daily Expected-Value top-K (2–3/day).
 
-    Selects candidates with ``z_score >= 1.65`` and ``win_probability >= 0.20``,
-    then applies proximity/RSI gates and the ₹8k risk budget.
+    Candidates must pass proximity/RSI gates, ``P ≥ 0.40``, and ``EV > 0``,
+    then the top scores by ``expected_value`` are kept (₹8k risk budget).
     """
 
     def __init__(
@@ -211,13 +223,12 @@ class DailyTradeRanker:
         z_score_min: float = Z_SCORE_MIN,
     ):
         self.meta_filter = meta_filter
-        # Absolute P floor is always 0.20; selectivity comes from z≥1.65.
-        # Remap legacy high floors (0.30/0.50/0.55) so CLI/tests don't re-starve.
-        _ = (min_probability_threshold, anomaly_floor, hard_floor)
-        self.min_prob = MIN_PROB
-        self.anomaly_floor = MIN_PROB
-        self.hard_floor = MIN_PROB
-        self.z_score_min = float(z_score_min)
+        _ = z_score_min
+        # EV gate is P≥0.40; remap legacy 0.20/0.30 floors upward.
+        raw = float(anomaly_floor if anomaly_floor is not None else min_probability_threshold)
+        self.min_prob = MIN_PROB if raw < MIN_PROB else float(raw)
+        self.anomaly_floor = self.min_prob
+        self.hard_floor = self.min_prob
         self.min_trades = int(min_trades_per_day)
         self.max_trades = int(max_trades_per_day)
         self.kelly_factor = float(kelly_factor)
@@ -254,40 +265,50 @@ class DailyTradeRanker:
                 na_position="last",
             )
             g = g.drop_duplicates(subset=["symbol"], keep="first")
-            if g.empty or len(g) < 2:
-                # Need ≥2 scores for a meaningful σ; still allow single-name days via z=0 skip
-                if g.empty:
-                    continue
-                g["z_score"] = 0.0
-            else:
-                mu = float(g["win_probability"].mean())
-                sigma = float(g["win_probability"].std(ddof=0))
-                g["z_score"] = (g["win_probability"] - mu) / (sigma + 1e-6)
-
-            pool = g[
-                (g["z_score"] >= self.z_score_min) & (g["win_probability"] >= self.min_prob)
-            ].sort_values(
-                ["z_score", "win_probability", "strategy_confidence"],
-                ascending=[False, False, False],
-                na_position="last",
-            )
-            if pool.empty:
+            if g.empty:
                 continue
 
-            day_picks: List[Dict[str, Any]] = []
-            for _, row in pool.iterrows():
-                if len(day_picks) >= self.max_trades:
-                    break
-                is_top = len(day_picks) == 0
+            pool: List[Dict[str, Any]] = []
+            for _, row in g.iterrows():
                 sized = apply_tiered_sizing(
                     row.to_dict(),
                     kelly_factor=self.kelly_factor,
                     anomaly_floor=self.min_prob,
                     max_risk_rupees=self.max_risk_rupees,
-                    is_top_rank=is_top,
+                    is_top_rank=False,
+                    require_positive_ev=True,
                 )
                 if sized is not None:
-                    day_picks.append(sized)
+                    pool.append(sized)
+            if not pool:
+                continue
+
+            pool.sort(
+                key=lambda r: (
+                    float(r.get("expected_value") or -1e9),
+                    float(r.get("win_probability") or 0.0),
+                    float(r.get("strategy_confidence") or 0.0),
+                ),
+                reverse=True,
+            )
+
+            day_picks: List[Dict[str, Any]] = []
+            for i, cand in enumerate(pool):
+                if len(day_picks) >= self.max_trades:
+                    break
+                if i == 0:
+                    # Re-size top EV name for optional 2-lot allocation
+                    top = apply_tiered_sizing(
+                        {k: v for k, v in cand.items() if k not in ("lots", "quantity", "tier", "total_risk")},
+                        kelly_factor=self.kelly_factor,
+                        anomaly_floor=self.min_prob,
+                        max_risk_rupees=self.max_risk_rupees,
+                        is_top_rank=True,
+                        require_positive_ev=True,
+                    )
+                    day_picks.append(top if top is not None else cand)
+                else:
+                    day_picks.append(cand)
             selected.extend(day_picks)
 
         return selected

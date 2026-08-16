@@ -80,19 +80,19 @@ def test_trailing_stop_ratchet():
         take_profit=1000.0 + 3.2 * 10.0,
         atr=10.0,
     )
-    # Not enough favorable move yet
-    pos.update_trailing_stop(high=1005.0, low=998.0, activate_at_r=1.0, trail_atr_mult=2.0)
+    # Not enough favorable move yet (<1.2×ATR)
+    pos.update_trailing_stop(high=1010.0, low=998.0, activate_at_r=1.2, trail_atr_mult=1.8)
     assert pos.trail_activated is False
     assert abs(pos.stop_loss - 982.0) < 1e-6
 
-    # +1.0×ATR: activate and ratchet to high − 2ATR
-    pos.update_trailing_stop(high=1010.0, low=1000.0, activate_at_r=1.0, trail_atr_mult=2.0)
+    # +1.2×ATR: activate and ratchet to high − 1.8ATR
+    pos.update_trailing_stop(high=1012.0, low=1000.0, activate_at_r=1.2, trail_atr_mult=1.8)
     assert pos.trail_activated is True
-    assert abs(pos.stop_loss - (1010.0 - 20.0)) < 1e-6
+    assert abs(pos.stop_loss - (1012.0 - 18.0)) < 1e-6
 
     # Further high ratchets stop up only
-    pos.update_trailing_stop(high=1020.0, low=1005.0, activate_at_r=1.0, trail_atr_mult=2.0)
-    assert abs(pos.stop_loss - (1020.0 - 20.0)) < 1e-6
+    pos.update_trailing_stop(high=1020.0, low=1005.0, activate_at_r=1.2, trail_atr_mult=1.8)
+    assert abs(pos.stop_loss - (1020.0 - 18.0)) < 1e-6
 
 
 def test_stagnation_time_exit():
@@ -145,7 +145,7 @@ def test_fractional_kelly_and_tier_sizing():
 
     high = apply_tiered_sizing(
         {
-            "win_probability": 0.40,
+            "win_probability": 0.55,
             "side": "BUY",
             "entry_price": 1000.0,
             "atr": 10.0,
@@ -163,13 +163,14 @@ def test_fractional_kelly_and_tier_sizing():
     assert high is not None
     assert high["tier"] == 1
     assert high["lots"] == 2
-    # Long: struct=min(990,985)=985; SL=min(986, max(985,980))=985
+    # Long: struct=min(990,985)=985; SL=min(988, max(985,984))=985
     assert abs(high["stop_loss"] - 985.0) < 1e-6
+    assert high["expected_value"] > 0.0
     assert high["total_risk"] <= 8000.0
 
     mid = apply_tiered_sizing(
         {
-            "win_probability": 0.35,
+            "win_probability": 0.45,
             "side": "SELL",
             "entry_price": 1000.0,
             "atr": 10.0,
@@ -187,12 +188,12 @@ def test_fractional_kelly_and_tier_sizing():
     assert mid is not None
     assert mid["tier"] == 2
     assert mid["lots"] == 1
-    # Short: struct=max(1015,1012)=1015; SL=max(1014, min(1015,1020))=1015
+    # Short: struct=max(1015,1012)=1015; SL=max(1012, min(1015,1016))=1015
     assert abs(mid["stop_loss"] - 1015.0) < 1e-6
 
     assert apply_tiered_sizing(
         {
-            "win_probability": 0.30,
+            "win_probability": 0.40,
             "side": "BUY",
             "entry_price": 1000.0,
             "atr": 10.0,
@@ -204,7 +205,7 @@ def test_fractional_kelly_and_tier_sizing():
             "vwap": 990.0,
         }
     ) is not None
-    assert apply_tiered_sizing({"win_probability": 0.19, "entry_price": 1000.0, "atr": 10.0}) is None
+    assert apply_tiered_sizing({"win_probability": 0.39, "entry_price": 1000.0, "atr": 10.0}) is None
 
 
 def test_gates_and_risk_cap():
@@ -263,12 +264,13 @@ def test_gates_and_risk_cap():
     )
 
 
-def test_zscore_daily_selection():
-    """Cross-sectional z≥1.65 + P≥0.20 → top 2–3/day; skip flat/weak days."""
+def test_ev_daily_selection():
+    """P≥0.40 + EV>0 → top 2–3/day by expected_value; skip sub-floor days."""
+    from rocket.ml.trade_selector import expected_value
+
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
-    # Day 1: two clear outliers above a dense pack → z≥1.65
-    day1_probs = [0.55, 0.52, 0.48, 0.28, 0.27, 0.26, 0.25, 0.24, 0.23, 0.22]
+    day1_probs = [0.62, 0.55, 0.48, 0.42, 0.35, 0.30]
     for i, p in enumerate(day1_probs):
         rows.append(
             {
@@ -288,8 +290,7 @@ def test_zscore_daily_selection():
                 "vwap": 990.0,
             }
         )
-    # Day 2: all near floor — no z≥1.65
-    for i, p in enumerate([0.22, 0.21, 0.20, 0.19]):
+    for i, p in enumerate([0.35, 0.32, 0.30, 0.25]):
         rows.append(
             {
                 "timestamp": base + timedelta(days=1),
@@ -317,7 +318,11 @@ def test_zscore_daily_selection():
     assert "2026-08-03" in by_day
     assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
-    assert all(s["z_score"] is not None and s["z_score"] >= 1.65 for s in by_day["2026-08-03"])
+    assert all(float(s["win_probability"]) >= 0.40 for s in by_day["2026-08-03"])
+    assert all(float(s["expected_value"]) > 0.0 for s in by_day["2026-08-03"])
+    evs = [float(s["expected_value"]) for s in by_day["2026-08-03"]]
+    assert evs == sorted(evs, reverse=True)
+    assert expected_value(0.55, 1.8) > 0.0
     assert "2026-08-04" not in by_day
 
 
@@ -357,9 +362,8 @@ def test_path_label_and_walk_forward_selector():
     assert scored["win_probability"].notna().all()
 
     scored = scored.copy()
-    # Vary P within each day so z≥1.65 outliers exist
     rng = np.random.default_rng(42)
-    scored["win_probability"] = 0.25 + rng.random(len(scored)) * 0.35
+    scored["win_probability"] = 0.40 + rng.random(len(scored)) * 0.35
     scored["ema5_dist_atr"] = 0.1
     scored["ema20_dist_atr"] = 0.5
     scored["raw_rsi_14"] = 50.0
@@ -371,9 +375,8 @@ def test_path_label_and_walk_forward_selector():
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
-    assert all(
-        (s.get("z_score") is None) or (float(s["z_score"]) >= 1.65 - 1e-9) for s in selected
-    )
+    assert all(float(s["win_probability"]) >= 0.40 for s in selected)
+    assert all(float(s["expected_value"]) > 0.0 for s in selected)
 
     cmp = build_comparison_table(
         {

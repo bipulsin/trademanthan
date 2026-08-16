@@ -74,13 +74,13 @@ def compute_structural_stop_target(
     safe_atr: float,
 ) -> Dict[str, float]:
     """
-    Volatility-buffered structural stop (EMA20/VWAP) with 1.4–2.0×ATR band.
+    Intraday vol-buffered structural stop (EMA20/VWAP) with 1.2–1.6×ATR band.
 
-    SELL: SL = max(entry+1.4ATR, min(struct, entry+2.0ATR))
-          struct = max(EMA20, VWAP) if above entry else entry+1.4ATR
-    BUY:  SL = min(entry-1.4ATR, max(struct, entry-2.0ATR))
-          struct = min(EMA20, VWAP) if below entry else entry-1.4ATR
-    Target = entry ± max(2.5×|entry−SL|, 3.0×ATR)
+    SELL: SL = max(entry+1.2ATR, min(struct, entry+1.6ATR))
+          struct = max(EMA20, VWAP) if above entry else entry+1.2ATR
+    BUY:  SL = min(entry-1.2ATR, max(struct, entry-1.6ATR))
+          struct = min(EMA20, VWAP) if below entry else entry-1.2ATR
+    Target = entry ± max(1.8×|entry−SL|, 2.2×ATR)
     """
     side_u = str(side).upper()
     entry = float(entry_price)
@@ -93,23 +93,23 @@ def compute_structural_stop_target(
 
     if side_u in ("SELL", "SHORT"):
         candidates = [x for x in (e20, vw) if x is not None and x > entry]
-        structural = float(max(candidates)) if candidates else (entry + 1.4 * atr)
-        floor_sl = entry + 1.4 * atr
-        cap_sl = entry + 2.0 * atr
+        structural = float(max(candidates)) if candidates else (entry + 1.2 * atr)
+        floor_sl = entry + 1.2 * atr
+        cap_sl = entry + 1.6 * atr
         stop_loss = max(floor_sl, min(structural, cap_sl))
         stop_kind = "vol_buffered" if candidates else "atr_floor"
         stop_dist = abs(stop_loss - entry)
-        target_dist = max(2.5 * stop_dist, 3.0 * atr)
+        target_dist = max(1.8 * stop_dist, 2.2 * atr)
         take_profit = entry - target_dist
     else:
         candidates = [x for x in (e20, vw) if x is not None and x < entry]
-        structural = float(min(candidates)) if candidates else (entry - 1.4 * atr)
-        floor_sl = entry - 1.4 * atr  # closest allowed (highest price for long SL)
-        cap_sl = entry - 2.0 * atr  # farthest allowed
+        structural = float(min(candidates)) if candidates else (entry - 1.2 * atr)
+        floor_sl = entry - 1.2 * atr  # closest allowed (highest price for long SL)
+        cap_sl = entry - 1.6 * atr  # farthest allowed
         stop_loss = min(floor_sl, max(structural, cap_sl))
         stop_kind = "vol_buffered" if candidates else "atr_floor"
         stop_dist = abs(entry - stop_loss)
-        target_dist = max(2.5 * stop_dist, 3.0 * atr)
+        target_dist = max(1.8 * stop_dist, 2.2 * atr)
         take_profit = entry + target_dist
 
     return {
@@ -315,12 +315,12 @@ class RocketBacktester:
                 pos.maybe_disarm_time_exit(self.time_exit_atr_min)
                 pos.bars_in_trade += 1
 
-                # After +1.0×ATR profit, ratchet stop to 2.0×ATR from bar extreme
+                # After +1.2×ATR profit, ratchet stop to 1.8×ATR from bar extreme
                 pos.update_trailing_stop(
                     high=hi,
                     low=lo,
-                    activate_at_r=1.0,
-                    trail_atr_mult=2.0,
+                    activate_at_r=1.2,
+                    trail_atr_mult=1.8,
                 )
                 exit_px = None
                 reason = ""

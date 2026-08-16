@@ -73,13 +73,16 @@ class RocketMetaFilter:
             l2_regularization=self.config.l2_regularization,
             random_state=42,
         )
-        # Need ≥2 classes and enough rows for calibration folds
+        # Platt scaling (sigmoid) — avoids isotonic step-function 0.95 plateaus
         n_pos = int(y.sum())
         n_neg = int(len(y) - n_pos)
         if n_pos < 5 or n_neg < 5 or len(y) < 30:
             base.fit(X, y)
             return base
-        cv = min(3, n_pos, n_neg)
+        cv = min(5, n_pos, n_neg)
+        if cv < 2:
+            base.fit(X, y)
+            return base
         calibrated = CalibratedClassifierCV(estimator=base, method="sigmoid", cv=cv)
         calibrated.fit(X, y)
         return calibrated
