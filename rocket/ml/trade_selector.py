@@ -1,8 +1,9 @@
-"""Daily Expected-Value allocator with vol-buffered stops and ₹8k risk."""
+"""Daily ordinal top-K allocator with session curfew, vol-buffered stops, ₹8k risk."""
 
 from __future__ import annotations
 
 import logging
+from datetime import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -13,10 +14,13 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-MIN_PROB = 0.32  # continuous-bulk floor (excludes noise below median band)
-MAX_PROB = 0.85  # discard calibration artifact spike (≥0.95 pile)
+MIN_PROB = 0.22  # continuous-bulk floor
+MAX_PROB = 0.85  # discard calibration artifact spike
 VALID_PROB_MIN = MIN_PROB
 VALID_PROB_MAX = MAX_PROB
+ENTRY_CURFEW_START = time(9, 20)
+# Last signal bar whose next-bar open fill is still ≤ 12:30 IST on 5-minute candles
+ENTRY_CURFEW_END = time(12, 25)
 DEFAULT_KELLY_FACTOR = 0.35
 DEFAULT_MIN_TRADES_PER_DAY = 2
 DEFAULT_MAX_TRADES_PER_DAY = 3
@@ -31,13 +35,29 @@ ANOMALY_FLOOR = MIN_PROB
 HARD_FLOOR = MIN_PROB
 TIER1_PROB = 0.62
 TIER2_PROB = MIN_PROB
-Z_SCORE_MIN = 0.0  # unused; kept for older imports
+Z_SCORE_MIN = 0.0
 
 
 def in_valid_prob_band(p_win: float, *, lo: float = VALID_PROB_MIN, hi: float = VALID_PROB_MAX) -> bool:
-    """True iff P sits in the continuous bulk (excludes noise and ≥0.85 artifact tail)."""
     p = float(p_win)
     return lo <= p <= hi
+
+
+def _ist_time(ts: Any) -> time:
+    t = pd.Timestamp(ts)
+    if t.tzinfo is None:
+        t = t.tz_localize("UTC")
+    return t.tz_convert("Asia/Kolkata").time()
+
+
+def entry_curfew_reject_reason(ts: Any) -> Optional[str]:
+    """Reject signals outside 09:20–12:25 IST (fills stay ≤12:30)."""
+    if ts is None:
+        return None
+    tclock = _ist_time(ts)
+    if tclock < ENTRY_CURFEW_START or tclock > ENTRY_CURFEW_END:
+        return "REJECT_POST_CURFEW"
+    return None
 
 
 def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = DEFAULT_KELLY_FACTOR) -> float:
@@ -51,7 +71,7 @@ def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = 
 
 
 def expected_value(p_win: float, reward_risk: float) -> float:
-    """EV in R-units: (P × R) − (1 − P)."""
+    """EV in R-units (informational; not used as a hard filter)."""
     p = float(np.clip(p_win, 0.0, 1.0))
     r = float(reward_risk)
     return (p * r) - (1.0 - p)
@@ -87,6 +107,9 @@ def _dist_atr(row: Dict[str, Any], key: str, entry: float, atr: float, level_key
 
 def entry_gate_reject_reason(row: Dict[str, Any], *, side: str, entry: float, atr: float) -> Optional[str]:
     """Return rejection code or None if gates pass."""
+    curfew = entry_curfew_reject_reason(row.get("timestamp"))
+    if curfew:
+        return curfew
     if _dist_atr(row, "ema5_dist_atr", entry, atr, "ema_5") > EMA5_MAX_DIST_ATR:
         return "REJECT_MID_AIR_CHASE"
     if _dist_atr(row, "ema20_dist_atr", entry, atr, "ema_20") > EMA20_MAX_DIST_ATR:
@@ -112,18 +135,16 @@ def apply_tiered_sizing(
     tier1_prob: float = TIER1_PROB,
     soft_floor: float = MIN_PROB,
     hard_floor: float = MIN_PROB,
-    require_positive_ev: bool = True,
+    require_positive_ev: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
-    Enrich a scored signal with vol-buffered SL/TP, EV, and ₹8k risk-capped lots.
+    Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
 
-    Inclusion is decided by daily EV ranking; this enforces
-    ``0.32 ≤ P ≤ 0.85``, EV>0 (optional), proximity gates, and monetary risk.
-    2 lots only when ``is_top_rank`` and 2×risk ≤ ₹8,000.
+    Ordinal ranking decides inclusion; this enforces ``0.22 ≤ P ≤ 0.85``,
+    session curfew, proximity gates, and monetary risk.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
-    # Continuous-bulk band: drop noise below floor and artifact spike above max
     if p < float(anomaly_floor) or p > float(max_probability):
         return None
 
@@ -213,11 +234,10 @@ def apply_tiered_sizing(
 
 class DailyTradeRanker:
     """
-    Daily Expected-Value top-K (2–3/day) on the continuous probability bulk.
+    Pure ordinal daily top-K (2–3/day) on the continuous probability bulk.
 
-    Candidates must pass proximity/RSI gates, ``0.32 ≤ P ≤ 0.85``, and ``EV > 0``,
-    then the top scores by ``expected_value`` are kept (₹8k risk budget).
-    Artifact spikes (P > 0.85) are discarded before ranking.
+    Rank by ``win_probability`` descending among candidates that pass curfew,
+    proximity/RSI gates, and ``0.22 ≤ P ≤ 0.85``. No hard EV > 0 filter.
     """
 
     def __init__(
@@ -236,13 +256,9 @@ class DailyTradeRanker:
         max_probability: float = MAX_PROB,
     ):
         self.meta_filter = meta_filter
-        _ = z_score_min
-        # Remap legacy floors (0.20/0.30/0.40) onto the continuous-bulk band.
-        raw = float(anomaly_floor if anomaly_floor is not None else min_probability_threshold)
-        if raw in (0.20, 0.30, 0.40) or raw < MIN_PROB:
-            self.min_prob = MIN_PROB
-        else:
-            self.min_prob = float(raw)
+        _ = (z_score_min, hard_floor, anomaly_floor, min_probability_threshold)
+        # Ordinal bulk floor is always 0.22; remap legacy CLI floors.
+        self.min_prob = MIN_PROB
         self.max_prob = float(max_probability)
         self.anomaly_floor = self.min_prob
         self.hard_floor = self.min_prob
@@ -275,7 +291,7 @@ class DailyTradeRanker:
         selected: List[Dict[str, Any]] = []
         for _date, group in df.groupby("trade_date", sort=True):
             g = group.copy()
-            # One position per symbol per day (keep highest raw score first)
+            # One position per symbol per day (highest ordinal score first)
             g = g.sort_values(
                 ["win_probability", "strategy_confidence"],
                 ascending=[False, False],
@@ -294,18 +310,19 @@ class DailyTradeRanker:
                     max_probability=self.max_prob,
                     max_risk_rupees=self.max_risk_rupees,
                     is_top_rank=False,
-                    require_positive_ev=True,
+                    require_positive_ev=False,
                 )
                 if sized is not None:
                     pool.append(sized)
             if not pool:
                 continue
 
+            # Pure ordinal: sort by win_probability (not EV)
             pool.sort(
                 key=lambda r: (
-                    float(r.get("expected_value") or -1e9),
                     float(r.get("win_probability") or 0.0),
                     float(r.get("strategy_confidence") or 0.0),
+                    float(r.get("expected_value") or -1e9),
                 ),
                 reverse=True,
             )
@@ -315,7 +332,6 @@ class DailyTradeRanker:
                 if len(day_picks) >= self.max_trades:
                     break
                 if i == 0:
-                    # Re-size top EV name for optional 2-lot allocation
                     top = apply_tiered_sizing(
                         {k: v for k, v in cand.items() if k not in ("lots", "quantity", "tier", "total_risk")},
                         kelly_factor=self.kelly_factor,
@@ -323,7 +339,7 @@ class DailyTradeRanker:
                         max_probability=self.max_prob,
                         max_risk_rupees=self.max_risk_rupees,
                         is_top_rank=True,
-                        require_positive_ev=True,
+                        require_positive_ev=False,
                     )
                     day_picks.append(top if top is not None else cand)
                 else:

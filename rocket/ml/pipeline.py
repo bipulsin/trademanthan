@@ -9,10 +9,12 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 import numpy as np
 import pandas as pd
 
-from rocket.engine.backtester import RocketBacktester
+from rocket.engine.backtester import RocketBacktester, compute_structural_stop_target
+from rocket.engine.order_book import Side
+from rocket.engine.portfolio import Position
 from rocket.ml.feature_extractor import RocketFeatureExtractor
 from rocket.ml.meta_filter import MetaModelConfig, RocketMetaFilter
-from rocket.ml.trade_selector import DailyTradeRanker
+from rocket.ml.trade_selector import DailyTradeRanker, ENTRY_CURFEW_END, ENTRY_CURFEW_START
 from rocket.strategies.base_strategy import Bias, Signal
 from rocket.strategies.ml_institutional import MLInstitutionalStrategy
 
@@ -31,6 +33,13 @@ def _side_from_bias(bias: Bias) -> str:
     return "BUY" if bias == Bias.LONG else "SELL"
 
 
+def _ist_time(ts: Any):
+    t = pd.Timestamp(ts)
+    if t.tzinfo is None:
+        t = t.tz_localize("UTC")
+    return t.tz_convert("Asia/Kolkata").time()
+
+
 def path_label_signal(
     df: pd.DataFrame,
     trigger_idx: int,
@@ -38,11 +47,20 @@ def path_label_signal(
     stop_loss: float,
     take_profit: float,
     entry_price: float,
+    *,
+    safe_atr: Optional[float] = None,
+    ema_20: Optional[float] = None,
+    ema_10: Optional[float] = None,
+    vwap: Optional[float] = None,
+    time_exit_bars: int = 4,
+    time_exit_atr_min: float = 0.5,
 ) -> Dict[str, Any]:
     """
-    Simulate SL/TP path on subsequent bars (no portfolio coupling).
+    Replay the backtester exit state machine for labeling.
 
-    Entry assumed next-bar open when available, else trigger close.
+    Uses structural 1.2–1.6×ATR stops, max(1.8R, 2.2×ATR) targets, +1.2/1.8
+    trailing, 4-bar stagnation, and 15:00 IST EOD — matching ``RocketBacktester``.
+    Legacy ``stop_loss`` / ``take_profit`` args are ignored when ATR is available.
     """
     side_u = side.upper()
     direction = 1 if side_u in ("BUY", "LONG") else -1
@@ -53,46 +71,90 @@ def path_label_signal(
         entry = float(entry_price)
         start = trigger_idx
 
-    # Re-anchor SL/TP distance from actual fill if possible
-    sl_dist = abs(float(entry_price) - float(stop_loss))
-    tp_dist = abs(float(take_profit) - float(entry_price))
-    if sl_dist <= 0:
-        sl_dist = abs(entry) * 0.003
-    if direction > 0:
-        sl = entry - sl_dist
-        tp = entry + tp_dist
-    else:
-        sl = entry + sl_dist
-        tp = entry - tp_dist
+    atr = float(safe_atr) if safe_atr is not None and float(safe_atr) > 0 else abs(entry) * 0.005
+    levels = compute_structural_stop_target(
+        side=side_u,
+        entry_price=entry,
+        ema_20=ema_20,
+        ema_10=ema_10,
+        vwap=vwap,
+        safe_atr=atr,
+    )
+    sl = float(levels["stop_loss"])
+    tp = float(levels["take_profit"])
+    sl_dist = float(levels["stop_distance"])
+    # Fallback if caller forced legacy distances without ATR context
+    if atr <= 0 and stop_loss and take_profit:
+        sl_dist = abs(float(entry_price) - float(stop_loss)) or abs(entry) * 0.003
+        tp_dist = abs(float(take_profit) - float(entry_price))
+        if direction > 0:
+            sl, tp = entry - sl_dist, entry + tp_dist
+        else:
+            sl, tp = entry + sl_dist, entry - tp_dist
+
+    pos = Position(
+        symbol="_label",
+        instrument_key="",
+        side=Side.BUY if direction > 0 else Side.SELL,
+        quantity=1,
+        avg_price=entry,
+        lot_size=1,
+        stop_loss=sl,
+        take_profit=tp,
+        atr=atr,
+        peak_favorable_price=entry,
+        bars_in_trade=0,
+        time_exit_armed=True,
+    )
 
     hit_target = False
     hit_stop = False
+    exit_reason = "backtest_end"
     exit_px = float(df.iloc[-1]["close"])
+
     for j in range(start, len(df)):
         bar = df.iloc[j]
+        # Skip exit checks on the fill bar (matches backtester)
+        if j == start:
+            continue
         hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
-        tclock = pd.Timestamp(bar["timestamp"]).tz_convert("Asia/Kolkata").time()
+        pos.update_mfe(high=hi, low=lo)
+        pos.maybe_disarm_time_exit(time_exit_atr_min)
+        pos.bars_in_trade += 1
+        pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.2, trail_atr_mult=1.8)
+
         if direction > 0:
-            if lo <= sl:
-                hit_stop, exit_px = True, sl
+            if pos.take_profit is not None and hi >= pos.take_profit:
+                hit_target, exit_px, exit_reason = True, float(pos.take_profit), "take_profit"
                 break
-            if hi >= tp:
-                hit_target, exit_px = True, tp
+            if pos.stop_loss is not None and lo <= pos.stop_loss:
+                hit_stop, exit_px = True, float(pos.stop_loss)
+                exit_reason = "trailing_stop" if pos.trail_activated else "stop_loss"
                 break
         else:
-            if hi >= sl:
-                hit_stop, exit_px = True, sl
+            if pos.take_profit is not None and lo <= pos.take_profit:
+                hit_target, exit_px, exit_reason = True, float(pos.take_profit), "take_profit"
                 break
-            if lo <= tp:
-                hit_target, exit_px = True, tp
+            if pos.stop_loss is not None and hi >= pos.stop_loss:
+                hit_stop, exit_px = True, float(pos.stop_loss)
+                exit_reason = "trailing_stop" if pos.trail_activated else "stop_loss"
                 break
-        if tclock >= datetime.strptime("15:20", "%H:%M").time():
-            exit_px = close
+
+        if pos.should_stagnation_exit(
+            time_exit_bars=time_exit_bars, time_exit_atr_min=time_exit_atr_min
+        ):
+            exit_px, exit_reason = close, "time_stagnation_exit"
+            break
+
+        tclock = _ist_time(bar["timestamp"])
+        if tclock >= datetime.strptime("15:00", "%H:%M").time():
+            exit_px, exit_reason = close, "eod_flat"
             break
 
     pnl = (exit_px - entry) * direction
     r_mult = pnl / sl_dist if sl_dist > 0 else 0.0
-    target_met = int(hit_target or r_mult >= 1.5)
+    # Win = positive PnL under synced execution (also counts ≥ +1R)
+    target_met = int(pnl > 0.0 or r_mult >= 1.0)
     return {
         "entry_price": entry,
         "exit_price": exit_px,
@@ -102,6 +164,9 @@ def path_label_signal(
         "hit_stop_first": int(hit_stop),
         "target_met": target_met,
         "stop_distance": sl_dist,
+        "exit_reason": exit_reason,
+        "stop_loss": sl,
+        "take_profit": tp,
     }
 
 
@@ -188,6 +253,10 @@ def harvest_raw_signals(
 
     rows: List[Dict[str, Any]] = []
     for ts in timeline:
+        tclock = _ist_time(ts)
+        # Entry curfew: only harvest labels in the tradable window
+        if tclock < ENTRY_CURFEW_START or tclock > ENTRY_CURFEW_END:
+            continue
         snapshot: Dict[str, Dict[str, Any]] = {}
         for sym in events[ts]:
             bar = indexed[sym].loc[ts]
@@ -219,10 +288,11 @@ def harvest_raw_signals(
             feats = RocketFeatureExtractor.extract_trade_features(df, trigger_idx, side)
             bar_close = float(snapshot[sig.symbol]["close"])
             contract = contract_by_sym.get(sig.symbol)
+            snap = snapshot[sig.symbol]
             atr_val = float(
-                snapshot[sig.symbol].get("atr")
-                or snapshot[sig.symbol].get("safe_atr")
-                or snapshot[sig.symbol].get("atr_14")
+                snap.get("atr")
+                or snap.get("safe_atr")
+                or snap.get("atr_14")
                 or bar_close * 0.005
             )
             label_info = path_label_signal(
@@ -232,8 +302,13 @@ def harvest_raw_signals(
                 float(sig.stop_loss or 0.0),
                 float(sig.target or 0.0),
                 bar_close,
+                safe_atr=atr_val,
+                ema_20=snap.get("ema_20"),
+                ema_10=snap.get("ema_10"),
+                vwap=snap.get("vwap"),
+                time_exit_bars=4,
+                time_exit_atr_min=0.5,
             )
-            snap = snapshot[sig.symbol]
             rec = {
                 "timestamp": ts.to_pydatetime(),
                 "trade_date": ts.date() if hasattr(ts, "date") else pd.Timestamp(ts).date(),
@@ -242,7 +317,7 @@ def harvest_raw_signals(
                 "side": side,
                 "bias": sig.bias.value,
                 "strategy_confidence": float(sig.confidence),
-                "entry_price": bar_close,
+                "entry_price": label_info.get("entry_price", bar_close),
                 "close": bar_close,
                 "atr": atr_val,
                 "safe_atr": float(snap.get("safe_atr") or atr_val),
@@ -254,8 +329,8 @@ def harvest_raw_signals(
                 "ema5_dist_atr": snap.get("ema5_dist_atr"),
                 "ema20_dist_atr": snap.get("ema20_dist_atr"),
                 "raw_rsi_14": snap.get("rsi_14"),
-                "stop_loss": sig.stop_loss,
-                "take_profit": sig.target,
+                "stop_loss": label_info.get("stop_loss", sig.stop_loss),
+                "take_profit": label_info.get("take_profit", sig.target),
                 "trigger_idx": trigger_idx,
                 **feats,
                 **label_info,
@@ -272,7 +347,7 @@ def run_comparative_meta_backtest(
     start: date,
     end: date,
     *,
-    min_probability: float = 0.32,
+    min_probability: float = 0.22,
     min_per_day: int = 2,
     max_per_day: int = 3,
     min_confidence: float = 0.58,
@@ -377,7 +452,7 @@ def run_timeframe_comparison(
     intervals: Sequence[str] = ("5minute", "15minute"),
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.32,
+    min_probability: float = 0.22,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -496,7 +571,7 @@ def run_time_exit_comparison(
     interval: str = "5minute",
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.32,
+    min_probability: float = 0.22,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
