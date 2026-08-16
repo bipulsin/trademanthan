@@ -177,6 +177,76 @@ def compare_timeframes(
     _mirror_html(path)
 
 
+@app.command("compare-time-exits")
+def compare_time_exits(
+    start_date: str = typer.Option(..., "--start-date", help="YYYY-MM-DD"),
+    end_date: str = typer.Option(..., "--end-date", help="YYYY-MM-DD"),
+    interval: str = typer.Option("5minute", "--interval"),
+    bars: str = typer.Option("2,4,6", "--bars", help="Comma-separated stagnation horizons in bars"),
+    capital: float = typer.Option(10_000_000.0, "--capital"),
+    limit: int = typer.Option(200, "--limit"),
+    output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
+    meta_filter: bool = typer.Option(
+        True,
+        "--meta-filter/--no-meta-filter",
+        help="Use ML meta-filter selected entries for the sweep",
+    ),
+    min_prob: float = typer.Option(0.55, "--min-prob"),
+    max_per_day: int = typer.Option(3, "--max-per-day"),
+    min_per_day: int = typer.Option(2, "--min-per-day"),
+    kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
+    time_exit_atr_min: float = typer.Option(0.5, "--time-exit-atr-min"),
+    include_none: bool = typer.Option(
+        True,
+        "--include-none/--no-include-none",
+        help="Include a no-time-exit control column",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Compare dynamic stagnation exits (N bars) on the same meta-selected book."""
+    _setup_logging(verbose)
+    if not meta_filter:
+        raise typer.BadParameter("compare-time-exits currently requires --meta-filter")
+
+    bar_list: List[int] = []
+    for part in bars.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bar_list.append(int(part))
+    if not bar_list:
+        raise typer.BadParameter("Provide at least one bar horizon via --bars")
+
+    from rocket.ml.pipeline import print_time_exit_comparison, run_time_exit_comparison
+
+    settings = get_settings()
+    out = Path(output) if output else settings.rocket_output_html
+    result = run_time_exit_comparison(
+        start=_parse_date(start_date),
+        end=_parse_date(end_date),
+        bars=bar_list,
+        interval=interval,
+        capital=capital,
+        limit=limit,
+        min_probability=min_prob,
+        kelly_factor=kelly_factor,
+        min_per_day=min_per_day,
+        max_per_day=max_per_day,
+        time_exit_atr_min=time_exit_atr_min,
+        include_none=include_none,
+    )
+    metrics = result["primary_metrics"]
+    horizons = metrics.get("time_exit_horizons") or []
+    print_tearsheet(metrics, console)
+    print_time_exit_comparison(result["time_exit_comparison"], horizons, console)
+    title = (
+        f"ML Meta + Time Exits · {start_date} → {end_date} · {interval} · "
+        f"bars={','.join(str(b) for b in bar_list)} · {metrics.get('universe_size', 0)} symbols"
+    )
+    path = export_html(metrics, out, title=title)
+    _mirror_html(path)
+
+
 def main() -> None:
     # Allow `python -m rocket.main` and `python rocket/main.py`
     if str(PROJECT_ROOT) not in sys.path:

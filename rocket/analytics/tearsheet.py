@@ -160,6 +160,32 @@ def export_html(
     </div>
 """
 
+    # Dynamic time / stagnation exit comparison (2/4/6 bars)
+    te_cmp: Sequence[Dict[str, Any]] = metrics.get("time_exit_comparison") or []
+    te_horizons: Sequence[str] = metrics.get("time_exit_horizons") or []
+    te_section = ""
+    if te_cmp and te_horizons:
+        header_cols = "".join(f"<th class='num'>{h}</th>" for h in te_horizons)
+        body_rows = []
+        for row in te_cmp:
+            cells = "".join(
+                f"<td class='num'>{_fmt_metric(row.get(h))}</td>" for h in te_horizons
+            )
+            body_rows.append(f"<tr><td>{row.get('metric')}</td>{cells}</tr>")
+        te_section = f"""
+    <div class="panel">
+      <h2>Dynamic Time / Stagnation Exit Sweep</h2>
+      <div class="sub" style="margin:0 0 10px">
+        Same meta-selected entries; exit if MFE &lt; 0.5×ATR at bar N (then disarm if MFE ≥ 0.5×ATR).
+        Priority: TP → SL/trail → stagnation → EOD (≥15:00 IST).
+      </div>
+      <table>
+        <thead><tr><th>Metric</th>{header_cols}</tr></thead>
+        <tbody>{''.join(body_rows)}</tbody>
+      </table>
+    </div>
+"""
+
     dual_eq_js = ""
     if bx and by:
         dual_eq_js = f"""
@@ -195,6 +221,37 @@ def export_html(
 """
             )
         tf_eq_js = "".join(parts)
+
+    # Overlay equity curves from time-exit horizons
+    te_eq_js = ""
+    te_results = metrics.get("time_exit_results") or {}
+    if isinstance(te_results, dict) and len(te_results) > 1:
+        parts = []
+        primary_label = None
+        if metrics.get("time_exit_bars") is not None:
+            n = int(metrics["time_exit_bars"])
+            primary_label = f"{n}bars/{n * 5}m"
+        elif "4bars/20m" in te_results:
+            primary_label = "4bars/20m"
+        for i, (h, res) in enumerate(te_results.items()):
+            if primary_label and h == primary_label:
+                continue
+            eq_i = (res.get("filtered") or {}).get("equity_curve") or []
+            if not eq_i:
+                continue
+            xs_i = [e.get("timestamp") for e in eq_i]
+            ys_i = [e.get("equity") for e in eq_i]
+            color = colors[(i + 1) % len(colors)]
+            parts.append(
+                f"""
+    traces.push({{
+      x: {json.dumps(xs_i)}, y: {json.dumps(ys_i)}, type: 'scatter', mode: 'lines',
+      line: {{ color: '{color}', width: 2 }},
+      name: '{h}'
+    }});
+"""
+            )
+        te_eq_js = "".join(parts)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -267,6 +324,7 @@ def export_html(
       <div class="metric"><div class="k">Total Costs</div><div class="v">₹{float(costs.get('total', 0)):,.0f}</div></div>
     </div>
 
+    {te_section}
     {tf_section}
     {cmp_section}
 
@@ -322,6 +380,7 @@ def export_html(
     }}];
     {dual_eq_js}
     {tf_eq_js}
+    {te_eq_js}
     Plotly.newPlot('eqChart', traces, {{
       margin: {{ t: 10, r: 20, b: 40, l: 60 }},
       paper_bgcolor: 'rgba(0,0,0,0)',

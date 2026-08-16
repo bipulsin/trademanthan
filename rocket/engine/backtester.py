@@ -68,6 +68,8 @@ class RocketBacktester:
         max_symbols: int = 200,
         max_positions: Optional[int] = None,
         signal_filter: Optional[Callable[[datetime, List[Signal]], List[Signal]]] = None,
+        time_exit_bars: Optional[int] = None,
+        time_exit_atr_min: float = 0.5,
     ):
         self.settings = get_settings()
         self.strategy = strategy or MLInstitutionalStrategy()
@@ -78,6 +80,8 @@ class RocketBacktester:
             max_positions if max_positions is not None else self.settings.rocket_max_positions
         )
         self.signal_filter = signal_filter
+        self.time_exit_bars = int(time_exit_bars) if time_exit_bars is not None else None
+        self.time_exit_atr_min = float(time_exit_atr_min)
         self.client = UpstoxCandleClient()
         self.contracts: List[FuturesContract] = []
         self.series: Dict[str, pd.DataFrame] = {}  # symbol -> enriched df
@@ -234,7 +238,7 @@ class RocketBacktester:
                 snapshot[sym] = row
                 marks[sym] = float(bar["close"])
 
-            # Stop / target exits on high/low (skip same bar as entry)
+            # Exits (skip same bar as entry). Priority: TP → SL/trail → stagnation → EOD
             for sym, pos in list(portfolio.positions.items()):
                 if sym not in snapshot:
                     continue
@@ -243,6 +247,11 @@ class RocketBacktester:
                 bar = snapshot[sym]
                 hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
                 c = contract_by_sym[sym]
+
+                pos.update_mfe(high=hi, low=lo)
+                pos.maybe_disarm_time_exit(self.time_exit_atr_min)
+                pos.bars_in_trade += 1
+
                 # After +1.0×ATR profit, ratchet stop to 2.0×ATR from bar extreme
                 pos.update_trailing_stop(
                     high=hi,
@@ -252,25 +261,36 @@ class RocketBacktester:
                 )
                 exit_px = None
                 reason = ""
+
+                # 1) Take profit
                 if pos.side == Side.BUY:
-                    if pos.stop_loss is not None and lo <= pos.stop_loss:
+                    if pos.take_profit is not None and hi >= pos.take_profit:
+                        exit_px, reason = pos.take_profit, "take_profit"
+                    # 2) Stop / trailing stop
+                    elif pos.stop_loss is not None and lo <= pos.stop_loss:
                         exit_px, reason = (
                             pos.stop_loss,
                             "trailing_stop" if pos.trail_activated else "stop_loss",
                         )
-                    elif pos.take_profit is not None and hi >= pos.take_profit:
-                        exit_px, reason = pos.take_profit, "take_profit"
                 else:
-                    if pos.stop_loss is not None and hi >= pos.stop_loss:
+                    if pos.take_profit is not None and lo <= pos.take_profit:
+                        exit_px, reason = pos.take_profit, "take_profit"
+                    elif pos.stop_loss is not None and hi >= pos.stop_loss:
                         exit_px, reason = (
                             pos.stop_loss,
                             "trailing_stop" if pos.trail_activated else "stop_loss",
                         )
-                    elif pos.take_profit is not None and lo <= pos.take_profit:
-                        exit_px, reason = pos.take_profit, "take_profit"
-                # flatten near session end
+
+                # 3) Dynamic stagnation exit at close of bar N
+                if exit_px is None and pos.should_stagnation_exit(
+                    time_exit_bars=self.time_exit_bars,
+                    time_exit_atr_min=self.time_exit_atr_min,
+                ):
+                    exit_px, reason = close, "time_stagnation_exit"
+
+                # 4) Flatten near session end
                 tclock = ts.timetz().replace(tzinfo=None) if hasattr(ts, "timetz") else ts.time()
-                if exit_px is None and tclock >= time(15, 20):
+                if exit_px is None and tclock >= time(15, 0):
                     exit_px, reason = close, "eod_flat"
 
                 if exit_px is not None:
@@ -327,4 +347,6 @@ class RocketBacktester:
         metrics["interval"] = self.interval
         metrics["universe_size"] = len(self.series)
         metrics["strategy"] = self.strategy.name
+        metrics["time_exit_bars"] = self.time_exit_bars
+        metrics["time_exit_atr_min"] = self.time_exit_atr_min
         return metrics

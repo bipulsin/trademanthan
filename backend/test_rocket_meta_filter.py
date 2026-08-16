@@ -91,6 +91,50 @@ def test_trailing_stop_ratchet():
     assert abs(pos.stop_loss - (1020.0 - 20.0)) < 1e-6
 
 
+def test_stagnation_time_exit():
+    from rocket.engine.order_book import Side
+    from rocket.engine.portfolio import Position
+
+    pos = Position(
+        symbol="ABC",
+        instrument_key="NSE_FO|ABC",
+        side=Side.BUY,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        atr=10.0,
+        peak_favorable_price=1000.0,
+        bars_in_trade=0,
+        time_exit_armed=True,
+    )
+    # Weak MFE through 2 bars → exit
+    pos.update_mfe(high=1003.0, low=998.0)
+    pos.maybe_disarm_time_exit(0.5)
+    pos.bars_in_trade = 2
+    assert pos.mfe() < 5.0
+    assert pos.time_exit_armed is True
+    assert pos.should_stagnation_exit(time_exit_bars=2, time_exit_atr_min=0.5) is True
+
+    # Strong MFE disarms timer
+    pos2 = Position(
+        symbol="ABC",
+        instrument_key="NSE_FO|ABC",
+        side=Side.SELL,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        atr=10.0,
+        peak_favorable_price=1000.0,
+        bars_in_trade=0,
+        time_exit_armed=True,
+    )
+    pos2.update_mfe(high=1001.0, low=994.0)  # MFE = 6 ≥ 0.5*10
+    pos2.maybe_disarm_time_exit(0.5)
+    pos2.bars_in_trade = 2
+    assert pos2.time_exit_armed is False
+    assert pos2.should_stagnation_exit(time_exit_bars=2, time_exit_atr_min=0.5) is False
+
+
 def test_fractional_kelly_and_tier_sizing():
     f = fractional_kelly(0.80, 3.2 / 1.8, kelly_factor=0.35)
     assert 0.0 < f <= 0.35

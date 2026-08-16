@@ -462,6 +462,195 @@ def print_timeframe_comparison(
     con.print(table)
 
 
+def _exit_label(n: Optional[int]) -> str:
+    if n is None or int(n) <= 0:
+        return "none"
+    n = int(n)
+    return f"{n}bars/{n * 5}m"
+
+
+def _stagnation_exit_share(metrics: Dict[str, Any]) -> float:
+    trades = metrics.get("trades") or []
+    if not trades:
+        return 0.0
+    n = sum(1 for t in trades if str(t.get("reason") or "") == "time_stagnation_exit")
+    return 100.0 * n / len(trades)
+
+
+def run_time_exit_comparison(
+    *,
+    start: date,
+    end: date,
+    bars: Sequence[int] = (2, 4, 6),
+    interval: str = "5minute",
+    capital: float = 10_000_000.0,
+    limit: int = 200,
+    min_probability: float = 0.55,
+    kelly_factor: float = 0.35,
+    min_per_day: int = 2,
+    max_per_day: int = 3,
+    min_confidence: float = 0.58,
+    time_exit_atr_min: float = 0.5,
+    include_none: bool = True,
+) -> Dict[str, Any]:
+    """
+    Harvest + score once, then replay the same meta-selected signals under each
+    stagnation horizon (and optionally a no-time-exit control).
+    """
+    bt = RocketBacktester(
+        interval=interval,
+        capital=capital,
+        max_symbols=limit,
+        time_exit_bars=None,
+        time_exit_atr_min=time_exit_atr_min,
+    )
+    bt.load_universe()
+    bt.fetch_data(start, end)
+    bt.series = RocketFeatureExtractor.enrich_universe(bt.series)
+
+    # Baseline once (no meta gate, no time exit)
+    baseline_strategy = MLInstitutionalStrategy(
+        min_confidence=min_confidence,
+        max_signals_per_bar=3,
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
+    )
+    bt.strategy = baseline_strategy
+    bt.signal_filter = None
+    bt.time_exit_bars = None
+    baseline = bt.run(start, end)
+    baseline["label"] = "raw_baseline"
+
+    raw = harvest_raw_signals(bt, start, end, min_confidence=min_confidence)
+    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=min_probability))
+    if raw.empty:
+        empty = dict(baseline)
+        empty["label"] = "ml_filtered"
+        empty["total_trades"] = 0
+        return {
+            "primary_metrics": empty,
+            "by_horizon": {},
+            "time_exit_comparison": [],
+            "baseline": baseline,
+        }
+
+    scored = meta.score_walk_forward(raw)
+    ranker = DailyTradeRanker(
+        meta,
+        min_probability_threshold=min_probability,
+        min_trades_per_day=min_per_day,
+        max_trades_per_day=max_per_day,
+        kelly_factor=kelly_factor,
+    )
+    selected = ranker.rank_and_select(scored)
+    by_key = ranker.selected_by_key(selected)
+    logger.info(
+        "Time-exit sweep: %s selected / %s raw; horizons=%s",
+        len(selected),
+        len(raw),
+        list(bars),
+    )
+
+    filtered_strategy = MLInstitutionalStrategy(
+        min_confidence=min_confidence,
+        max_signals_per_bar=10_000,
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
+    )
+    horizons: List[Optional[int]] = []
+    if include_none:
+        horizons.append(None)
+    horizons.extend(int(n) for n in bars)
+
+    results: Dict[str, Any] = {}
+    for n in horizons:
+        label = _exit_label(n)
+        logger.info("=== Time-exit comparison: %s ===", label)
+        bt.strategy = filtered_strategy
+        bt.signal_filter = SizedSignalGate(by_key)
+        bt.time_exit_bars = n
+        bt.time_exit_atr_min = float(time_exit_atr_min)
+        filtered = bt.run(start, end)
+        filtered["label"] = f"ml_filtered_{label}"
+        filtered["selected_signals"] = len(selected)
+        filtered["raw_signals"] = len(raw)
+        filtered["kelly_factor"] = kelly_factor
+        filtered["stagnation_exit_pct"] = _stagnation_exit_share(filtered)
+        results[label] = {
+            "baseline": baseline,
+            "filtered": filtered,
+            "comparison": build_comparison_table(baseline, filtered),
+            "selected_count": len(selected),
+            "raw_signal_count": int(len(raw)),
+        }
+
+    time_exit_comparison = build_time_exit_comparison_table(results)
+    # Prefer 4bars/20m as primary dashboard view when present; else first horizon
+    primary_key = "4bars/20m" if "4bars/20m" in results else next(iter(results))
+    primary = dict(results[primary_key]["filtered"])
+    primary["comparison"] = results[primary_key]["comparison"]
+    primary["baseline"] = baseline
+    primary["raw_signal_count"] = results[primary_key].get("raw_signal_count")
+    primary["selected_count"] = results[primary_key].get("selected_count")
+    primary["time_exit_results"] = results
+    primary["time_exit_comparison"] = time_exit_comparison
+    primary["time_exit_horizons"] = list(results.keys())
+    primary["meta_metrics"] = meta.train_metrics
+    return {
+        "primary_metrics": primary,
+        "by_horizon": results,
+        "time_exit_comparison": time_exit_comparison,
+        "baseline": baseline,
+    }
+
+
+def build_time_exit_comparison_table(by_horizon: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _pf(m: Dict[str, Any]) -> Any:
+        pf = m.get("profit_factor")
+        if pf is None and m.get("profit_factor_raw") == float("inf"):
+            return "∞"
+        return pf if pf is not None else "—"
+
+    horizons = list(by_horizon.keys())
+    specs = [
+        ("Total Trades", lambda m: m.get("total_trades")),
+        ("Win Rate (%)", lambda m: m.get("win_rate_pct")),
+        ("Profit Factor", _pf),
+        ("Max Drawdown (%)", lambda m: m.get("max_drawdown_pct")),
+        ("Expectancy / Trade (₹)", lambda m: m.get("expectancy")),
+        ("Net Return (%)", lambda m: m.get("net_return_pct")),
+        ("Final Equity (₹)", lambda m: m.get("final_equity")),
+        ("Avg Trades / Day", lambda m: round(_avg_trades_per_day(m), 2)),
+        ("Stagnation Exits (%)", lambda m: round(float(m.get("stagnation_exit_pct") or 0.0), 2)),
+        ("Total Costs (₹)", lambda m: float((m.get("costs") or {}).get("total", 0))),
+    ]
+    rows: List[Dict[str, Any]] = []
+    for label, fn in specs:
+        row: Dict[str, Any] = {"metric": label}
+        for h in horizons:
+            row[h] = fn(by_horizon[h]["filtered"])
+        rows.append(row)
+    return rows
+
+
+def print_time_exit_comparison(
+    comparison: Sequence[Dict[str, Any]],
+    horizons: Sequence[str],
+    console: Any = None,
+) -> None:
+    from rich.console import Console
+    from rich.table import Table
+
+    con = console or Console()
+    table = Table(title="Rocket — Dynamic Time / Stagnation Exits", show_header=True)
+    table.add_column("Metric")
+    for h in horizons:
+        table.add_column(str(h), justify="right")
+    for row in comparison:
+        table.add_row(str(row["metric"]), *[str(row.get(h, "—")) for h in horizons])
+    con.print(table)
+
+
 def _avg_trades_per_day(metrics: Dict[str, Any]) -> float:
     trades = metrics.get("trades") or []
     if not trades:

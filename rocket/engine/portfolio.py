@@ -23,15 +23,66 @@ class Position:
     take_profit: Optional[float] = None
     opened_at: Optional[datetime] = None
     confidence: float = 0.0
-    atr: Optional[float] = None
+    atr: Optional[float] = None  # atr_at_entry
     trail_activated: bool = False
+    peak_favorable_price: Optional[float] = None
+    bars_in_trade: int = 0
+    time_exit_armed: bool = True
 
     @property
     def direction(self) -> int:
         return 1 if self.side == Side.BUY else -1
 
+    @property
+    def atr_at_entry(self) -> Optional[float]:
+        return self.atr
+
     def unrealized_pnl(self, mark: float) -> float:
         return (mark - self.avg_price) * self.quantity * self.direction
+
+    def mfe(self) -> float:
+        """Maximum favorable excursion in price units since entry."""
+        peak = self.peak_favorable_price
+        if peak is None:
+            return 0.0
+        if self.side == Side.BUY:
+            return float(peak) - float(self.avg_price)
+        return float(self.avg_price) - float(peak)
+
+    def update_mfe(self, *, high: float, low: float) -> None:
+        if self.peak_favorable_price is None:
+            self.peak_favorable_price = float(self.avg_price)
+        if self.side == Side.BUY:
+            self.peak_favorable_price = max(float(self.peak_favorable_price), float(high))
+        else:
+            self.peak_favorable_price = min(float(self.peak_favorable_price), float(low))
+
+    def maybe_disarm_time_exit(self, atr_min: float = 0.5) -> None:
+        """Disarm stagnation timer once MFE ≥ atr_min × ATR at entry."""
+        if not self.time_exit_armed:
+            return
+        atr = self.atr
+        if atr is None or atr <= 0:
+            return
+        if self.mfe() >= float(atr_min) * float(atr):
+            self.time_exit_armed = False
+
+    def should_stagnation_exit(
+        self,
+        *,
+        time_exit_bars: Optional[int],
+        time_exit_atr_min: float = 0.5,
+    ) -> bool:
+        if time_exit_bars is None or int(time_exit_bars) <= 0:
+            return False
+        if not self.time_exit_armed:
+            return False
+        if self.bars_in_trade != int(time_exit_bars):
+            return False
+        atr = self.atr
+        if atr is None or atr <= 0:
+            return False
+        return self.mfe() < float(time_exit_atr_min) * float(atr)
 
     def update_trailing_stop(
         self,
@@ -177,6 +228,9 @@ class Portfolio:
                 opened_at=fill.timestamp,
                 confidence=confidence,
                 atr=atr,
+                peak_favorable_price=float(fill.price),
+                bars_in_trade=0,
+                time_exit_armed=True,
             )
             return cost
 
@@ -220,6 +274,9 @@ class Portfolio:
                     opened_at=fill.timestamp,
                     confidence=confidence,
                     atr=atr,
+                    peak_favorable_price=float(fill.price),
+                    bars_in_trade=0,
+                    time_exit_armed=True,
                 )
             return cost
 
