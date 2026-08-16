@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -67,6 +67,7 @@ class RocketBacktester:
         interval: str = "5minute",
         max_symbols: int = 200,
         max_positions: Optional[int] = None,
+        signal_filter: Optional[Callable[[datetime, List[Signal]], List[Signal]]] = None,
     ):
         self.settings = get_settings()
         self.strategy = strategy or MLInstitutionalStrategy()
@@ -76,6 +77,7 @@ class RocketBacktester:
         self.max_positions = int(
             max_positions if max_positions is not None else self.settings.rocket_max_positions
         )
+        self.signal_filter = signal_filter
         self.client = UpstoxCandleClient()
         self.contracts: List[FuturesContract] = []
         self.series: Dict[str, pd.DataFrame] = {}  # symbol -> enriched df
@@ -263,8 +265,10 @@ class RocketBacktester:
 
             portfolio.update_marks(marks, ts.to_pydatetime())
 
-            # New signals → queue for next bar open
+            # New signals → optional meta-filter → queue for next bar open
             signals = self.strategy.generate_signals(ts.to_pydatetime(), snapshot)
+            if self.signal_filter is not None:
+                signals = self.signal_filter(ts.to_pydatetime(), signals)
             for sig in signals:
                 if sig.symbol in portfolio.positions:
                     continue

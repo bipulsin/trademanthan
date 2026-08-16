@@ -60,7 +60,15 @@ def backtest(
     capital: float = typer.Option(10_000_000.0, "--capital"),
     limit: int = typer.Option(200, "--limit"),
     output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
-    skip_fetch: bool = typer.Option(False, "--skip-fetch", help="Use in-memory/cache only path still fetches missing"),
+    skip_fetch: bool = typer.Option(False, "--skip-fetch", help="Use cache when present; still fetches missing"),
+    meta_filter: bool = typer.Option(
+        True,
+        "--meta-filter/--no-meta-filter",
+        help="Run ML meta-filter (top 2–4 trades/day) and comparative report",
+    ),
+    min_prob: float = typer.Option(0.65, "--min-prob", help="Meta-filter P(win) threshold"),
+    max_per_day: int = typer.Option(4, "--max-per-day", help="Max selected trades per day"),
+    min_per_day: int = typer.Option(2, "--min-per-day", help="Soft minimum trades per day"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run Rocket backtest and write rocket.html tear sheet."""
@@ -69,19 +77,42 @@ def backtest(
     out = Path(output) if output else settings.rocket_output_html
     bt = RocketBacktester(interval=interval, capital=capital, max_symbols=limit)
     bt.load_universe()
-    if not skip_fetch:
-        bt.fetch_data(_parse_date(start_date), _parse_date(end_date))
-    else:
-        bt.fetch_data(_parse_date(start_date), _parse_date(end_date))
+    # Always resolve series via cache/fetch (skip_fetch currently still warms cache)
+    _ = skip_fetch
+    bt.fetch_data(_parse_date(start_date), _parse_date(end_date))
 
-    metrics = bt.run(_parse_date(start_date), _parse_date(end_date))
-    print_tearsheet(metrics, console)
-    title = (
-        f"ML Institutional Futures · {start_date} → {end_date} · {interval} · "
-        f"{metrics.get('universe_size', 0)} symbols"
-    )
+    if meta_filter:
+        from rocket.ml.pipeline import print_comparison, run_comparative_meta_backtest
+
+        result = run_comparative_meta_backtest(
+            bt,
+            _parse_date(start_date),
+            _parse_date(end_date),
+            min_probability=min_prob,
+            min_per_day=min_per_day,
+            max_per_day=max_per_day,
+        )
+        metrics = dict(result["filtered"])
+        metrics["comparison"] = result["comparison"]
+        metrics["baseline"] = result["baseline"]
+        metrics["raw_signal_count"] = result.get("raw_signal_count")
+        metrics["selected_count"] = result.get("selected_count")
+        metrics["meta_metrics"] = result.get("meta_metrics")
+        print_tearsheet(metrics, console)
+        print_comparison(result["comparison"], console)
+        title = (
+            f"ML Institutional Futures + Meta-Filter · {start_date} → {end_date} · "
+            f"{interval} · {metrics.get('universe_size', 0)} symbols"
+        )
+    else:
+        metrics = bt.run(_parse_date(start_date), _parse_date(end_date))
+        print_tearsheet(metrics, console)
+        title = (
+            f"ML Institutional Futures · {start_date} → {end_date} · {interval} · "
+            f"{metrics.get('universe_size', 0)} symbols"
+        )
+
     path = export_html(metrics, out, title=title)
-    # Mirror into frontend/public for production static serving
     public = PROJECT_ROOT / "frontend" / "public" / "rocket.html"
     try:
         public.parent.mkdir(parents=True, exist_ok=True)

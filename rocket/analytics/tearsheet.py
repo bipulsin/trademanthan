@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from rich.console import Console
 from rich.table import Table
@@ -44,6 +44,22 @@ def print_tearsheet(metrics: Dict[str, Any], console: Optional[Console] = None) 
         ct.add_row(key, f"{float(costs.get(key, 0)):,.2f}")
     con.print(ct)
 
+    comparison = metrics.get("comparison")
+    if comparison:
+        from rocket.ml.pipeline import print_comparison
+
+        print_comparison(comparison, con)
+
+
+def _fmt_metric(val: Any) -> str:
+    if val is None:
+        return "—"
+    if isinstance(val, float):
+        if abs(val) >= 1000:
+            return f"{val:,.2f}"
+        return f"{val:.4f}".rstrip("0").rstrip(".")
+    return str(val)
+
 
 def export_html(
     metrics: Dict[str, Any],
@@ -58,8 +74,11 @@ def export_html(
     ys = [e.get("equity") for e in eq]
     trades = metrics.get("trades") or []
     costs = metrics.get("costs") or {}
+    comparison: Sequence[Dict[str, Any]] = metrics.get("comparison") or []
+    baseline_eq = (metrics.get("baseline") or {}).get("equity_curve") or []
+    bx = [e.get("timestamp") for e in baseline_eq]
+    by = [e.get("equity") for e in baseline_eq]
 
-    # Build trade table rows
     trade_rows = []
     for t in trades:
         pnl = float(t.get("pnl") or 0)
@@ -77,6 +96,57 @@ def export_html(
 
     pf = metrics.get("profit_factor")
     pf_s = "∞" if pf is None and metrics.get("profit_factor_raw") == float("inf") else (f"{pf}" if pf is not None else "—")
+
+    cmp_rows = []
+    for row in comparison:
+        cmp_rows.append(
+            "<tr><td>{metric}</td><td class='num'>{baseline}</td><td class='num'>{filtered}</td></tr>".format(
+                metric=row.get("metric"),
+                baseline=_fmt_metric(row.get("baseline")),
+                filtered=_fmt_metric(row.get("filtered")),
+            )
+        )
+    cmp_section = ""
+    if cmp_rows:
+        raw_n = metrics.get("raw_signal_count")
+        sel_n = metrics.get("selected_count")
+        meta_note = ""
+        if raw_n is not None and sel_n is not None:
+            meta_note = (
+                f"<div class='sub' style='margin:0 0 10px'>Meta-filter kept "
+                f"<strong>{sel_n}</strong> of <strong>{raw_n}</strong> raw candidates "
+                f"(walk-forward daily top-K).</div>"
+            )
+        cmp_section = f"""
+    <div class="panel">
+      <h2>Baseline vs ML Meta-Filter</h2>
+      {meta_note}
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th class="num">Raw Strategy (Baseline)</th>
+            <th class="num">ML-Filtered Strategy</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(cmp_rows)}
+        </tbody>
+      </table>
+    </div>
+"""
+
+    dual_eq_js = ""
+    if bx and by:
+        dual_eq_js = f"""
+    const bx = {json.dumps(bx)};
+    const by = {json.dumps(by)};
+    traces.push({{
+      x: bx, y: by, type: 'scatter', mode: 'lines',
+      line: {{ color: '#93a0b8', width: 1.5, dash: 'dot' }},
+      name: 'Baseline'
+    }});
+"""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -149,6 +219,8 @@ def export_html(
       <div class="metric"><div class="k">Total Costs</div><div class="v">₹{float(costs.get('total', 0)):,.0f}</div></div>
     </div>
 
+    {cmp_section}
+
     <div class="panel">
       <h2>Equity Curve</h2>
       <div id="eqChart" style="height:380px;"></div>
@@ -193,18 +265,21 @@ def export_html(
   <script>
     const xs = {json.dumps(xs)};
     const ys = {json.dumps(ys)};
-    Plotly.newPlot('eqChart', [{{
+    const traces = [{{
       x: xs, y: ys, type: 'scatter', mode: 'lines',
       line: {{ color: '#3dd6c6', width: 2 }},
       fill: 'tozeroy', fillcolor: 'rgba(61,214,198,0.08)',
-      name: 'Equity'
-    }}], {{
+      name: 'ML-Filtered'
+    }}];
+    {dual_eq_js}
+    Plotly.newPlot('eqChart', traces, {{
       margin: {{ t: 10, r: 20, b: 40, l: 60 }},
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: {{ color: '#93a0b8' }},
       xaxis: {{ gridcolor: '#243049' }},
       yaxis: {{ gridcolor: '#243049', tickprefix: '₹' }},
+      legend: {{ orientation: 'h', y: 1.08 }},
     }}, {{responsive: true, displayModeBar: false}});
   </script>
 </body>
