@@ -80,7 +80,7 @@ def compute_structural_stop_target(
           struct = max(EMA20, VWAP) if above entry else entry+1.4ATR
     BUY:  SL = min(entry-1.4ATR, max(struct, entry-2.0ATR))
           struct = min(EMA20, VWAP) if below entry else entry-1.4ATR
-    Target = entry ± max(2.2×|entry−SL|, 3.0×ATR)
+    Target = entry ± max(2.5×|entry−SL|, 3.0×ATR)
     """
     side_u = str(side).upper()
     entry = float(entry_price)
@@ -99,7 +99,7 @@ def compute_structural_stop_target(
         stop_loss = max(floor_sl, min(structural, cap_sl))
         stop_kind = "vol_buffered" if candidates else "atr_floor"
         stop_dist = abs(stop_loss - entry)
-        target_dist = max(2.2 * stop_dist, 3.0 * atr)
+        target_dist = max(2.5 * stop_dist, 3.0 * atr)
         take_profit = entry - target_dist
     else:
         candidates = [x for x in (e20, vw) if x is not None and x < entry]
@@ -109,7 +109,7 @@ def compute_structural_stop_target(
         stop_loss = min(floor_sl, max(structural, cap_sl))
         stop_kind = "vol_buffered" if candidates else "atr_floor"
         stop_dist = abs(entry - stop_loss)
-        target_dist = max(2.2 * stop_dist, 3.0 * atr)
+        target_dist = max(2.5 * stop_dist, 3.0 * atr)
         take_profit = entry + target_dist
 
     return {

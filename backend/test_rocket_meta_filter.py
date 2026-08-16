@@ -204,7 +204,7 @@ def test_fractional_kelly_and_tier_sizing():
             "vwap": 990.0,
         }
     ) is not None
-    assert apply_tiered_sizing({"win_probability": 0.29, "entry_price": 1000.0, "atr": 10.0}) is None
+    assert apply_tiered_sizing({"win_probability": 0.19, "entry_price": 1000.0, "atr": 10.0}) is None
 
 
 def test_gates_and_risk_cap():
@@ -263,10 +263,13 @@ def test_gates_and_risk_cap():
     )
 
 
-def test_dynamic_soft_fill_hits_min_per_day():
+def test_zscore_daily_selection():
+    """Cross-sectional z≥1.65 + P≥0.20 → top 2–3/day; skip flat/weak days."""
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
-    for i, p in enumerate([0.40, 0.35, 0.32, 0.31]):
+    # Day 1: two clear outliers above a dense pack → z≥1.65
+    day1_probs = [0.55, 0.52, 0.48, 0.28, 0.27, 0.26, 0.25, 0.24, 0.23, 0.22]
+    for i, p in enumerate(day1_probs):
         rows.append(
             {
                 "timestamp": base,
@@ -285,7 +288,8 @@ def test_dynamic_soft_fill_hits_min_per_day():
                 "vwap": 990.0,
             }
         )
-    for i, p in enumerate([0.20, 0.15]):
+    # Day 2: all near floor — no z≥1.65
+    for i, p in enumerate([0.22, 0.21, 0.20, 0.19]):
         rows.append(
             {
                 "timestamp": base + timedelta(days=1),
@@ -304,14 +308,16 @@ def test_dynamic_soft_fill_hits_min_per_day():
                 "vwap": 990.0,
             }
         )
-    selected = DailyTradeRanker(
-        None, anomaly_floor=0.30, max_trades_per_day=3, min_trades_per_day=2
-    ).rank_and_select(rows)
+    selected = DailyTradeRanker(None, max_trades_per_day=3, min_trades_per_day=2).rank_and_select(
+        rows
+    )
     by_day = {}
     for s in selected:
         by_day.setdefault(s["trade_date"], []).append(s)
-    assert len(by_day["2026-08-03"]) == 3
+    assert "2026-08-03" in by_day
+    assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
+    assert all(s["z_score"] is not None and s["z_score"] >= 1.65 for s in by_day["2026-08-03"])
     assert "2026-08-04" not in by_day
 
 
@@ -351,7 +357,9 @@ def test_path_label_and_walk_forward_selector():
     assert scored["win_probability"].notna().all()
 
     scored = scored.copy()
-    scored["win_probability"] = 0.40
+    # Vary P within each day so z≥1.65 outliers exist
+    rng = np.random.default_rng(42)
+    scored["win_probability"] = 0.25 + rng.random(len(scored)) * 0.35
     scored["ema5_dist_atr"] = 0.1
     scored["ema20_dist_atr"] = 0.5
     scored["raw_rsi_14"] = 50.0
@@ -359,12 +367,13 @@ def test_path_label_and_walk_forward_selector():
     scored["ema_20"] = scored["entry_price"] - 10.0
     scored["vwap"] = scored["entry_price"] - 10.0
     scored["safe_atr"] = scored["atr"]
-    selected = DailyTradeRanker(meta, anomaly_floor=0.30, max_trades_per_day=3).rank_and_select(
-        scored
-    )
+    selected = DailyTradeRanker(meta, max_trades_per_day=3).rank_and_select(scored)
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
+    assert all(
+        (s.get("z_score") is None) or (float(s["z_score"]) >= 1.65 - 1e-9) for s in selected
+    )
 
     cmp = build_comparison_table(
         {

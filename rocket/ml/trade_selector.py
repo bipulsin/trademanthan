@@ -1,4 +1,4 @@
-"""Relative daily top-K allocator with vol-buffered stops and ₹8k risk budget."""
+"""Daily cross-sectional z-score allocator with vol-buffered stops and ₹8k risk."""
 
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-ANOMALY_FLOOR = 0.30  # skip day only if best score < this
+MIN_PROB = 0.20  # absolute floor alongside z-score
+Z_SCORE_MIN = 1.65  # ~top ~5% one-sided under normality
 DEFAULT_KELLY_FACTOR = 0.35
 DEFAULT_MIN_TRADES_PER_DAY = 2
 DEFAULT_MAX_TRADES_PER_DAY = 3
@@ -23,10 +24,11 @@ EMA20_MAX_DIST_ATR = 1.80
 RSI_OVERSOLD = 25.0
 RSI_OVERBOUGHT = 75.0
 
-# Back-compat aliases for older imports/tests
-HARD_FLOOR = ANOMALY_FLOOR
+# Back-compat aliases
+ANOMALY_FLOOR = MIN_PROB
+HARD_FLOOR = MIN_PROB
 TIER1_PROB = 0.62
-TIER2_PROB = ANOMALY_FLOOR
+TIER2_PROB = MIN_PROB
 
 
 def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = DEFAULT_KELLY_FACTOR) -> float:
@@ -87,19 +89,18 @@ def apply_tiered_sizing(
     row: Dict[str, Any],
     *,
     kelly_factor: float = DEFAULT_KELLY_FACTOR,
-    anomaly_floor: float = ANOMALY_FLOOR,
+    anomaly_floor: float = MIN_PROB,
     max_risk_rupees: float = MAX_RISK_RUPEES,
     is_top_rank: bool = False,
-    # Unused legacy kwargs kept so older call sites don't break
     tier1_prob: float = TIER1_PROB,
-    soft_floor: float = ANOMALY_FLOOR,
-    hard_floor: float = ANOMALY_FLOOR,
+    soft_floor: float = MIN_PROB,
+    hard_floor: float = MIN_PROB,
 ) -> Optional[Dict[str, Any]]:
     """
     Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
 
-    Relative ranking decides inclusion; this only enforces anomaly floor, gates,
-    and monetary risk. 2 lots only when ``is_top_rank`` and 2×risk ≤ ₹8,000.
+    Inclusion is decided by daily z-score ranking; this enforces P≥0.20, proximity
+    gates, and monetary risk. 2 lots only when ``is_top_rank`` and 2×risk ≤ ₹8,000.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
@@ -134,7 +135,7 @@ def apply_tiered_sizing(
     take_profit = float(levels["take_profit"])
     stop_dist = float(levels["stop_distance"])
     target_dist = float(levels["target_distance"])
-    rr = (target_dist / stop_dist) if stop_dist > 0 else 2.2
+    rr = (target_dist / stop_dist) if stop_dist > 0 else 2.5
     f_star = fractional_kelly(p, rr, kelly_factor=kelly_factor)
 
     lot_size = int(row.get("lot_size") or 0)
@@ -181,6 +182,7 @@ def apply_tiered_sizing(
             "stop_kind": "vol_buffered" if levels.get("stop_kind", 0) >= 1.0 else "atr_floor",
             "ema5_dist_atr": round(_dist_atr(row, "ema5_dist_atr", entry, atr, "ema_5"), 6),
             "ema20_dist_atr": round(_dist_atr(row, "ema20_dist_atr", entry, atr, "ema_20"), 6),
+            "z_score": float(row["z_score"]) if row.get("z_score") is not None else None,
         }
     )
     return out
@@ -188,34 +190,34 @@ def apply_tiered_sizing(
 
 class DailyTradeRanker:
     """
-    Relative daily top-K (2–3/day) by walk-forward score.
+    Daily cross-sectional z-score top-K (2–3/day).
 
-    Skips a day only when its best raw score is below the anomaly floor (0.30).
+    Selects candidates with ``z_score >= 1.65`` and ``win_probability >= 0.20``,
+    then applies proximity/RSI gates and the ₹8k risk budget.
     """
 
     def __init__(
         self,
         meta_filter: Optional[RocketMetaFilter] = None,
         *,
-        min_probability_threshold: float = ANOMALY_FLOOR,
-        hard_floor: float = ANOMALY_FLOOR,
+        min_probability_threshold: float = MIN_PROB,
+        hard_floor: float = MIN_PROB,
         min_trades_per_day: int = DEFAULT_MIN_TRADES_PER_DAY,
         max_trades_per_day: int = DEFAULT_MAX_TRADES_PER_DAY,
         kelly_factor: float = DEFAULT_KELLY_FACTOR,
         high_conviction_prob: float = TIER1_PROB,
         max_risk_rupees: float = MAX_RISK_RUPEES,
         anomaly_floor: Optional[float] = None,
+        z_score_min: float = Z_SCORE_MIN,
     ):
         self.meta_filter = meta_filter
-        # Relative ranking: anomaly floor defaults to 0.30. Older callers that
-        # pass 0.50/0.55 as min_probability are remapped to 0.30 so we don't starve.
-        raw_floor = float(anomaly_floor if anomaly_floor is not None else min_probability_threshold)
-        if anomaly_floor is None and raw_floor > ANOMALY_FLOOR:
-            self.anomaly_floor = ANOMALY_FLOOR
-        else:
-            self.anomaly_floor = max(0.0, raw_floor)
-        self.min_prob = self.anomaly_floor
-        self.hard_floor = self.anomaly_floor
+        # Absolute P floor is always 0.20; selectivity comes from z≥1.65.
+        # Remap legacy high floors (0.30/0.50/0.55) so CLI/tests don't re-starve.
+        _ = (min_probability_threshold, anomaly_floor, hard_floor)
+        self.min_prob = MIN_PROB
+        self.anomaly_floor = MIN_PROB
+        self.hard_floor = MIN_PROB
+        self.z_score_min = float(z_score_min)
         self.min_trades = int(min_trades_per_day)
         self.max_trades = int(max_trades_per_day)
         self.kelly_factor = float(kelly_factor)
@@ -244,25 +246,33 @@ class DailyTradeRanker:
 
         selected: List[Dict[str, Any]] = []
         for _date, group in df.groupby("trade_date", sort=True):
-            g = group.sort_values(
+            g = group.copy()
+            # One position per symbol per day (keep highest raw score first)
+            g = g.sort_values(
                 ["win_probability", "strategy_confidence"],
                 ascending=[False, False],
                 na_position="last",
             )
             g = g.drop_duplicates(subset=["symbol"], keep="first")
-            if g.empty:
-                continue
+            if g.empty or len(g) < 2:
+                # Need ≥2 scores for a meaningful σ; still allow single-name days via z=0 skip
+                if g.empty:
+                    continue
+                g["z_score"] = 0.0
+            else:
+                mu = float(g["win_probability"].mean())
+                sigma = float(g["win_probability"].std(ddof=0))
+                g["z_score"] = (g["win_probability"] - mu) / (sigma + 1e-6)
 
-            best = float(g["win_probability"].max())
-            if best < self.anomaly_floor:
-                # Extreme anomaly day — skip entirely
-                continue
-
-            # Relative pool: keep scores ≥ anomaly floor when available; otherwise
-            # still take the day's top ranks (best already ≥ floor).
-            pool = g[g["win_probability"] >= self.anomaly_floor]
+            pool = g[
+                (g["z_score"] >= self.z_score_min) & (g["win_probability"] >= self.min_prob)
+            ].sort_values(
+                ["z_score", "win_probability", "strategy_confidence"],
+                ascending=[False, False, False],
+                na_position="last",
+            )
             if pool.empty:
-                pool = g
+                continue
 
             day_picks: List[Dict[str, Any]] = []
             for _, row in pool.iterrows():
@@ -272,15 +282,12 @@ class DailyTradeRanker:
                 sized = apply_tiered_sizing(
                     row.to_dict(),
                     kelly_factor=self.kelly_factor,
-                    anomaly_floor=self.anomaly_floor,
+                    anomaly_floor=self.min_prob,
                     max_risk_rupees=self.max_risk_rupees,
                     is_top_rank=is_top,
                 )
                 if sized is not None:
-                    # Prefer filling toward min_trades; hard-cap max_trades
                     day_picks.append(sized)
-
-            # If we got fewer than min_trades, keep what we have (gates/risk may thin the day)
             selected.extend(day_picks)
 
         return selected
