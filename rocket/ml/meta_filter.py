@@ -27,9 +27,18 @@ class MetaModelConfig:
     max_depth: int = 4
     min_samples_leaf: int = 20
     l2_regularization: float = 2.0
-    scoring_threshold: float = 0.30
+    scoring_threshold: float = 0.32
     min_train_samples: int = 40
     model_path: str = ".cache/rocket_meta_filter.joblib"
+    # Continuous-bulk band used by the selector (documented here for OOF audits)
+    continuous_prob_min: float = 0.32
+    continuous_prob_max: float = 0.85
+
+
+def in_continuous_prob_bulk(p: float, *, lo: float = 0.32, hi: float = 0.85) -> bool:
+    """Exclude bottom noise and the ≥0.85 / 0.95 calibration artifact spike."""
+    x = float(p)
+    return lo <= x <= hi
 
 
 class RocketMetaFilter:
@@ -219,7 +228,19 @@ class RocketMetaFilter:
 
         out = df.copy()
         out["win_probability"] = probs
-        self.train_metrics = {"walk_forward_folds": fold_stats}
+        # Audit flags — selection still happens in DailyTradeRanker
+        p = out["win_probability"].astype(float)
+        lo = float(self.config.continuous_prob_min)
+        hi = float(self.config.continuous_prob_max)
+        out["in_continuous_bulk"] = (p >= lo) & (p <= hi)
+        out["is_artifact_spike"] = p > hi
+        self.train_metrics = {
+            "walk_forward_folds": fold_stats,
+            "prob_bulk_frac": float(out["in_continuous_bulk"].mean()) if len(out) else 0.0,
+            "prob_artifact_frac": float(out["is_artifact_spike"].mean()) if len(out) else 0.0,
+            "continuous_prob_min": lo,
+            "continuous_prob_max": hi,
+        }
         # Fit final model on all labeled rows for persistence / later days
         labeled = out[out[label_col].notna()]
         if len(labeled) >= self.config.min_train_samples and labeled[label_col].nunique() > 1:

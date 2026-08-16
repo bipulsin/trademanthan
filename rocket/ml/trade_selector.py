@@ -13,7 +13,10 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-MIN_PROB = 0.40  # sigmoid floor for EV selection
+MIN_PROB = 0.32  # continuous-bulk floor (excludes noise below median band)
+MAX_PROB = 0.85  # discard calibration artifact spike (≥0.95 pile)
+VALID_PROB_MIN = MIN_PROB
+VALID_PROB_MAX = MAX_PROB
 DEFAULT_KELLY_FACTOR = 0.35
 DEFAULT_MIN_TRADES_PER_DAY = 2
 DEFAULT_MAX_TRADES_PER_DAY = 3
@@ -29,6 +32,12 @@ HARD_FLOOR = MIN_PROB
 TIER1_PROB = 0.62
 TIER2_PROB = MIN_PROB
 Z_SCORE_MIN = 0.0  # unused; kept for older imports
+
+
+def in_valid_prob_band(p_win: float, *, lo: float = VALID_PROB_MIN, hi: float = VALID_PROB_MAX) -> bool:
+    """True iff P sits in the continuous bulk (excludes noise and ≥0.85 artifact tail)."""
+    p = float(p_win)
+    return lo <= p <= hi
 
 
 def fractional_kelly(p_win: float, reward_risk: float, *, kelly_factor: float = DEFAULT_KELLY_FACTOR) -> float:
@@ -97,6 +106,7 @@ def apply_tiered_sizing(
     *,
     kelly_factor: float = DEFAULT_KELLY_FACTOR,
     anomaly_floor: float = MIN_PROB,
+    max_probability: float = MAX_PROB,
     max_risk_rupees: float = MAX_RISK_RUPEES,
     is_top_rank: bool = False,
     tier1_prob: float = TIER1_PROB,
@@ -107,13 +117,14 @@ def apply_tiered_sizing(
     """
     Enrich a scored signal with vol-buffered SL/TP, EV, and ₹8k risk-capped lots.
 
-    Inclusion is decided by daily EV ranking; this enforces P≥0.40, EV>0 (optional),
-    proximity gates, and monetary risk. 2 lots only when ``is_top_rank`` and
-    2×risk ≤ ₹8,000.
+    Inclusion is decided by daily EV ranking; this enforces
+    ``0.32 ≤ P ≤ 0.85``, EV>0 (optional), proximity gates, and monetary risk.
+    2 lots only when ``is_top_rank`` and 2×risk ≤ ₹8,000.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
-    if p < float(anomaly_floor):
+    # Continuous-bulk band: drop noise below floor and artifact spike above max
+    if p < float(anomaly_floor) or p > float(max_probability):
         return None
 
     side = str(row.get("side") or row.get("bias") or "BUY").upper()
@@ -202,10 +213,11 @@ def apply_tiered_sizing(
 
 class DailyTradeRanker:
     """
-    Daily Expected-Value top-K (2–3/day).
+    Daily Expected-Value top-K (2–3/day) on the continuous probability bulk.
 
-    Candidates must pass proximity/RSI gates, ``P ≥ 0.40``, and ``EV > 0``,
+    Candidates must pass proximity/RSI gates, ``0.32 ≤ P ≤ 0.85``, and ``EV > 0``,
     then the top scores by ``expected_value`` are kept (₹8k risk budget).
+    Artifact spikes (P > 0.85) are discarded before ranking.
     """
 
     def __init__(
@@ -221,12 +233,17 @@ class DailyTradeRanker:
         max_risk_rupees: float = MAX_RISK_RUPEES,
         anomaly_floor: Optional[float] = None,
         z_score_min: float = Z_SCORE_MIN,
+        max_probability: float = MAX_PROB,
     ):
         self.meta_filter = meta_filter
         _ = z_score_min
-        # EV gate is P≥0.40; remap legacy 0.20/0.30 floors upward.
+        # Remap legacy floors (0.20/0.30/0.40) onto the continuous-bulk band.
         raw = float(anomaly_floor if anomaly_floor is not None else min_probability_threshold)
-        self.min_prob = MIN_PROB if raw < MIN_PROB else float(raw)
+        if raw in (0.20, 0.30, 0.40) or raw < MIN_PROB:
+            self.min_prob = MIN_PROB
+        else:
+            self.min_prob = float(raw)
+        self.max_prob = float(max_probability)
         self.anomaly_floor = self.min_prob
         self.hard_floor = self.min_prob
         self.min_trades = int(min_trades_per_day)
@@ -274,6 +291,7 @@ class DailyTradeRanker:
                     row.to_dict(),
                     kelly_factor=self.kelly_factor,
                     anomaly_floor=self.min_prob,
+                    max_probability=self.max_prob,
                     max_risk_rupees=self.max_risk_rupees,
                     is_top_rank=False,
                     require_positive_ev=True,
@@ -302,6 +320,7 @@ class DailyTradeRanker:
                         {k: v for k, v in cand.items() if k not in ("lots", "quantity", "tier", "total_risk")},
                         kelly_factor=self.kelly_factor,
                         anomaly_floor=self.min_prob,
+                        max_probability=self.max_prob,
                         max_risk_rupees=self.max_risk_rupees,
                         is_top_rank=True,
                         require_positive_ev=True,
