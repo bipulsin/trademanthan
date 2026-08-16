@@ -1,0 +1,173 @@
+{
+  "symbol": "ASHOKLEY",
+  "contract": {
+    "instrument_key": "NSE_FO|58106",
+    "futures_symbol": "ASHOKLEY FUT 25 AUG 26",
+    "lot_size": 5000,
+    "tick_size": 1.0
+  },
+  "trade": {
+    "side": "SELL",
+    "entry_time": "2026-08-14T13:50:00+05:30",
+    "exit_time": "2026-08-14T14:00:00+05:30",
+    "entry_price": 170.95,
+    "exit_price": 174.15,
+    "qty": 5000,
+    "lots": 1,
+    "tier": 2,
+    "win_probability": 0.3055913378950812,
+    "notional": 854750.0,
+    "pnl": -16145.85,
+    "pct_move_signed": -1.8719,
+    "reason": "stop_loss",
+    "bars_held": 2
+  },
+  "levels": {
+    "atr_14": 1.762857,
+    "stop_atr_mult": 1.8,
+    "target_atr_mult": 3.2,
+    "stop_loss": 174.1331,
+    "take_profit": 165.3189,
+    "stop_distance": 3.1831,
+    "adverse_atr_on_exit_bar": 1.8436,
+    "intra_bar_stop_breach": true
+  },
+  "features": {
+    "directional_ema20_dist": 2.6653420951455535,
+    "directional_vwap_dist": 2.7323073486612452,
+    "rsi_14": 79.90196078431386,
+    "rsi_slope_3": -6.629729356531399,
+    "rvol": 1.4871691250757728,
+    "vol_surge": 0.0,
+    "high_breakout": 0.0,
+    "low_breakout": 0.0,
+    "atr_pct": 1.0312121338737288,
+    "win_probability": 0.3055913378950812,
+    "strategy_confidence": 0.95
+  },
+  "costs": {
+    "entry": {
+      "brokerage": 20.0,
+      "stt": 170.95,
+      "exchange": 16.24,
+      "sebi": 0.85,
+      "stamp_duty": 0.0,
+      "gst": 6.68,
+      "slippage": 170.95,
+      "total": 385.67
+    },
+    "exit": {
+      "brokerage": 20.0,
+      "stt": 0.0,
+      "exchange": 16.54,
+      "sebi": 0.87,
+      "stamp_duty": 17.42,
+      "gst": 6.73,
+      "slippage": 170.95,
+      "total": 232.51
+    },
+    "total_est": 618.19,
+    "tearsheet_costs": 145.85
+  },
+  "bars": [
+    {
+      "i": 745,
+      "timestamp": "2026-08-14T13:35:00+05:30",
+      "tag": "pre-3",
+      "open": 171.21,
+      "high": 172.65,
+      "low": 170.88,
+      "close": 172.06,
+      "volume": 3540000.0,
+      "stop_hit": false,
+      "tp_hit": false,
+      "adverse_from_entry": null,
+      "favorable_from_entry": null
+    },
+    {
+      "i": 746,
+      "timestamp": "2026-08-14T13:40:00+05:30",
+      "tag": "pre-2",
+      "open": 172.21,
+      "high": 172.34,
+      "low": 171.4,
+      "close": 171.57,
+      "volume": 2795000.0,
+      "stop_hit": false,
+      "tp_hit": false,
+      "adverse_from_entry": null,
+      "favorable_from_entry": null
+    },
+    {
+      "i": 747,
+      "timestamp": "2026-08-14T13:45:00+05:30",
+      "tag": "signal,pre-1",
+      "open": 171.5,
+      "high": 172.5,
+      "low": 170.1,
+      "close": 170.95,
+      "volume": 3680000.0,
+      "stop_hit": false,
+      "tp_hit": false,
+      "adverse_from_entry": null,
+      "favorable_from_entry": null
+    },
+    {
+      "i": 748,
+      "timestamp": "2026-08-14T13:50:00+05:30",
+      "tag": "ENTRY",
+      "open": 170.96,
+      "high": 171.74,
+      "low": 170.52,
+      "close": 170.52,
+      "volume": 1890000.0,
+      "stop_hit": false,
+      "tp_hit": false,
+      "adverse_from_entry": 0.7900000000000205,
+      "favorable_from_entry": 0.4299999999999784
+    },
+    {
+      "i": 749,
+      "timestamp": "2026-08-14T13:55:00+05:30",
+      "tag": "post+1",
+      "open": 170.6,
+      "high": 173.1,
+      "low": 170.51,
+      "close": 172.99,
+      "volume": 2240000.0,
+      "stop_hit": false,
+      "tp_hit": false,
+      "adverse_from_entry": 2.1500000000000057,
+      "favorable_from_entry": 0.4399999999999977
+    },
+    {
+      "i": 750,
+      "timestamp": "2026-08-14T14:00:00+05:30",
+      "tag": "EXIT,post+2",
+      "open": 173.0,
+      "high": 174.2,
+      "low": 172.94,
+      "close": 173.72,
+      "volume": 2135000.0,
+      "stop_hit": true,
+      "tp_hit": false,
+      "adverse_from_entry": 3.25,
+      "favorable_from_entry": -1.990000000000009
+    },
+    {
+      "i": 751,
+      "timestamp": "2026-08-14T14:05:00+05:30",
+      "tag": "post+3",
+      "open": 173.94,
+      "high": 173.96,
+      "low": 173.33,
+      "close": 173.5,
+      "volume": 535000.0,
+      "stop_hit": false,
+      "tp_hit": false,
+      "adverse_from_entry": 3.0100000000000193,
+      "favorable_from_entry": -2.380000000000024
+    }
+  ],
+  "verdict": "Hard stop triggered on Bar 2 after entry: 1.84\u00d7ATR adverse extreme vs 1.8\u00d7ATR stop on 5,000 qty (1 lot, Tier 2). Exit fill 174.15 \u2248 stop 174.13. Trap signals: immediate adverse spike into short stop (squeeze / false breakdown risk)."
+}
