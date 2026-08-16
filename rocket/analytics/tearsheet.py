@@ -115,7 +115,8 @@ def export_html(
             meta_note = (
                 f"<div class='sub' style='margin:0 0 10px'>Meta-filter + fractional Kelly kept "
                 f"<strong>{sel_n}</strong> of <strong>{raw_n}</strong> raw candidates "
-                f"(ordinal top-K on 0.22≤P≤0.85, 09:20–12:25 IST signal curfew → fills ≤12:30, "
+                f"(HTF 15m trend + RVOL≥1.25 confluence, ordinal 0–3/day on 0.28≤P≤0.85, "
+                f"09:20–12:25 IST signal curfew → fills ≤12:30, "
                 f"EMA5≤0.70×ATR / EMA20≤1.80×ATR, RSI 25/75, ₹8k risk; "
                 f"vol-buffered EMA20/VWAP stop (1.2–1.6×ATR) + 1.8R/2.2×ATR target; "
                 f"1.8×ATR trail after +1.2R; 4-bar stagnation; synced execution labels).</div>"

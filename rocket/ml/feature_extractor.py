@@ -47,6 +47,57 @@ class RocketFeatureExtractor:
     """Computes technical, structural, and session-context features for 5m candles."""
 
     @staticmethod
+    def _attach_htf_15m(out: pd.DataFrame) -> pd.DataFrame:
+        """Attach completed 15m EMA20 + VWAP onto each 5m bar (backward as-of)."""
+        if out.empty:
+            out["ema_20_15m"] = np.nan
+            out["vwap_15m"] = np.nan
+            out["close_15m"] = np.nan
+            return out
+
+        indexed = out.set_index("timestamp").sort_index()
+        htf = (
+            indexed.resample("15min", label="left", closed="left")
+            .agg(
+                open=("open", "first"),
+                high=("high", "max"),
+                low=("low", "min"),
+                close=("close", "last"),
+                volume=("volume", "sum"),
+            )
+            .dropna(subset=["close"])
+        )
+        if htf.empty:
+            out["ema_20_15m"] = np.nan
+            out["vwap_15m"] = np.nan
+            out["close_15m"] = np.nan
+            return out
+
+        htf["ema_20_15m"] = htf["close"].ewm(span=20, adjust=False).mean()
+        ts_ist = htf.index.tz_convert("Asia/Kolkata")
+        day15 = pd.Series(ts_ist.date, index=htf.index)
+        tp15 = (htf["high"] + htf["low"] + htf["close"]) / 3.0
+        vol15 = htf["volume"].fillna(0.0).clip(lower=0.0)
+        cum_vol15 = vol15.groupby(day15).cumsum()
+        cum_pv15 = (tp15 * vol15).groupby(day15).cumsum()
+        htf["vwap_15m"] = np.where(cum_vol15 > 0, cum_pv15 / cum_vol15, htf["close"])
+
+        # Values become available only after the 15m bucket closes
+        avail = htf[["ema_20_15m", "vwap_15m", "close"]].copy()
+        avail.index = avail.index + pd.Timedelta(minutes=15)
+        avail = avail.rename(columns={"close": "close_15m"}).reset_index()
+        avail = avail.rename(columns={"timestamp": "timestamp"})
+
+        base = out.sort_values("timestamp").reset_index(drop=True)
+        merged = pd.merge_asof(
+            base,
+            avail.sort_values("timestamp"),
+            on="timestamp",
+            direction="backward",
+        )
+        return merged
+
+    @staticmethod
     def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """Enrich raw OHLCV with indicators (no lookahead beyond current bar)."""
         if df.empty:
@@ -105,6 +156,9 @@ class RocketFeatureExtractor:
         out["vol_sma20"] = vol.rolling(window=20, min_periods=5).mean()
         out["rvol"] = np.where(out["vol_sma20"] > 0, vol / out["vol_sma20"], 1.0)
         out["vol_surge"] = np.where(out["rvol"] >= 2.0, 1, 0)
+
+        # --- 15-minute HTF structure (no lookahead: only completed 15m bars) ---
+        out = RocketFeatureExtractor._attach_htf_15m(out)
 
         out["day_high"] = out["high"].groupby(day).cummax()
         out["day_low"] = out["low"].groupby(day).cummin()
@@ -202,6 +256,10 @@ class RocketFeatureExtractor:
             "ema_20": _f("ema_20"),
             "vwap": _f("vwap"),
             "safe_atr": _f("safe_atr"),
+            "rvol_raw": _f("rvol", 1.0),
+            "ema_20_15m": _f("ema_20_15m"),
+            "vwap_15m": _f("vwap_15m"),
+            "close_15m": _f("close_15m"),
         }
 
     @classmethod

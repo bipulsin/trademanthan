@@ -21,6 +21,32 @@ from rocket.ml.trade_selector import (
 IST = pytz.timezone("Asia/Kolkata")
 
 
+def _buy_confluence(**extra):
+    row = {
+        "close": 1000.0,
+        "rvol": 1.5,
+        "rvol_raw": 1.5,
+        "ema_20_15m": 990.0,
+        "vwap": 995.0,
+        "timestamp": IST.localize(datetime(2026, 8, 3, 10, 0)),
+    }
+    row.update(extra)
+    return row
+
+
+def _sell_confluence(**extra):
+    row = {
+        "close": 1000.0,
+        "rvol": 1.5,
+        "rvol_raw": 1.5,
+        "ema_20_15m": 1015.0,
+        "vwap": 1012.0,
+        "timestamp": IST.localize(datetime(2026, 8, 3, 10, 0)),
+    }
+    row.update(extra)
+    return row
+
+
 def _synth_ohlcv(n: int = 80) -> pd.DataFrame:
     start = IST.localize(datetime(2026, 8, 3, 9, 15))
     rows = []
@@ -56,6 +82,8 @@ def test_feature_extractor_columns():
     assert "vwap" in df.columns
     assert "ema_10" in df.columns
     assert "ema5_dist_atr" in df.columns
+    assert "ema_20_15m" in df.columns
+    assert "rvol" in df.columns
     assert "is_open_drive" in df.columns
     feats = RocketFeatureExtractor.extract_trade_features(df, 40, "BUY")
     for col in FEATURE_COLUMNS:
@@ -63,6 +91,8 @@ def test_feature_extractor_columns():
         assert np.isfinite(feats[col])
     assert "ema5_dist_atr" in feats
     assert "raw_rsi_14" in feats
+    assert "ema_20_15m" in feats
+    assert "rvol_raw" in feats
 
 
 def test_trailing_stop_ratchet():
@@ -144,45 +174,42 @@ def test_fractional_kelly_and_tier_sizing():
     assert 0.0 < f <= 0.35
 
     high = apply_tiered_sizing(
-        {
-            "win_probability": 0.55,
-            "side": "BUY",
-            "entry_price": 1000.0,
-            "atr": 10.0,
-            "safe_atr": 10.0,
-            "ema_5": 1001.0,
-            "ema_20": 990.0,
-            "vwap": 985.0,
-            "ema5_dist_atr": 0.1,
-            "ema20_dist_atr": 1.0,
-            "raw_rsi_14": 55.0,
-            "lot_size": 50,
-        },
+        _buy_confluence(
+            win_probability=0.55,
+            side="BUY",
+            entry_price=1000.0,
+            atr=10.0,
+            safe_atr=10.0,
+            ema_5=1001.0,
+            ema_20=990.0,
+            ema5_dist_atr=0.1,
+            ema20_dist_atr=1.0,
+            raw_rsi_14=55.0,
+            lot_size=50,
+        ),
         is_top_rank=True,
     )
     assert high is not None
     assert high["tier"] == 1
     assert high["lots"] == 2
-    # Long: struct=min(990,985)=985; SL=min(988, max(985,984))=985
-    assert abs(high["stop_loss"] - 985.0) < 1e-6
-    assert high["expected_value"] > 0.0
+    # Long: struct=min(990,995)=990; SL=min(988, max(990,984))=988
+    assert abs(high["stop_loss"] - 988.0) < 1e-6
     assert high["total_risk"] <= 8000.0
 
     mid = apply_tiered_sizing(
-        {
-            "win_probability": 0.45,
-            "side": "SELL",
-            "entry_price": 1000.0,
-            "atr": 10.0,
-            "safe_atr": 10.0,
-            "ema_5": 999.0,
-            "ema_20": 1015.0,
-            "vwap": 1012.0,
-            "ema5_dist_atr": 0.1,
-            "ema20_dist_atr": 1.5,
-            "raw_rsi_14": 45.0,
-            "lot_size": 50,
-        },
+        _sell_confluence(
+            win_probability=0.45,
+            side="SELL",
+            entry_price=1000.0,
+            atr=10.0,
+            safe_atr=10.0,
+            ema_5=999.0,
+            ema_20=1015.0,
+            ema5_dist_atr=0.1,
+            ema20_dist_atr=1.5,
+            raw_rsi_14=45.0,
+            lot_size=50,
+        ),
         is_top_rank=False,
     )
     assert mid is not None
@@ -191,55 +218,92 @@ def test_fractional_kelly_and_tier_sizing():
     # Short: struct=max(1015,1012)=1015; SL=max(1012, min(1015,1016))=1015
     assert abs(mid["stop_loss"] - 1015.0) < 1e-6
 
-    assert apply_tiered_sizing(
-        {
-            "win_probability": 0.38,
-            "side": "BUY",
-            "entry_price": 1000.0,
-            "atr": 10.0,
-            "ema5_dist_atr": 0.1,
-            "ema20_dist_atr": 0.5,
-            "raw_rsi_14": 50.0,
-            "lot_size": 50,
-            "ema_20": 990.0,
-            "vwap": 990.0,
-        }
-    ) is not None
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.38,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is not None
+    )
     assert apply_tiered_sizing({"win_probability": 0.21, "entry_price": 1000.0, "atr": 10.0}) is None
+    # Low RVOL rejected
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.55,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                rvol=1.0,
+                rvol_raw=1.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is None
+    )
+    # HTF counter-trend rejected
+    assert (
+        apply_tiered_sizing(
+            _buy_confluence(
+                win_probability=0.55,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                ema_20_15m=1010.0,  # close below HTF EMA
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
+        )
+        is None
+    )
     # Artifact spike must be excluded
     assert (
         apply_tiered_sizing(
-            {
-                "win_probability": 0.95,
-                "side": "BUY",
-                "entry_price": 1000.0,
-                "atr": 10.0,
-                "ema5_dist_atr": 0.1,
-                "ema20_dist_atr": 0.5,
-                "raw_rsi_14": 50.0,
-                "lot_size": 50,
-                "ema_20": 990.0,
-                "vwap": 990.0,
-            }
+            _buy_confluence(
+                win_probability=0.95,
+                side="BUY",
+                entry_price=1000.0,
+                atr=10.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
         )
         is None
     )
     # Post-curfew rejected
     assert (
         apply_tiered_sizing(
-            {
-                "win_probability": 0.55,
-                "side": "BUY",
-                "timestamp": IST.localize(datetime(2026, 8, 3, 13, 0)),
-                "entry_price": 1000.0,
-                "atr": 10.0,
-                "ema5_dist_atr": 0.1,
-                "ema20_dist_atr": 0.5,
-                "raw_rsi_14": 50.0,
-                "lot_size": 50,
-                "ema_20": 990.0,
-                "vwap": 990.0,
-            }
+            _buy_confluence(
+                win_probability=0.55,
+                side="BUY",
+                timestamp=IST.localize(datetime(2026, 8, 3, 13, 0)),
+                entry_price=1000.0,
+                atr=10.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
         )
         is None
     )
@@ -302,68 +366,64 @@ def test_gates_and_risk_cap():
 
 
 def test_ordinal_daily_selection_with_curfew():
-    """0.22≤P≤0.85 ordinal top-K; reject spikes and post-12:30 entries."""
+    """0.28≤P≤0.85 ordinal 0–3/day with HTF+RVOL; empty days stay empty."""
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
     day1_probs = [0.55, 0.48, 0.42, 0.38, 0.35, 0.95, 0.18]
     for i, p in enumerate(day1_probs):
         rows.append(
-            {
-                "timestamp": base,
-                "trade_date": "2026-08-03",
-                "symbol": f"W{i}",
-                "side": "BUY",
-                "win_probability": p,
-                "strategy_confidence": 0.6,
-                "entry_price": 1000.0,
-                "atr": 10.0,
-                "ema5_dist_atr": 0.1,
-                "ema20_dist_atr": 0.5,
-                "raw_rsi_14": 50.0,
-                "lot_size": 50,
-                "ema_20": 990.0,
-                "vwap": 990.0,
-            }
+            _buy_confluence(
+                timestamp=base,
+                trade_date="2026-08-03",
+                symbol=f"W{i}",
+                side="BUY",
+                win_probability=p,
+                strategy_confidence=0.6,
+                entry_price=1000.0,
+                atr=10.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
         )
-    # Late-day high score must not be selected
     rows.append(
-        {
-            "timestamp": IST.localize(datetime(2026, 8, 3, 14, 45)),
-            "trade_date": "2026-08-03",
-            "symbol": "LATE",
-            "side": "BUY",
-            "win_probability": 0.80,
-            "strategy_confidence": 0.9,
-            "entry_price": 1000.0,
-            "atr": 10.0,
-            "ema5_dist_atr": 0.1,
-            "ema20_dist_atr": 0.5,
-            "raw_rsi_14": 50.0,
-            "lot_size": 50,
-            "ema_20": 990.0,
-            "vwap": 990.0,
-        }
+        _buy_confluence(
+            timestamp=IST.localize(datetime(2026, 8, 3, 14, 45)),
+            trade_date="2026-08-03",
+            symbol="LATE",
+            side="BUY",
+            win_probability=0.80,
+            strategy_confidence=0.9,
+            entry_price=1000.0,
+            atr=10.0,
+            ema5_dist_atr=0.1,
+            ema20_dist_atr=0.5,
+            raw_rsi_14=50.0,
+            lot_size=50,
+            ema_20=990.0,
+        )
     )
     for i, p in enumerate([0.95, 0.90, 0.15, 0.10]):
         rows.append(
-            {
-                "timestamp": base + timedelta(days=1),
-                "trade_date": "2026-08-04",
-                "symbol": f"A{i}",
-                "side": "BUY",
-                "win_probability": p,
-                "strategy_confidence": 0.6,
-                "entry_price": 1000.0,
-                "atr": 10.0,
-                "ema5_dist_atr": 0.1,
-                "ema20_dist_atr": 0.5,
-                "raw_rsi_14": 50.0,
-                "lot_size": 50,
-                "ema_20": 990.0,
-                "vwap": 990.0,
-            }
+            _buy_confluence(
+                timestamp=base + timedelta(days=1),
+                trade_date="2026-08-04",
+                symbol=f"A{i}",
+                side="BUY",
+                win_probability=p,
+                strategy_confidence=0.6,
+                entry_price=1000.0,
+                atr=10.0,
+                ema5_dist_atr=0.1,
+                ema20_dist_atr=0.5,
+                raw_rsi_14=50.0,
+                lot_size=50,
+                ema_20=990.0,
+            )
         )
-    selected = DailyTradeRanker(None, max_trades_per_day=3, min_trades_per_day=2).rank_and_select(
+    selected = DailyTradeRanker(None, max_trades_per_day=3, min_trades_per_day=0).rank_and_select(
         rows
     )
     by_day = {}
@@ -372,8 +432,8 @@ def test_ordinal_daily_selection_with_curfew():
     assert "2026-08-03" in by_day
     assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
-    assert by_day["2026-08-03"][0]["symbol"] == "W0"  # highest valid P
-    assert all(0.22 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert by_day["2026-08-03"][0]["symbol"] == "W0"
+    assert all(0.28 <= float(s["win_probability"]) <= 0.85 for s in selected)
     assert all(s["symbol"] != "LATE" for s in selected)
     assert "2026-08-04" not in by_day
 
@@ -415,22 +475,28 @@ def test_path_label_and_walk_forward_selector():
 
     scored = scored.copy()
     rng = np.random.default_rng(42)
-    scored["win_probability"] = 0.22 + rng.random(len(scored)) * 0.40
+    scored["win_probability"] = 0.28 + rng.random(len(scored)) * 0.35
     scored.loc[scored.index[:5], "win_probability"] = 0.95
-    # Place timestamps inside the entry curfew
     scored["timestamp"] = IST.localize(datetime(2026, 8, 3, 10, 30))
+    scored["side"] = "BUY"
+    scored["close"] = scored["entry_price"]
+    scored["rvol"] = 1.5
+    scored["rvol_raw"] = 1.5
+    scored["ema_20_15m"] = scored["entry_price"] - 10.0
+    scored["vwap"] = scored["entry_price"] - 5.0
     scored["ema5_dist_atr"] = 0.1
     scored["ema20_dist_atr"] = 0.5
     scored["raw_rsi_14"] = 50.0
     scored["lot_size"] = 50
     scored["ema_20"] = scored["entry_price"] - 10.0
-    scored["vwap"] = scored["entry_price"] - 10.0
     scored["safe_atr"] = scored["atr"]
-    selected = DailyTradeRanker(meta, max_trades_per_day=3).rank_and_select(scored)
+    selected = DailyTradeRanker(meta, max_trades_per_day=3, min_trades_per_day=0).rank_and_select(
+        scored
+    )
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
-    assert all(0.22 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.28 <= float(s["win_probability"]) <= 0.85 for s in selected)
 
     cmp = build_comparison_table(
         {

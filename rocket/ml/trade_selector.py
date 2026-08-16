@@ -14,7 +14,7 @@ from rocket.ml.meta_filter import RocketMetaFilter
 
 logger = logging.getLogger(__name__)
 
-MIN_PROB = 0.22  # continuous-bulk floor
+MIN_PROB = 0.28  # continuous-bulk floor after confluence filters
 MAX_PROB = 0.85  # discard calibration artifact spike
 VALID_PROB_MIN = MIN_PROB
 VALID_PROB_MAX = MAX_PROB
@@ -22,13 +22,14 @@ ENTRY_CURFEW_START = time(9, 20)
 # Last signal bar whose next-bar open fill is still ≤ 12:30 IST on 5-minute candles
 ENTRY_CURFEW_END = time(12, 25)
 DEFAULT_KELLY_FACTOR = 0.35
-DEFAULT_MIN_TRADES_PER_DAY = 2
+DEFAULT_MIN_TRADES_PER_DAY = 0  # allow zero-trade days
 DEFAULT_MAX_TRADES_PER_DAY = 3
 MAX_RISK_RUPEES = 8000.0  # 0.08% of ₹1Cr
 EMA5_MAX_DIST_ATR = 0.70
 EMA20_MAX_DIST_ATR = 1.80
 RSI_OVERSOLD = 25.0
 RSI_OVERBOUGHT = 75.0
+MIN_RVOL = 1.25
 
 # Back-compat aliases
 ANOMALY_FLOOR = MIN_PROB
@@ -110,6 +111,25 @@ def entry_gate_reject_reason(row: Dict[str, Any], *, side: str, entry: float, at
     curfew = entry_curfew_reject_reason(row.get("timestamp"))
     if curfew:
         return curfew
+
+    rvol = row.get("rvol_raw", row.get("rvol"))
+    if rvol is None or not np.isfinite(float(rvol)) or float(rvol) < MIN_RVOL:
+        return "REJECT_LOW_RVOL"
+
+    close = float(row.get("close") or entry)
+    ema20_15 = row.get("ema_20_15m")
+    vwap = row.get("vwap")
+    if ema20_15 is None or not np.isfinite(float(ema20_15)) or vwap is None or not np.isfinite(float(vwap)):
+        return "REJECT_HTF_COUNTER_TREND"
+    e20 = float(ema20_15)
+    vw = float(vwap)
+    if side in ("BUY", "LONG"):
+        if not (close > e20 and close > vw):
+            return "REJECT_HTF_COUNTER_TREND"
+    elif side in ("SELL", "SHORT"):
+        if not (close < e20 and close < vw):
+            return "REJECT_HTF_COUNTER_TREND"
+
     if _dist_atr(row, "ema5_dist_atr", entry, atr, "ema_5") > EMA5_MAX_DIST_ATR:
         return "REJECT_MID_AIR_CHASE"
     if _dist_atr(row, "ema20_dist_atr", entry, atr, "ema_20") > EMA20_MAX_DIST_ATR:
@@ -140,8 +160,8 @@ def apply_tiered_sizing(
     """
     Enrich a scored signal with vol-buffered SL/TP and ₹8k risk-capped lots.
 
-    Ordinal ranking decides inclusion; this enforces ``0.22 ≤ P ≤ 0.85``,
-    session curfew, proximity gates, and monetary risk.
+    Ordinal ranking decides inclusion; this enforces ``0.28 ≤ P ≤ 0.85``,
+    HTF+RVOL confluence, session curfew, proximity gates, and monetary risk.
     """
     _ = (tier1_prob, soft_floor, hard_floor)
     p = float(row.get("win_probability") or 0.0)
@@ -234,10 +254,10 @@ def apply_tiered_sizing(
 
 class DailyTradeRanker:
     """
-    Pure ordinal daily top-K (2–3/day) on the continuous probability bulk.
+    Dynamic 0–3 ordinal daily allocator on high-confluence setups.
 
-    Rank by ``win_probability`` descending among candidates that pass curfew,
-    proximity/RSI gates, and ``0.22 ≤ P ≤ 0.85``. No hard EV > 0 filter.
+    Days with zero candidates that pass HTF + RVOL + proximity + curfew +
+    ``0.28 ≤ P ≤ 0.85`` produce **zero trades** (no soft-fill quota).
     """
 
     def __init__(
@@ -257,7 +277,7 @@ class DailyTradeRanker:
     ):
         self.meta_filter = meta_filter
         _ = (z_score_min, hard_floor, anomaly_floor, min_probability_threshold)
-        # Ordinal bulk floor is always 0.22; remap legacy CLI floors.
+        # Ordinal bulk floor is always 0.28; remap legacy CLI floors.
         self.min_prob = MIN_PROB
         self.max_prob = float(max_probability)
         self.anomaly_floor = self.min_prob

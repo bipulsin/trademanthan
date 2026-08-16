@@ -74,11 +74,11 @@ def backtest(
     meta_filter: bool = typer.Option(
         True,
         "--meta-filter/--no-meta-filter",
-        help="Run ML meta-filter (ordinal top-K on 0.22–0.85 bulk, 09:20–12:30 curfew) and comparative report",
+        help="Run ML meta-filter (HTF+RVOL confluence, 0–3/day ordinal, 09:20–12:25 curfew)",
     ),
-    min_prob: float = typer.Option(0.22, "--min-prob", help="Continuous-bulk floor (artifact spikes >0.85 discarded)"),
+    min_prob: float = typer.Option(0.28, "--min-prob", help="Continuous-bulk floor (artifact spikes >0.85 discarded)"),
     max_per_day: int = typer.Option(3, "--max-per-day", help="Max selected trades per day"),
-    min_per_day: int = typer.Option(2, "--min-per-day", help="Soft minimum trades per day"),
+    min_per_day: int = typer.Option(0, "--min-per-day", help="Min trades/day (0 = allow empty days)"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor", help="Fractional Kelly multiplier"),
     time_exit_bars: Optional[int] = typer.Option(
         4, "--time-exit-bars", help="Stagnation exit bar count (None/0 disables)"
@@ -150,9 +150,9 @@ def compare_timeframes(
     capital: float = typer.Option(10_000_000.0, "--capital"),
     limit: int = typer.Option(200, "--limit"),
     output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
-    min_prob: float = typer.Option(0.22, "--min-prob"),
+    min_prob: float = typer.Option(0.28, "--min-prob"),
     max_per_day: int = typer.Option(3, "--max-per-day"),
-    min_per_day: int = typer.Option(2, "--min-per-day"),
+    min_per_day: int = typer.Option(0, "--min-per-day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
@@ -202,9 +202,9 @@ def compare_time_exits(
         "--meta-filter/--no-meta-filter",
         help="Use ML meta-filter selected entries for the sweep",
     ),
-    min_prob: float = typer.Option(0.22, "--min-prob"),
+    min_prob: float = typer.Option(0.28, "--min-prob"),
     max_per_day: int = typer.Option(3, "--max-per-day"),
-    min_per_day: int = typer.Option(2, "--min-per-day"),
+    min_per_day: int = typer.Option(0, "--min-per-day"),
     kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
     time_exit_atr_min: float = typer.Option(0.5, "--time-exit-atr-min"),
     include_none: bool = typer.Option(
