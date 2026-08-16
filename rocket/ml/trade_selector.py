@@ -57,18 +57,24 @@ class DailyTradeRanker:
             g = group.sort_values("win_probability", ascending=False)
             qualified = g[g["win_probability"] >= self.min_prob].copy()
 
-            if qualified.empty:
-                # Soft fallback: take up to min_trades if within 0.08 of threshold
-                soft = g[g["win_probability"] >= (self.min_prob - 0.08)].head(self.min_trades)
-                if soft.empty or float(soft.iloc[0]["win_probability"]) < (self.min_prob - 0.08):
-                    continue
-                pick = soft
-            else:
+            if len(qualified) >= self.min_trades:
                 pick = qualified
+            else:
+                # Fill toward min_trades/day from next-best scores (floor = threshold - 0.15)
+                floor = self.min_prob - 0.15
+                pool = g[g["win_probability"] >= floor]
+                if pool.empty:
+                    pool = g.head(self.min_trades)
+                pick = pool
 
             # One entry per symbol per day
             pick = pick.drop_duplicates(subset=["symbol"], keep="first")
-            alloc = pick.head(self.max_trades)
+            # Prefer between min and max trades/day when candidates exist
+            n = min(self.max_trades, max(self.min_trades, len(pick)))
+            n = min(n, len(pick))
+            alloc = pick.head(n)
+            if alloc.empty:
+                continue
             selected.extend(alloc.to_dict("records"))
 
         return selected
