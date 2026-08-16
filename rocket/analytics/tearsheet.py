@@ -113,25 +113,48 @@ def export_html(
         meta_note = ""
         if raw_n is not None and sel_n is not None:
             meta_note = (
-                f"<div class='sub' style='margin:0 0 10px'>Meta-filter kept "
+                f"<div class='sub' style='margin:0 0 10px'>Meta-filter + fractional Kelly kept "
                 f"<strong>{sel_n}</strong> of <strong>{raw_n}</strong> raw candidates "
-                f"(walk-forward daily top-K).</div>"
+                f"(walk-forward daily top-K; Tier1 P≥0.75 → 2–3 lots / 1.2×ATR stop).</div>"
             )
         cmp_section = f"""
     <div class="panel">
-      <h2>Baseline vs ML Meta-Filter</h2>
+      <h2>Baseline vs ML Meta-Filter (primary interval)</h2>
       {meta_note}
       <table>
         <thead>
           <tr>
             <th>Metric</th>
             <th class="num">Raw Strategy (Baseline)</th>
-            <th class="num">ML-Filtered Strategy</th>
+            <th class="num">ML-Filtered + Kelly</th>
           </tr>
         </thead>
         <tbody>
           {''.join(cmp_rows)}
         </tbody>
+      </table>
+    </div>
+"""
+
+    # Multi-timeframe comparison (5m vs 15m, …)
+    tf_cmp: Sequence[Dict[str, Any]] = metrics.get("timeframe_comparison") or []
+    tf_intervals: Sequence[str] = metrics.get("intervals") or []
+    tf_section = ""
+    if tf_cmp and tf_intervals:
+        header_cols = "".join(f"<th class='num'>{iv}</th>" for iv in tf_intervals)
+        body_rows = []
+        for row in tf_cmp:
+            cells = "".join(
+                f"<td class='num'>{_fmt_metric(row.get(iv))}</td>" for iv in tf_intervals
+            )
+            body_rows.append(f"<tr><td>{row.get('metric')}</td>{cells}</tr>")
+        tf_section = f"""
+    <div class="panel">
+      <h2>Timeframe Comparison (ML Meta + Kelly)</h2>
+      <div class="sub" style="margin:0 0 10px">Side-by-side filtered performance across candle intervals.</div>
+      <table>
+        <thead><tr><th>Metric</th>{header_cols}</tr></thead>
+        <tbody>{''.join(body_rows)}</tbody>
       </table>
     </div>
 """
@@ -147,6 +170,30 @@ def export_html(
       name: 'Baseline'
     }});
 """
+
+    # Overlay equity curves from other intervals when present
+    tf_eq_js = ""
+    tf_results = metrics.get("timeframe_results") or {}
+    colors = ["#3dd6c6", "#6ea8fe", "#f0c14b", "#c084fc"]
+    if isinstance(tf_results, dict) and len(tf_results) > 1:
+        parts = []
+        for i, (iv, res) in enumerate(tf_results.items()):
+            if i == 0:
+                continue  # primary already plotted as ML-Filtered
+            eq_i = (res.get("filtered") or {}).get("equity_curve") or []
+            xs_i = [e.get("timestamp") for e in eq_i]
+            ys_i = [e.get("equity") for e in eq_i]
+            color = colors[i % len(colors)]
+            parts.append(
+                f"""
+    traces.push({{
+      x: {json.dumps(xs_i)}, y: {json.dumps(ys_i)}, type: 'scatter', mode: 'lines',
+      line: {{ color: '{color}', width: 2 }},
+      name: '{iv} filtered'
+    }});
+"""
+            )
+        tf_eq_js = "".join(parts)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -219,6 +266,7 @@ def export_html(
       <div class="metric"><div class="k">Total Costs</div><div class="v">₹{float(costs.get('total', 0)):,.0f}</div></div>
     </div>
 
+    {tf_section}
     {cmp_section}
 
     <div class="panel">
@@ -272,6 +320,7 @@ def export_html(
       name: 'ML-Filtered'
     }}];
     {dual_eq_js}
+    {tf_eq_js}
     Plotly.newPlot('eqChart', traces, {{
       margin: {{ t: 10, r: 20, b: 40, l: 60 }},
       paper_bgcolor: 'rgba(0,0,0,0)',

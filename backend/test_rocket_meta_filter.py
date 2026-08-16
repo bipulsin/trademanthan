@@ -11,7 +11,11 @@ import pytz
 from rocket.ml.feature_extractor import FEATURE_COLUMNS, RocketFeatureExtractor
 from rocket.ml.meta_filter import MetaModelConfig, RocketMetaFilter
 from rocket.ml.pipeline import build_comparison_table, path_label_signal
-from rocket.ml.trade_selector import DailyTradeRanker
+from rocket.ml.trade_selector import (
+    DailyTradeRanker,
+    apply_tiered_sizing,
+    fractional_kelly,
+)
 
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -25,7 +29,6 @@ def _synth_ohlcv(n: int = 80) -> pd.DataFrame:
         ts = start + timedelta(minutes=5 * i)
         if ts.weekday() >= 5:
             continue
-        # skip overnight gaps roughly
         if ts.time().hour >= 15 and ts.time().minute > 30:
             continue
         o = px
@@ -58,6 +61,40 @@ def test_feature_extractor_columns():
         assert np.isfinite(feats[col])
 
 
+def test_fractional_kelly_and_tier_sizing():
+    f = fractional_kelly(0.80, 3.2 / 1.2, kelly_factor=0.35)
+    assert 0.0 < f <= 0.35
+
+    high = apply_tiered_sizing(
+        {
+            "win_probability": 0.80,
+            "side": "BUY",
+            "entry_price": 1000.0,
+            "atr": 10.0,
+        }
+    )
+    assert high is not None
+    assert high["tier"] == 1
+    assert high["lots"] in (2, 3)
+    assert abs(high["stop_loss"] - (1000.0 - 1.2 * 10.0)) < 1e-6
+    assert abs(high["take_profit"] - (1000.0 + 3.2 * 10.0)) < 1e-6
+
+    mid = apply_tiered_sizing(
+        {
+            "win_probability": 0.70,
+            "side": "SELL",
+            "entry_price": 1000.0,
+            "atr": 10.0,
+        }
+    )
+    assert mid is not None
+    assert mid["tier"] == 2
+    assert mid["lots"] == 1
+    assert abs(mid["stop_loss"] - (1000.0 + 1.8 * 10.0)) < 1e-6
+
+    assert apply_tiered_sizing({"win_probability": 0.50, "entry_price": 1000.0, "atr": 10.0}) is None
+
+
 def test_path_label_and_walk_forward_selector():
     df = RocketFeatureExtractor.calculate_indicators(_synth_ohlcv(120))
     rows = []
@@ -65,8 +102,8 @@ def test_path_label_and_walk_forward_selector():
         idx = 30 + day_offset * 20
         close = float(df.iloc[idx]["close"])
         atr = float(df.iloc[idx]["safe_atr"])
-        sl = close - 1.5 * atr if side == "BUY" else close + 1.5 * atr
-        tp = close + 2.5 * atr if side == "BUY" else close - 2.5 * atr
+        sl = close - 1.8 * atr if side == "BUY" else close + 1.8 * atr
+        tp = close + 3.2 * atr if side == "BUY" else close - 3.2 * atr
         label = path_label_signal(df, idx, side, sl, tp, close)
         feats = RocketFeatureExtractor.extract_trade_features(df, idx, side)
         rows.append(
@@ -76,11 +113,13 @@ def test_path_label_and_walk_forward_selector():
                 "symbol": f"SYM{day_offset}",
                 "side": side,
                 "strategy_confidence": 0.7,
+                "entry_price": close,
+                "close": close,
+                "atr": atr,
                 **feats,
                 **label,
             }
         )
-    # inflate training set
     base = pd.DataFrame(rows)
     big = pd.concat([base] * 15, ignore_index=True)
     big["symbol"] = [f"S{i%30}" for i in range(len(big))]
@@ -91,10 +130,14 @@ def test_path_label_and_walk_forward_selector():
     assert "win_probability" in scored.columns
     assert scored["win_probability"].notna().all()
 
-    selected = DailyTradeRanker(meta, min_probability_threshold=0.55, max_trades_per_day=4).rank_and_select(
+    scored = scored.copy()
+    scored["win_probability"] = 0.70
+    selected = DailyTradeRanker(meta, min_probability_threshold=0.65, max_trades_per_day=4).rank_and_select(
         scored
     )
     assert isinstance(selected, list)
+    assert all(int(s.get("lots") or 0) >= 1 for s in selected)
+    assert all(s.get("stop_loss") is not None for s in selected)
 
     cmp = build_comparison_table(
         {

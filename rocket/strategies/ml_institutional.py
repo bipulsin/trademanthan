@@ -38,8 +38,8 @@ class MLInstitutionalStrategy(BaseStrategy):
         model: Any = None,
         min_confidence: float = 0.58,
         max_signals_per_bar: int = 3,
-        atr_stop_mult: float = 1.5,
-        atr_target_mult: float = 2.5,
+        atr_stop_mult: float = 1.8,
+        atr_target_mult: float = 3.2,
         session_start: time = time(9, 30),
         session_end: time = time(14, 45),
     ):

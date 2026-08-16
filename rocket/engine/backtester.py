@@ -170,10 +170,25 @@ class RocketBacktester:
                     continue
                 bar = indexed[sig.symbol].loc[ts]
                 c = contract_by_sym[sig.symbol]
-                qty = c.lot_size * max(1, sig.lots)
+                lots = max(1, int(sig.lots or 1))
                 px = float(bar["open"])
+                qty = c.lot_size * lots
+                # Margin gate: degrade multi-lot size before skipping
                 if not portfolio.can_open(px, qty):
-                    continue
+                    degraded = False
+                    while lots > 1 and not portfolio.can_open(px, c.lot_size * lots):
+                        lots -= 1
+                        degraded = True
+                    qty = c.lot_size * lots
+                    if not portfolio.can_open(px, qty):
+                        continue
+                    if degraded:
+                        logger.debug(
+                            "margin degrade %s lots→%s @ %s",
+                            sig.symbol,
+                            lots,
+                            ts,
+                        )
                 side = Side.BUY if sig.bias == Bias.LONG else Side.SELL
                 order = Order(
                     symbol=sig.symbol,

@@ -7,7 +7,7 @@ import shutil
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich.console import Console
@@ -33,6 +33,16 @@ def _setup_logging(verbose: bool) -> None:
 
 def _parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _mirror_html(path: Path) -> None:
+    public = PROJECT_ROOT / "frontend" / "public" / "rocket.html"
+    try:
+        public.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, public)
+        console.print(f"[green]Wrote[/green] {path} and {public}")
+    except Exception:
+        console.print(f"[green]Wrote[/green] {path}")
 
 
 @app.command("fetch-data")
@@ -69,6 +79,7 @@ def backtest(
     min_prob: float = typer.Option(0.65, "--min-prob", help="Meta-filter P(win) threshold"),
     max_per_day: int = typer.Option(4, "--max-per-day", help="Max selected trades per day"),
     min_per_day: int = typer.Option(2, "--min-per-day", help="Soft minimum trades per day"),
+    kelly_factor: float = typer.Option(0.35, "--kelly-factor", help="Fractional Kelly multiplier"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Run Rocket backtest and write rocket.html tear sheet."""
@@ -77,7 +88,6 @@ def backtest(
     out = Path(output) if output else settings.rocket_output_html
     bt = RocketBacktester(interval=interval, capital=capital, max_symbols=limit)
     bt.load_universe()
-    # Always resolve series via cache/fetch (skip_fetch currently still warms cache)
     _ = skip_fetch
     bt.fetch_data(_parse_date(start_date), _parse_date(end_date))
 
@@ -91,6 +101,7 @@ def backtest(
             min_probability=min_prob,
             min_per_day=min_per_day,
             max_per_day=max_per_day,
+            kelly_factor=kelly_factor,
         )
         metrics = dict(result["filtered"])
         metrics["comparison"] = result["comparison"]
@@ -101,8 +112,8 @@ def backtest(
         print_tearsheet(metrics, console)
         print_comparison(result["comparison"], console)
         title = (
-            f"ML Institutional Futures + Meta-Filter · {start_date} → {end_date} · "
-            f"{interval} · {metrics.get('universe_size', 0)} symbols"
+            f"ML Meta + Kelly · {start_date} → {end_date} · {interval} · "
+            f"{metrics.get('universe_size', 0)} symbols"
         )
     else:
         metrics = bt.run(_parse_date(start_date), _parse_date(end_date))
@@ -113,13 +124,57 @@ def backtest(
         )
 
     path = export_html(metrics, out, title=title)
-    public = PROJECT_ROOT / "frontend" / "public" / "rocket.html"
-    try:
-        public.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, public)
-        console.print(f"[green]Wrote[/green] {path} and {public}")
-    except Exception:
-        console.print(f"[green]Wrote[/green] {path}")
+    _mirror_html(path)
+
+
+@app.command("compare-timeframes")
+def compare_timeframes(
+    start_date: str = typer.Option(..., "--start-date", help="YYYY-MM-DD"),
+    end_date: str = typer.Option(..., "--end-date", help="YYYY-MM-DD"),
+    intervals: str = typer.Option(
+        "5minute,15minute",
+        "--intervals",
+        help="Comma-separated intervals (e.g. 5minute,15minute)",
+    ),
+    capital: float = typer.Option(10_000_000.0, "--capital"),
+    limit: int = typer.Option(200, "--limit"),
+    output: Optional[Path] = typer.Option(None, "--output", help="HTML tear sheet path"),
+    min_prob: float = typer.Option(0.65, "--min-prob"),
+    max_per_day: int = typer.Option(4, "--max-per-day"),
+    min_per_day: int = typer.Option(2, "--min-per-day"),
+    kelly_factor: float = typer.Option(0.35, "--kelly-factor"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+) -> None:
+    """Comparative meta+Kelly backtest across candle intervals; writes rocket.html."""
+    _setup_logging(verbose)
+    from rocket.ml.pipeline import print_timeframe_comparison, run_timeframe_comparison
+
+    ivs: List[str] = [x.strip() for x in intervals.split(",") if x.strip()]
+    if not ivs:
+        raise typer.BadParameter("Provide at least one interval")
+
+    settings = get_settings()
+    out = Path(output) if output else settings.rocket_output_html
+    result = run_timeframe_comparison(
+        start=_parse_date(start_date),
+        end=_parse_date(end_date),
+        intervals=ivs,
+        capital=capital,
+        limit=limit,
+        min_probability=min_prob,
+        kelly_factor=kelly_factor,
+        min_per_day=min_per_day,
+        max_per_day=max_per_day,
+    )
+    metrics = result["primary_metrics"]
+    print_tearsheet(metrics, console)
+    print_timeframe_comparison(result["timeframe_comparison"], ivs, console)
+    title = (
+        f"ML Meta + Kelly · {start_date} → {end_date} · "
+        f"{'+'.join(ivs)} · {metrics.get('universe_size', 0)} symbols"
+    )
+    path = export_html(metrics, out, title=title)
+    _mirror_html(path)
 
 
 def main() -> None:

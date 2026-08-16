@@ -120,6 +120,35 @@ class AllowedSignalGate:
         return kept
 
 
+class SizedSignalGate:
+    """Admit selected signals and overlay Kelly lots + tiered SL/TP."""
+
+    def __init__(self, by_key: Dict[SignalKey, Dict[str, Any]]):
+        self.by_key = dict(by_key)
+
+    def __call__(self, ts: datetime, signals: List[Signal]) -> List[Signal]:
+        kept: List[Signal] = []
+        for sig in signals:
+            key = (sig.symbol, _ts_iso(ts), _side_from_bias(sig.bias))
+            meta = self.by_key.get(key)
+            if not meta:
+                continue
+            lots = int(meta.get("lots") or 1)
+            sig.lots = max(1, lots)
+            if meta.get("stop_loss") is not None:
+                sig.stop_loss = float(meta["stop_loss"])
+            if meta.get("take_profit") is not None:
+                sig.target = float(meta["take_profit"])
+            elif meta.get("target_price") is not None:
+                sig.target = float(meta["target_price"])
+            if meta.get("win_probability") is not None:
+                sig.confidence = float(meta["win_probability"])
+            tier = meta.get("tier")
+            sig.reason = f"ml_meta_kelly_t{tier}" if tier is not None else "ml_meta_kelly"
+            kept.append(sig)
+        return kept
+
+
 def harvest_raw_signals(
     bt: RocketBacktester,
     start: date,
@@ -136,6 +165,8 @@ def harvest_raw_signals(
     strategy = MLInstitutionalStrategy(
         min_confidence=min_confidence,
         max_signals_per_bar=10_000,  # do not truncate; meta layer selects daily
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
     )
     contract_by_sym = {c.symbol: c for c in bt.contracts if c.symbol in bt.series}
 
@@ -179,13 +210,20 @@ def harvest_raw_signals(
 
             side = _side_from_bias(sig.bias)
             feats = RocketFeatureExtractor.extract_trade_features(df, trigger_idx, side)
+            bar_close = float(snapshot[sig.symbol]["close"])
+            atr_val = float(
+                snapshot[sig.symbol].get("atr")
+                or snapshot[sig.symbol].get("safe_atr")
+                or snapshot[sig.symbol].get("atr_14")
+                or bar_close * 0.005
+            )
             label_info = path_label_signal(
                 df,
                 trigger_idx,
                 side,
                 float(sig.stop_loss or 0.0),
                 float(sig.target or 0.0),
-                float(snapshot[sig.symbol]["close"]),
+                bar_close,
             )
             rec = {
                 "timestamp": ts.to_pydatetime(),
@@ -195,6 +233,9 @@ def harvest_raw_signals(
                 "side": side,
                 "bias": sig.bias.value,
                 "strategy_confidence": float(sig.confidence),
+                "close": bar_close,
+                "atr": atr_val,
+                "safe_atr": atr_val,
                 "stop_loss": sig.stop_loss,
                 "take_profit": sig.target,
                 "trigger_idx": trigger_idx,
@@ -217,11 +258,12 @@ def run_comparative_meta_backtest(
     min_per_day: int = 2,
     max_per_day: int = 4,
     min_confidence: float = 0.58,
+    kelly_factor: float = 0.35,
 ) -> Dict[str, Any]:
     """
     1) Baseline backtest (existing strategy truncation)
     2) Harvest all candidates + path labels
-    3) Walk-forward score + daily top-K
+    3) Walk-forward score + daily top-K with Kelly sizing
     4) Filtered backtest reusing same engine/PnL path
     """
     if not bt.series:
@@ -232,11 +274,17 @@ def run_comparative_meta_backtest(
     bt.series = RocketFeatureExtractor.enrich_universe(bt.series)
 
     # --- Baseline ---
-    baseline_strategy = MLInstitutionalStrategy(min_confidence=min_confidence, max_signals_per_bar=3)
+    baseline_strategy = MLInstitutionalStrategy(
+        min_confidence=min_confidence,
+        max_signals_per_bar=3,
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
+    )
     bt.strategy = baseline_strategy
     bt.signal_filter = None
     baseline = bt.run(start, end)
     baseline["label"] = "raw_baseline"
+    baseline["interval"] = bt.interval
 
     # --- Harvest + score ---
     raw = harvest_raw_signals(bt, start, end, min_confidence=min_confidence)
@@ -260,27 +308,35 @@ def run_comparative_meta_backtest(
         min_probability_threshold=min_probability,
         min_trades_per_day=min_per_day,
         max_trades_per_day=max_per_day,
+        kelly_factor=kelly_factor,
     )
     selected = ranker.rank_and_select(scored)
-    keys = ranker.selected_keys(selected)
+    by_key = ranker.selected_by_key(selected)
     logger.info(
-        "Meta selected %s / %s signals (%.1f%%)",
+        "Meta selected %s / %s signals (%.1f%%); tier1=%s tier2=%s avg_lots=%.2f",
         len(selected),
         len(raw),
         100.0 * len(selected) / max(1, len(raw)),
+        sum(1 for s in selected if int(s.get("tier") or 0) == 1),
+        sum(1 for s in selected if int(s.get("tier") or 0) == 2),
+        float(np.mean([s.get("lots") or 1 for s in selected])) if selected else 0.0,
     )
 
-    # --- Filtered replay: emit all candidates, gate by selected keys ---
+    # --- Filtered replay: emit all candidates, gate by selected keys + Kelly overlay ---
     filtered_strategy = MLInstitutionalStrategy(
         min_confidence=min_confidence,
         max_signals_per_bar=10_000,
+        atr_stop_mult=1.8,
+        atr_target_mult=3.2,
     )
     bt.strategy = filtered_strategy
-    bt.signal_filter = AllowedSignalGate(keys)
+    bt.signal_filter = SizedSignalGate(by_key)
     filtered = bt.run(start, end)
     filtered["label"] = "ml_filtered"
+    filtered["interval"] = bt.interval
     filtered["selected_signals"] = len(selected)
     filtered["raw_signals"] = len(raw)
+    filtered["kelly_factor"] = kelly_factor
 
     comparison = build_comparison_table(baseline, filtered)
     return {
@@ -294,6 +350,109 @@ def run_comparative_meta_backtest(
         "avg_trades_per_day_baseline": _avg_trades_per_day(baseline),
         "avg_trades_per_day_filtered": _avg_trades_per_day(filtered),
     }
+
+
+def run_timeframe_comparison(
+    *,
+    start: date,
+    end: date,
+    intervals: Sequence[str] = ("5minute", "15minute"),
+    capital: float = 10_000_000.0,
+    limit: int = 200,
+    min_probability: float = 0.65,
+    kelly_factor: float = 0.35,
+    min_per_day: int = 2,
+    max_per_day: int = 4,
+) -> Dict[str, Any]:
+    """Run meta-filtered Kelly backtests across intervals and build a side-by-side report."""
+    results: Dict[str, Any] = {}
+    for interval in intervals:
+        iv = str(interval).strip()
+        logger.info("=== Timeframe comparison: %s ===", iv)
+        bt = RocketBacktester(interval=iv, capital=capital, max_symbols=limit)
+        bt.load_universe()
+        bt.fetch_data(start, end)
+        results[iv] = run_comparative_meta_backtest(
+            bt,
+            start,
+            end,
+            min_probability=min_probability,
+            min_per_day=min_per_day,
+            max_per_day=max_per_day,
+            kelly_factor=kelly_factor,
+        )
+
+    timeframe_comparison = build_timeframe_comparison_table(results)
+    # Primary metrics for HTML = first interval's filtered run, with extras
+    primary_iv = str(intervals[0]).strip()
+    primary = dict(results[primary_iv]["filtered"])
+    primary["comparison"] = results[primary_iv]["comparison"]
+    primary["baseline"] = results[primary_iv]["baseline"]
+    primary["raw_signal_count"] = results[primary_iv].get("raw_signal_count")
+    primary["selected_count"] = results[primary_iv].get("selected_count")
+    primary["timeframe_results"] = {
+        iv: {
+            "baseline": res["baseline"],
+            "filtered": res["filtered"],
+            "comparison": res["comparison"],
+            "selected_count": res.get("selected_count"),
+            "raw_signal_count": res.get("raw_signal_count"),
+        }
+        for iv, res in results.items()
+    }
+    primary["timeframe_comparison"] = timeframe_comparison
+    primary["intervals"] = list(results.keys())
+    return {"primary_metrics": primary, "by_interval": results, "timeframe_comparison": timeframe_comparison}
+
+
+def build_timeframe_comparison_table(by_interval: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rows with one column per interval (filtered Kelly meta path)."""
+
+    def _pf(m: Dict[str, Any]) -> Any:
+        pf = m.get("profit_factor")
+        if pf is None and m.get("profit_factor_raw") == float("inf"):
+            return "∞"
+        return pf if pf is not None else "—"
+
+    intervals = list(by_interval.keys())
+    specs = [
+        ("Total Trades", lambda m: m.get("total_trades")),
+        ("Win Rate (%)", lambda m: m.get("win_rate_pct")),
+        ("Profit Factor", _pf),
+        ("Max Drawdown (%)", lambda m: m.get("max_drawdown_pct")),
+        ("Expectancy / Trade (₹)", lambda m: m.get("expectancy")),
+        ("Net Return (%)", lambda m: m.get("net_return_pct")),
+        ("Final Equity (₹)", lambda m: m.get("final_equity")),
+        ("Avg Trades / Day", lambda m: round(_avg_trades_per_day(m), 2)),
+        ("Total Costs (₹)", lambda m: float((m.get("costs") or {}).get("total", 0))),
+        ("Selected Signals", lambda m: m.get("selected_signals") or m.get("selected_count")),
+    ]
+    rows: List[Dict[str, Any]] = []
+    for label, fn in specs:
+        row: Dict[str, Any] = {"metric": label}
+        for iv in intervals:
+            filtered = by_interval[iv]["filtered"]
+            row[iv] = fn(filtered)
+        rows.append(row)
+    return rows
+
+
+def print_timeframe_comparison(
+    comparison: Sequence[Dict[str, Any]],
+    intervals: Sequence[str],
+    console: Any = None,
+) -> None:
+    from rich.console import Console
+    from rich.table import Table
+
+    con = console or Console()
+    table = Table(title="Rocket — 5m vs 15m (ML Meta + Kelly)", show_header=True)
+    table.add_column("Metric")
+    for iv in intervals:
+        table.add_column(str(iv), justify="right")
+    for row in comparison:
+        table.add_row(str(row["metric"]), *[str(row.get(iv, "—")) for iv in intervals])
+    con.print(table)
 
 
 def _avg_trades_per_day(metrics: Dict[str, Any]) -> float:
