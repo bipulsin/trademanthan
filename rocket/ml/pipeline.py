@@ -218,6 +218,7 @@ def harvest_raw_signals(
             side = _side_from_bias(sig.bias)
             feats = RocketFeatureExtractor.extract_trade_features(df, trigger_idx, side)
             bar_close = float(snapshot[sig.symbol]["close"])
+            contract = contract_by_sym.get(sig.symbol)
             atr_val = float(
                 snapshot[sig.symbol].get("atr")
                 or snapshot[sig.symbol].get("safe_atr")
@@ -232,6 +233,7 @@ def harvest_raw_signals(
                 float(sig.target or 0.0),
                 bar_close,
             )
+            snap = snapshot[sig.symbol]
             rec = {
                 "timestamp": ts.to_pydatetime(),
                 "trade_date": ts.date() if hasattr(ts, "date") else pd.Timestamp(ts).date(),
@@ -240,9 +242,16 @@ def harvest_raw_signals(
                 "side": side,
                 "bias": sig.bias.value,
                 "strategy_confidence": float(sig.confidence),
+                "entry_price": bar_close,
                 "close": bar_close,
                 "atr": atr_val,
-                "safe_atr": atr_val,
+                "safe_atr": float(snap.get("safe_atr") or atr_val),
+                "lot_size": int(snap.get("lot_size") or (contract.lot_size if contract else 1)),
+                "ema_5": snap.get("ema_5"),
+                "ema_10": snap.get("ema_10"),
+                "vwap": snap.get("vwap"),
+                "ema5_dist_atr": snap.get("ema5_dist_atr"),
+                "raw_rsi_14": snap.get("rsi_14"),
                 "stop_loss": sig.stop_loss,
                 "take_profit": sig.target,
                 "trigger_idx": trigger_idx,
@@ -261,7 +270,7 @@ def run_comparative_meta_backtest(
     start: date,
     end: date,
     *,
-    min_probability: float = 0.55,
+    min_probability: float = 0.50,
     min_per_day: int = 2,
     max_per_day: int = 3,
     min_confidence: float = 0.58,
@@ -366,7 +375,7 @@ def run_timeframe_comparison(
     intervals: Sequence[str] = ("5minute", "15minute"),
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.55,
+    min_probability: float = 0.50,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -485,7 +494,7 @@ def run_time_exit_comparison(
     interval: str = "5minute",
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.55,
+    min_probability: float = 0.50,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,

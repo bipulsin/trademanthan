@@ -27,7 +27,7 @@ class MetaModelConfig:
     max_depth: int = 4
     min_samples_leaf: int = 20
     l2_regularization: float = 2.0
-    scoring_threshold: float = 0.55
+    scoring_threshold: float = 0.50
     min_train_samples: int = 40
     model_path: str = ".cache/rocket_meta_filter.joblib"
 

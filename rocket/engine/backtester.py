@@ -51,11 +51,67 @@ def enrich_features(df: pd.DataFrame) -> pd.DataFrame:
     vol_std = vol.rolling(20, min_periods=5).std().replace(0, np.nan)
     out["vol_z"] = (vol - vol_mean) / vol_std
     out["atr"] = _atr(out["high"], out["low"], out["close"])
+    out["safe_atr"] = np.where(out["atr"] > 0, out["atr"], c * 0.002)
     out["atr_pct"] = out["atr"] / c.replace(0, np.nan)
     out["range_pct"] = (out["high"] - out["low"]) / c.replace(0, np.nan)
+    out["ema_5"] = c.ewm(span=5, adjust=False).mean()
+    out["ema_10"] = c.ewm(span=10, adjust=False).mean()
+    out["ema5_dist_atr"] = (c - out["ema_5"]).abs() / out["safe_atr"].replace(0, np.nan)
     oi = out["oi"] if "oi" in out.columns else pd.Series(0.0, index=out.index)
     out["oi_chg_pct"] = oi.pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return out
+
+
+def compute_structural_stop_target(
+    *,
+    side: str,
+    entry_price: float,
+    ema_10: Optional[float],
+    vwap: Optional[float],
+    safe_atr: float,
+) -> Dict[str, float]:
+    """
+    Structural stop from EMA10/VWAP anchors; target = max(2.5×|entry−SL|, 2.5×ATR).
+
+    SELL: SL = min(EMA10, VWAP) among levels above entry (else entry + 1×ATR).
+    BUY:  SL = max(EMA10, VWAP) among levels below entry (else entry − 1×ATR).
+    """
+    side_u = str(side).upper()
+    entry = float(entry_price)
+    atr = float(safe_atr) if safe_atr and safe_atr > 0 else abs(entry) * 0.005
+    e10 = float(ema_10) if ema_10 is not None and np.isfinite(float(ema_10)) else None
+    vw = float(vwap) if vwap is not None and np.isfinite(float(vwap)) else None
+
+    if side_u in ("SELL", "SHORT"):
+        above = [x for x in (e10, vw) if x is not None and x > entry]
+        if above:
+            stop_loss = float(min(above))
+            stop_kind = "structural"
+        else:
+            stop_loss = entry + 1.0 * atr
+            stop_kind = "atr_fallback"
+        stop_dist = abs(stop_loss - entry)
+        target_dist = max(2.5 * stop_dist, 2.5 * atr)
+        take_profit = entry - target_dist
+    else:
+        below = [x for x in (e10, vw) if x is not None and x < entry]
+        if below:
+            stop_loss = float(max(below))
+            stop_kind = "structural"
+        else:
+            stop_loss = entry - 1.0 * atr
+            stop_kind = "atr_fallback"
+        stop_dist = abs(entry - stop_loss)
+        target_dist = max(2.5 * stop_dist, 2.5 * atr)
+        take_profit = entry + target_dist
+
+    return {
+        "stop_loss": float(stop_loss),
+        "take_profit": float(take_profit),
+        "stop_distance": float(stop_dist),
+        "target_distance": float(target_dist),
+        "stop_kind": 1.0 if stop_kind == "structural" else 0.0,
+    }
 
 
 class RocketBacktester:

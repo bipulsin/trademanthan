@@ -71,13 +71,18 @@ class MLInstitutionalStrategy(BaseStrategy):
             if bias == Bias.NEUTRAL or conf < self.min_confidence:
                 continue
             close = float(bar["close"])
-            atr = float(bar.get("atr") or close * 0.005)
-            if bias == Bias.LONG:
-                sl = close - self.atr_stop_mult * atr
-                tp = close + self.atr_target_mult * atr
-            else:
-                sl = close + self.atr_stop_mult * atr
-                tp = close - self.atr_target_mult * atr
+            atr = float(bar.get("safe_atr") or bar.get("atr") or close * 0.005)
+            from rocket.engine.backtester import compute_structural_stop_target
+
+            levels = compute_structural_stop_target(
+                side="BUY" if bias == Bias.LONG else "SELL",
+                entry_price=close,
+                ema_10=bar.get("ema_10"),
+                vwap=bar.get("vwap"),
+                safe_atr=atr,
+            )
+            sl = float(levels["stop_loss"])
+            tp = float(levels["take_profit"])
             scored.append(
                 Signal(
                     symbol=sym,
@@ -89,6 +94,7 @@ class MLInstitutionalStrategy(BaseStrategy):
                     lots=1,
                     reason="ml_institutional",
                     features=dict(zip(FEATURE_COLUMNS, feats.tolist())),
+                    atr=atr,
                 )
             )
 
