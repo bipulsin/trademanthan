@@ -43,10 +43,10 @@ FEATURE_COLUMNS = (
 )
 
 # Default confluence thresholds (enforced via trade_selector.ConfluenceGatesConfig)
-DEFAULT_CLV_THRESHOLD = 0.20
+DEFAULT_CLV_THRESHOLD = 0.15
 DEFAULT_BREADTH_LONG_MIN = 0.50
 DEFAULT_BREADTH_SHORT_MAX = 0.50
-DEFAULT_RVOL_MIN = 1.15
+DEFAULT_RVOL_MIN = 1.25
 
 
 class RocketFeatureExtractor:

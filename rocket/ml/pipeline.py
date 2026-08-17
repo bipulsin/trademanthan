@@ -63,8 +63,9 @@ def path_label_signal(
     """
     Replay the backtester exit state machine for labeling.
 
-    Uses structural 1.2–1.6×ATR stops, max(1.8R, 2.2×ATR) targets, +1.2/1.8
-    trailing, 4-bar stagnation, and 15:00 IST EOD — matching ``RocketBacktester``.
+    Uses structural 1.2–1.6×ATR stops, max(1.8R, 2.2×ATR) targets, hard
+    breakeven at +1.0×ATR, post-BE trail +1.6/1.2×ATR (else +1.2/1.8),
+    4-bar stagnation, and 15:00 IST EOD — matching ``RocketBacktester``.
     Legacy ``stop_loss`` / ``take_profit`` args are ignored when ATR is available.
     """
     side_u = side.upper()
@@ -126,7 +127,11 @@ def path_label_signal(
         pos.update_mfe(high=hi, low=lo)
         pos.maybe_disarm_time_exit(time_exit_atr_min)
         pos.bars_in_trade += 1
-        pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.2, trail_atr_mult=1.8)
+        pos.update_breakeven_stop(high=hi, low=lo, trigger_atr_mult=1.0, buffer=0.05)
+        if pos.breakeven_locked:
+            pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.6, trail_atr_mult=1.2)
+        else:
+            pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.2, trail_atr_mult=1.8)
 
         if direction > 0:
             if pos.take_profit is not None and hi >= pos.take_profit:
@@ -134,7 +139,7 @@ def path_label_signal(
                 break
             if pos.stop_loss is not None and lo <= pos.stop_loss:
                 hit_stop, exit_px = True, float(pos.stop_loss)
-                exit_reason = "trailing_stop" if pos.trail_activated else "stop_loss"
+                exit_reason = pos.stop_exit_reason()
                 break
         else:
             if pos.take_profit is not None and lo <= pos.take_profit:
@@ -142,7 +147,7 @@ def path_label_signal(
                 break
             if pos.stop_loss is not None and hi >= pos.stop_loss:
                 hit_stop, exit_px = True, float(pos.stop_loss)
-                exit_reason = "trailing_stop" if pos.trail_activated else "stop_loss"
+                exit_reason = pos.stop_exit_reason()
                 break
 
         if pos.should_stagnation_exit(
@@ -359,7 +364,7 @@ def run_comparative_meta_backtest(
     start: date,
     end: date,
     *,
-    min_probability: float = 0.34,
+    min_probability: float = 0.36,
     min_per_day: int = 2,
     max_per_day: int = 3,
     min_confidence: float = 0.58,
@@ -478,7 +483,7 @@ def run_timeframe_comparison(
     intervals: Sequence[str] = ("5minute", "15minute"),
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.34,
+    min_probability: float = 0.36,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -598,7 +603,7 @@ def run_time_exit_comparison(
     interval: str = "5minute",
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.34,
+    min_probability: float = 0.36,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -873,7 +878,7 @@ def run_confluence_sweep(
     baseline["label"] = "raw_baseline"
 
     raw = harvest_raw_signals(bt, start, end, min_confidence=min_confidence)
-    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=0.34))
+    meta = RocketMetaFilter(MetaModelConfig(scoring_threshold=0.36))
     if raw.empty:
         return {
             "baseline": baseline,

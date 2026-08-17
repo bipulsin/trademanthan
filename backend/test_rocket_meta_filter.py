@@ -132,6 +132,56 @@ def test_trailing_stop_ratchet():
     assert abs(pos.stop_loss - (1020.0 - 18.0)) < 1e-6
 
 
+def test_breakeven_lock_and_tighter_trail():
+    from rocket.engine.order_book import Side
+    from rocket.engine.portfolio import Position
+
+    pos = Position(
+        symbol="ABC",
+        instrument_key="NSE_FO|ABC",
+        side=Side.BUY,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        stop_loss=1000.0 - 1.4 * 10.0,
+        take_profit=1000.0 + 3.0 * 10.0,
+        atr=10.0,
+    )
+    # +1.0×ATR locks breakeven; never give back the full structural SL
+    newly = pos.update_breakeven_stop(high=1010.0, low=1000.0, trigger_atr_mult=1.0, buffer=0.05)
+    assert newly is True
+    assert pos.breakeven_locked is True
+    assert abs(pos.stop_loss - 1000.05) < 1e-6
+    assert pos.stop_exit_reason() == "breakeven_exit"
+
+    # Post-BE: trail only activates at +1.6×ATR with 1.2×ATR distance
+    pos.update_trailing_stop(high=1012.0, low=1000.0, activate_at_r=1.6, trail_atr_mult=1.2)
+    assert pos.trail_activated is False
+    assert abs(pos.stop_loss - 1000.05) < 1e-6
+
+    pos.update_trailing_stop(high=1016.0, low=1005.0, activate_at_r=1.6, trail_atr_mult=1.2)
+    assert pos.trail_activated is True
+    assert abs(pos.stop_loss - (1016.0 - 12.0)) < 1e-6
+    assert pos.stop_exit_reason() == "trailing_stop"
+
+    # Short side
+    short = Position(
+        symbol="XYZ",
+        instrument_key="NSE_FO|XYZ",
+        side=Side.SELL,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        stop_loss=1000.0 + 1.4 * 10.0,
+        take_profit=1000.0 - 3.0 * 10.0,
+        atr=10.0,
+    )
+    short.update_breakeven_stop(high=1000.0, low=990.0, trigger_atr_mult=1.0, buffer=0.05)
+    assert short.breakeven_locked is True
+    assert abs(short.stop_loss - 999.95) < 1e-6
+    assert short.stop_exit_reason() == "breakeven_exit"
+
+
 def test_stagnation_time_exit():
     from rocket.engine.order_book import Side
     from rocket.engine.portfolio import Position
@@ -259,7 +309,7 @@ def test_fractional_kelly_and_tier_sizing():
         )
         is None
     )
-    # Weak CLV rejected (below ±0.20)
+    # Weak CLV rejected (below ±0.15)
     assert (
         apply_tiered_sizing(
             _buy_confluence(
@@ -445,7 +495,7 @@ def test_gates_and_risk_cap():
 
 
 def test_ordinal_daily_selection_with_curfew():
-    """0.34≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
+    """0.36≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
     day1_probs = [0.55, 0.48, 0.42, 0.39, 0.35, 0.95, 0.18]
@@ -512,9 +562,53 @@ def test_ordinal_daily_selection_with_curfew():
     assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
     assert by_day["2026-08-03"][0]["symbol"] == "W0"
-    assert all(0.34 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.36 <= float(s["win_probability"]) <= 0.85 for s in selected)
     assert all(s["symbol"] != "LATE" for s in selected)
     assert "2026-08-04" not in by_day
+
+
+def test_open_drive_soft_priority():
+    """Open-drive candidates outrank equal-P non-drive peers on the same day."""
+    base = IST.localize(datetime(2026, 8, 3, 10, 0))
+    rows = [
+        _buy_confluence(
+            timestamp=base,
+            trade_date="2026-08-03",
+            symbol="DRIVE",
+            side="BUY",
+            win_probability=0.50,
+            strategy_confidence=0.55,
+            is_open_drive=1,
+            entry_price=1000.0,
+            atr=10.0,
+            ema5_dist_atr=0.1,
+            ema20_dist_atr=0.5,
+            raw_rsi_14=50.0,
+            lot_size=50,
+            ema_20=990.0,
+        ),
+        _buy_confluence(
+            timestamp=base,
+            trade_date="2026-08-03",
+            symbol="MIDDAY",
+            side="BUY",
+            win_probability=0.55,
+            strategy_confidence=0.9,
+            is_open_drive=0,
+            entry_price=1000.0,
+            atr=10.0,
+            ema5_dist_atr=0.1,
+            ema20_dist_atr=0.5,
+            raw_rsi_14=50.0,
+            lot_size=50,
+            ema_20=990.0,
+        ),
+    ]
+    selected = DailyTradeRanker(None, max_trades_per_day=1, min_trades_per_day=0).rank_and_select(
+        rows
+    )
+    assert len(selected) == 1
+    assert selected[0]["symbol"] == "DRIVE"
 
 
 def test_path_label_and_walk_forward_selector():
@@ -554,7 +648,7 @@ def test_path_label_and_walk_forward_selector():
 
     scored = scored.copy()
     rng = np.random.default_rng(42)
-    scored["win_probability"] = 0.34 + rng.random(len(scored)) * 0.30
+    scored["win_probability"] = 0.36 + rng.random(len(scored)) * 0.30
     scored.loc[scored.index[:5], "win_probability"] = 0.95
     scored["timestamp"] = IST.localize(datetime(2026, 8, 3, 10, 30))
     scored["side"] = "BUY"
@@ -577,7 +671,7 @@ def test_path_label_and_walk_forward_selector():
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
-    assert all(0.34 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.36 <= float(s["win_probability"]) <= 0.85 for s in selected)
 
     from rocket.ml.pipeline import iter_confluence_sweep_grid, pick_best_confluence_config
 

@@ -315,13 +315,23 @@ class RocketBacktester:
                 pos.maybe_disarm_time_exit(self.time_exit_atr_min)
                 pos.bars_in_trade += 1
 
-                # After +1.2×ATR profit, ratchet stop to 1.8×ATR from bar extreme
-                pos.update_trailing_stop(
-                    high=hi,
-                    low=lo,
-                    activate_at_r=1.2,
-                    trail_atr_mult=1.8,
-                )
+                # Breakeven lock at +1.0×ATR, then trail:
+                #   pre-BE: +1.2 / 1.8×ATR; post-BE: tighter +1.6 / 1.2×ATR
+                pos.update_breakeven_stop(high=hi, low=lo, trigger_atr_mult=1.0, buffer=0.05)
+                if pos.breakeven_locked:
+                    pos.update_trailing_stop(
+                        high=hi,
+                        low=lo,
+                        activate_at_r=1.6,
+                        trail_atr_mult=1.2,
+                    )
+                else:
+                    pos.update_trailing_stop(
+                        high=hi,
+                        low=lo,
+                        activate_at_r=1.2,
+                        trail_atr_mult=1.8,
+                    )
                 exit_px = None
                 reason = ""
 
@@ -329,20 +339,14 @@ class RocketBacktester:
                 if pos.side == Side.BUY:
                     if pos.take_profit is not None and hi >= pos.take_profit:
                         exit_px, reason = pos.take_profit, "take_profit"
-                    # 2) Stop / trailing stop
+                    # 2) Stop / trailing / breakeven
                     elif pos.stop_loss is not None and lo <= pos.stop_loss:
-                        exit_px, reason = (
-                            pos.stop_loss,
-                            "trailing_stop" if pos.trail_activated else "stop_loss",
-                        )
+                        exit_px, reason = pos.stop_loss, pos.stop_exit_reason()
                 else:
                     if pos.take_profit is not None and lo <= pos.take_profit:
                         exit_px, reason = pos.take_profit, "take_profit"
                     elif pos.stop_loss is not None and hi >= pos.stop_loss:
-                        exit_px, reason = (
-                            pos.stop_loss,
-                            "trailing_stop" if pos.trail_activated else "stop_loss",
-                        )
+                        exit_px, reason = pos.stop_loss, pos.stop_exit_reason()
 
                 # 3) Dynamic stagnation exit at close of bar N
                 if exit_px is None and pos.should_stagnation_exit(

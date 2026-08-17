@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ConfluenceGatesConfig:
-    """High-confluence entry gates (calibrated baseline defaults)."""
+    """High-confluence entry gates (sweep-winner production defaults)."""
 
-    p_min: float = 0.34
+    p_min: float = 0.36
     p_max: float = 0.85
-    clv_threshold: float = 0.20
+    clv_threshold: float = 0.15
     breadth_long_min: float = 0.50
     breadth_short_max: float = 0.50
-    rvol_min: float = 1.15
+    rvol_min: float = 1.25
 
     def label(self) -> str:
         return (
@@ -38,7 +38,7 @@ class ConfluenceGatesConfig:
         return asdict(self)
 
 
-MIN_PROB = 0.34  # calibrated continuous-bulk floor
+MIN_PROB = 0.36  # sweep-winner continuous-bulk floor
 MAX_PROB = 0.85  # discard calibration artifact spike
 VALID_PROB_MIN = MIN_PROB
 VALID_PROB_MAX = MAX_PROB
@@ -53,9 +53,9 @@ EMA5_MAX_DIST_ATR = 0.70
 EMA20_MAX_DIST_ATR = 1.80
 RSI_OVERSOLD = 25.0
 RSI_OVERBOUGHT = 75.0
-MIN_RVOL = 1.15
-MIN_CLV_LONG = 0.20
-MAX_CLV_SHORT = -0.20
+MIN_RVOL = 1.25
+MIN_CLV_LONG = 0.15
+MAX_CLV_SHORT = -0.15
 BREADTH_LONG_MIN = 0.50
 BREADTH_SHORT_MAX = 0.50
 BREADTH_CHOP_LO = 0.50
@@ -390,10 +390,14 @@ class DailyTradeRanker:
         selected: List[Dict[str, Any]] = []
         for _date, group in df.groupby("trade_date", sort=True):
             g = group.copy()
-            # One position per symbol per day (highest ordinal score first)
+            if "is_open_drive" not in g.columns:
+                g["is_open_drive"] = 0
+            else:
+                g["is_open_drive"] = pd.to_numeric(g["is_open_drive"], errors="coerce").fillna(0)
+            # Soft open-drive priority, then ordinal P / confidence
             g = g.sort_values(
-                ["win_probability", "strategy_confidence"],
-                ascending=[False, False],
+                ["is_open_drive", "win_probability", "strategy_confidence"],
+                ascending=[False, False, False],
                 na_position="last",
             )
             g = g.drop_duplicates(subset=["symbol"], keep="first")
@@ -417,9 +421,10 @@ class DailyTradeRanker:
             if not pool:
                 continue
 
-            # Pure ordinal: sort by win_probability (not EV)
+            # Soft open-drive boost, then ordinal win_probability
             pool.sort(
                 key=lambda r: (
+                    float(r.get("is_open_drive") or 0.0),
                     float(r.get("win_probability") or 0.0),
                     float(r.get("strategy_confidence") or 0.0),
                     float(r.get("expected_value") or -1e9),

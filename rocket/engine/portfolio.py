@@ -25,6 +25,7 @@ class Position:
     confidence: float = 0.0
     atr: Optional[float] = None  # atr_at_entry
     trail_activated: bool = False
+    breakeven_locked: bool = False
     peak_favorable_price: Optional[float] = None
     bars_in_trade: int = 0
     time_exit_armed: bool = True
@@ -84,6 +85,43 @@ class Position:
             return False
         return self.mfe() < float(time_exit_atr_min) * float(atr)
 
+    def update_breakeven_stop(
+        self,
+        *,
+        high: float,
+        low: float,
+        trigger_atr_mult: float = 1.0,
+        buffer: float = 0.05,
+    ) -> bool:
+        """
+        Hard breakeven lock: once MFE ≥ trigger_atr_mult × ATR, ratchet SL to
+        entry ± buffer and never allow a full structural loss again.
+        Returns True if breakeven was newly locked on this call.
+        """
+        if self.atr is None or self.atr <= 0:
+            return False
+        atr = float(self.atr)
+        entry = float(self.avg_price)
+        pad = float(buffer)
+        newly = False
+        if self.side == Side.BUY:
+            if high >= entry + trigger_atr_mult * atr:
+                be = entry + pad
+                if self.stop_loss is None or be > float(self.stop_loss):
+                    self.stop_loss = be
+                if not self.breakeven_locked:
+                    newly = True
+                self.breakeven_locked = True
+        else:
+            if low <= entry - trigger_atr_mult * atr:
+                be = entry - pad
+                if self.stop_loss is None or be < float(self.stop_loss):
+                    self.stop_loss = be
+                if not self.breakeven_locked:
+                    newly = True
+                self.breakeven_locked = True
+        return newly
+
     def update_trailing_stop(
         self,
         *,
@@ -94,7 +132,8 @@ class Position:
     ) -> None:
         """
         After +activate_at_r × ATR favorable move, ratchet stop by trail_atr_mult × ATR
-        from the bar extreme (long: high − 2ATR; short: low + 2ATR).
+        from the bar extreme (long: high − trail×ATR; short: low + trail×ATR).
+        Never loosens an already-tighter stop (e.g. breakeven lock).
         """
         if self.atr is None or self.atr <= 0:
             return
@@ -113,6 +152,14 @@ class Position:
                 trail = low + trail_atr_mult * atr
                 if self.stop_loss is None or trail < self.stop_loss:
                     self.stop_loss = trail
+
+    def stop_exit_reason(self) -> str:
+        """Classify stop hit: trail > breakeven lock > structural stop."""
+        if self.trail_activated:
+            return "trailing_stop"
+        if self.breakeven_locked:
+            return "breakeven_exit"
+        return "stop_loss"
 
 
 @dataclass
