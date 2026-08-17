@@ -113,7 +113,7 @@ def export_html(
         meta_note = ""
         if raw_n is not None and sel_n is not None:
             g = metrics.get("confluence_gates") or {}
-            p_min = g.get("p_min", 0.36)
+            p_min = g.get("p_min", 0.12)
             p_max = g.get("p_max", 0.85)
             clv = g.get("clv_threshold", 0.15)
             b_lo = g.get("breadth_long_min", 0.50)
@@ -123,12 +123,12 @@ def export_html(
                 f"<div class='sub' style='margin:0 0 10px'>Meta-filter + fractional Kelly kept "
                 f"<strong>{sel_n}</strong> of <strong>{raw_n}</strong> raw candidates "
                 f"(breadth≥{b_lo}/≤{b_hi} + CLV±{clv} + HTF 15m + RVOL≥{rvol}, ordinal 0–3/day on "
-                f"{p_min}≤P≤{p_max}, open-drive soft priority, "
+                f"{p_min}≤P≤{p_max}, "
                 f"09:20–12:25 IST signal curfew → fills ≤12:30, "
                 f"EMA5≤0.70×ATR / EMA20≤1.80×ATR, RSI 25/75, ₹8k risk; "
                 f"vol-buffered EMA20/VWAP stop (1.2–1.6×ATR) + 1.8R/2.2×ATR target; "
-                f"breakeven lock at +1.0×ATR; trail 1.8×ATR after +1.2R (1.2×ATR after +1.6R post-BE); "
-                f"4-bar stagnation; synced execution labels).</div>"
+                f"early EMA20 invalidation on bars 1–2; breakeven lock at +1.0×ATR; "
+                f"trail 1.2×ATR after +1.6R; 4-bar stagnation; expansion-only labels).</div>"
             )
         cmp_section = f"""
     <div class="panel">
@@ -189,7 +189,7 @@ def export_html(
       <h2>Dynamic Time / Stagnation Exit Sweep</h2>
       <div class="sub" style="margin:0 0 10px">
         Same meta-selected entries; exit if MFE &lt; 0.5×ATR at bar N (then disarm if MFE ≥ 0.5×ATR).
-        Priority: TP → SL / breakeven / trail → stagnation → EOD (≥15:00 IST).
+        Priority: TP → SL / breakeven / trail → early EMA20 invalidation → stagnation → EOD (≥15:00 IST).
       </div>
       <table>
         <thead><tr><th>Metric</th>{header_cols}</tr></thead>

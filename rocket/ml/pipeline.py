@@ -45,6 +45,18 @@ def _ist_time(ts: Any):
     return t.tz_convert("Asia/Kolkata").time()
 
 
+def label_simulated_trade(trade_pnl_r: float, exit_reason: str) -> int:
+    """Expansion-only labels: y=1 iff take-profit or realized R ≥ 1.5."""
+    if str(exit_reason or "") == "take_profit":
+        return 1
+    try:
+        if float(trade_pnl_r) >= 1.5:
+            return 1
+    except (TypeError, ValueError):
+        return 0
+    return 0
+
+
 def path_label_signal(
     df: pd.DataFrame,
     trigger_idx: int,
@@ -61,11 +73,13 @@ def path_label_signal(
     time_exit_atr_min: float = 0.5,
 ) -> Dict[str, Any]:
     """
-    Replay the backtester exit state machine for labeling.
+    Replay the profit-taking state machine for expansion-only labels.
 
     Uses structural 1.2–1.6×ATR stops, max(1.8R, 2.2×ATR) targets, hard
-    breakeven at +1.0×ATR, post-BE trail +1.6/1.2×ATR (else +1.2/1.8),
-    4-bar stagnation, and 15:00 IST EOD — matching ``RocketBacktester``.
+    breakeven at +1.0×ATR, trail +1.6/1.2×ATR, 4-bar stagnation, and 15:00 IST
+    EOD. Early EMA20 invalidation is an execution cut (backtester only) so
+    training labels keep the ~0.30–0.35 expansion base rate.
+    ``y=1`` only for take_profit or R≥1.5; BE/scratch/stop = 0.
     Legacy ``stop_loss`` / ``take_profit`` args are ignored when ATR is available.
     """
     side_u = side.upper()
@@ -128,10 +142,7 @@ def path_label_signal(
         pos.maybe_disarm_time_exit(time_exit_atr_min)
         pos.bars_in_trade += 1
         pos.update_breakeven_stop(high=hi, low=lo, trigger_atr_mult=1.0, buffer=0.05)
-        if pos.breakeven_locked:
-            pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.6, trail_atr_mult=1.2)
-        else:
-            pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.2, trail_atr_mult=1.8)
+        pos.update_trailing_stop(high=hi, low=lo, activate_at_r=1.6, trail_atr_mult=1.2)
 
         if direction > 0:
             if pos.take_profit is not None and hi >= pos.take_profit:
@@ -163,8 +174,7 @@ def path_label_signal(
 
     pnl = (exit_px - entry) * direction
     r_mult = pnl / sl_dist if sl_dist > 0 else 0.0
-    # Win = positive PnL under synced execution (also counts ≥ +1R)
-    target_met = int(pnl > 0.0 or r_mult >= 1.0)
+    target_met = label_simulated_trade(r_mult, exit_reason)
     return {
         "entry_price": entry,
         "exit_price": exit_px,
@@ -355,7 +365,10 @@ def harvest_raw_signals(
             rows.append(rec)
 
     out = pd.DataFrame(rows)
-    logger.info("Harvested %s raw candidate signals", len(out))
+    pos_rate = float(out["target_met"].mean()) if not out.empty and "target_met" in out.columns else 0.0
+    logger.info("Harvested %s raw candidate signals (expansion-only pos_rate=%.3f)", len(out), pos_rate)
+    if not out.empty and "exit_reason" in out.columns:
+        logger.info("Harvest exit reasons:\n%s", out["exit_reason"].value_counts().to_string())
     return out
 
 
@@ -364,7 +377,7 @@ def run_comparative_meta_backtest(
     start: date,
     end: date,
     *,
-    min_probability: float = 0.36,
+    min_probability: float = 0.12,
     min_per_day: int = 2,
     max_per_day: int = 3,
     min_confidence: float = 0.58,
@@ -483,7 +496,7 @@ def run_timeframe_comparison(
     intervals: Sequence[str] = ("5minute", "15minute"),
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.36,
+    min_probability: float = 0.12,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,
@@ -603,7 +616,7 @@ def run_time_exit_comparison(
     interval: str = "5minute",
     capital: float = 10_000_000.0,
     limit: int = 200,
-    min_probability: float = 0.36,
+    min_probability: float = 0.12,
     kelly_factor: float = 0.35,
     min_per_day: int = 2,
     max_per_day: int = 3,

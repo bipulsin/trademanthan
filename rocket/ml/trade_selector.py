@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ConfluenceGatesConfig:
     """High-confluence entry gates (sweep-winner production defaults)."""
 
-    p_min: float = 0.36
+    p_min: float = 0.12
     p_max: float = 0.85
     clv_threshold: float = 0.15
     breadth_long_min: float = 0.50
@@ -38,7 +38,7 @@ class ConfluenceGatesConfig:
         return asdict(self)
 
 
-MIN_PROB = 0.36  # sweep-winner continuous-bulk floor
+MIN_PROB = 0.12  # expansion-only bulk floor (OOF p50≈0.09; 0.36 was BE-inflated)
 MAX_PROB = 0.85  # discard calibration artifact spike
 VALID_PROB_MIN = MIN_PROB
 VALID_PROB_MAX = MAX_PROB
@@ -388,16 +388,15 @@ class DailyTradeRanker:
             df["trade_date"] = df["trade_date"].astype(str)
 
         selected: List[Dict[str, Any]] = []
+        n_p_reject = 0
+        n_gate_reject = 0
+        n_considered = 0
         for _date, group in df.groupby("trade_date", sort=True):
             g = group.copy()
-            if "is_open_drive" not in g.columns:
-                g["is_open_drive"] = 0
-            else:
-                g["is_open_drive"] = pd.to_numeric(g["is_open_drive"], errors="coerce").fillna(0)
-            # Soft open-drive priority, then ordinal P / confidence
+            # One position per symbol per day (highest ordinal P first)
             g = g.sort_values(
-                ["is_open_drive", "win_probability", "strategy_confidence"],
-                ascending=[False, False, False],
+                ["win_probability", "strategy_confidence"],
+                ascending=[False, False],
                 na_position="last",
             )
             g = g.drop_duplicates(subset=["symbol"], keep="first")
@@ -406,6 +405,11 @@ class DailyTradeRanker:
 
             pool: List[Dict[str, Any]] = []
             for _, row in g.iterrows():
+                n_considered += 1
+                p = float(row.get("win_probability") or 0.0)
+                if p < self.min_prob or p > self.max_prob:
+                    n_p_reject += 1
+                    continue
                 sized = apply_tiered_sizing(
                     row.to_dict(),
                     kelly_factor=self.kelly_factor,
@@ -418,13 +422,13 @@ class DailyTradeRanker:
                 )
                 if sized is not None:
                     pool.append(sized)
+                else:
+                    n_gate_reject += 1
             if not pool:
                 continue
 
-            # Soft open-drive boost, then ordinal win_probability
             pool.sort(
                 key=lambda r: (
-                    float(r.get("is_open_drive") or 0.0),
                     float(r.get("win_probability") or 0.0),
                     float(r.get("strategy_confidence") or 0.0),
                     float(r.get("expected_value") or -1e9),
@@ -452,6 +456,15 @@ class DailyTradeRanker:
                     day_picks.append(cand)
             selected.extend(day_picks)
 
+        logger.info(
+            "selector funnel considered=%s p_band_reject=%s gate_reject=%s selected=%s (P∈[%.2f,%.2f])",
+            n_considered,
+            n_p_reject,
+            n_gate_reject,
+            len(selected),
+            self.min_prob,
+            self.max_prob,
+        )
         return selected
 
     def selected_keys(self, selected: List[Dict[str, Any]]) -> set[Tuple[str, str, str]]:

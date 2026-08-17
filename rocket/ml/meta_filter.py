@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Sequence
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import log_loss, precision_score, roc_auc_score
 
@@ -27,15 +26,15 @@ class MetaModelConfig:
     max_depth: int = 4
     min_samples_leaf: int = 20
     l2_regularization: float = 2.0
-    scoring_threshold: float = 0.36
+    scoring_threshold: float = 0.12
     min_train_samples: int = 40
     model_path: str = ".cache/rocket_meta_filter.joblib"
     # Continuous-bulk band used by the selector (documented here for OOF audits)
-    continuous_prob_min: float = 0.36
+    continuous_prob_min: float = 0.12
     continuous_prob_max: float = 0.85
 
 
-def in_continuous_prob_bulk(p: float, *, lo: float = 0.36, hi: float = 0.85) -> bool:
+def in_continuous_prob_bulk(p: float, *, lo: float = 0.12, hi: float = 0.85) -> bool:
     """Exclude bottom noise and the ≥0.85 / 0.95 calibration artifact spike."""
     x = float(p)
     return lo <= x <= hi
@@ -82,19 +81,10 @@ class RocketMetaFilter:
             l2_regularization=self.config.l2_regularization,
             random_state=42,
         )
-        # Platt scaling (sigmoid) — avoids isotonic step-function 0.95 plateaus
-        n_pos = int(y.sum())
-        n_neg = int(len(y) - n_pos)
-        if n_pos < 5 or n_neg < 5 or len(y) < 30:
-            base.fit(X, y)
-            return base
-        cv = min(5, n_pos, n_neg)
-        if cv < 2:
-            base.fit(X, y)
-            return base
-        calibrated = CalibratedClassifierCV(estimator=base, method="sigmoid", cv=cv)
-        calibrated.fit(X, y)
-        return calibrated
+        # Uncalibrated leaf frequencies. Sigmoid Platt collapses expansion-only
+        # labels (~10% pos) to ~base-rate scores, so P≥0.36 never fires.
+        base.fit(X, y)
+        return base
 
     def train(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
         if X.empty or y.empty:
@@ -230,6 +220,15 @@ class RocketMetaFilter:
         out["win_probability"] = probs
         # Audit flags — selection still happens in DailyTradeRanker
         p = out["win_probability"].astype(float)
+        if len(p):
+            logger.info(
+                "OOF P p50=%.3f p90=%.3f p99=%.3f frac>=0.12=%.4f frac>=0.36=%.4f",
+                float(p.median()),
+                float(p.quantile(0.90)),
+                float(p.quantile(0.99)),
+                float((p >= 0.12).mean()),
+                float((p >= 0.36).mean()),
+            )
         lo = float(self.config.continuous_prob_min)
         hi = float(self.config.continuous_prob_max)
         out["in_continuous_bulk"] = (p >= lo) & (p <= hi)

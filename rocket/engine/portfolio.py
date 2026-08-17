@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from math import isfinite
 from typing import Dict, List, Optional
 
 from rocket.config.constants import DEFAULT_INITIAL_MARGIN_PCT
@@ -84,6 +85,23 @@ class Position:
         if atr is None or atr <= 0:
             return False
         return self.mfe() < float(time_exit_atr_min) * float(atr)
+
+    def should_early_invalidate(self, *, close: float, ema_20: Optional[float]) -> bool:
+        """Bar 1–2 close through EMA20 against the position → flatten at market."""
+        if self.bars_in_trade < 1 or self.bars_in_trade > 2:
+            return False
+        if ema_20 is None:
+            return False
+        try:
+            e20 = float(ema_20)
+            px = float(close)
+        except (TypeError, ValueError):
+            return False
+        if not isfinite(e20):
+            return False
+        if self.side == Side.BUY:
+            return px < e20
+        return px > e20
 
     def update_breakeven_stop(
         self,

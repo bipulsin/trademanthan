@@ -301,7 +301,7 @@ class RocketBacktester:
                 snapshot[sym] = row
                 marks[sym] = float(bar["close"])
 
-            # Exits (skip same bar as entry). Priority: TP → SL/trail → stagnation → EOD
+            # Exits (skip same bar as entry). Priority: TP → SL → early EMA20 → stagnation → EOD
             for sym, pos in list(portfolio.positions.items()):
                 if sym not in snapshot:
                     continue
@@ -315,23 +315,14 @@ class RocketBacktester:
                 pos.maybe_disarm_time_exit(self.time_exit_atr_min)
                 pos.bars_in_trade += 1
 
-                # Breakeven lock at +1.0×ATR, then trail:
-                #   pre-BE: +1.2 / 1.8×ATR; post-BE: tighter +1.6 / 1.2×ATR
+                # BE lock at +1.0×ATR; trail only after +1.6×ATR at 1.2×ATR
                 pos.update_breakeven_stop(high=hi, low=lo, trigger_atr_mult=1.0, buffer=0.05)
-                if pos.breakeven_locked:
-                    pos.update_trailing_stop(
-                        high=hi,
-                        low=lo,
-                        activate_at_r=1.6,
-                        trail_atr_mult=1.2,
-                    )
-                else:
-                    pos.update_trailing_stop(
-                        high=hi,
-                        low=lo,
-                        activate_at_r=1.2,
-                        trail_atr_mult=1.8,
-                    )
+                pos.update_trailing_stop(
+                    high=hi,
+                    low=lo,
+                    activate_at_r=1.6,
+                    trail_atr_mult=1.2,
+                )
                 exit_px = None
                 reason = ""
 
@@ -348,14 +339,19 @@ class RocketBacktester:
                     elif pos.stop_loss is not None and hi >= pos.stop_loss:
                         exit_px, reason = pos.stop_loss, pos.stop_exit_reason()
 
-                # 3) Dynamic stagnation exit at close of bar N
+                # 3) Early adverse invalidation (bar 1–2 close through EMA20)
+                ema20 = bar.get("ema_20")
+                if exit_px is None and pos.should_early_invalidate(close=close, ema_20=ema20):
+                    exit_px, reason = close, "early_trend_invalidation"
+
+                # 4) Dynamic stagnation exit at close of bar N
                 if exit_px is None and pos.should_stagnation_exit(
                     time_exit_bars=self.time_exit_bars,
                     time_exit_atr_min=self.time_exit_atr_min,
                 ):
                     exit_px, reason = close, "time_stagnation_exit"
 
-                # 4) Flatten near session end
+                # 5) Flatten near session end
                 tclock = ts.timetz().replace(tzinfo=None) if hasattr(ts, "timetz") else ts.time()
                 if exit_px is None and tclock >= time(15, 0):
                     exit_px, reason = close, "eod_flat"

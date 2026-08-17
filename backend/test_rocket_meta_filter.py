@@ -10,7 +10,7 @@ import pytz
 
 from rocket.ml.feature_extractor import FEATURE_COLUMNS, RocketFeatureExtractor
 from rocket.ml.meta_filter import MetaModelConfig, RocketMetaFilter
-from rocket.ml.pipeline import build_comparison_table, path_label_signal
+from rocket.ml.pipeline import build_comparison_table, label_simulated_trade, path_label_signal
 from rocket.ml.trade_selector import (
     ConfluenceGatesConfig,
     DailyTradeRanker,
@@ -296,7 +296,7 @@ def test_fractional_kelly_and_tier_sizing():
     assert (
         apply_tiered_sizing(
             _buy_confluence(
-                win_probability=0.33,
+                win_probability=0.10,
                 side="BUY",
                 entry_price=1000.0,
                 atr=10.0,
@@ -495,7 +495,7 @@ def test_gates_and_risk_cap():
 
 
 def test_ordinal_daily_selection_with_curfew():
-    """0.36≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
+    """0.12≤P≤0.85 ordinal 0–3/day with breadth+CLV+HTF+RVOL; empty days stay empty."""
     rows = []
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
     day1_probs = [0.55, 0.48, 0.42, 0.39, 0.35, 0.95, 0.18]
@@ -534,7 +534,7 @@ def test_ordinal_daily_selection_with_curfew():
             ema_20=990.0,
         )
     )
-    for i, p in enumerate([0.95, 0.90, 0.30, 0.20]):
+    for i, p in enumerate([0.95, 0.90, 0.08, 0.05]):
         rows.append(
             _buy_confluence(
                 timestamp=base + timedelta(days=1),
@@ -562,13 +562,13 @@ def test_ordinal_daily_selection_with_curfew():
     assert 1 <= len(by_day["2026-08-03"]) <= 3
     assert by_day["2026-08-03"][0]["lots"] == 2
     assert by_day["2026-08-03"][0]["symbol"] == "W0"
-    assert all(0.36 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.12 <= float(s["win_probability"]) <= 0.85 for s in selected)
     assert all(s["symbol"] != "LATE" for s in selected)
     assert "2026-08-04" not in by_day
 
 
-def test_open_drive_soft_priority():
-    """Open-drive candidates outrank equal-P non-drive peers on the same day."""
+def test_open_drive_does_not_outrank_higher_p():
+    """Daily rank is pure win_probability — open-drive is not a boost."""
     base = IST.localize(datetime(2026, 8, 3, 10, 0))
     rows = [
         _buy_confluence(
@@ -608,7 +608,47 @@ def test_open_drive_soft_priority():
         rows
     )
     assert len(selected) == 1
-    assert selected[0]["symbol"] == "DRIVE"
+    assert selected[0]["symbol"] == "MIDDAY"
+
+
+def test_expansion_only_labels():
+    assert label_simulated_trade(0.2, "take_profit") == 1
+    assert label_simulated_trade(1.8, "trailing_stop") == 1
+    assert label_simulated_trade(0.05, "breakeven_exit") == 0
+    assert label_simulated_trade(-0.1, "time_stagnation_exit") == 0
+    assert label_simulated_trade(-1.4, "stop_loss") == 0
+    assert label_simulated_trade(0.4, "early_trend_invalidation") == 0
+
+
+def test_early_trend_invalidation():
+    from rocket.engine.order_book import Side
+    from rocket.engine.portfolio import Position
+
+    pos = Position(
+        symbol="ABC",
+        instrument_key="NSE_FO|ABC",
+        side=Side.BUY,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        atr=10.0,
+        bars_in_trade=1,
+    )
+    assert pos.should_early_invalidate(close=989.0, ema_20=990.0) is True
+    pos.bars_in_trade = 3
+    assert pos.should_early_invalidate(close=989.0, ema_20=990.0) is False
+    short = Position(
+        symbol="XYZ",
+        instrument_key="NSE_FO|XYZ",
+        side=Side.SELL,
+        quantity=50,
+        avg_price=1000.0,
+        lot_size=50,
+        atr=10.0,
+        bars_in_trade=2,
+    )
+    assert short.should_early_invalidate(close=1001.0, ema_20=990.0) is True
+    assert short.should_early_invalidate(close=980.0, ema_20=990.0) is False
 
 
 def test_path_label_and_walk_forward_selector():
@@ -671,7 +711,7 @@ def test_path_label_and_walk_forward_selector():
     assert isinstance(selected, list)
     assert all(int(s.get("lots") or 0) >= 1 for s in selected)
     assert all(s.get("stop_loss") is not None for s in selected)
-    assert all(0.36 <= float(s["win_probability"]) <= 0.85 for s in selected)
+    assert all(0.12 <= float(s["win_probability"]) <= 0.85 for s in selected)
 
     from rocket.ml.pipeline import iter_confluence_sweep_grid, pick_best_confluence_config
 
