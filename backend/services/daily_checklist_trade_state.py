@@ -1791,6 +1791,31 @@ def enrich_stocks_trade_state(
         except Exception:
             nifty_pct = 0.0
 
+        # Snapshot rocket fallback: one batch read so per-symbol cache misses
+        # (WATCH symbols not in the [:25] pre-load and not morning-locked) can
+        # still show the score the RS scan computed from live-fetched candles.
+        snapshot_rocket: Dict[str, Dict[str, Any]] = {}
+        try:
+            _sym_in = ", ".join(f"'{s}'" for s in symbols if s)
+            snap_rows = db.execute(
+                text(
+                    f"SELECT DISTINCT ON (symbol) symbol, rocket_score, rocket_signals, rocket_label "
+                    f"FROM rs_universe_score_snapshot WHERE symbol IN ({_sym_in}) "
+                    f"ORDER BY symbol, scan_time DESC"
+                )
+            ).fetchall()
+            for _r in snap_rows:
+                _m = _r._mapping if hasattr(_r, "_mapping") else dict(zip(_r.keys(), _r))
+                _sym = str(_m.get("symbol") or "").upper()
+                if _sym:
+                    snapshot_rocket[_sym] = {
+                        "rocket_score": int(_m.get("rocket_score") or 0),
+                        "rocket_signals": list(_m.get("rocket_signals") or []),
+                        "rocket_label": str(_m.get("rocket_label") or ""),
+                    }
+        except Exception:
+            pass
+
         for s in stocks:
             sym = (s.get("symbol") or "").upper()
             if not sym:
@@ -1813,9 +1838,20 @@ def enrich_stocks_trade_state(
                     candle_cache[sym] = candles
                 except Exception:
                     candles = []
+            had_candles = bool(candles)
             # Every poll: refresh Trend/ST/MACD from the same 10m candle path as
             # live Kavach so DIR CONFLICT is not stuck on sticky checklist labels.
             overlay_live_momentum_from_candles(s, candles, nifty_pct=nifty_pct)
+            # When candles were unavailable the overlay sets rocket_score=0.
+            # Fall back to the RS snapshot value (from the scan job which fetches
+            # candles for all 200 symbols) so WATCH-section READY symbols show
+            # their rocket badge even when the live candle cache is cold.
+            if not had_candles and int(s.get("rocket_score") or 0) == 0:
+                snap = snapshot_rocket.get(sym)
+                if snap and int(snap.get("rocket_score") or 0) > 0:
+                    s["rocket_score"] = snap["rocket_score"]
+                    s["rocket_signals"] = snap["rocket_signals"]
+                    s["rocket_label"] = snap["rocket_label"]
             whip = count_whipsaw_reversals(
                 candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
             ) if candles else 0
