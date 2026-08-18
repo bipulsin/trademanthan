@@ -1726,7 +1726,7 @@
             if (rScore >= 1 && rLabel) {
                 rk.hidden = false;
                 rk.textContent = rLabel;
-                rk.className = "dc-ready-rocket dc-ready-rocket--" + Math.min(4, rScore);
+                rk.className = "dc-ready-rocket dc-ready-rocket--hero dc-ready-rocket--" + Math.min(4, rScore);
                 var sigs = stock.rocket_signals;
                 if (typeof sigs === "string") {
                     try { sigs = JSON.parse(sigs); } catch (e) { sigs = String(sigs).split(","); }
@@ -1736,7 +1736,7 @@
             } else {
                 rk.hidden = true;
                 rk.textContent = "";
-                rk.className = "dc-ready-rocket";
+                rk.className = "dc-ready-rocket dc-ready-rocket--hero";
                 rk.title = "";
             }
         }
