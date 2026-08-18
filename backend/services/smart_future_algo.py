@@ -302,18 +302,10 @@ class SmartFutureAlgoScheduler:
                         return
                     if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
                         return
-                    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
-                        return
-                    from backend.services.oi_heatmap import ensure_daily_universe_cached
-                    from backend.services.upstox_market_feed import ensure_market_feed_running
+                    from backend.services.rocket_ws_live import ensure_rocket_feed_running
 
-                    keys = ensure_daily_universe_cached()
-                    if keys:
-                        ensure_market_feed_running(keys)
-                        logger.info(
-                            "✅ Upstox v3 market WebSocket feed prewarmed (%s instruments)",
-                            len(keys),
-                        )
+                    ensure_rocket_feed_running()
+                    logger.info("✅ Upstox v3 market WebSocket feed prewarmed for Rocket/Crash live scoring")
                 except Exception as e:
                     logger.warning("⚠️ Upstox market feed prewarm failed: %s", e)
 

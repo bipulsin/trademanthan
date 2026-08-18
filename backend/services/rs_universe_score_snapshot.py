@@ -94,6 +94,9 @@ CREATE TABLE IF NOT EXISTS rs_universe_score_snapshot (
     rocket_score INTEGER,
     rocket_signals TEXT,
     rocket_label TEXT,
+    crash_score INTEGER,
+    crash_signals TEXT,
+    crash_label TEXT,
     UNIQUE (scan_time, symbol)
 );
 CREATE INDEX IF NOT EXISTS ix_rs_univ_scan ON rs_universe_score_snapshot (scan_time DESC);
@@ -115,7 +118,8 @@ _UPSERT = text(
         trade_score, ranking_type, rank_raw, rank_membership,
         in_top10_membership, in_top5_membership, incumbent_bonus_applied, incumbent_rs_bonus,
         scan_trigger, cache_only, from_cache, exclusion_reason, detail,
-        rocket_score, rocket_signals, rocket_label
+        rocket_score, rocket_signals, rocket_label,
+        crash_score, crash_signals, crash_label
     ) VALUES (
         :scan_time, CAST(:session_date AS date), :symbol, :instrument_key,
         :current_price, :previous_close, :stock_percent, :nifty_percent,
@@ -126,7 +130,8 @@ _UPSERT = text(
         :trade_score, :ranking_type, :rank_raw, :rank_membership,
         :in_top10_membership, :in_top5_membership, :incumbent_bonus_applied, :incumbent_rs_bonus,
         :scan_trigger, :cache_only, :from_cache, :exclusion_reason, :detail,
-        :rocket_score, :rocket_signals, :rocket_label
+        :rocket_score, :rocket_signals, :rocket_label,
+        :crash_score, :crash_signals, :crash_label
     )
     ON CONFLICT (scan_time, symbol) DO UPDATE SET
         ranking_type = EXCLUDED.ranking_type,
@@ -143,7 +148,10 @@ _UPSERT = text(
         detail = EXCLUDED.detail,
         rocket_score = EXCLUDED.rocket_score,
         rocket_signals = EXCLUDED.rocket_signals,
-        rocket_label = EXCLUDED.rocket_label
+        rocket_label = EXCLUDED.rocket_label,
+        crash_score = EXCLUDED.crash_score,
+        crash_signals = EXCLUDED.crash_signals,
+        crash_label = EXCLUDED.crash_label
     """
 )
 
@@ -168,6 +176,18 @@ def ensure_rs_universe_score_snapshot() -> None:
         conn.execute(text(
             "ALTER TABLE rs_universe_score_snapshot "
             "ADD COLUMN IF NOT EXISTS rocket_label TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE rs_universe_score_snapshot "
+            "ADD COLUMN IF NOT EXISTS crash_score INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE rs_universe_score_snapshot "
+            "ADD COLUMN IF NOT EXISTS crash_signals TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE rs_universe_score_snapshot "
+            "ADD COLUMN IF NOT EXISTS crash_label TEXT"
         ))
     _ENSURED = True
 
@@ -370,6 +390,9 @@ def _row_params(
         "rocket_score": int(r.get("rocket_score") or 0),
         "rocket_signals": _signals_dump(r.get("rocket_signals")),
         "rocket_label": r.get("rocket_label") or "",
+        "crash_score": int(r.get("crash_score") or 0),
+        "crash_signals": _signals_dump(r.get("crash_signals")),
+        "crash_label": r.get("crash_label") or "",
     }
 
 

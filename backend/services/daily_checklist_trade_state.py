@@ -410,6 +410,12 @@ def overlay_live_momentum_from_candles(
         "macd": stock.get("macd"),
     }
     if not candles:
+        try:
+            from backend.services.rocket_ws_live import overlay_live_rocket_crash
+
+            overlay_live_rocket_crash(stock)
+        except Exception:
+            pass
         return prior
     try:
         from backend.services.daily_checklist import (
@@ -488,6 +494,15 @@ def overlay_live_momentum_from_candles(
         stock["rocket_score"] = int(metrics.get("rocket_score") or 0)
         stock["rocket_signals"] = list(metrics.get("rocket_signals") or [])
         stock["rocket_label"] = metrics.get("rocket_label") or ""
+        stock["crash_score"] = int(metrics.get("crash_score") or 0)
+        stock["crash_signals"] = list(metrics.get("crash_signals") or [])
+        stock["crash_label"] = metrics.get("crash_label") or ""
+        try:
+            from backend.services.rocket_ws_live import overlay_live_rocket_crash
+
+            overlay_live_rocket_crash(stock)
+        except Exception:
+            pass
         if int(stock["rocket_score"] or 0) >= 3:
             from backend.services.rocket_pre_ignition import log_rocket
 
@@ -1796,10 +1811,14 @@ def enrich_stocks_trade_state(
         # still show the score the RS scan computed from live-fetched candles.
         snapshot_rocket: Dict[str, Dict[str, Any]] = {}
         try:
+            from backend.services.rs_universe_score_snapshot import ensure_rs_universe_score_snapshot
+
+            ensure_rs_universe_score_snapshot()
             _sym_in = ", ".join(f"'{s}'" for s in symbols if s)
             snap_rows = db.execute(
                 text(
-                    f"SELECT DISTINCT ON (symbol) symbol, rocket_score, rocket_signals, rocket_label "
+                    f"SELECT DISTINCT ON (symbol) symbol, rocket_score, rocket_signals, rocket_label, "
+                    f"crash_score, crash_signals, crash_label "
                     f"FROM rs_universe_score_snapshot WHERE symbol IN ({_sym_in}) "
                     f"ORDER BY symbol, scan_time DESC"
                 )
@@ -1812,6 +1831,9 @@ def enrich_stocks_trade_state(
                         "rocket_score": int(_m.get("rocket_score") or 0),
                         "rocket_signals": list(_m.get("rocket_signals") or []),
                         "rocket_label": str(_m.get("rocket_label") or ""),
+                        "crash_score": int(_m.get("crash_score") or 0),
+                        "crash_signals": list(_m.get("crash_signals") or []),
+                        "crash_label": str(_m.get("crash_label") or ""),
                     }
         except Exception:
             pass
@@ -1852,6 +1874,18 @@ def enrich_stocks_trade_state(
                     s["rocket_score"] = snap["rocket_score"]
                     s["rocket_signals"] = snap["rocket_signals"]
                     s["rocket_label"] = snap["rocket_label"]
+            if int(s.get("crash_score") or 0) == 0:
+                snap = snapshot_rocket.get(sym)
+                if snap and int(snap.get("crash_score") or 0) > 0:
+                    s["crash_score"] = snap["crash_score"]
+                    s["crash_signals"] = snap["crash_signals"]
+                    s["crash_label"] = snap["crash_label"]
+            try:
+                from backend.services.rocket_ws_live import overlay_live_rocket_crash
+
+                overlay_live_rocket_crash(s)
+            except Exception:
+                pass
             whip = count_whipsaw_reversals(
                 candles, session_date=session_date, is_long=is_long, near_atr=near_atr, atr=atr
             ) if candles else 0

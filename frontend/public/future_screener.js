@@ -17,6 +17,7 @@
   let selectedReadiness = new Set();
   let sortKey = "trade_score";
   let sortAsc = false;
+  let hotOnly = false;
 
   function $(id) {
     return document.getElementById(id);
@@ -57,6 +58,11 @@
         const s = Number(r.trade_score);
         if (!Number.isFinite(s) || s > scoreMax) return false;
       }
+      if (hotOnly) {
+        const rk = Number(r.rocket_score || 0);
+        const ck = Number(r.crash_score || 0);
+        if (!(rk >= 3 || ck >= 3)) return false;
+      }
       return true;
     });
   }
@@ -64,7 +70,7 @@
   function cmp(a, b, key, asc) {
     let va = a[key];
     let vb = b[key];
-    if (key === "trade_score" || key === "adx" || key === "pct_from_open" || key === "pullback_number" || key === "rocket_score") {
+    if (key === "trade_score" || key === "adx" || key === "pct_from_open" || key === "pullback_number" || key === "rocket_score" || key === "crash_score") {
       va = va == null || va === "" ? (asc ? Infinity : -Infinity) : Number(va);
       vb = vb == null || vb === "" ? (asc ? Infinity : -Infinity) : Number(vb);
       if (va < vb) return asc ? -1 : 1;
@@ -91,6 +97,35 @@
     if (s === "READY TO SHORT") return "fs-ready-short";
     if (s === "WATCHING") return "fs-watching";
     return "fs-not-ready";
+  }
+
+  function crashCell(r) {
+    const score = Number(r.crash_score || 0);
+    const label = r.crash_label || (score >= 1 ? "💥 " + score + "/4" : "");
+    if (!(score >= 1) || !label) return "<td></td>";
+    let sigs = r.crash_signals;
+    if (typeof sigs === "string") {
+      try {
+        sigs = JSON.parse(sigs);
+      } catch (e) {
+        sigs = String(sigs).split(",");
+      }
+    }
+    const tip =
+      "Crash Score: " +
+      score +
+      "/4" +
+      (Array.isArray(sigs) && sigs.length ? " | " + sigs.filter(Boolean).join(", ") : "");
+    const cls = "fs-crash fs-crash--" + Math.min(4, score);
+    return (
+      '<td class="' +
+      cls +
+      '" title="' +
+      escapeHtml(tip) +
+      '">' +
+      escapeHtml(label) +
+      "</td>"
+    );
   }
 
   function rocketCell(r) {
@@ -167,6 +202,7 @@
           escapeHtml(r.readiness || "—") +
           "</td>" +
           rocketCell(r) +
+          crashCell(r) +
           '<td class="num">' +
           fmtNum(r.trade_score, 1) +
           "</td>" +
@@ -236,6 +272,12 @@
     // Back to page-load default: Grade A+/A; readiness & score unset
     selectedGrades = new Set(DEFAULT_GRADES);
     selectedReadiness = new Set();
+    hotOnly = false;
+    const hotBtn = $("fsHotBtn");
+    if (hotBtn) {
+      hotBtn.classList.toggle("is-on", false);
+      hotBtn.setAttribute("aria-pressed", "false");
+    }
     $("fsScoreMin").value = "";
     $("fsScoreMax").value = "";
     rebuildFilterUi();
@@ -296,6 +338,15 @@
   function init() {
     $("fsRefreshBtn").addEventListener("click", load);
     $("fsClearBtn").addEventListener("click", clearFilters);
+    const hotBtn = $("fsHotBtn");
+    if (hotBtn) {
+      hotBtn.addEventListener("click", () => {
+        hotOnly = !hotOnly;
+        hotBtn.classList.toggle("is-on", hotOnly);
+        hotBtn.setAttribute("aria-pressed", hotOnly ? "true" : "false");
+        renderTable();
+      });
+    }
     $("fsScoreMin").addEventListener("input", renderTable);
     $("fsScoreMax").addEventListener("input", renderTable);
     document.querySelectorAll("#fsTable th[data-sort]").forEach((th) => {
@@ -304,7 +355,7 @@
         if (sortKey === key) sortAsc = !sortAsc;
         else {
           sortKey = key;
-          sortAsc = key === "trade_score" || key === "adx" || key === "pct_from_open" ? false : true;
+          sortAsc = key === "trade_score" || key === "adx" || key === "pct_from_open" || key === "rocket_score" || key === "crash_score" ? false : true;
         }
         renderTable();
       });

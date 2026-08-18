@@ -1321,6 +1321,7 @@ body[data-theme="dark"] .dc-go-board-card {
 .dc-ready-rocket-row {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
     margin: -2px 0 4px;
     min-height: 40px;
 }
@@ -1328,6 +1329,20 @@ body[data-theme="dark"] .dc-go-board-card {
 .dc-ready-rocket--2 { color: #fb923c; background: rgba(251, 146, 60, 0.16); }
 .dc-ready-rocket--3 { color: #f97316; background: rgba(249, 115, 22, 0.22); }
 .dc-ready-rocket--4 { color: #fff7ed; background: #ea580c; }
+.dc-ready-crash {
+    font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 999px;
+    letter-spacing: 0.01em; line-height: 1.4;
+}
+.dc-ready-crash--hero, .dc-ready-crash--under {
+    font-size: 30px; font-weight: 900;
+    padding: 2px 14px; border-radius: 999px;
+    letter-spacing: 0.01em; line-height: 1.3;
+    margin-left: 8px;
+}
+.dc-ready-crash--1 { color: #94a3b8; background: rgba(148, 163, 184, 0.16); }
+.dc-ready-crash--2 { color: #67e8f9; background: rgba(6, 182, 212, 0.16); }
+.dc-ready-crash--3 { color: #22d3ee; background: rgba(8, 145, 178, 0.22); }
+.dc-ready-crash--4 { color: #ecfeff; background: #0e7490; }
 .dc-ready-gates, .dc-watch-gates, .dc-gates-btn {
     font-size: 11px; font-weight: 700;
     padding: 6px 10px; border-radius: 8px; border: 1px solid #475569;

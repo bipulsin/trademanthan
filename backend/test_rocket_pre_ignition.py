@@ -103,3 +103,56 @@ def test_zero_score_has_empty_label():
     if out["rocket_score"] == 0:
         assert out["rocket_label"] == ""
         assert out["rocket_signals"] == []
+
+
+def test_phase1_disables_shallower_dips():
+    from backend.services.rocket_pre_ignition import compute_rocket_crash
+
+    rows = [
+        _bar(100.0, 100.4, 99.50, 100.2, v=700),
+        _bar(100.2, 100.5, 99.70, 100.3, v=700),
+        _bar(100.3, 100.6, 99.90, 100.4, v=700),
+    ]
+    out = compute_rocket_crash(rows, session_bar_count=3)
+    assert "shallower_dips" not in out["rocket_signals"]
+    assert out["rocket_score"] <= 3
+    assert out["lookback_used"] == 3
+
+
+def test_crash_buyer_failure_green_upper_wick():
+    from backend.services.rocket_pre_ignition import compute_crash_score
+
+    rows = _coil_base()
+    prev_c = rows[-1]["close"]
+    # Green bar that fails (long upper wick, close back at/under prior close).
+    rows.append(_bar(prev_c - 0.05, prev_c + 2.0, prev_c - 0.1, prev_c - 0.02, v=900))
+    out = compute_crash_score(rows)
+    assert "buyer_failure" in out["crash_signals"]
+    assert out["crash_label"].startswith("💥")
+
+
+def test_crash_anti_chase_drops_late_stage():
+    from backend.services.rocket_pre_ignition import compute_crash_score
+
+    rows = []
+    px = 120.0
+    for i in range(19):
+        rows.append(_bar(px, px + 0.05, px - 0.2, px - 0.15, v=500))
+        px -= 1.5
+    rows.append(_bar(px, px + 0.1, px - 8, px - 7.5, v=5000))
+    out = compute_crash_score(rows)
+    assert "falling_highs" not in out["crash_signals"]
+    assert "volume_coil_wakeup" not in out["crash_signals"]
+
+
+def test_live_delta_used_instead_of_ohlc_proxy():
+    from backend.services.rocket_pre_ignition import compute_rocket_crash
+
+    rows = []
+    for i in range(20):
+        # All red bars (would be negative proxy) but live delta is strongly positive.
+        rows.append({"open": 101, "high": 101.2, "low": 99.5, "close": 100, "volume": 1000, "delta": 5000})
+    rows[-1]["high"] = 101.0
+    rows[5]["high"] = 110.0
+    out = compute_rocket_crash(rows)
+    assert "cumdelta_lead" in out["rocket_signals"]

@@ -1254,6 +1254,17 @@ def _run_startup_schema_migrations(db_engine):
                     )
                 except Exception:
                     pass
+                for _col_sql in (
+                    "ADD COLUMN IF NOT EXISTS peak_unrealized_price DOUBLE PRECISION",
+                    "ADD COLUMN IF NOT EXISTS peak_unrealized_time TIMESTAMPTZ",
+                    "ADD COLUMN IF NOT EXISTS peak_unrealized_r DOUBLE PRECISION",
+                    "ADD COLUMN IF NOT EXISTS candles_peak_to_exit INTEGER",
+                    "ADD COLUMN IF NOT EXISTS peak_backfill_status TEXT",
+                ):
+                    try:
+                        conn.execute(text(f"ALTER TABLE trade_log {_col_sql}"))
+                    except Exception:
+                        pass
                 try:
                     conn.execute(
                         text(
@@ -2472,5 +2483,81 @@ def _run_startup_schema_migrations(db_engine):
                         conn.execute(text(f"DROP TABLE IF EXISTS {_tbl}"))
                     print(f"Applied migration: dropped legacy table {_tbl}")
                     _names_now.discard(_tbl)
+
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS rocket_live_state (
+                        symbol TEXT NOT NULL,
+                        timeframe INTEGER NOT NULL,
+                        candle_start TIMESTAMPTZ,
+                        candle_end TIMESTAMPTZ,
+                        rocket_score INTEGER NOT NULL DEFAULT 0,
+                        rocket_signals TEXT,
+                        rocket_label TEXT,
+                        crash_score INTEGER NOT NULL DEFAULT 0,
+                        crash_signals TEXT,
+                        crash_label TEXT,
+                        active_side TEXT,
+                        candle_delta DOUBLE PRECISION,
+                        session_cum_delta DOUBLE PRECISION,
+                        volume DOUBLE PRECISION,
+                        ema5 DOUBLE PRECISION,
+                        atr10 DOUBLE PRECISION,
+                        lookback_used INTEGER,
+                        session_bar_number INTEGER,
+                        candle_status TEXT,
+                        data_quality_flag TEXT,
+                        last_update TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        source TEXT NOT NULL DEFAULT 'upstox_websocket_live',
+                        PRIMARY KEY (symbol, timeframe)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_rocket_live_state_upd ON rocket_live_state (last_update DESC)"
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS rocket_crash_event_log (
+                        event_id BIGSERIAL PRIMARY KEY,
+                        symbol TEXT NOT NULL,
+                        timeframe INTEGER NOT NULL,
+                        event_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        candle_timestamp TIMESTAMPTZ,
+                        side TEXT NOT NULL,
+                        score INTEGER NOT NULL,
+                        s1_flag BOOLEAN NOT NULL DEFAULT FALSE,
+                        s2_flag BOOLEAN NOT NULL DEFAULT FALSE,
+                        s3_flag BOOLEAN NOT NULL DEFAULT FALSE,
+                        s4_flag BOOLEAN NOT NULL DEFAULT FALSE,
+                        close DOUBLE PRECISION,
+                        high DOUBLE PRECISION,
+                        low DOUBLE PRECISION,
+                        volume DOUBLE PRECISION,
+                        candle_delta DOUBLE PRECISION,
+                        cumulative_delta_session DOUBLE PRECISION,
+                        ema5 DOUBLE PRECISION,
+                        atr10 DOUBLE PRECISION,
+                        lookback_used INTEGER,
+                        session_bar_number INTEGER,
+                        candle_status TEXT,
+                        source TEXT NOT NULL DEFAULT 'upstox_websocket_live',
+                        data_quality_flag TEXT,
+                        notes TEXT
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_rocket_crash_event_sym_ts "
+                    "ON rocket_crash_event_log (symbol, timeframe, event_timestamp DESC)"
+                )
+            )
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")

@@ -301,9 +301,9 @@ def _compute_symbol_metrics(
         t_closes_full, vwap_series_today, direction=purity_dir
     )
 
-    from backend.services.rocket_pre_ignition import compute_rocket_score, empty_rocket, log_rocket
+    from backend.services.rocket_pre_ignition import compute_rocket_crash, empty_rocket_crash, log_crash, log_rocket
 
-    rocket = empty_rocket()
+    rocket = empty_rocket_crash()
     try:
         from backend.services.kavach_10m import (
             aggregate_10m_bars,
@@ -316,11 +316,40 @@ def _compute_symbol_metrics(
             if closed_end >= 0
             else []
         )
-        rocket = compute_rocket_score(bars_10m)
+        rocket = compute_rocket_crash(bars_10m)
+        try:
+            from backend.services.rocket_ws_live import get_live_10m
+
+            live = get_live_10m(symbol)
+            if live:
+                lookback = int(live.get("lookback_used") or 0)
+                live_r = int(live.get("rocket_score") or 0)
+                live_c = int(live.get("crash_score") or 0)
+                if lookback >= 8 or live_r >= 1 or live_c >= 1:
+                    rocket["rocket_score"] = live_r
+                    rocket["rocket_signals"] = [
+                        p.strip()
+                        for p in str(live.get("rocket_signals") or "").split(",")
+                        if p.strip()
+                    ] or list(rocket.get("rocket_signals") or [])
+                    rocket["rocket_label"] = live.get("rocket_label") or rocket.get("rocket_label") or ""
+                    rocket["crash_score"] = live_c
+                    rocket["crash_signals"] = [
+                        p.strip()
+                        for p in str(live.get("crash_signals") or "").split(",")
+                        if p.strip()
+                    ]
+                    rocket["crash_label"] = live.get("crash_label") or ""
+        except Exception:
+            pass
         if int(rocket.get("rocket_score") or 0) >= 3:
             log_rocket(symbol, rocket, level=logging.INFO)
         else:
             log_rocket(symbol, rocket)
+        if int(rocket.get("crash_score") or 0) >= 3:
+            log_crash(symbol, rocket, level=logging.INFO)
+        else:
+            log_crash(symbol, rocket)
     except Exception as exc:
         logger.debug("rocket score skipped %s: %s", symbol, exc)
 
@@ -355,6 +384,9 @@ def _compute_symbol_metrics(
         "rocket_score": rocket.get("rocket_score") or 0,
         "rocket_signals": rocket.get("rocket_signals") or [],
         "rocket_label": rocket.get("rocket_label") or "",
+        "crash_score": rocket.get("crash_score") or 0,
+        "crash_signals": rocket.get("crash_signals") or [],
+        "crash_label": rocket.get("crash_label") or "",
     }, None
 
 
@@ -665,6 +697,12 @@ def run_relative_strength_scan(
     """
     if cache_only is None:
         cache_only = _is_market_live_ist()
+    try:
+        from backend.services.rocket_ws_live import ensure_rocket_feed_running
+
+        ensure_rocket_feed_running()
+    except Exception:
+        pass
     started = time.time()
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
 

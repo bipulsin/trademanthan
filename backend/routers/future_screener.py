@@ -56,15 +56,15 @@ def _rocket_signals(v: Any) -> List[str]:
     return [p.strip() for p in str(v).split(",") if p.strip()]
 
 
-def _rocket_fields(r: Any) -> Dict[str, Any]:
-    score = int(_f(r.get("rocket_score")) or 0)
-    signals = _rocket_signals(r.get("rocket_signals"))
-    label = (r.get("rocket_label") or "").strip()
+def _crash_fields(r: Any) -> Dict[str, Any]:
+    score = int(_f(r.get("crash_score")) or 0)
+    signals = _rocket_signals(r.get("crash_signals"))
+    label = (r.get("crash_label") or "").strip()
     if score <= 0:
-        return {"rocket_score": 0, "rocket_signals": [], "rocket_label": ""}
+        return {"crash_score": 0, "crash_signals": [], "crash_label": ""}
     if not label:
-        label = f"🚀 {score}/4"
-    return {"rocket_score": score, "rocket_signals": signals, "rocket_label": label}
+        label = f"💥 {score}/4"
+    return {"crash_score": score, "crash_signals": signals, "crash_label": label}
 
 
 def _ist_clock(dt: Any) -> Optional[str]:
@@ -88,6 +88,13 @@ def future_screener_latest() -> Dict[str, Any]:
         from backend.services.rs_universe_score_snapshot import ensure_rs_universe_score_snapshot
 
         ensure_rs_universe_score_snapshot()
+        live_map: Dict[str, Dict[str, Any]] = {}
+        try:
+            from backend.services.rocket_ws_live import load_live_10m_map
+
+            live_map = load_live_10m_map()
+        except Exception:
+            live_map = {}
         latest = db.execute(
             text("SELECT max(scan_time) AS t FROM rs_universe_score_snapshot")
         ).mappings().first()
@@ -128,7 +135,10 @@ def future_screener_latest() -> Dict[str, Any]:
                     session_date,
                     rocket_score,
                     rocket_signals,
-                    rocket_label
+                    rocket_label,
+                    crash_score,
+                    crash_signals,
+                    crash_label
                 FROM rs_universe_score_snapshot
                 WHERE scan_time = :t
                 ORDER BY trade_score DESC NULLS LAST, symbol ASC
@@ -174,8 +184,7 @@ def future_screener_latest() -> Dict[str, Any]:
             if session_date is None and r.get("session_date") is not None:
                 session_date = str(r["session_date"])
 
-            out_rows.append(
-                {
+            payload = {
                     "symbol": r.get("symbol"),
                     "confidence_grade": grade,
                     "readiness": readiness,
@@ -187,8 +196,16 @@ def future_screener_latest() -> Dict[str, Any]:
                     "kavach_state": kav,
                     "ranking_type": r.get("ranking_type"),
                     **_rocket_fields(r),
+                    **_crash_fields(r),
                 }
-            )
+            live = live_map.get(str(r.get("symbol") or "").upper())
+            if live:
+                lookback = int(live.get("lookback_used") or 0)
+                if lookback >= 8 or int(live.get("rocket_score") or 0) >= 1 or int(live.get("crash_score") or 0) >= 1:
+                    payload.update(_rocket_fields(live))
+                    payload.update(_crash_fields(live))
+                    payload["rocket_source"] = "upstox_websocket_live"
+            out_rows.append(payload)
 
         # Prefer known order, then any extras from live data
         def _ordered(known: List[str], live: Set[str]) -> List[str]:

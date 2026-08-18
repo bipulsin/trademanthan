@@ -1750,6 +1750,36 @@
                 }
             });
         }
+        var crHero = card.querySelector(".dc-ready-crash--hero");
+        var crUnder = card.querySelector(".dc-ready-crash--under");
+        if (crHero || crUnder) {
+            var cScore = Number(stock.crash_score || 0);
+            var cLabel = stock.crash_label || (cScore >= 1 ? ("💥 " + cScore + "/4") : "");
+            var cSigs = stock.crash_signals;
+            if (typeof cSigs === "string") {
+                try { cSigs = JSON.parse(cSigs); } catch (e) { cSigs = String(cSigs).split(","); }
+            }
+            cSigs = Array.isArray(cSigs) ? cSigs.filter(Boolean).join(", ") : "";
+            var crTitle = "Crash Score: " + cScore + "/4" + (cSigs ? " | " + cSigs : "");
+            var crClassSuffix = " dc-ready-crash--" + Math.min(4, cScore);
+            [crHero, crUnder].forEach(function (el) {
+                if (!el) return;
+                var placementClass = el.classList.contains("dc-ready-crash--under")
+                    ? "dc-ready-crash--under"
+                    : "dc-ready-crash--hero";
+                if (cScore >= 1 && cLabel) {
+                    el.hidden = false;
+                    el.textContent = cLabel;
+                    el.className = "dc-ready-crash " + placementClass + crClassSuffix;
+                    el.title = crTitle;
+                } else {
+                    el.hidden = true;
+                    el.textContent = "";
+                    el.className = "dc-ready-crash " + placementClass;
+                    el.title = "";
+                }
+            });
+        }
         var sqEl = card.querySelector(".dc-ready-sq");
         if (sqEl) {
             var viaSq = !!stock.promoted_via_structural_score;
@@ -2969,6 +2999,9 @@
         if (stock.dashboard_score != null) sub.push("Score " + stock.dashboard_score);
         if (stock.rocket_score >= 1) {
             sub.push(stock.rocket_label || ("🚀 " + stock.rocket_score + "/4"));
+        }
+        if (stock.crash_score >= 1) {
+            sub.push(stock.crash_label || ("💥 " + stock.crash_score + "/4"));
         }
         if (stock.vol_multiplier != null) sub.push("Vol " + Number(stock.vol_multiplier).toFixed(2) + "×");
         $("dcModalSub").textContent = sub.join(" · ");

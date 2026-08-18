@@ -363,6 +363,30 @@ def _market_ff_from_feed(feed_val: Any) -> Optional[Dict[str, Any]]:
     return mff if isinstance(mff, dict) else None
 
 
+def _best_bid_ask(mff: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    ml = mff.get("marketLevel") or mff.get("market_level") or {}
+    quotes = ml.get("bidAskQuote") or ml.get("bid_ask_quote") or []
+    if not isinstance(quotes, list) or not quotes:
+        return None, None
+    q0 = quotes[0] if isinstance(quotes[0], dict) else None
+    if not q0:
+        return None, None
+    bid = ask = None
+    try:
+        bp = q0.get("bidP") or q0.get("bid_p")
+        if bp is not None:
+            bid = float(bp)
+    except (TypeError, ValueError):
+        bid = None
+    try:
+        ap = q0.get("askP") or q0.get("ask_p")
+        if ap is not None:
+            ask = float(ap)
+    except (TypeError, ValueError):
+        ask = None
+    return bid, ask
+
+
 def _depth_from_mff(mff: Dict[str, Any], *, levels: int = 5) -> Tuple[int, int, float]:
     """Sum bid/ask quantity at top N levels; return (bid_qty, ask_qty, imbalance ratio)."""
     ml = mff.get("marketLevel") or mff.get("market_level") or {}
@@ -431,9 +455,11 @@ def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
     depth_ratio = 1.0
     tbq = tsq = 0
     ltq = 0
+    best_bid = best_ask = None
     if mff:
         bid_q, ask_q, depth_ratio = _depth_from_mff(mff)
         ltq = _ltq_from_mff(mff)
+        best_bid, best_ask = _best_bid_ask(mff)
         try:
             tbq = int(float(mff.get("tbq") or 0))
             tsq = int(float(mff.get("tsq") or 0))
@@ -444,6 +470,8 @@ def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
         "oi": oi,
         "ltp": ltp,
         "ltq": ltq,
+        "best_bid": best_bid,
+        "best_ask": best_ask,
         "bid_depth_qty": bid_q,
         "ask_depth_qty": ask_q,
         "depth_imbalance_ratio": depth_ratio,
@@ -586,6 +614,20 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                 _persist_orderflow_latest(ik, {**row, "oi": eff_oi, "ltp": eff_ltp})
             except Exception:
                 pass
+            if eff_ltp is not None:
+                try:
+                    from backend.services.rocket_ws_live import on_upstox_tick
+
+                    on_upstox_tick(
+                        ik,
+                        ltp=float(eff_ltp),
+                        ltq=int(parsed.get("ltq") or 0),
+                        best_bid=parsed.get("best_bid"),
+                        best_ask=parsed.get("best_ask"),
+                        now=now_ist,
+                    )
+                except Exception as rocket_exc:
+                    logger.debug("upstox_market_feed: rocket tick skipped %s: %s", ik, rocket_exc)
 
 
 def _decode_and_ingest(binary: bytes) -> None:
@@ -683,6 +725,13 @@ async def _run_connection_loop(batches: List[List[str]]) -> None:
             continue
         backoff = 2.0
         try:
+            logger.info("upstox_market_feed: websocket connecting")
+            try:
+                from backend.services.rocket_ws_live import mark_feed_reconnect
+
+                mark_feed_reconnect()
+            except Exception:
+                pass
             await _subscribe_and_listen(ws_url, batches)
         except asyncio.CancelledError:
             raise
@@ -710,8 +759,6 @@ def ensure_market_feed_running(instrument_keys: List[str]) -> None:
     global _FEED_THREAD, _LAST_KEYS_SIG, _STOP_EVENT
 
     if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
-        return
-    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
         return
     keys = [k.strip() for k in instrument_keys if (k or "").strip()]
     if not keys:
