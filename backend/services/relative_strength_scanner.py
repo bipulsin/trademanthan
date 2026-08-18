@@ -301,6 +301,29 @@ def _compute_symbol_metrics(
         t_closes_full, vwap_series_today, direction=purity_dir
     )
 
+    from backend.services.rocket_pre_ignition import compute_rocket_score, empty_rocket, log_rocket
+
+    rocket = empty_rocket()
+    try:
+        from backend.services.kavach_10m import (
+            aggregate_10m_bars,
+            last_closed_10m_pair_end_idx,
+        )
+
+        closed_end = last_closed_10m_pair_end_idx(candles)
+        bars_10m = (
+            [b for b in aggregate_10m_bars(candles) if b["end_5m_idx"] <= closed_end]
+            if closed_end >= 0
+            else []
+        )
+        rocket = compute_rocket_score(bars_10m)
+        if int(rocket.get("rocket_score") or 0) >= 3:
+            log_rocket(symbol, rocket, level=logging.INFO)
+        else:
+            log_rocket(symbol, rocket)
+    except Exception as exc:
+        logger.debug("rocket score skipped %s: %s", symbol, exc)
+
     return {
         "symbol": symbol,
         "instrument_key": instrument_key,
@@ -329,6 +352,9 @@ def _compute_symbol_metrics(
         "market_regime": regime,
         "kavach_state": kav.state,
         "kavach_strength": kav.strength,
+        "rocket_score": rocket.get("rocket_score") or 0,
+        "rocket_signals": rocket.get("rocket_signals") or [],
+        "rocket_label": rocket.get("rocket_label") or "",
     }, None
 
 

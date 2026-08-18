@@ -112,6 +112,11 @@ table.fs-table tbody tr:hover { background: rgba(13, 148, 136, 0.06); }
 .fs-ready-short { color: #dc2626; font-weight: 600; }
 .fs-watching { color: #d97706; }
 .fs-not-ready { color: var(--theme-muted, #64748b); }
+.fs-rocket { font-weight: 700; white-space: nowrap; }
+.fs-rocket--1 { color: #94a3b8; }
+.fs-rocket--2 { color: #fb923c; }
+.fs-rocket--3 { color: #ea580c; font-weight: 800; }
+.fs-rocket--4 { color: #c2410c; font-weight: 800; }
 
 @media (max-width: 960px) {
   .fs-filters { grid-template-columns: 1fr; }

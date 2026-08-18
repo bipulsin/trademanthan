@@ -9,6 +9,7 @@ Membership bonus applies only to sort keys for Top-10/Top-5 flags — raw
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -90,6 +91,9 @@ CREATE TABLE IF NOT EXISTS rs_universe_score_snapshot (
     from_cache BOOLEAN,
     exclusion_reason TEXT,
     detail TEXT,
+    rocket_score INTEGER,
+    rocket_signals TEXT,
+    rocket_label TEXT,
     UNIQUE (scan_time, symbol)
 );
 CREATE INDEX IF NOT EXISTS ix_rs_univ_scan ON rs_universe_score_snapshot (scan_time DESC);
@@ -110,7 +114,8 @@ _UPSERT = text(
         vwap_purity_pct, market_regime, confidence_grade, kavach_state, kavach_strength,
         trade_score, ranking_type, rank_raw, rank_membership,
         in_top10_membership, in_top5_membership, incumbent_bonus_applied, incumbent_rs_bonus,
-        scan_trigger, cache_only, from_cache, exclusion_reason, detail
+        scan_trigger, cache_only, from_cache, exclusion_reason, detail,
+        rocket_score, rocket_signals, rocket_label
     ) VALUES (
         :scan_time, CAST(:session_date AS date), :symbol, :instrument_key,
         :current_price, :previous_close, :stock_percent, :nifty_percent,
@@ -120,7 +125,8 @@ _UPSERT = text(
         :vwap_purity_pct, :market_regime, :confidence_grade, :kavach_state, :kavach_strength,
         :trade_score, :ranking_type, :rank_raw, :rank_membership,
         :in_top10_membership, :in_top5_membership, :incumbent_bonus_applied, :incumbent_rs_bonus,
-        :scan_trigger, :cache_only, :from_cache, :exclusion_reason, :detail
+        :scan_trigger, :cache_only, :from_cache, :exclusion_reason, :detail,
+        :rocket_score, :rocket_signals, :rocket_label
     )
     ON CONFLICT (scan_time, symbol) DO UPDATE SET
         ranking_type = EXCLUDED.ranking_type,
@@ -134,7 +140,10 @@ _UPSERT = text(
         in_top5_membership = EXCLUDED.in_top5_membership,
         incumbent_bonus_applied = EXCLUDED.incumbent_bonus_applied,
         exclusion_reason = EXCLUDED.exclusion_reason,
-        detail = EXCLUDED.detail
+        detail = EXCLUDED.detail,
+        rocket_score = EXCLUDED.rocket_score,
+        rocket_signals = EXCLUDED.rocket_signals,
+        rocket_label = EXCLUDED.rocket_label
     """
 )
 
@@ -148,6 +157,18 @@ def ensure_rs_universe_score_snapshot() -> None:
             s = stmt.strip()
             if s:
                 conn.execute(text(s))
+        conn.execute(text(
+            "ALTER TABLE rs_universe_score_snapshot "
+            "ADD COLUMN IF NOT EXISTS rocket_score INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE rs_universe_score_snapshot "
+            "ADD COLUMN IF NOT EXISTS rocket_signals TEXT"
+        ))
+        conn.execute(text(
+            "ALTER TABLE rs_universe_score_snapshot "
+            "ADD COLUMN IF NOT EXISTS rocket_label TEXT"
+        ))
     _ENSURED = True
 
 
@@ -284,6 +305,17 @@ def apply_membership_ranks(
     return scored
 
 
+def _signals_dump(value: Any) -> str:
+    if value is None or value == "":
+        return "[]"
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(list(value), separators=(",", ":"))
+    except Exception:
+        return "[]"
+
+
 def _row_params(
     scan_time: datetime,
     session_date: str,
@@ -335,6 +367,9 @@ def _row_params(
         "from_cache": r.get("from_cache"),
         "exclusion_reason": r.get("exclusion_reason"),
         "detail": r.get("detail"),
+        "rocket_score": int(r.get("rocket_score") or 0),
+        "rocket_signals": _signals_dump(r.get("rocket_signals")),
+        "rocket_label": r.get("rocket_label") or "",
     }
 
 

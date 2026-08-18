@@ -6,6 +6,7 @@ same ``classify_kavach_readiness`` helper used by checklist cards.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
@@ -41,6 +42,31 @@ def _f(v: Any) -> Optional[float]:
         return None
 
 
+def _rocket_signals(v: Any) -> List[str]:
+    if v is None or v == "":
+        return []
+    if isinstance(v, list):
+        return [str(x) for x in v if x]
+    try:
+        parsed = json.loads(v)
+        if isinstance(parsed, list):
+            return [str(x) for x in parsed if x]
+    except (TypeError, ValueError):
+        pass
+    return [p.strip() for p in str(v).split(",") if p.strip()]
+
+
+def _rocket_fields(r: Any) -> Dict[str, Any]:
+    score = int(_f(r.get("rocket_score")) or 0)
+    signals = _rocket_signals(r.get("rocket_signals"))
+    label = (r.get("rocket_label") or "").strip()
+    if score <= 0:
+        return {"rocket_score": 0, "rocket_signals": [], "rocket_label": ""}
+    if not label:
+        label = f"🚀 {score}/4"
+    return {"rocket_score": score, "rocket_signals": signals, "rocket_label": label}
+
+
 def _ist_clock(dt: Any) -> Optional[str]:
     if dt is None:
         return None
@@ -59,6 +85,9 @@ def future_screener_latest() -> Dict[str, Any]:
     """Return latest full-universe snapshot rows for client-side filtering."""
     db = SessionLocal()
     try:
+        from backend.services.rs_universe_score_snapshot import ensure_rs_universe_score_snapshot
+
+        ensure_rs_universe_score_snapshot()
         latest = db.execute(
             text("SELECT max(scan_time) AS t FROM rs_universe_score_snapshot")
         ).mappings().first()
@@ -96,7 +125,10 @@ def future_screener_latest() -> Dict[str, Any]:
                     volume_tod_ratio,
                     ranking_type,
                     scan_time,
-                    session_date
+                    session_date,
+                    rocket_score,
+                    rocket_signals,
+                    rocket_label
                 FROM rs_universe_score_snapshot
                 WHERE scan_time = :t
                 ORDER BY trade_score DESC NULLS LAST, symbol ASC
@@ -154,6 +186,7 @@ def future_screener_latest() -> Dict[str, Any]:
                     "candle_ts": _ist_clock(r.get("scan_time")),
                     "kavach_state": kav,
                     "ranking_type": r.get("ranking_type"),
+                    **_rocket_fields(r),
                 }
             )
 

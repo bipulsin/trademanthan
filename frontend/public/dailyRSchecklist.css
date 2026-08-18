@@ -1303,6 +1303,14 @@ body[data-theme="dark"] .dc-go-board-card {
 }
 .dc-ready-dir--long { background: #14532d; color: #86efac !important; }
 .dc-ready-dir--short { background: #7f1d1d; color: #fca5a5 !important; }
+.dc-ready-rocket {
+    font-size: 10px; font-weight: 800; padding: 1px 7px; border-radius: 999px;
+    letter-spacing: 0.01em; line-height: 1.4;
+}
+.dc-ready-rocket--1 { color: #94a3b8; background: rgba(148, 163, 184, 0.16); }
+.dc-ready-rocket--2 { color: #fb923c; background: rgba(251, 146, 60, 0.16); }
+.dc-ready-rocket--3 { color: #f97316; background: rgba(249, 115, 22, 0.22); }
+.dc-ready-rocket--4 { color: #fff7ed; background: #ea580c; }
 .dc-ready-gates, .dc-watch-gates, .dc-gates-btn {
     font-size: 11px; font-weight: 700;
     padding: 6px 10px; border-radius: 8px; border: 1px solid #475569;

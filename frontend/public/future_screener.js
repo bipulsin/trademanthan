@@ -64,7 +64,7 @@
   function cmp(a, b, key, asc) {
     let va = a[key];
     let vb = b[key];
-    if (key === "trade_score" || key === "adx" || key === "pct_from_open" || key === "pullback_number") {
+    if (key === "trade_score" || key === "adx" || key === "pct_from_open" || key === "pullback_number" || key === "rocket_score") {
       va = va == null || va === "" ? (asc ? Infinity : -Infinity) : Number(va);
       vb = vb == null || vb === "" ? (asc ? Infinity : -Infinity) : Number(vb);
       if (va < vb) return asc ? -1 : 1;
@@ -91,6 +91,35 @@
     if (s === "READY TO SHORT") return "fs-ready-short";
     if (s === "WATCHING") return "fs-watching";
     return "fs-not-ready";
+  }
+
+  function rocketCell(r) {
+    const score = Number(r.rocket_score || 0);
+    const label = r.rocket_label || (score >= 1 ? "🚀 " + score + "/4" : "");
+    if (!(score >= 1) || !label) return "<td></td>";
+    let sigs = r.rocket_signals;
+    if (typeof sigs === "string") {
+      try {
+        sigs = JSON.parse(sigs);
+      } catch (e) {
+        sigs = String(sigs).split(",");
+      }
+    }
+    const tip =
+      "Rocket Pre-Ignition Score: " +
+      score +
+      "/4" +
+      (Array.isArray(sigs) && sigs.length ? " | " + sigs.filter(Boolean).join(", ") : "");
+    const cls = "fs-rocket fs-rocket--" + Math.min(4, score);
+    return (
+      '<td class="' +
+      cls +
+      '" title="' +
+      escapeHtml(tip) +
+      '">' +
+      escapeHtml(label) +
+      "</td>"
+    );
   }
 
   function updateSortHeaders() {
@@ -137,6 +166,7 @@
           '">' +
           escapeHtml(r.readiness || "—") +
           "</td>" +
+          rocketCell(r) +
           '<td class="num">' +
           fmtNum(r.trade_score, 1) +
           "</td>" +

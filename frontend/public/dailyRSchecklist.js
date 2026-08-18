@@ -1719,6 +1719,27 @@
         var dirEl = card.querySelector(".dc-ready-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
+        var rk = card.querySelector(".dc-ready-rocket");
+        if (rk) {
+            var rScore = Number(stock.rocket_score || 0);
+            var rLabel = stock.rocket_label || (rScore >= 1 ? ("🚀 " + rScore + "/4") : "");
+            if (rScore >= 1 && rLabel) {
+                rk.hidden = false;
+                rk.textContent = rLabel;
+                rk.className = "dc-ready-rocket dc-ready-rocket--" + Math.min(4, rScore);
+                var sigs = stock.rocket_signals;
+                if (typeof sigs === "string") {
+                    try { sigs = JSON.parse(sigs); } catch (e) { sigs = String(sigs).split(","); }
+                }
+                sigs = Array.isArray(sigs) ? sigs.filter(Boolean).join(", ") : "";
+                rk.title = "Rocket Pre-Ignition Score: " + rScore + "/4" + (sigs ? " | " + sigs : "");
+            } else {
+                rk.hidden = true;
+                rk.textContent = "";
+                rk.className = "dc-ready-rocket";
+                rk.title = "";
+            }
+        }
         var sqEl = card.querySelector(".dc-ready-sq");
         if (sqEl) {
             var viaSq = !!stock.promoted_via_structural_score;
@@ -2936,6 +2957,9 @@
         var sub = [];
         if (stock.rs_pct != null) sub.push("RS " + (stock.rs_pct > 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%");
         if (stock.dashboard_score != null) sub.push("Score " + stock.dashboard_score);
+        if (stock.rocket_score >= 1) {
+            sub.push(stock.rocket_label || ("🚀 " + stock.rocket_score + "/4"));
+        }
         if (stock.vol_multiplier != null) sub.push("Vol " + Number(stock.vol_multiplier).toFixed(2) + "×");
         $("dcModalSub").textContent = sub.join(" · ");
 

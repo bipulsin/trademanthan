@@ -42,6 +42,7 @@ from backend.services.relative_strength_scanner import (
     _parse_ist_date,
     _sorted_candles,
 )
+from backend.services.rocket_pre_ignition import compute_rocket_score
 from backend.services.rs_conviction_signals import ema10_10min
 from backend.services.smart_futures_exit import _supertrend_dir_last_two
 from backend.services.smart_futures_picker.indicators import adx_value
@@ -401,6 +402,12 @@ def metrics_from_10m_candles(
         vwaps_at_10m=vwaps_at_10m,
     )
 
+    # Rocket uses confirmed 10m bars only (never the forming bucket).
+    closed_end = last_closed_10m_pair_end_idx(candles, now=now)
+    rocket = compute_rocket_score(
+        _10m_series_upto(candles, closed_end) if closed_end >= 0 else []
+    )
+
     return {
         "relative_strength": relative_strength,
         "trade_score": trade_score,
@@ -446,6 +453,7 @@ def metrics_from_10m_candles(
             "macd": (PINE_MACD_FAST, PINE_MACD_SLOW, PINE_MACD_SIGNAL),
             "ema_len": PINE_EMA_LEN,
         },
+        **rocket,
     }
 
 

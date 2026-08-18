@@ -480,12 +480,18 @@ def overlay_live_momentum_from_candles(
             stock["supertrend"] = st_lbl
         if macd_lbl is not None:
             stock["macd"] = macd_lbl
-        kav = metrics.get("kavach_state")
-        if kav:
-            stock["dashboard_kavach_live"] = kav
-            ts_lbl = _trading_state_label(kav, direction)
+        if metrics.get("kavach_state"):
+            stock["dashboard_kavach_live"] = metrics.get("kavach_state")
+            ts_lbl = _trading_state_label(metrics.get("kavach_state"), direction)
             if ts_lbl:
                 stock["trading_state"] = ts_lbl
+        stock["rocket_score"] = int(metrics.get("rocket_score") or 0)
+        stock["rocket_signals"] = list(metrics.get("rocket_signals") or [])
+        stock["rocket_label"] = metrics.get("rocket_label") or ""
+        if int(stock["rocket_score"] or 0) >= 3:
+            from backend.services.rocket_pre_ignition import log_rocket
+
+            log_rocket(str(stock.get("symbol") or ""), metrics, level=logging.INFO)
         stock["_live_kavach_metrics"] = metrics
         return {
             "trend": stock.get("trend"),
