@@ -2560,7 +2560,9 @@ def _run_startup_schema_migrations(db_engine):
                 )
             )
             from backend.services.rocket_layer10f_backtest import ensure_backtest_tables
+            from backend.services.rocket_live_replay import ensure_live_replay_tables
 
             ensure_backtest_tables(conn)
+            ensure_live_replay_tables(conn)
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")
