@@ -2559,5 +2559,8 @@ def _run_startup_schema_migrations(db_engine):
                     "ON rocket_crash_event_log (symbol, timeframe, event_timestamp DESC)"
                 )
             )
+            from backend.services.rocket_layer10f_backtest import ensure_backtest_tables
+
+            ensure_backtest_tables(conn)
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")

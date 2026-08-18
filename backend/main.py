@@ -32,6 +32,7 @@ import backend.routers.iron_condor as iron_condor
 import backend.routers.volume_mismatch_futures as volume_mismatch_futures
 import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
+import backend.routers.rocket_backtest as rocket_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
 import backend.routers.daily_checklist as daily_checklist
@@ -352,6 +353,8 @@ app.include_router(volume_mismatch_backtest.router, prefix="/api")
 app.include_router(volume_mismatch_backtest.router, prefix="")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
+app.include_router(rocket_backtest.router, prefix="/api")
+app.include_router(rocket_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")
 app.include_router(security_chart.router, prefix="")
 # Relative Strength Scanner — router already carries /api/dashboard prefix;
