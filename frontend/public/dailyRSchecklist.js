@@ -1719,26 +1719,36 @@
         var dirEl = card.querySelector(".dc-ready-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
-        var rk = card.querySelector(".dc-ready-rocket");
-        if (rk) {
+        var rkHero = card.querySelector(".dc-ready-rocket--hero");
+        var rkUnder = card.querySelector(".dc-ready-rocket--under");
+        if (rkHero || rkUnder) {
             var rScore = Number(stock.rocket_score || 0);
             var rLabel = stock.rocket_label || (rScore >= 1 ? ("🚀 " + rScore + "/4") : "");
-            if (rScore >= 1 && rLabel) {
-                rk.hidden = false;
-                rk.textContent = rLabel;
-                rk.className = "dc-ready-rocket dc-ready-rocket--hero dc-ready-rocket--" + Math.min(4, rScore);
-                var sigs = stock.rocket_signals;
-                if (typeof sigs === "string") {
-                    try { sigs = JSON.parse(sigs); } catch (e) { sigs = String(sigs).split(","); }
-                }
-                sigs = Array.isArray(sigs) ? sigs.filter(Boolean).join(", ") : "";
-                rk.title = "Rocket Pre-Ignition Score: " + rScore + "/4" + (sigs ? " | " + sigs : "");
-            } else {
-                rk.hidden = true;
-                rk.textContent = "";
-                rk.className = "dc-ready-rocket dc-ready-rocket--hero";
-                rk.title = "";
+            var sigs = stock.rocket_signals;
+            if (typeof sigs === "string") {
+                try { sigs = JSON.parse(sigs); } catch (e) { sigs = String(sigs).split(","); }
             }
+            sigs = Array.isArray(sigs) ? sigs.filter(Boolean).join(", ") : "";
+            var rkTitle = "Rocket Pre-Ignition Score: " + rScore + "/4" + (sigs ? " | " + sigs : "");
+            var rkClassSuffix = " dc-ready-rocket--" + Math.min(4, rScore);
+
+            [rkHero, rkUnder].forEach(function (rk) {
+                if (!rk) return;
+                var placementClass = rk.classList.contains("dc-ready-rocket--under")
+                    ? "dc-ready-rocket--under"
+                    : "dc-ready-rocket--hero";
+                if (rScore >= 1 && rLabel) {
+                    rk.hidden = false;
+                    rk.textContent = rLabel;
+                    rk.className = "dc-ready-rocket " + placementClass + rkClassSuffix;
+                    rk.title = rkTitle;
+                } else {
+                    rk.hidden = true;
+                    rk.textContent = "";
+                    rk.className = "dc-ready-rocket " + placementClass;
+                    rk.title = "";
+                }
+            });
         }
         var sqEl = card.querySelector(".dc-ready-sq");
         if (sqEl) {
