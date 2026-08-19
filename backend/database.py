@@ -2559,10 +2559,31 @@ def _run_startup_schema_migrations(db_engine):
                     "ON rocket_crash_event_log (symbol, timeframe, event_timestamp DESC)"
                 )
             )
-            from backend.services.rocket_layer10f_backtest import ensure_backtest_tables
-            from backend.services.rocket_live_replay import ensure_live_replay_tables
-
-            ensure_backtest_tables(conn)
-            ensure_live_replay_tables(conn)
+            # Retired: Rocket ML/Layer10f replay tables and Sambhav research tables.
+            # Keep rocket_live_state / rocket_crash_event_log (Kavach scoring).
+            conn.execute(
+                text(
+                    """
+                    DO $$ DECLARE r RECORD;
+                    BEGIN
+                      FOR r IN
+                        SELECT tablename FROM pg_tables
+                        WHERE schemaname = 'public'
+                          AND (
+                            tablename LIKE 'sambhav_%'
+                            OR tablename IN (
+                              'rocket_backtest_events',
+                              'rocket_backtest_summary',
+                              'rocket_live_replay_events',
+                              'rocket_live_replay_summary'
+                            )
+                          )
+                      LOOP
+                        EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', r.tablename);
+                      END LOOP;
+                    END $$;
+                    """
+                )
+            )
     except Exception as migration_error:
         print(f"Warning: startup schema migration failed: {migration_error}")
