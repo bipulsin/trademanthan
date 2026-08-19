@@ -283,13 +283,33 @@ h1 { margin:0 0 6px; font-size:1.6rem; }
 .charts { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
 .charts .wide { grid-column:1 / -1; }
 .tbl-wrap { overflow-x:auto; }
-table.ha { width:100%; border-collapse:collapse; font-size:0.82rem; color:var(--text); }
-table.ha th, table.ha td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:left; white-space:nowrap; }
-.win { background:rgba(34,197,94,.12); }
-.loss { background:rgba(239,68,68,.12); }
-.time { background:rgba(245,158,11,.12); }
+table.ha { width:100%; border-collapse:collapse; font-size:0.82rem; color:var(--text); background:transparent; }
+table.ha th, table.ha td { border-bottom:1px solid var(--line); padding:7px 6px; text-align:left; white-space:nowrap; color:var(--text) !important; }
+table.dataTable, table.dataTable.display, table.dataTable.stripe { background:transparent !important; }
+table.dataTable tbody tr,
+table.dataTable tbody tr.odd,
+table.dataTable tbody tr.even,
+table.dataTable.display tbody tr.odd,
+table.dataTable.display tbody tr.even,
+table.dataTable.stripe tbody tr.odd,
+table.dataTable.stripe tbody tr.even,
+table.dataTable.hover tbody tr:hover {
+  background: var(--bg) !important;
+  background-color: var(--bg) !important;
+  color: var(--text) !important;
+}
+table.dataTable tbody tr.win { background-color: rgba(34,197,94,.18) !important; }
+table.dataTable tbody tr.loss { background-color: rgba(239,68,68,.18) !important; }
+table.dataTable tbody tr.time { background-color: rgba(245,158,11,.18) !important; }
+.win { background-color: rgba(34,197,94,.18); }
+.loss { background-color: rgba(239,68,68,.18); }
+.time { background-color: rgba(245,158,11,.18); }
 details { margin-top:18px; background:var(--card); border-radius:12px; padding:12px; border:1px solid var(--line); }
-.dataTables_wrapper { color:var(--text); }
+.dataTables_wrapper, .dataTables_wrapper .dataTables_length, .dataTables_wrapper .dataTables_filter,
+.dataTables_wrapper .dataTables_info, .dataTables_wrapper .dataTables_paginate { color:var(--text) !important; }
+.dataTables_wrapper .dataTables_filter input, .dataTables_wrapper .dataTables_length select {
+  background: var(--card); color: var(--text); border: 1px solid var(--line);
+}
 @media (max-width:900px) { .charts { grid-template-columns:1fr; } }
 </style>
 </head>
