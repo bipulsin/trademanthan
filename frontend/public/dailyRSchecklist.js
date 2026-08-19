@@ -1720,8 +1720,7 @@
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
         var rkHero = card.querySelector(".dc-ready-rocket--hero");
-        var rkUnder = card.querySelector(".dc-ready-rocket--under");
-        if (rkHero || rkUnder) {
+        if (rkHero) {
             var rScore = Number(stock.rocket_score || 0);
             var rLabel = stock.rocket_label || (rScore >= 1 ? ("🚀 " + rScore + "/4") : "");
             var sigs = stock.rocket_signals;
@@ -1730,29 +1729,20 @@
             }
             sigs = Array.isArray(sigs) ? sigs.filter(Boolean).join(", ") : "";
             var rkTitle = "Rocket Pre-Ignition Score: " + rScore + "/4" + (sigs ? " | " + sigs : "");
-            var rkClassSuffix = " dc-ready-rocket--" + Math.min(4, rScore);
-
-            [rkHero, rkUnder].forEach(function (rk) {
-                if (!rk) return;
-                var placementClass = rk.classList.contains("dc-ready-rocket--under")
-                    ? "dc-ready-rocket--under"
-                    : "dc-ready-rocket--hero";
-                if (rScore >= 1 && rLabel) {
-                    rk.hidden = false;
-                    rk.textContent = rLabel;
-                    rk.className = "dc-ready-rocket " + placementClass + rkClassSuffix;
-                    rk.title = rkTitle;
-                } else {
-                    rk.hidden = true;
-                    rk.textContent = "";
-                    rk.className = "dc-ready-rocket " + placementClass;
-                    rk.title = "";
-                }
-            });
+            if (rScore >= 1 && rLabel) {
+                rkHero.hidden = false;
+                rkHero.textContent = rLabel;
+                rkHero.className = "dc-ready-rocket dc-ready-rocket--hero dc-ready-rocket--" + Math.min(4, rScore);
+                rkHero.title = rkTitle;
+            } else {
+                rkHero.hidden = true;
+                rkHero.textContent = "";
+                rkHero.className = "dc-ready-rocket dc-ready-rocket--hero";
+                rkHero.title = "";
+            }
         }
         var crHero = card.querySelector(".dc-ready-crash--hero");
-        var crUnder = card.querySelector(".dc-ready-crash--under");
-        if (crHero || crUnder) {
+        if (crHero) {
             var cScore = Number(stock.crash_score || 0);
             var cLabel = stock.crash_label || (cScore >= 1 ? ("💥 " + cScore + "/4") : "");
             var cSigs = stock.crash_signals;
@@ -1761,24 +1751,17 @@
             }
             cSigs = Array.isArray(cSigs) ? cSigs.filter(Boolean).join(", ") : "";
             var crTitle = "Crash Score: " + cScore + "/4" + (cSigs ? " | " + cSigs : "");
-            var crClassSuffix = " dc-ready-crash--" + Math.min(4, cScore);
-            [crHero, crUnder].forEach(function (el) {
-                if (!el) return;
-                var placementClass = el.classList.contains("dc-ready-crash--under")
-                    ? "dc-ready-crash--under"
-                    : "dc-ready-crash--hero";
-                if (cScore >= 1 && cLabel) {
-                    el.hidden = false;
-                    el.textContent = cLabel;
-                    el.className = "dc-ready-crash " + placementClass + crClassSuffix;
-                    el.title = crTitle;
-                } else {
-                    el.hidden = true;
-                    el.textContent = "";
-                    el.className = "dc-ready-crash " + placementClass;
-                    el.title = "";
-                }
-            });
+            if (cScore >= 1 && cLabel) {
+                crHero.hidden = false;
+                crHero.textContent = cLabel;
+                crHero.className = "dc-ready-crash dc-ready-crash--hero dc-ready-crash--" + Math.min(4, cScore);
+                crHero.title = crTitle;
+            } else {
+                crHero.hidden = true;
+                crHero.textContent = "";
+                crHero.className = "dc-ready-crash dc-ready-crash--hero";
+                crHero.title = "";
+            }
         }
         var sqEl = card.querySelector(".dc-ready-sq");
         if (sqEl) {
