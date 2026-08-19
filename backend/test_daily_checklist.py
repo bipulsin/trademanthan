@@ -216,3 +216,38 @@ def test_volume_label_buckets():
     assert _volume_label(1.5) == "High"
     assert _volume_label(0.8) == "Average"
     assert _volume_label(0.3) == "Low"
+
+
+def test_journaled_trade_log_marks_ready_name_exited():
+    from datetime import time as dtime
+
+    from backend.services.daily_checklist import apply_journaled_trade_log_rows
+
+    stocks = [
+        {"symbol": "ITC", "trade_state": "READY"},
+        {"symbol": "COFORGE", "trade_state": "READY", "trade_taken": True},
+    ]
+    apply_journaled_trade_log_rows(
+        stocks,
+        [
+            {
+                "symbol": "ITC",
+                "qty": 1725,
+                "points_captured": -0.40,
+                "exit_time": dtime(15, 14, 47),
+            },
+            {
+                "symbol": "COFORGE",
+                "qty": 475,
+                "points_captured": 12.60,
+                "exit_time": dtime(10, 48, 16),
+            },
+        ],
+    )
+    assert stocks[0]["trade_exited"] is True
+    assert stocks[0]["stopped_out_today"] is True
+    assert "15:14" in stocks[0]["trade_exited_label"]
+    assert "₹-690" in stocks[0]["trade_exited_label"]
+    # Open Take Trade is not overwritten by the journal row.
+    assert stocks[1].get("trade_exited") is not True
+    assert stocks[1]["trade_taken"] is True

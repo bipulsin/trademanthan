@@ -456,7 +456,7 @@
         var afterClose = afterSquareOffIST();
         var live = {};
         stocks.forEach(function (s) {
-            if (!isReadyState(s.trade_state)) return;
+            if (!isReadyNowCard(s)) return;
             if (!windowOpen || afterClose) return;
             if (s.trade_state === "EXPIRED" || s.trade_expiry_crossed) return;
             var sym = s.symbol;
@@ -1251,6 +1251,13 @@
         if (g.indexOf("D!") === 0) return 5;
         if (g.indexOf("D") === 0) return 4;
         return 9;
+    }
+
+    /** Live READY NOW / after-window cards: skip names already taken or exited today. */
+    function isReadyNowCard(stock) {
+        if (!stock || !isReadyState(stock.trade_state)) return false;
+        if (stock.trade_taken || stock.trade_exited || stock.stopped_out_today) return false;
+        return true;
     }
 
     /** Trade / Combined Score used on READY cards (same field as card body). */
@@ -2097,7 +2104,7 @@
     function renderZones(stocks, preview) {
         var windowOpen = entryWindowOpenIST();
         var afterClose = afterSquareOffIST();
-        var readyAll = sortStocks(stocks.filter(function (s) { return isReadyState(s.trade_state); }));
+        var readyAll = sortStocks(stocks.filter(isReadyNowCard));
         // After 14:30 / 15:15: do not present READY under the live READY NOW heading.
         // Display cap: top 4 by take-enabled → score → grade (render-time only; data/alerts untouched).
         var readyLive = (!windowOpen || afterClose) ? [] : limitReadyNowDisplay(readyAll);

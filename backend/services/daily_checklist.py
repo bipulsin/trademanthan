@@ -48,6 +48,68 @@ IST = pytz.timezone("Asia/Kolkata")
 
 # Entry window (hard rule): 9:45 – 14:30 IST.
 ENTRY_START_MIN = 9 * 60 + 45
+
+
+def apply_journaled_trade_log_rows(stocks: List[Dict[str, Any]], rows: List[Dict[str, Any]]) -> None:
+    """Mark names that already have a closed trade_log row today (in-place).
+
+    Does not override an open Take Trade position or a kavach_checklist_trades close.
+    READY NOW UI hides these so a journaled round-trip is not a live setup card.
+    """
+    by_sym: Dict[str, Dict[str, Any]] = {}
+    for r in rows or []:
+        sym = str(r.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        by_sym[sym] = r
+    for s in stocks or []:
+        if s.get("trade_taken") or s.get("trade_exited"):
+            continue
+        row = by_sym.get(str(s.get("symbol") or "").strip().upper())
+        if not row:
+            continue
+        qty = row.get("qty")
+        pts = row.get("points_captured")
+        pnl = None
+        try:
+            if qty is not None and pts is not None:
+                pnl = float(pts) * int(qty)
+        except (TypeError, ValueError):
+            pnl = None
+        et = row.get("exit_time")
+        hhmm = ""
+        if hasattr(et, "strftime"):
+            hhmm = et.strftime("%H:%M")
+        elif et:
+            hhmm = str(et)[:5]
+        if pnl is None:
+            label = f"Exited {hhmm}".strip() if hhmm else "Exited today"
+        else:
+            sign = "+" if pnl >= 0 else ""
+            label = f"Exited {hhmm} · ₹{sign}{int(round(pnl))}".strip()
+        s["trade_exited"] = True
+        s["trade_exited_label"] = label
+        s["stopped_out_today"] = True
+
+
+def _overlay_trade_log_exits(stocks: List[Dict[str, Any]], session_date: str) -> None:
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT symbol, qty, points_captured, exit_time
+                FROM trade_log
+                WHERE session_date = CAST(:d AS date)
+                  AND exit_price IS NOT NULL
+                ORDER BY exit_time NULLS LAST, id
+                """
+            ),
+            {"d": session_date},
+        ).mappings().all()
+        apply_journaled_trade_log_rows(stocks, [dict(r) for r in rows])
+    finally:
+        db.close()
 ENTRY_END_MIN = 14 * 60 + 30
 
 LONG = "LONG"
@@ -927,8 +989,16 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
                 s["trade_exited"] = True
                 s["trade_exited_label"] = f"Exited {hhmm} · ₹{sign}{int(pnl or 0)}"
                 s["stopped_out_today"] = True
+        try:
+            _overlay_trade_log_exits(display_stocks, sd)
+        except Exception as log_exc:
+            logger.debug("checklist trade_log overlay failed: %s", log_exc)
     except Exception as exc:
         logger.debug("checklist open-trades enrichment failed: %s", exc)
+        try:
+            _overlay_trade_log_exits(display_stocks, sd)
+        except Exception as log_exc:
+            logger.debug("checklist trade_log overlay failed: %s", log_exc)
 
     try:
         from backend.services.fo_display_symbol import attach_future_symbols
