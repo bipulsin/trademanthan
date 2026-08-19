@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HA Momentum Strategy — Backtest Results</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<style>
+:root { --bg:#0b1220; --card:#121a2b; --text:#e5e7eb; --muted:#94a3b8; --green:#22c55e; --red:#ef4444; --orange:#f59e0b; --line:#1f2a44; }
+* { box-sizing:border-box; }
+body { margin:0; font-family: Inter, system-ui, sans-serif; background:var(--bg); color:var(--text); }
+.wrap { max-width:1280px; margin:0 auto; padding:24px 16px 48px; }
+h1 { margin:0 0 6px; font-size:1.6rem; }
+.sub { color:var(--muted); margin:0 0 18px; }
+.kpis { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-bottom:20px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+.card .lbl { font-size:0.72rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+.card .val { font-size:1.25rem; font-weight:800; margin-top:4px; }
+.pos { color:var(--green); } .neg { color:var(--red); }
+.charts { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
+.charts .wide { grid-column:1 / -1; }
+table.dataTable { color:var(--text); }
+table.dataTable tbody tr { background:var(--card); }
+table.dataTable.stripe tbody tr.odd { background:#0f172a; }
+.win { background:rgba(34,197,94,.12) !important; }
+.loss { background:rgba(239,68,68,.12) !important; }
+.time { background:rgba(245,158,11,.12) !important; }
+details { margin-top:18px; background:var(--card); border-radius:12px; padding:12px; border:1px solid var(--line); }
+@media (max-width:900px) { .charts { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>HA Momentum Strategy — Backtest Results</h1>
+  <p class="sub">15-Min | NSE F&amp;O | 17-Jul-2026 to 19-Aug-2026 · Last updated <span id="updated"></span></p>
+  <div class="kpis" id="kpis"></div>
+  <div class="charts">
+    <div class="card wide"><canvas id="cPnl"></canvas></div>
+    <div class="card"><canvas id="cT1"></canvas></div>
+    <div class="card"><canvas id="cT2"></canvas></div>
+    <div class="card wide"><canvas id="cSym"></canvas></div>
+    <div class="card"><canvas id="cDir"></canvas></div>
+  </div>
+  <h2>All trades</h2>
+  <table id="tbl" class="display" style="width:100%"></table>
+  <details>
+    <summary>Skipped trades (SL &gt; ₹5,000)</summary>
+    <table id="tblSkip" class="display" style="width:100%;margin-top:10px"></table>
+  </details>
+</div>
+<script id="ha-data" type="application/json">{"summary": {"signals": 0, "trades": 0, "skipped": 0, "wr_t1": 0, "wr_t2": 0, "pnl_t1": 0, "pnl_t2": 0, "pnl_actual": 0, "avg_rr": 0, "best": {"symbol": null, "pnl": 0.0}, "worst": {"symbol": null, "pnl": 0.0}, "avg_hold": 0, "long": {"n": 0, "wins": 0, "losses": 0, "pnl": 0}, "short": {"n": 0, "wins": 0, "losses": 0, "pnl": 0}, "time_exits": 0, "mfe_beyond_t2": 0, "from": "2026-07-17", "to": "2026-08-19", "generated_at": "2026-08-19 23:29:34 IST"}, "trades": [], "skipped": []}</script>
+<script>
+const DATA = JSON.parse(document.getElementById('ha-data').textContent);
+const S = DATA.summary || {};
+document.getElementById('updated').textContent = S.generated_at || '';
+const money = n => '₹' + Number(n||0).toLocaleString('en-IN', {maximumFractionDigits:0});
+const kpis = [
+  ['Total signals', S.signals],
+  ['Trades taken', S.trades],
+  ['Skipped (SL>5K)', S.skipped],
+  ['Win rate T1', (S.wr_t1||0)+'%'],
+  ['Win rate T2', (S.wr_t2||0)+'%'],
+  ['P&L T1', money(S.pnl_t1), S.pnl_t1],
+  ['P&L T2', money(S.pnl_t2), S.pnl_t2],
+  ['Actual P&L', money(S.pnl_actual), S.pnl_actual],
+  ['Avg R:R', S.avg_rr],
+  ['Best trade', (S.best&&S.best.symbol?S.best.symbol+' ':'') + money(S.best&&S.best.pnl)],
+  ['Worst trade', (S.worst&&S.worst.symbol?S.worst.symbol+' ':'') + money(S.worst&&S.worst.pnl)],
+  ['Avg hold (min)', S.avg_hold],
+  ['LONG w/l/pnl', (S.long?S.long.wins+'/'+S.long.losses+' '+money(S.long.pnl):'—')],
+  ['SHORT w/l/pnl', (S.short?S.short.wins+'/'+S.short.losses+' '+money(S.short.pnl):'—')],
+  ['Time exits', S.time_exits],
+  ['Avg MFE beyond T2', S.mfe_beyond_t2]
+];
+document.getElementById('kpis').innerHTML = kpis.map(function(k){
+  var cls = '';
+  if (typeof k[2]==='number') cls = k[2]>=0?' pos':' neg';
+  return '<div class="card"><div class="lbl">'+k[0]+'</div><div class="val'+cls+'">'+k[1]+'</div></div>';
+}).join('');
+
+const trades = DATA.trades || [];
+const byDate = {};
+trades.forEach(function(t){
+  const d = String(t.signal_time||'').slice(0,10);
+  byDate[d] = (byDate[d]||0) + Number(t.actual_pnl_rs||0);
+});
+const dates = Object.keys(byDate).sort();
+let run = 0;
+const cum = dates.map(function(d){ run += byDate[d]; return run; });
+new Chart(document.getElementById('cPnl'), {
+  type:'line', data:{ labels:dates, datasets:[{ label:'Cumulative actual P&L', data:cum, borderColor:'#22c55e', tension:.2 }] },
+  options:{ plugins:{ legend:{ labels:{ color:'#e5e7eb' } } }, scales:{ x:{ ticks:{ color:'#94a3b8' } }, y:{ ticks:{ color:'#94a3b8' } } } }
+});
+const t1w = trades.filter(t=>Number(t.t1_hit)).length, t1l = trades.length-t1w;
+const t2w = trades.filter(t=>Number(t.t2_hit)).length, t2l = trades.length-t2w;
+new Chart(document.getElementById('cT1'), { type:'pie', data:{ labels:['T1 Win','T1 Loss'], datasets:[{ data:[t1w,t1l], backgroundColor:['#22c55e','#ef4444'] }] }, options:{ plugins:{ title:{ display:true, text:'T1', color:'#e5e7eb' }, legend:{ labels:{ color:'#e5e7eb' } } } } });
+new Chart(document.getElementById('cT2'), { type:'pie', data:{ labels:['T2 Win','T2 Loss'], datasets:[{ data:[t2w,t2l], backgroundColor:['#22c55e','#ef4444'] }] }, options:{ plugins:{ title:{ display:true, text:'T2', color:'#e5e7eb' }, legend:{ labels:{ color:'#e5e7eb' } } } } });
+const bySym = {};
+trades.forEach(function(t){ const s=t.symbol||''; bySym[s]=(bySym[s]||0)+Number(t.actual_pnl_rs||0); });
+const top = Object.entries(bySym).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,20);
+new Chart(document.getElementById('cSym'), {
+  type:'bar', data:{ labels:top.map(x=>x[0]), datasets:[{ label:'Actual P&L', data:top.map(x=>x[1]), backgroundColor:top.map(x=>x[1]>=0?'#22c55e':'#ef4444') }] },
+  options:{ plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ color:'#94a3b8', maxRotation:90 } }, y:{ ticks:{ color:'#94a3b8' } } } }
+});
+const ln = (S.long&&S.long.n)||0, sn=(S.short&&S.short.n)||0;
+new Chart(document.getElementById('cDir'), { type:'doughnut', data:{ labels:['LONG','SHORT'], datasets:[{ data:[ln,sn], backgroundColor:['#38bdf8','#a78bfa'] }] }, options:{ plugins:{ title:{ display:true, text:'Direction', color:'#e5e7eb' }, legend:{ labels:{ color:'#e5e7eb' } } } } });
+
+function yn(v){ return Number(v) ? 'Y' : ''; }
+$('#tbl').DataTable({
+  data: trades,
+  pageLength: 25,
+  order: [[2,'desc'],[3,'desc']],
+  createdRow: function(row, data){
+    const pnl = Number(data.actual_pnl_rs||0);
+    if (String(data.exit_reason)==='TIME_EXIT') $(row).addClass('time');
+    else if (pnl>0) $(row).addClass('win');
+    else if (pnl<0) $(row).addClass('loss');
+  },
+  columns: [
+    { title:'#', data:null, render:(d,t,r,m)=>m.row+1 },
+    { title:'Symbol', data:'symbol' },
+    { title:'Date', data:'signal_time', render:v=>String(v||'').slice(0,10) },
+    { title:'Time', data:'signal_time', render:v=>String(v||'').slice(11,19) },
+    { title:'Direction', data:'direction' },
+    { title:'Entry', data:'entry_price' },
+    { title:'SL', data:'sl_price' },
+    { title:'T1', data:'t1_price' },
+    { title:'T2', data:'t2_price' },
+    { title:'Candle SL?', data:'sl_used_prev_candle', render:yn },
+    { title:'Entry candle %', data:'entry_candle_size_pct' },
+    { title:'T1 Hit', data:'t1_hit', render:yn },
+    { title:'T2 Hit', data:'t2_hit', render:yn },
+    { title:'SL Hit', data:'sl_hit', render:yn },
+    { title:'Exit reason', data:'exit_reason' },
+    { title:'Actual exit', data:'actual_exit_price' },
+    { title:'Actual P&L', data:'actual_pnl_rs' },
+    { title:'P&L T1', data:'pnl_t1_rs' },
+    { title:'P&L T2', data:'pnl_t2_rs' },
+    { title:'Max favorable', data:'max_favorable' },
+    { title:'Lot', data:'lot_qty' },
+    { title:'Hold min', data:'holding_min' }
+  ]
+});
+$('#tblSkip').DataTable({
+  data: DATA.skipped || [],
+  pageLength: 25,
+  columns: [
+    { title:'#', data:null, render:(d,t,r,m)=>m.row+1 },
+    { title:'Symbol', data:'symbol' },
+    { title:'Date', data:'signal_time', render:v=>String(v||'').slice(0,10) },
+    { title:'Time', data:'signal_time', render:v=>String(v||'').slice(11,19) },
+    { title:'Direction', data:'direction' },
+    { title:'Entry', data:'entry_price' },
+    { title:'SL', data:'sl_price' },
+    { title:'SL Rs', data:'sl_rs' },
+    { title:'Lot', data:'lot_qty' },
+    { title:'Reason', data:'reason' }
+  ]
+});
+</script>
+</body>
+</html>
