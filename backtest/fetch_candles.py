@@ -103,9 +103,7 @@ def _headers() -> Dict[str, str]:
 
 def fetch_chunk(instrument_key: str, to_d: date, from_d: date) -> List[Dict[str, Any]]:
     # TEMP: Upstox data fetch for backtest — not for live trading.
-    rows = _http_candles(instrument_key, CANDLE_INTERVAL, to_d, from_d)
-    if rows:
-        return rows
+    # V2 does not accept 15minute; build 15m bars from 1-minute candles.
     raw_1m = _http_candles(instrument_key, "1minute", to_d, from_d)
     if not raw_1m:
         return []
