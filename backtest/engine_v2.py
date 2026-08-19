@@ -94,6 +94,7 @@ def simulate_trade(
     use_fixed_sl: bool,
     fixed_sl_pct: float,
     sl_cap: float,
+    forced_exit: time = FORCED_EXIT,
 ) -> Dict[str, Any]:
     row = df.iloc[i]
     prev = df.iloc[i - 1]
@@ -139,7 +140,10 @@ def simulate_trade(
         "sl_used_prev_candle": bool(use_prev) and not use_fixed_sl,
         "sl_logic_used": sl_logic,
         "skipped": (not use_fixed_sl) and sl_rs > sl_cap,
-        "reason": "SL_EXCEEDS_5K" if (not use_fixed_sl and sl_rs > sl_cap) else None,
+        "reason": "SL_EXCEEDS_CAP" if (not use_fixed_sl and sl_rs > sl_cap) else None,
+        "use_fixed_sl": bool(use_fixed_sl),
+        "fixed_sl_pct": round(fixed_sl_pct, 4) if use_fixed_sl else None,
+        "forced_exit_time": forced_exit.strftime("%H:%M"),
     }
     if out["skipped"] or risk <= 0 or lot_qty <= 0:
         return out
@@ -153,7 +157,7 @@ def simulate_trade(
     for j in range(i + 1, len(df)):
         bar = df.iloc[j]
         bts = bar["ts"].to_pydatetime() if hasattr(bar["ts"], "to_pydatetime") else bar["ts"]
-        if bts.date() != entry_day or bts.time().replace(microsecond=0) >= FORCED_EXIT:
+        if bts.date() != entry_day or bts.time().replace(microsecond=0) >= forced_exit:
             exit_reason = "TIME_EXIT"
             exit_px = float(bar["open"])
             exit_ts = bts
@@ -231,12 +235,15 @@ def run_prepared(
     nifty_closes: Dict,
     nifty_vwaps: Dict,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    cutoff = datetime.strptime(str(variant.get("cutoff") or "14:45"), "%H:%M").time()
+    cutoff = datetime.strptime(str(variant.get("entry_cutoff") or variant.get("cutoff") or "14:45"), "%H:%M").time()
+    exit_s = str(variant.get("forced_exit") or "15:00")
+    forced_exit = datetime.strptime(exit_s, "%H:%M").time()
     rr_t1 = float(variant["rr_t1"])
     rr_t2 = float(variant["rr_t2"])
     use_fixed = bool(variant.get("use_fixed_sl"))
-    fixed_pct = float(variant.get("fixed_sl_pct") or 0.004)
-    sl_cap = float(variant.get("sl_cap") or 5000)
+    raw_pct = variant.get("fixed_sl_pct")
+    fixed_pct = float(raw_pct) if raw_pct is not None else 0.004
+    sl_cap = float(variant.get("sl_cap_rs") if variant.get("sl_cap_rs") is not None else variant.get("sl_cap") or 5000)
     nifty_filter = bool(variant.get("nifty_filter"))
     short_only = bool(variant.get("short_only"))
     vname = str(variant["name"])
@@ -257,12 +264,9 @@ def run_prepared(
             continue
         if pd.isna(row["ema50"]) or pd.isna(row["adx14"]) or pd.isna(row["adx14_prev"]):
             continue
-        direction = None
-        if (not short_only) and long_signal(row, prev):
-            direction = "LONG"
-        elif short_signal(row, prev):
-            direction = "SHORT"
-        if not direction:
+        long_ok = long_signal(row, prev)
+        short_ok = short_signal(row, prev)
+        if not long_ok and not short_ok:
             continue
         n_close, n_vwap = _lookup_nifty(ts, nifty_closes, nifty_vwaps)
         above = None
@@ -273,10 +277,41 @@ def run_prepared(
             sim["symbol"] = symbol
             sim["instrument_key"] = instrument_key
             sim["variant"] = vname
+            sim["use_fixed_sl"] = use_fixed
+            sim["fixed_sl_pct"] = round(fixed_pct, 4) if use_fixed else None
+            sim["forced_exit_time"] = exit_s
             sim["nifty_close_signal"] = round(n_close, 2) if n_close is not None else None
             sim["nifty_vwap_signal"] = round(n_vwap, 2) if n_vwap is not None else None
             sim["nifty_above_vwap"] = above
             return sim
+
+        if short_only and long_ok and not short_ok:
+            skipped.append(
+                stamp(
+                    {
+                        "direction": "LONG",
+                        "signal_time": ts,
+                        "entry_price": None,
+                        "sl_price": None,
+                        "sl_distance": None,
+                        "sl_rs": None,
+                        "lot_qty": lot_qty,
+                        "skipped": True,
+                        "reason": "LONG_FILTERED_SHORT_ONLY_MODE",
+                    }
+                )
+            )
+            continue
+        direction = None
+        if short_only:
+            if short_ok:
+                direction = "SHORT"
+        elif long_ok:
+            direction = "LONG"
+        elif short_ok:
+            direction = "SHORT"
+        if not direction:
+            continue
 
         if tclock > cutoff:
             used_days.add(d)
@@ -325,6 +360,7 @@ def run_prepared(
             use_fixed_sl=use_fixed,
             fixed_sl_pct=fixed_pct,
             sl_cap=sl_cap,
+            forced_exit=forced_exit,
         )
         sim = stamp(sim)
         if sim.get("skipped"):

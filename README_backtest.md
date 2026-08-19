@@ -63,3 +63,19 @@ PYTHONPATH=. python3 backtest/generate_report_v2.py
 ```
 
 Nifty cache: `data/candles/NIFTY50_15min.json` (`NSE_INDEX|Nifty 50`). Extra deps: `backtest/requirements_v2.txt` (same stack as v1). The report overwrites `frontend/public/hamoment.html`.
+
+## v3 multi-variant run
+
+v3 corrects v7 to **0.3% fixed SL** (it was identical to v6 at 0.4%) and adds v9–v12 (short+tight SL, 0.2% stress, 15:15 exit). Previous dashboard is archived at `frontend/public/hamoment_v2.html`.
+
+```bash
+PYTHONPATH=. python3 backtest/run_all_v3.py
+```
+
+Production (app container):
+
+```bash
+PYTHONPATH=/app /opt/venv/bin/python backtest/run_all_v3.py
+```
+
+Then copy `frontend/public/hamoment.html` (and `hamoment_v2.html`) into nginx. Public URLs: https://www.tradewithcto.com/hamoment.html and https://www.tradewithcto.com/hamoment_v2.html

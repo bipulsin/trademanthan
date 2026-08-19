@@ -31,6 +31,19 @@ def test_fixed_pct_sl_long_no_skip():
     assert sim["sl_rs"] > 5000
 
 
+def test_v3_variant_checklist():
+    from backtest.run_backtest_v3 import VARIANTS
+
+    by_name = {v["name"]: v for v in VARIANTS}
+    assert by_name["v7_corrected"]["fixed_sl_pct"] == 0.003
+    assert by_name["v6b_fixed_sl_03pct"]["fixed_sl_pct"] == 0.003
+    assert by_name["v9_short_fixed_03pct"]["short_only"] is True
+    assert by_name["v9_short_fixed_03pct"]["fixed_sl_pct"] == 0.003
+    assert by_name["v11_short_fixed_02pct"]["short_only"] is True
+    assert by_name["v11_short_fixed_02pct"]["fixed_sl_pct"] == 0.002
+    assert by_name["v12_exit_1515"]["forced_exit"] == "15:15"
+
+
 def test_nifty_vwap_resets_daily():
     d1 = IST.localize(datetime(2026, 8, 18, 9, 15, 0))
     d2 = IST.localize(datetime(2026, 8, 19, 9, 15, 0))
