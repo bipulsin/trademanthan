@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Trade Log · TWCTO Kavach</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.24">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="tradelog.css?v=1">
+</head>
+<body class="theme-page">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <h1 class="mobile-title">Trade Log</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title"><i class="fas fa-book"></i> Kavach Trade Log</h1>
+                    <p class="settings-subtitle">
+                        Journal executed futures into <code>trade_log</code>.
+                        Contract and lot size come from arbitrage_master; gross P&amp;L is points × qty.
+                    </p>
+                </div>
+            </div>
+
+            <div class="tl-wrap">
+                <section class="tl-card" aria-label="Paste journal">
+                    <h2>1. Paste journal note</h2>
+                    <p class="tl-hint">Same text you send to Cursor: symbol, LONG/SHORT, times, prices, exit type, slippage, notes.</p>
+                    <textarea id="tlPaste" rows="10" placeholder="Paste the full trade journal here…"></textarea>
+                    <div class="tl-actions">
+                        <button type="button" class="tl-btn" id="tlParseBtn"><i class="fas fa-magic"></i> Parse</button>
+                        <button type="button" class="tl-btn tl-btn-primary" id="tlSavePasteBtn"><i class="fas fa-save"></i> Save parsed trade</button>
+                    </div>
+                    <pre class="tl-preview" id="tlPreview" hidden></pre>
+                </section>
+
+                <section class="tl-card" aria-label="Manual form">
+                    <h2>2. Manual / missed trade</h2>
+                    <p class="tl-hint">Use the date picker for a past session. Leave qty blank to use 1 futures lot from master.</p>
+                    <input type="hidden" id="tlEditId" value="">
+                    <div class="tl-form">
+                        <label>Session date <input type="date" id="tlDate"></label>
+                        <label>Symbol <input type="text" id="tlSymbol" placeholder="ITC or ITC FUT"></label>
+                        <label>Side
+                            <select id="tlDir">
+                                <option value="LONG">LONG</option>
+                                <option value="SHORT">SHORT</option>
+                            </select>
+                        </label>
+                        <label>Entry time <input type="time" id="tlEntryTime" step="1"></label>
+                        <label>Entry price <input type="number" id="tlEntryPx" step="0.05"></label>
+                        <label>Exit time <input type="time" id="tlExitTime" step="1"></label>
+                        <label>Exit price <input type="number" id="tlExitPx" step="0.05"></label>
+                        <label>Qty (optional) <input type="number" id="tlQty" step="1" min="1" placeholder="lot size if empty"></label>
+                        <label>Slippage pts <input type="number" id="tlSlip" step="0.01" placeholder="optional"></label>
+                        <label>Intended exit <input type="number" id="tlIntended" step="0.05" placeholder="optional"></label>
+                        <label>Exit type
+                            <select id="tlExitType">
+                                <option value="rule_compliant">rule_compliant</option>
+                                <option value="discretionary">discretionary</option>
+                            </select>
+                        </label>
+                        <label class="tl-span2">Exit note <input type="text" id="tlExitTrig" placeholder="e.g. 2-candle fail / pre-pause"></label>
+                        <label class="tl-span2">Notes / trade context
+                            <textarea id="tlNotes" rows="4"></textarea>
+                        </label>
+                    </div>
+                    <div class="tl-actions">
+                        <button type="button" class="tl-btn tl-btn-primary" id="tlSaveFormBtn"><i class="fas fa-save"></i> Save</button>
+                        <button type="button" class="tl-btn" id="tlClearFormBtn">New trade</button>
+                    </div>
+                    <p class="tl-status" id="tlStatus" role="status"></p>
+                </section>
+
+                <section class="tl-card" aria-label="Existing trades">
+                    <h2>3. Existing trades</h2>
+                    <div class="tl-list-filters">
+                        <label>From <input type="date" id="tlFrom"></label>
+                        <label>To <input type="date" id="tlTo"></label>
+                        <button type="button" class="tl-btn" id="tlLoadBtn"><i class="fas fa-sync"></i> Load</button>
+                    </div>
+                    <p class="tl-hint">Click a row to edit times, prices, notes, and exit type.</p>
+                    <div class="tl-table-wrap">
+                        <table class="tl-table" id="tlTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Qty</th>
+                                    <th>Entry</th>
+                                    <th>Exit</th>
+                                    <th>Gross P&amp;L</th>
+                                    <th>Exit type</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="left-menu.js?v=3.28"></script>
+    <script src="tradelog.js?v=1"></script>
+</body>
+</html>

@@ -820,6 +820,21 @@ body {
     margin-bottom: 1.5rem;
 }
 
+.reports-tradelog-line {
+    margin: 0.5rem 0 0;
+    font-size: 0.95rem;
+}
+
+.reports-tradelog-link {
+    font-weight: 700;
+    color: #0f766e;
+    text-decoration: none;
+}
+
+.reports-tradelog-link:hover {
+    text-decoration: underline;
+}
+
 .reports-page-intro .reports-title {
     margin: 0 0 0.35rem;
 }

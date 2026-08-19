@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.27';
+const MENU_HTML_PATH = 'left-menu.html?v=3.28';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog/.test(path);
     }
 
     getCurrentPage() {
@@ -45,6 +45,7 @@ class LeftMenu {
         if (path.includes('algo')) return 'algo';
         if (path.includes('scan')) return 'scan';
         if (path.includes('settings')) return 'settings';
+        if (path.includes('tradelog')) return 'tradelog';
         if (path.includes('reports')) return 'reports';
         if (path.includes('intraoption')) return 'intraoption';
         if (path.includes('smartfuture')) return 'smartfuture';
@@ -279,6 +280,7 @@ class LeftMenu {
                 <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true"><i class="fas fa-university"></i><span>Broker Management</span></li>
                 <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
+                <li class="nav-item" data-page="tradelog.html"><i class="fas fa-book"></i><span>Trade Log</span></li>
                 <li class="nav-item" data-page="future_screener.html"><i class="fas fa-filter"></i><span>Future Screener</span></li>
                 <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
@@ -699,6 +701,7 @@ class LeftMenu {
             broker: 'Broker Management',
             strategy: 'Strategy Management',
             reports: 'Trading Reports',
+            tradelog: 'Trade Log',
             future_screener: 'Future Screener',
             settings: 'Settings',
             algo: 'Algo Trading',
@@ -774,6 +777,7 @@ class LeftMenu {
             case 'broker': return 'broker.html';
             case 'strategy': return 'strategy.html';
             case 'reports': return 'reports.html';
+            case 'tradelog': return 'tradelog.html';
             case 'intraoption': return 'intraoption.html';
             case 'smartfuture': return 'smartfuture.html';
             case 'vajrafutures': return 'vajrafutures.html';

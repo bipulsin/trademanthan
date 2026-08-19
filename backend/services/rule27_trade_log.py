@@ -228,6 +228,37 @@ def ensure_trade_log_table() -> None:
                 "ADD COLUMN IF NOT EXISTS peak_to_exit_giveback_r DOUBLE PRECISION"
             )
         )
+        # Peak price/time/R + candles peak→exit — journal only (Upstox OHLC backfill).
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS peak_unrealized_price DOUBLE PRECISION"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS peak_unrealized_time TIMESTAMPTZ"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS peak_unrealized_r DOUBLE PRECISION"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS candles_peak_to_exit INTEGER"
+            )
+        )
+        conn.execute(
+            text(
+                f"ALTER TABLE {TABLE} "
+                "ADD COLUMN IF NOT EXISTS peak_backfill_status TEXT"
+            )
+        )
 
 
 def normalize_exit_trigger_type(val: Any) -> Optional[str]:
@@ -469,6 +500,140 @@ def upsert_trade(db, payload: Dict[str, Any]) -> int:
     params = row_params(payload)
     rid = db.execute(_UPSERT, params).scalar()
     return int(rid)
+
+
+def serialize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
+    """JSON-safe trade_log row plus gross PnL."""
+    out: Dict[str, Any] = {}
+    for k, v in row.items():
+        if hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
+        elif isinstance(v, time):
+            out[k] = v.strftime("%H:%M:%S")
+        else:
+            out[k] = v
+    qty = row.get("qty")
+    pts = row.get("points_captured")
+    pnl = None
+    try:
+        if qty is not None and pts is not None:
+            pnl = round(float(pts) * int(qty), 2)
+    except (TypeError, ValueError):
+        pnl = None
+    out["gross_pnl_inr"] = pnl
+    return out
+
+
+def list_trades(db, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict[str, Any]]:
+    ensure_trade_log_table()
+    sql = f"""
+        SELECT * FROM {TABLE}
+        WHERE (:sd IS NULL OR session_date >= CAST(:sd AS date))
+          AND (:ed IS NULL OR session_date <= CAST(:ed AS date))
+        ORDER BY session_date DESC, entry_time DESC NULLS LAST, id DESC
+        LIMIT 500
+    """
+    rows = db.execute(text(sql), {"sd": start_date, "ed": end_date}).mappings().all()
+    return [serialize_trade(dict(r)) for r in rows]
+
+
+def get_trade(db, trade_id: int) -> Optional[Dict[str, Any]]:
+    ensure_trade_log_table()
+    row = db.execute(
+        text(f"SELECT * FROM {TABLE} WHERE id = :id"),
+        {"id": int(trade_id)},
+    ).mappings().first()
+    return serialize_trade(dict(row)) if row else None
+
+
+_UPDATE_BY_ID = text(
+    f"""
+    UPDATE {TABLE} SET
+        entry_time = CAST(:entry_time AS time),
+        entry_price = :entry_price,
+        exit_time = CAST(:exit_time AS time),
+        exit_price = :exit_price,
+        exit_price_intended = :exit_price_intended,
+        slippage_pts = :slippage_pts,
+        slippage_inr = :slippage_inr,
+        points_captured = :points_captured,
+        bars_held_10m = :bars_held_10m,
+        exit_trigger = :exit_trigger,
+        exit_trigger_type = :exit_trigger_type,
+        notes = :notes,
+        updated_at = NOW()
+    WHERE id = :id
+    RETURNING id
+    """
+)
+
+
+def update_trade_fields(db, trade_id: int, payload: Dict[str, Any]) -> int:
+    """Patch entry/exit clock+price, notes, and exit type. Recalculates points/PnL fields."""
+    ensure_trade_log_table()
+    existing = db.execute(
+        text(f"SELECT * FROM {TABLE} WHERE id = :id"),
+        {"id": int(trade_id)},
+    ).mappings().first()
+    if not existing:
+        raise ValueError("trade not found")
+    merged = dict(existing)
+    for key in (
+        "entry_time",
+        "entry_price",
+        "exit_time",
+        "exit_price",
+        "exit_price_intended",
+        "slippage_pts",
+        "exit_trigger",
+        "exit_trigger_type",
+        "notes",
+    ):
+        if key in payload and payload[key] is not None:
+            merged[key] = payload[key]
+    direction = str(merged.get("direction") or "LONG").upper()
+    entry = float(merged["entry_price"])
+    exit_px = _f(merged.get("exit_price"))
+    qty = int(merged["qty"]) if merged.get("qty") is not None else None
+    points = _points(direction, entry, exit_px)
+    slip_pts = _f(merged.get("slippage_pts"))
+    slip_inr = None
+    if slip_pts is not None and qty is not None:
+        slip_inr = round(float(slip_pts) * int(qty), 2)
+    et = _as_time(merged.get("entry_time"))
+    xt = _as_time(merged.get("exit_time"))
+    bars = merged.get("bars_held_10m")
+    if et is not None and xt is not None:
+        bars = _bars_held(et, xt)
+    rid = db.execute(
+        _UPDATE_BY_ID,
+        {
+            "id": int(trade_id),
+            "entry_time": et.strftime("%H:%M:%S") if et else None,
+            "entry_price": entry,
+            "exit_time": xt.strftime("%H:%M:%S") if xt else None,
+            "exit_price": exit_px,
+            "exit_price_intended": _f(merged.get("exit_price_intended")),
+            "slippage_pts": slip_pts,
+            "slippage_inr": slip_inr,
+            "points_captured": points,
+            "bars_held_10m": int(bars) if bars is not None else None,
+            "exit_trigger": merged.get("exit_trigger"),
+            "exit_trigger_type": normalize_exit_trigger_type(merged.get("exit_trigger_type")),
+            "notes": merged.get("notes"),
+        },
+    ).scalar()
+    return int(rid)
+
+
+def _bars_held(entry_t: time, exit_t: time) -> int:
+    base = datetime(2000, 1, 1)
+    a = datetime.combine(base.date(), entry_t)
+    b = datetime.combine(base.date(), exit_t)
+    if b < a:
+        b = b + timedelta(days=1)
+    mins = max(0.0, (b - a).total_seconds() / 60.0)
+    return max(1, int(round(mins / 10.0)))
 
 
 def load_from_xlsx(path: str) -> List[Dict[str, Any]]:
