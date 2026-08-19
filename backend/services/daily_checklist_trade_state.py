@@ -497,6 +497,7 @@ def overlay_live_momentum_from_candles(
         stock["crash_score"] = int(metrics.get("crash_score") or 0)
         stock["crash_signals"] = list(metrics.get("crash_signals") or [])
         stock["crash_label"] = metrics.get("crash_label") or ""
+        stock["rocket_active_side"] = metrics.get("active_side") or ""
         try:
             from backend.services.rocket_ws_live import overlay_live_rocket_crash
 

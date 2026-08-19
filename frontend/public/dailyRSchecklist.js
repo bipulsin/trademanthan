@@ -73,6 +73,22 @@
         return obj.display_symbol || obj.future_symbol || obj.symbol || "";
     }
 
+    /**
+     * READY NOW shows one chip: Rocket or Crash, never both.
+     * Higher score wins; equal scores use live active_side, then card direction.
+     */
+    function rocketCrashChipSide(stock) {
+        var r = Number(stock.rocket_score || 0);
+        var c = Number(stock.crash_score || 0);
+        if (r < 1 && c < 1) return "";
+        if (r > c) return "rocket";
+        if (c > r) return "crash";
+        var side = String(stock.rocket_active_side || "").toLowerCase();
+        if (side.indexOf("crash") >= 0) return "crash";
+        if (side.indexOf("rocket") >= 0) return "rocket";
+        return String(stock.direction || "LONG").toUpperCase() === "SHORT" ? "crash" : "rocket";
+    }
+
     function ensureChartEngine() {
         if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
         if (_chartEngineLoadPromise) return _chartEngineLoadPromise;
@@ -1719,6 +1735,7 @@
         var dirEl = card.querySelector(".dc-ready-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";
         dirEl.className = "dc-ready-dir dc-ready-dir--" + (dir === "SHORT" ? "short" : "long");
+        var chipSide = rocketCrashChipSide(stock);
         var rkHero = card.querySelector(".dc-ready-rocket--hero");
         if (rkHero) {
             var rScore = Number(stock.rocket_score || 0);
@@ -1729,7 +1746,7 @@
             }
             sigs = Array.isArray(sigs) ? sigs.filter(Boolean).join(", ") : "";
             var rkTitle = "Rocket Pre-Ignition Score: " + rScore + "/4" + (sigs ? " | " + sigs : "");
-            if (rScore >= 1 && rLabel) {
+            if (chipSide === "rocket" && rScore >= 1 && rLabel) {
                 rkHero.hidden = false;
                 rkHero.textContent = rLabel;
                 rkHero.className = "dc-ready-rocket dc-ready-rocket--hero dc-ready-rocket--" + Math.min(4, rScore);
@@ -1751,7 +1768,7 @@
             }
             cSigs = Array.isArray(cSigs) ? cSigs.filter(Boolean).join(", ") : "";
             var crTitle = "Crash Score: " + cScore + "/4" + (cSigs ? " | " + cSigs : "");
-            if (cScore >= 1 && cLabel) {
+            if (chipSide === "crash" && cScore >= 1 && cLabel) {
                 crHero.hidden = false;
                 crHero.textContent = cLabel;
                 crHero.className = "dc-ready-crash dc-ready-crash--hero dc-ready-crash--" + Math.min(4, cScore);
@@ -2980,10 +2997,10 @@
         var sub = [];
         if (stock.rs_pct != null) sub.push("RS " + (stock.rs_pct > 0 ? "+" : "") + Number(stock.rs_pct).toFixed(2) + "%");
         if (stock.dashboard_score != null) sub.push("Score " + stock.dashboard_score);
-        if (stock.rocket_score >= 1) {
+        var modalChip = rocketCrashChipSide(stock);
+        if (modalChip === "rocket") {
             sub.push(stock.rocket_label || ("🚀 " + stock.rocket_score + "/4"));
-        }
-        if (stock.crash_score >= 1) {
+        } else if (modalChip === "crash") {
             sub.push(stock.crash_label || ("💥 " + stock.crash_score + "/4"));
         }
         if (stock.vol_multiplier != null) sub.push("Vol " + Number(stock.vol_multiplier).toFixed(2) + "×");
