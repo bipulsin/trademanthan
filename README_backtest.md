@@ -45,3 +45,21 @@ python3 backtest/run_all.py
 Then copy `frontend/public/hamoment.html` into the nginx image on the next frontend deploy, or re-run `generate_report.py` and commit the HTML.
 
 Public URL: https://www.tradewithcto.com/hamoment.html
+
+## v2 multi-variant run
+
+v2 keeps the same candle cache (`data/candles/<SYMBOL>_15min.json`) and adds Nifty 15m + eight strategy variants (plus `v6b` at 0.3% fixed SL).
+
+```bash
+PYTHONPATH=. python3 backtest/run_all_v2.py
+```
+
+Steps:
+
+```bash
+PYTHONPATH=. python3 backtest/fetch_nifty_candles.py
+PYTHONPATH=. python3 backtest/run_backtest_v2.py
+PYTHONPATH=. python3 backtest/generate_report_v2.py
+```
+
+Nifty cache: `data/candles/NIFTY50_15min.json` (`NSE_INDEX|Nifty 50`). Extra deps: `backtest/requirements_v2.txt` (same stack as v1). The report overwrites `frontend/public/hamoment.html`.

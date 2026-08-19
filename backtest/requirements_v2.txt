@@ -1,0 +1,8 @@
+# HA Momentum v2 uses the same Python stack as v1. No extra pip packages.
+# (Listed for the v2 runbook; install from backend/requirements.txt in the app image.)
+pandas
+pandas_ta
+sqlalchemy
+requests
+python-dotenv
+pytz
