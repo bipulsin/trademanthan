@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
-    <link rel="stylesheet" href="tradelog.css?v=1">
+    <link rel="stylesheet" href="tradelog.css?v=2">
 </head>
 <body class="theme-page">
     <div class="mobile-title-bar">
@@ -35,8 +35,14 @@
             </div>
 
             <div class="tl-wrap">
-                <section class="tl-card" aria-label="Paste journal">
-                    <h2>1. Paste journal note</h2>
+                <div class="tl-tabs" role="tablist" aria-label="Trade log sections">
+                    <button type="button" class="tl-tab" role="tab" id="tlTabPaste" data-tab="paste" aria-controls="tlPanePaste" aria-selected="true">1. Paste journal note</button>
+                    <button type="button" class="tl-tab" role="tab" id="tlTabForm" data-tab="form" aria-controls="tlPaneForm" aria-selected="false">2. Manual / missed trade</button>
+                    <button type="button" class="tl-tab" role="tab" id="tlTabList" data-tab="list" aria-controls="tlPaneList" aria-selected="false">3. Existing trades</button>
+                </div>
+                <p class="tl-status" id="tlStatus" role="status"></p>
+
+                <section class="tl-card" id="tlPanePaste" role="tabpanel" aria-labelledby="tlTabPaste">
                     <p class="tl-hint">Same text you send to Cursor: symbol, LONG/SHORT, times, prices, exit type, slippage, notes.</p>
                     <textarea id="tlPaste" rows="10" placeholder="Paste the full trade journal here…"></textarea>
                     <div class="tl-actions">
@@ -46,9 +52,8 @@
                     <pre class="tl-preview" id="tlPreview" hidden></pre>
                 </section>
 
-                <section class="tl-card" aria-label="Manual form">
-                    <h2>2. Manual / missed trade</h2>
-                    <p class="tl-hint">Use the date picker for a past session. Leave qty blank to use 1 futures lot from master.</p>
+                <section class="tl-card" id="tlPaneForm" role="tabpanel" aria-labelledby="tlTabForm" hidden>
+                    <p class="tl-hint">Use the date picker for a past session. Leave qty blank to use 1 futures lot from master. Selecting a row on Existing trades opens this tab for edit.</p>
                     <input type="hidden" id="tlEditId" value="">
                     <div class="tl-form">
                         <label>Session date <input type="date" id="tlDate"></label>
@@ -81,11 +86,9 @@
                         <button type="button" class="tl-btn tl-btn-primary" id="tlSaveFormBtn"><i class="fas fa-save"></i> Save</button>
                         <button type="button" class="tl-btn" id="tlClearFormBtn">New trade</button>
                     </div>
-                    <p class="tl-status" id="tlStatus" role="status"></p>
                 </section>
 
-                <section class="tl-card" aria-label="Existing trades">
-                    <h2>3. Existing trades</h2>
+                <section class="tl-card" id="tlPaneList" role="tabpanel" aria-labelledby="tlTabList" hidden>
                     <div class="tl-list-filters">
                         <label>From <input type="date" id="tlFrom"></label>
                         <label>To <input type="date" id="tlTo"></label>
@@ -114,6 +117,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.28"></script>
-    <script src="tradelog.js?v=1"></script>
+    <script src="tradelog.js?v=2"></script>
 </body>
 </html>

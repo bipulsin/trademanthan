@@ -16,6 +16,16 @@
 
     function $(id) { return document.getElementById(id); }
 
+    function showTab(name) {
+        var tabs = document.querySelectorAll(".tl-tab[data-tab]");
+        Array.prototype.forEach.call(tabs, function (btn) {
+            var on = btn.getAttribute("data-tab") === name;
+            btn.setAttribute("aria-selected", on ? "true" : "false");
+            var pane = document.getElementById(btn.getAttribute("aria-controls"));
+            if (pane) pane.hidden = !on;
+        });
+    }
+
     function setStatus(msg, ok) {
         var el = $("tlStatus");
         el.textContent = msg || "";
@@ -181,8 +191,10 @@
                 Array.prototype.forEach.call(tb.querySelectorAll("tr"), function (x) { x.classList.remove("active"); });
                 tr.classList.add("active");
                 fillForm(row);
+                showTab("form");
                 setStatus("Editing trade #" + row.id + ". Change times/prices/notes/exit type, then Save.", true);
-                window.scrollTo({ top: $("tlDate").getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" });
+                var focusEl = $("tlEntryTime");
+                if (focusEl && focusEl.focus) focusEl.focus();
             };
             tb.appendChild(tr);
         });
@@ -204,6 +216,9 @@
         $("tlDate").value = today;
         $("tlFrom").value = today;
         $("tlTo").value = today;
+        document.querySelectorAll(".tl-tab[data-tab]").forEach(function (btn) {
+            btn.onclick = function () { showTab(btn.getAttribute("data-tab")); };
+        });
         $("tlParseBtn").onclick = function () { parsePaste().catch(function (e) { setStatus(String(e), false); }); };
         $("tlSavePasteBtn").onclick = function () {
             parsePaste().then(function (p) {
