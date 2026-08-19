@@ -54,3 +54,11 @@ def test_tick_rule_unchanged_inherits_prior_dir():
     )
     assert signed == -8
     assert direction == -1
+
+
+def test_rocket_fields_helper_exists():
+    from backend.routers.future_screener import _rocket_fields
+
+    out = _rocket_fields({"rocket_score": 3, "rocket_signals": "seller_failure", "rocket_label": ""})
+    assert out["rocket_score"] == 3
+    assert out["rocket_label"].startswith("🚀")

@@ -324,6 +324,7 @@ def on_upstox_tick(
 
         persist_jobs: List[Tuple[str, int]] = []
         event_jobs: List[Dict[str, Any]] = []
+        score_jobs: List[Tuple[Tuple[str, int], List[Dict[str, Any]], int, bool]] = []
         for tf in TIMEFRAMES:
             key = (symbol, tf)
             book = _BOOKS.get(key)
@@ -361,10 +362,16 @@ def on_upstox_tick(
                 forming["volume"] = float(forming.get("volume") or 0.0) + float(qty)
                 forming["delta"] = float(forming.get("delta") or 0.0) + float(signed)
             book["updated_at"] = now
-
             bars = list(book["completed"]) + [dict(forming, forming=True)]
             session_n = len(book["completed"]) + 1
-            scored = compute_rocket_crash(bars, session_bar_count=session_n)
+            score_jobs.append((key, bars, session_n, rolled))
+
+    for key, bars, session_n, rolled in score_jobs:
+        scored = compute_rocket_crash(bars, session_bar_count=session_n)
+        with _LOCK:
+            book = _BOOKS.get(key)
+            if not book:
+                continue
             prev_r = int(book.get("last_rocket") or 0)
             prev_c = int(book.get("last_crash") or 0)
             r_now = int(scored.get("rocket_score") or 0)
@@ -372,7 +379,6 @@ def on_upstox_tick(
             book["scored"] = scored
             book["last_rocket"] = r_now
             book["last_crash"] = c_now
-
             candle_status = "confirmed" if rolled else "forming"
             if r_now >= 3 and (rolled or prev_r < 3):
                 event_jobs.append(_event_payload(book, "bullish_rocket", r_now, candle_status, now))
@@ -585,14 +591,18 @@ def get_live_10m(symbol: str) -> Optional[Dict[str, Any]]:
     sym = (symbol or "").strip().upper()
     if not sym:
         return None
-    with _LOCK:
-        book = _BOOKS.get((sym, DEFAULT_TF))
-        if book and book.get("updated_at"):
-            age = (datetime.now(IST) - book["updated_at"]).total_seconds()
-            if age <= STALE_SEC:
-                row = _state_row(book)
-                row["age_sec"] = age
-                return row
+    got = _LOCK.acquire(timeout=0.05)
+    if got:
+        try:
+            book = _BOOKS.get((sym, DEFAULT_TF))
+            if book and book.get("updated_at"):
+                age = (datetime.now(IST) - book["updated_at"]).total_seconds()
+                if age <= STALE_SEC:
+                    row = _state_row(book)
+                    row["age_sec"] = age
+                    return row
+        finally:
+            _LOCK.release()
     try:
         ensure_rocket_live_tables()
         db = SessionLocal()
@@ -658,15 +668,19 @@ def load_live_10m_map() -> Dict[str, Dict[str, Any]]:
     """All fresh 10m live rows keyed by symbol (memory, then DB fill)."""
     out: Dict[str, Dict[str, Any]] = {}
     now = datetime.now(IST)
-    with _LOCK:
-        for (sym, tf), book in _BOOKS.items():
-            if tf != DEFAULT_TF or not book.get("updated_at"):
-                continue
-            age = (now - book["updated_at"]).total_seconds()
-            if age <= STALE_SEC:
-                row = _state_row(book)
-                row["age_sec"] = age
-                out[sym] = row
+    got = _LOCK.acquire(timeout=0.05)
+    if got:
+        try:
+            for (sym, tf), book in _BOOKS.items():
+                if tf != DEFAULT_TF or not book.get("updated_at"):
+                    continue
+                age = (now - book["updated_at"]).total_seconds()
+                if age <= STALE_SEC:
+                    row = _state_row(book)
+                    row["age_sec"] = age
+                    out[sym] = row
+        finally:
+            _LOCK.release()
     try:
         ensure_rocket_live_tables()
         db = SessionLocal()

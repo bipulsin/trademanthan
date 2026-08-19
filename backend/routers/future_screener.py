@@ -56,6 +56,17 @@ def _rocket_signals(v: Any) -> List[str]:
     return [p.strip() for p in str(v).split(",") if p.strip()]
 
 
+def _rocket_fields(r: Any) -> Dict[str, Any]:
+    score = int(_f(r.get("rocket_score")) or 0)
+    signals = _rocket_signals(r.get("rocket_signals"))
+    label = (r.get("rocket_label") or "").strip()
+    if score <= 0:
+        return {"rocket_score": 0, "rocket_signals": [], "rocket_label": ""}
+    if not label:
+        label = f"🚀 {score}/4"
+    return {"rocket_score": score, "rocket_signals": signals, "rocket_label": label}
+
+
 def _crash_fields(r: Any) -> Dict[str, Any]:
     score = int(_f(r.get("crash_score")) or 0)
     signals = _rocket_signals(r.get("crash_signals"))
