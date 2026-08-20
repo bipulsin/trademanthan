@@ -32,12 +32,27 @@
         el.className = "tl-status " + (ok === true ? "ok" : ok === false ? "err" : "");
     }
 
+    function errDetail(data) {
+        var d = data && data.detail;
+        if (typeof d === "string") return d;
+        if (Array.isArray(d) && d.length) {
+            return d.map(function (x) { return (x && x.msg) || JSON.stringify(x); }).join("; ");
+        }
+        if (d && typeof d === "object" && d.msg) return d.msg;
+        return "Save failed";
+    }
+
     function clockForInput(v) {
-        if (!v) return "";
-        var s = String(v);
-        if (s.length >= 8) return s.slice(0, 8);
-        if (s.length === 5) return s + ":00";
-        return s;
+        if (v == null || v === "") return "";
+        var s = String(v).trim();
+        if (s.indexOf("T") >= 0) s = s.split("T").pop();
+        s = s.split(".")[0].split("+")[0].replace("Z", "");
+        var m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (!m) return "";
+        var hh = ("0" + m[1]).slice(-2);
+        var mm = ("0" + m[2]).slice(-2);
+        var ss = m[3] != null ? ("0" + m[3]).slice(-2) : "00";
+        return hh + ":" + mm + ":" + ss;
     }
 
     function fillForm(row) {
@@ -59,14 +74,16 @@
 
     function formPayload() {
         var qty = $("tlQty").value;
+        var entryPx = $("tlEntryPx").value;
+        var exitPx = $("tlExitPx").value;
         return {
             session_date: $("tlDate").value,
             symbol: $("tlSymbol").value.trim(),
             direction: $("tlDir").value,
-            entry_time: $("tlEntryTime").value,
-            entry_price: Number($("tlEntryPx").value),
-            exit_time: $("tlExitTime").value || null,
-            exit_price: $("tlExitPx").value === "" ? null : Number($("tlExitPx").value),
+            entry_time: clockForInput($("tlEntryTime").value) || $("tlEntryTime").value,
+            entry_price: entryPx === "" ? null : Number(entryPx),
+            exit_time: $("tlExitTime").value ? (clockForInput($("tlExitTime").value) || $("tlExitTime").value) : null,
+            exit_price: exitPx === "" ? null : Number(exitPx),
             qty: qty === "" ? null : Number(qty),
             slippage_pts: $("tlSlip").value === "" ? null : Number($("tlSlip").value),
             exit_price_intended: $("tlIntended").value === "" ? null : Number($("tlIntended").value),
@@ -89,13 +106,14 @@
         });
         var data = await res.json();
         if (!res.ok) {
-            setStatus(data.detail || "Parse failed", false);
+            setStatus(errDetail(data) || "Parse failed", false);
             return null;
         }
         var p = data.parsed || {};
         $("tlPreview").hidden = false;
         $("tlPreview").textContent = JSON.stringify(p, null, 2);
-        fillForm(Object.assign({ notes: text }, p));
+        // Keep edit id empty for a new paste save.
+        fillForm(Object.assign({ notes: text, id: null }, p));
         if (p.parse_warnings && p.parse_warnings.length) {
             setStatus("Parsed with warnings: " + p.parse_warnings.join("; "), false);
         } else {
@@ -107,7 +125,7 @@
     async function saveForm() {
         var editId = $("tlEditId").value;
         var payload = formPayload();
-        if (!payload.session_date || !payload.symbol || !payload.entry_time || !payload.entry_price) {
+        if (!payload.session_date || !payload.symbol || !payload.entry_time || payload.entry_price == null) {
             setStatus("Date, symbol, entry time, and entry price are required.", false);
             return;
         }
@@ -117,23 +135,13 @@
         if (editId) {
             url += "/" + editId;
             method = "PATCH";
-            body = {
-                entry_time: payload.entry_time,
-                entry_price: payload.entry_price,
-                exit_time: payload.exit_time,
-                exit_price: payload.exit_price,
-                slippage_pts: payload.slippage_pts,
-                exit_price_intended: payload.exit_price_intended,
-                exit_trigger_type: payload.exit_trigger_type,
-                exit_trigger: payload.exit_trigger,
-                notes: payload.notes
-            };
+            // Send the full form so date/symbol/side/qty edits also persist.
+            body = payload;
         }
         var res = await fetch(url, { method: method, headers: headers(), body: JSON.stringify(body) });
         var data = await res.json().catch(function () { return {}; });
         if (!res.ok) {
-            var d = data.detail;
-            setStatus(typeof d === "string" ? d : (d && d[0] && d[0].msg) || "Save failed", false);
+            setStatus(errDetail(data), false);
             return;
         }
         var t = data.trade || {};
@@ -144,6 +152,7 @@
             true
         );
         $("tlEditId").value = String(t.id || editId || "");
+        if (t && t.id) fillForm(t);
         loadList();
     }
 
@@ -192,7 +201,7 @@
                 tr.classList.add("active");
                 fillForm(row);
                 showTab("form");
-                setStatus("Editing trade #" + row.id + ". Change times/prices/notes/exit type, then Save.", true);
+                setStatus("Editing trade #" + row.id + ". Change fields, then Save.", true);
                 var focusEl = $("tlEntryTime");
                 if (focusEl && focusEl.focus) focusEl.focus();
             };
@@ -222,7 +231,17 @@
         $("tlParseBtn").onclick = function () { parsePaste().catch(function (e) { setStatus(String(e), false); }); };
         $("tlSavePasteBtn").onclick = function () {
             parsePaste().then(function (p) {
-                if (p && p.master_ok !== false) return saveForm();
+                if (!p) return;
+                if (p.master_ok === false) {
+                    setStatus("Cannot save: symbol not found in arbitrage_master. Fix symbol then Parse again.", false);
+                    return;
+                }
+                if (p.parse_warnings && p.parse_warnings.length) {
+                    setStatus("Cannot save until required fields parse cleanly: " + p.parse_warnings.join("; "), false);
+                    return;
+                }
+                showTab("form");
+                return saveForm();
             }).catch(function (e) { setStatus(String(e), false); });
         };
         $("tlSaveFormBtn").onclick = function () { saveForm().catch(function (e) { setStatus(String(e), false); }); };

@@ -15,7 +15,6 @@ from backend.services.rule27_trade_log import (
     ensure_trade_log_table,
     get_trade,
     list_trades,
-    serialize_trade,
     update_trade_fields,
     upsert_trade,
 )
@@ -56,6 +55,10 @@ class TradeBody(BaseModel):
 
 
 class PatchBody(BaseModel):
+    session_date: Optional[str] = None
+    symbol: Optional[str] = None
+    direction: Optional[str] = None
+    qty: Optional[int] = None
     entry_time: Optional[str] = None
     entry_price: Optional[float] = None
     exit_time: Optional[str] = None
@@ -149,6 +152,26 @@ def patch_journal(
     ensure_trade_log_table()
     patch = body.model_dump(exclude_unset=True)
     try:
+        if "symbol" in patch and patch["symbol"]:
+            enriched = enrich_from_master(
+                db,
+                {
+                    "symbol": patch["symbol"],
+                    "direction": patch.get("direction") or "LONG",
+                    "session_date": patch.get("session_date") or "2000-01-01",
+                    "entry_time": patch.get("entry_time") or "09:15:00",
+                    "entry_price": patch.get("entry_price") or 1.0,
+                    "qty": patch.get("qty"),
+                    "parse_warnings": [],
+                },
+            )
+            if not enriched.get("master_ok"):
+                raise ValueError("symbol not found in arbitrage_master")
+            patch["symbol"] = enriched["symbol"]
+            if enriched.get("contract"):
+                patch["contract"] = enriched["contract"]
+            if patch.get("qty") is None and enriched.get("qty") is not None:
+                patch["qty"] = enriched["qty"]
         update_trade_fields(db, trade_id, patch)
         row = get_trade(db, trade_id)
         if row:
@@ -161,7 +184,11 @@ def patch_journal(
         db.commit()
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # Keep 404 for missing rows; other validation → 400
+        code = 404 if "not found" in str(exc).lower() and "symbol" not in str(exc).lower() else 400
+        if str(exc) == "trade not found":
+            code = 404
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(

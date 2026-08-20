@@ -360,13 +360,24 @@ def _as_date(val: Any) -> Optional[date]:
 
 
 def _as_time(val: Any) -> Optional[time]:
-    if val is None:
+    if val is None or val == "":
         return None
     if isinstance(val, datetime):
         return val.time().replace(microsecond=0)
     if isinstance(val, time):
         return val.replace(microsecond=0)
+    if isinstance(val, timedelta):
+        total = int(val.total_seconds()) % 86400
+        if total < 0:
+            total += 86400
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        return time(h, m, s)
     s = str(val).strip()
+    if "T" in s:
+        s = s.split("T", 1)[-1]
+    s = s.split(".", 1)[0]
+    s = s.split("+", 1)[0].split("Z", 1)[0].strip()
     for fmt in ("%H:%M:%S", "%H:%M"):
         try:
             return datetime.strptime(s, fmt).time()
@@ -549,6 +560,11 @@ def get_trade(db, trade_id: int) -> Optional[Dict[str, Any]]:
 _UPDATE_BY_ID = text(
     f"""
     UPDATE {TABLE} SET
+        session_date = CAST(:session_date AS date),
+        symbol = :symbol,
+        contract = :contract,
+        direction = :direction,
+        qty = :qty,
         entry_time = CAST(:entry_time AS time),
         entry_price = :entry_price,
         exit_time = CAST(:exit_time AS time),
@@ -569,7 +585,7 @@ _UPDATE_BY_ID = text(
 
 
 def update_trade_fields(db, trade_id: int, payload: Dict[str, Any]) -> int:
-    """Patch entry/exit clock+price, notes, and exit type. Recalculates points/PnL fields."""
+    """Patch trade fields from the UI form. Recalculates points/slippage/bars."""
     ensure_trade_log_table()
     existing = db.execute(
         text(f"SELECT * FROM {TABLE} WHERE id = :id"),
@@ -578,7 +594,13 @@ def update_trade_fields(db, trade_id: int, payload: Dict[str, Any]) -> int:
     if not existing:
         raise ValueError("trade not found")
     merged = dict(existing)
+    # Allow explicit nulls so exit/slippage can be cleared on edit.
     for key in (
+        "session_date",
+        "symbol",
+        "contract",
+        "direction",
+        "qty",
         "entry_time",
         "entry_price",
         "exit_time",
@@ -589,28 +611,55 @@ def update_trade_fields(db, trade_id: int, payload: Dict[str, Any]) -> int:
         "exit_trigger_type",
         "notes",
     ):
-        if key in payload and payload[key] is not None:
+        if key in payload:
             merged[key] = payload[key]
+
     direction = str(merged.get("direction") or "LONG").upper()
-    entry = float(merged["entry_price"])
+    if direction not in ("LONG", "SHORT"):
+        raise ValueError("direction must be LONG or SHORT")
+    entry = _f(merged.get("entry_price"))
+    if entry is None:
+        raise ValueError("entry_price is required")
+    et = _as_time(merged.get("entry_time"))
+    if et is None:
+        raise ValueError("entry_time is required (use HH:MM or HH:MM:SS)")
+    xt = _as_time(merged.get("exit_time"))
     exit_px = _f(merged.get("exit_price"))
-    qty = int(merged["qty"]) if merged.get("qty") is not None else None
-    points = _points(direction, entry, exit_px)
+    sd = _as_date(merged.get("session_date"))
+    if sd is None:
+        raise ValueError("session_date is required")
+    symbol = str(merged.get("symbol") or "").strip().upper()
+    if not symbol:
+        raise ValueError("symbol is required")
+
+    qty = None
+    if merged.get("qty") is not None and merged.get("qty") != "":
+        try:
+            qty = int(merged["qty"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("qty must be an integer") from exc
+    points = _points(direction, float(entry), exit_px)
     slip_pts = _f(merged.get("slippage_pts"))
     slip_inr = None
     if slip_pts is not None and qty is not None:
         slip_inr = round(float(slip_pts) * int(qty), 2)
-    et = _as_time(merged.get("entry_time"))
-    xt = _as_time(merged.get("exit_time"))
     bars = merged.get("bars_held_10m")
     if et is not None and xt is not None:
         bars = _bars_held(et, xt)
+    elif exit_px is None and xt is None:
+        bars = None
+
     rid = db.execute(
         _UPDATE_BY_ID,
         {
             "id": int(trade_id),
-            "entry_time": et.strftime("%H:%M:%S") if et else None,
-            "entry_price": entry,
+            "session_date": sd.isoformat(),
+            "symbol": symbol,
+            "contract": merged.get("contract"),
+            "direction": direction,
+            "qty": qty,
+            "entry_time": et.strftime("%H:%M:%S"),
+            "entry_price": float(entry),
             "exit_time": xt.strftime("%H:%M:%S") if xt else None,
             "exit_price": exit_px,
             "exit_price_intended": _f(merged.get("exit_price_intended")),

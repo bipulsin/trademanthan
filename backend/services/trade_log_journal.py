@@ -61,10 +61,37 @@ def normalize_underlying(raw: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", s)
 
 
+def _kv_map(text_in: str) -> Dict[str, str]:
+    """Parse ``key : value`` / ``key=value`` lines (spaces around separators OK)."""
+    out: Dict[str, str] = {}
+    for line in (text_in or "").splitlines():
+        m = re.match(r"^\s*([A-Za-z][A-Za-z0-9_/ ]{0,48}?)\s*[:=]\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        key = re.sub(r"[\s/]+", "_", m.group(1).strip().lower())
+        out[key] = m.group(2).strip()
+    return out
+
+
+def _clock_from_val(val: Optional[str]) -> Optional[str]:
+    if not val:
+        return None
+    s = str(val).strip()
+    m = re.search(r"(?:20\d{2}-\d{2}-\d{2}[ T])?(\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?)", s)
+    if not m:
+        return None
+    clock = m.group(1).split(".", 1)[0]
+    parts = clock.split(":")
+    if len(parts) == 2:
+        return f"{int(parts[0]):02d}:{int(parts[1]):02d}:00"
+    return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
+
+
 def parse_journal_text(text_in: str) -> Dict[str, Any]:
     """Extract journal fields from a pasted trade note. Missing keys are None."""
     raw = text_in or ""
     t = raw.replace("\u2013", "-").replace("\u2014", "-")
+    kv = _kv_map(t)
     out: Dict[str, Any] = {
         "session_date": None,
         "symbol": None,
@@ -82,40 +109,86 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
         "parse_warnings": [],
     }
 
+    # Prefer explicit key/value lines (Cursor journal / structured paste).
+    for date_key in ("trade_date", "session_date", "date"):
+        if kv.get(date_key):
+            dm = re.search(r"(20\d{2}-\d{2}-\d{2})", kv[date_key])
+            if dm:
+                out["session_date"] = dm.group(1)
+                break
+    for sym_key in ("symbol", "symbol_instrument", "instrument", "underlying", "ticker"):
+        if kv.get(sym_key):
+            out["symbol"] = kv[sym_key].strip().upper()
+            break
+    for dir_key in ("side", "direction", "dir"):
+        if kv.get(dir_key):
+            dm = re.search(r"\b(LONG|SHORT)\b", kv[dir_key], re.I)
+            if dm:
+                out["direction"] = dm.group(1).upper()
+                break
+    if kv.get("entry_time") or kv.get("entrytime"):
+        out["entry_time"] = _clock_from_val(kv.get("entry_time") or kv.get("entrytime"))
+    if kv.get("exit_time") or kv.get("exittime"):
+        out["exit_time"] = _clock_from_val(kv.get("exit_time") or kv.get("exittime"))
+    if kv.get("entry_price") or kv.get("entryprice"):
+        out["entry_price"] = _num(kv.get("entry_price") or kv.get("entryprice") or "")
+    if kv.get("exit_price") or kv.get("exitprice"):
+        out["exit_price"] = _num(kv.get("exit_price") or kv.get("exitprice") or "")
+    for qty_key in ("qty", "quantity", "size", "lot", "lots"):
+        if kv.get(qty_key):
+            out["qty"] = _int_qty(kv[qty_key])
+            break
+    if kv.get("slippage_pts") or kv.get("slippage"):
+        out["slippage_pts"] = _num(kv.get("slippage_pts") or kv.get("slippage") or "")
+    if kv.get("exit_price_intended") or kv.get("intended_exit") or kv.get("target"):
+        out["exit_price_intended"] = _num(
+            kv.get("exit_price_intended") or kv.get("intended_exit") or kv.get("target") or ""
+        )
+    if kv.get("exit_trigger_type"):
+        out["exit_trigger_type"] = normalize_exit_trigger_type(kv["exit_trigger_type"])
+    if kv.get("exit_trigger") or kv.get("exit_rule") or kv.get("exitrule"):
+        out["exit_trigger"] = (kv.get("exit_trigger") or kv.get("exit_rule") or kv.get("exitrule") or "")[
+            :400
+        ]
+
     dm = re.search(r"(20\d{2}-\d{2}-\d{2})", t)
-    if dm:
+    if not out["session_date"] and dm:
         out["session_date"] = dm.group(1)
 
-    dir_m = re.search(r"\b(LONG|SHORT)\b", t, re.I)
-    if dir_m:
-        out["direction"] = dir_m.group(1).upper()
+    if not out["direction"]:
+        dir_m = re.search(r"\b(LONG|SHORT)\b", t, re.I)
+        if dir_m:
+            out["direction"] = dir_m.group(1).upper()
 
-    for pat in (
-        r"Symbol\s*/\s*Instrument\s*[:|]?\s*([A-Z0-9][A-Z0-9 ./-]{1,40})",
-        r"Symbol:\s*([A-Z0-9][A-Z0-9 ./-]{1,40})",
-        r"\b(?:LONG|SHORT)\s+([A-Z]{2,20})(?:\s+FUT)?\b",
-        r"\b([A-Z]{2,20})\s+(?:LONG|SHORT)\b",
-        r"\b([A-Z]{2,20})\s+FUT\b",
-    ):
-        m = re.search(pat, t, re.I)
-        if m:
-            out["symbol"] = m.group(1).strip().upper()
-            break
+    if not out["symbol"]:
+        for pat in (
+            r"Symbol\s*/\s*Instrument\s*[:|]?\s*([A-Z0-9][A-Z0-9 ./-]{1,40})",
+            r"Symbol\s*[:|]\s*([A-Z0-9][A-Z0-9 ./-]{1,40})",
+            r"\b(?:LONG|SHORT)\s+([A-Z]{2,20})(?:\s+FUT)?\b",
+            r"\b([A-Z]{2,20})\s+(?:LONG|SHORT)\b",
+            r"\b([A-Z]{2,20})\s+FUT\b",
+        ):
+            m = re.search(pat, t, re.I)
+            if m:
+                out["symbol"] = m.group(1).strip().upper()
+                break
 
-    em = re.search(
-        r"Entry(?:Time| \(time\)| time)?\s*[:|]?\s*(?:20\d{2}-\d{2}-\d{2}\s+)?(\d{1,2}:\d{2}(?::\d{2})?)",
-        t,
-        re.I,
-    )
-    if em:
-        out["entry_time"] = em.group(1)
-    xm = re.search(
-        r"Exit(?:Time| \(time\)| time)?\s*[:|]?\s*(?:20\d{2}-\d{2}-\d{2}\s+)?(\d{1,2}:\d{2}(?::\d{2})?)",
-        t,
-        re.I,
-    )
-    if xm:
-        out["exit_time"] = xm.group(1)
+    if not out["entry_time"]:
+        em = re.search(
+            r"Entry(?:_?Time| \(time\)| time)?\s*[:|]?\s*(?:20\d{2}-\d{2}-\d{2}\s+)?(\d{1,2}:\d{2}(?::\d{2})?)",
+            t,
+            re.I,
+        )
+        if em:
+            out["entry_time"] = _clock_from_val(em.group(1))
+    if not out["exit_time"]:
+        xm = re.search(
+            r"Exit(?:_?Time| \(time\)| time)?\s*[:|]?\s*(?:20\d{2}-\d{2}-\d{2}\s+)?(\d{1,2}:\d{2}(?::\d{2})?)",
+            t,
+            re.I,
+        )
+        if xm:
+            out["exit_time"] = _clock_from_val(xm.group(1))
     if not out["entry_time"] or not out["exit_time"]:
         span = re.search(
             r"(\d{1,2}:\d{2}(?::\d{2})?)\s*(?:to|-|→)\s*(\d{1,2}:\d{2}(?::\d{2})?)",
@@ -123,23 +196,25 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
             re.I,
         )
         if span:
-            out["entry_time"] = out["entry_time"] or span.group(1)
-            out["exit_time"] = out["exit_time"] or span.group(2)
+            out["entry_time"] = out["entry_time"] or _clock_from_val(span.group(1))
+            out["exit_time"] = out["exit_time"] or _clock_from_val(span.group(2))
 
-    ep = re.search(
-        r"Entry(?:Price| \(price\)| price)\s*[:|]?\s*([0-9,]+\.?[0-9]*)",
-        t,
-        re.I,
-    )
-    if ep:
-        out["entry_price"] = _num(ep.group(1))
-    xp = re.search(
-        r"Exit(?:Price| \(price\)| price)\s*[:|]?\s*([0-9,]+\.?[0-9]*)",
-        t,
-        re.I,
-    )
-    if xp:
-        out["exit_price"] = _num(xp.group(1))
+    if out["entry_price"] is None:
+        ep = re.search(
+            r"Entry(?:_?Price| \(price\)| price)\s*[:|]?\s*([0-9,]+\.?[0-9]*)",
+            t,
+            re.I,
+        )
+        if ep:
+            out["entry_price"] = _num(ep.group(1))
+    if out["exit_price"] is None:
+        xp = re.search(
+            r"Exit(?:_?Price| \(price\)| price)\s*[:|]?\s*([0-9,]+\.?[0-9]*)",
+            t,
+            re.I,
+        )
+        if xp:
+            out["exit_price"] = _num(xp.group(1))
     if out["entry_price"] is None or out["exit_price"] is None:
         arrow = re.search(
             r"\(?\s*([0-9,]+\.?[0-9]*)\s*(?:→|->)\s*([0-9,]+\.?[0-9]*)\s*\)?",
@@ -149,54 +224,52 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
             out["entry_price"] = out["entry_price"] or _num(arrow.group(1))
             out["exit_price"] = out["exit_price"] or _num(arrow.group(2))
 
-    qm = re.search(
-        r"(?:Size|Executed Shares\s*/\s*Lot|qty|quantity)\s*[:|]?\s*([0-9,]+)",
-        t,
-        re.I,
-    )
-    if qm:
-        out["qty"] = _int_qty(qm.group(1))
+    if out["qty"] is None:
+        qm = re.search(
+            r"(?:Size|Executed Shares\s*/\s*Lot|qty|quantity)\s*[:|]?\s*([0-9,]+)",
+            t,
+            re.I,
+        )
+        if qm:
+            out["qty"] = _int_qty(qm.group(1))
 
-    sm = None
-    for m in re.finditer(r"([0-9]+\.?[0-9]*)\s*pts\b", t, re.I):
-        sm = m
-    if sm:
-        out["slippage_pts"] = _num(sm.group(1))
-    intended = re.search(
-        r"(?:intended|target)\s*(?:exit|fill)?[^0-9]{0,20}([0-9]+\.?[0-9]*)",
-        t,
-        re.I,
-    )
-    if intended:
-        out["exit_price_intended"] = _num(intended.group(1))
+    if out["slippage_pts"] is None:
+        sm = None
+        for m in re.finditer(r"([0-9]+\.?[0-9]*)\s*pts\b", t, re.I):
+            sm = m
+        if sm:
+            out["slippage_pts"] = _num(sm.group(1))
+    if out["exit_price_intended"] is None:
+        intended = re.search(
+            r"(?:intended|target)\s*(?:exit|fill)?[^0-9]{0,20}([0-9]+\.?[0-9]*)",
+            t,
+            re.I,
+        )
+        if intended:
+            out["exit_price_intended"] = _num(intended.group(1))
 
-    etype = re.search(r"exit_trigger_type\s*[=:]\s*([a-z_]+)", t, re.I)
-    if etype:
-        out["exit_trigger_type"] = normalize_exit_trigger_type(etype.group(1))
-    elif re.search(r"discretionary", t, re.I) and not re.search(
-        r"rule_compliant|2-candle|F&O pause|pre-F&O", t, re.I
-    ):
-        out["exit_trigger_type"] = "discretionary"
-    elif re.search(r"rule_compliant|2-candle fail|F&O pause|pre-F&O pause", t, re.I):
-        out["exit_trigger_type"] = "rule_compliant"
+    if not out["exit_trigger_type"]:
+        etype = re.search(r"exit_trigger_type\s*[=:]\s*([a-z_]+)", t, re.I)
+        if etype:
+            out["exit_trigger_type"] = normalize_exit_trigger_type(etype.group(1))
+        elif re.search(r"discretionary", t, re.I) and not re.search(
+            r"rule_compliant|2-candle|F&O pause|pre-F&O", t, re.I
+        ):
+            out["exit_trigger_type"] = "discretionary"
+        elif re.search(r"rule_compliant|2-candle fail|F&O pause|pre-F&O pause", t, re.I):
+            out["exit_trigger_type"] = "rule_compliant"
 
-    trig = re.search(r"ExitRule\s*[:|]?\s*(.+)", t, re.I)
-    if trig:
-        out["exit_trigger"] = trig.group(1).strip()[:400]
-    elif out["exit_trigger_type"]:
-        out["exit_trigger"] = out["exit_trigger_type"]
+    if not out["exit_trigger"]:
+        trig = re.search(r"ExitRule\s*[:|]?\s*(.+)", t, re.I)
+        if trig:
+            out["exit_trigger"] = trig.group(1).strip()[:400]
+        elif out["exit_trigger_type"]:
+            out["exit_trigger"] = out["exit_trigger_type"]
 
+    # Exit is optional for open / in-progress journals.
     missing = [
         k
-        for k in (
-            "symbol",
-            "direction",
-            "session_date",
-            "entry_time",
-            "entry_price",
-            "exit_time",
-            "exit_price",
-        )
+        for k in ("symbol", "direction", "session_date", "entry_time", "entry_price")
         if not out.get(k)
     ]
     if missing:

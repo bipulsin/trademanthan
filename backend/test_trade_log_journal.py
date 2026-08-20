@@ -45,3 +45,45 @@ def test_parse_long_arrow_line():
     assert p["session_date"] == "2026-08-19"
     assert p["entry_price"] == 1807.40
     assert p["exit_price"] == 1820.00
+
+
+PFC_NOTE = """
+trade_date : 2026-08-20
+symbol : PFCQ2026
+contract_month : Aug 2026
+side : SHORT
+entry_time : 10:25:00
+entry_price : 365.80
+entry_candle_type : RED
+entry_trigger_type : Rule 15 - EMA5 Pullback
+entry_grade : A
+pullback_number : 1
+exit_time : 11:45:00
+exit_price : 364.20
+qty : 1300
+"""
+
+
+def test_parse_snake_case_key_value_journal():
+    p = parse_journal_text(PFC_NOTE)
+    assert p["session_date"] == "2026-08-20"
+    assert p["symbol"] == "PFCQ2026"
+    assert normalize_underlying(p["symbol"]) == "PFC"
+    assert p["direction"] == "SHORT"
+    assert p["entry_time"] == "10:25:00"
+    assert p["entry_price"] == 365.80
+    assert p["exit_time"] == "11:45:00"
+    assert p["exit_price"] == 364.20
+    assert p["qty"] == 1300
+    assert not any(str(w).startswith("missing:") for w in p["parse_warnings"])
+
+
+def test_parse_open_trade_does_not_require_exit():
+    p = parse_journal_text(
+        "trade_date : 2026-08-20\nsymbol : ITC\nside : LONG\nentry_time : 10:25:00\nentry_price : 400.5\n"
+    )
+    assert p["symbol"] == "ITC"
+    assert p["entry_time"] == "10:25:00"
+    assert p["entry_price"] == 400.5
+    assert p["exit_time"] is None
+    assert not any(str(w).startswith("missing:") for w in p["parse_warnings"])
