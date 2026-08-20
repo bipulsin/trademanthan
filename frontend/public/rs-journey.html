@@ -90,10 +90,14 @@
     .pill-beyond { background: rgba(251, 191, 36, 0.2); color: var(--warn); }
     .pill-neutral { background: rgba(148, 163, 184, 0.25); color: #cbd5e1; }
     .pill-failhard { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+    .pill-ready { background: rgba(52, 211, 153, 0.25); color: #6ee7b7; }
+    .pill-take { background: rgba(56, 189, 248, 0.22); color: #7dd3fc; }
+    .pill-off { background: rgba(148, 163, 184, 0.15); color: #64748b; }
     .meta { color: var(--muted); font-size: 12px; }
     tr.row-persist { background: rgba(13, 148, 136, 0.06); }
     tr.row-beyond { background: rgba(251, 191, 36, 0.05); }
     tr.row-fail { background: rgba(248, 113, 113, 0.05); }
+    tr.row-ready { box-shadow: inset 3px 0 0 rgba(52, 211, 153, 0.7); }
   </style>
 </head>
 <body>
@@ -101,7 +105,7 @@
     <header>
       <div>
         <h1>RS Journey / Exclusion Audit</h1>
-        <p class="sub">Read-only tracer: universe eligibility → each scan checkpoint (RS%, rank, cutoff, pass/fail) → lock. Prospective exclusion log fills the pre-Top-10 gap from deploy forward.</p>
+        <p class="sub">Read-only tracer: universe eligibility → each scan checkpoint (RS%, rank, cutoff, pass/fail) → lock. READY NOW / Take Trade come from checklist consistency log (not the same as Kavach engine state). Prospective exclusion log fills the pre-Top-10 gap from deploy forward.</p>
       </div>
     </header>
 
@@ -184,7 +188,13 @@
     if (st === "metrics_fail" || st === "not_in_universe") return '<span class="pill pill-failhard">' + esc(st) + '</span>';
     return '<span class="pill pill-unk">' + esc(st || "—") + '</span>';
   }
-  function rowClass(st) {
+  function ynPill(v, yesCls, yesLabel) {
+    if (v === true) return '<span class="pill ' + yesCls + '">' + yesLabel + '</span>';
+    if (v === false) return '<span class="pill pill-off">no</span>';
+    return '<span class="pill pill-unk">—</span>';
+  }
+  function rowClass(st, ready) {
+    if (ready === true) return "row-ready";
     if (st === "persisted") return "row-persist";
     if (st === "beyond_persist") return "row-beyond";
     if (st === "metrics_fail" || st === "neutral" || st === "not_in_universe") return "row-fail";
@@ -203,6 +213,7 @@
     var sum = data.summary || {};
     var uni = data.universe || {};
     var pol = data.cutoffs_policy || {};
+    var rt = data.ready_take || {};
     $("agg").innerHTML =
       '<div class="agg-card"><div class="k">Symbol</div><div class="v">' + esc(data.symbol) + '</div>' +
         '<div class="s">in: ' + esc((data.symbol_resolution || {}).input || "") + '</div></div>' +
@@ -212,14 +223,33 @@
         '<div class="s">persist Top-' + (pol.persist_top_n || 10) + ': ' + (sum.ever_persisted_top10 ? "yes" : "no") + '</div></div>' +
       '<div class="agg-card"><div class="k">First Top-10</div><div class="v">' + esc(sum.first_persisted_at_ist || "—") + '</div>' +
         '<div class="s">rank #' + esc(sum.first_persisted_rank != null ? sum.first_persisted_rank : "—") + '</div></div>' +
-      '<div class="agg-card"><div class="k">Locked</div><div class="v">' + (sum.locked ? "YES" : "NO") + '</div></div>';
+      '<div class="agg-card"><div class="k">Locked</div><div class="v">' + (sum.locked ? "YES" : "NO") + '</div></div>' +
+      '<div class="agg-card"><div class="k">First READY NOW</div><div class="v">' + esc(sum.first_ready_now_at_ist || "—") + '</div>' +
+        '<div class="s">' + esc(rt.ready_now_episodes != null ? (rt.ready_now_episodes + " episode(s)") : "no log") + '</div></div>' +
+      '<div class="agg-card"><div class="k">First Take Trade</div><div class="v">' + esc(sum.first_take_trade_at_ist || "—") + '</div>' +
+        '<div class="s">' + esc(rt.take_trade_episodes != null ? (rt.take_trade_episodes + " armed episode(s)") : "no log") + '</div></div>';
 
     var dc = data.data_completeness || {};
+    var boxes = "";
     if (dc.full_exclusion_reasons) {
-      $("completeness").innerHTML = '<div class="okbox">' + esc(dc.note) + "</div>";
+      boxes += '<div class="okbox">' + esc(dc.note) + "</div>";
     } else {
-      $("completeness").innerHTML = '<div class="warn">' + esc(dc.note) + "</div>";
+      boxes += '<div class="warn">' + esc(dc.note) + "</div>";
     }
+    if (rt.note) {
+      boxes += '<div class="okbox">' + esc(rt.note) +
+        (rt.log_rows ? (' · ' + rt.log_rows + ' consistency rows') : ' · no consistency rows for this symbol-day') +
+        "</div>";
+    }
+    if ((rt.ready_now_times_ist || []).length) {
+      boxes += '<div class="meta" style="margin-bottom:8px">READY NOW episode starts: ' +
+        esc((rt.ready_now_times_ist || []).join(", ")) + "</div>";
+    }
+    if ((rt.take_trade_times_ist || []).length) {
+      boxes += '<div class="meta" style="margin-bottom:8px">Take Trade armed starts: ' +
+        esc((rt.take_trade_times_ist || []).join(", ")) + "</div>";
+    }
+    $("completeness").innerHTML = boxes;
 
     var cps = data.checkpoints || [];
     $("cpHint").textContent = cps.length + " checkpoints · " + (data.date || "");
@@ -230,9 +260,10 @@
         "<th>IST</th><th>Status</th><th>Side</th><th>Rank</th><th>Would-be</th>" +
         "<th>RS%</th><th>Top-" + (pol.top_n || 5) + " cutoff RS</th><th>Top-" + (pol.persist_top_n || 10) + " cutoff RS</th>" +
         "<th>Top-N</th><th>Persist</th><th>Reason</th><th>Score</th><th>Grade</th><th>Kavach</th>" +
+        "<th>Ready Now</th><th>Take Trade</th>" +
         "</tr></thead><tbody>";
       cps.forEach(function (c) {
-        html += '<tr class="' + rowClass(c.status) + '">' +
+        html += '<tr class="' + rowClass(c.status, c.ready_now) + '">' +
           '<td class="mono">' + esc(c.scan_time_ist || "—") + "</td>" +
           "<td>" + statusPill(c.status) + "</td>" +
           "<td>" + esc(c.ranking_side || "—") + "</td>" +
@@ -249,6 +280,12 @@
           '<td class="mono">' + fmt(c.trade_score, 0) + "</td>" +
           "<td>" + esc(c.confidence_grade || "—") + "</td>" +
           "<td>" + esc(c.kavach_state || "—") + "</td>" +
+          "<td>" + ynPill(c.ready_now, "pill-ready", "READY") +
+            (c.ready_now_at_ist ? '<div class="meta mono">' + esc(c.ready_now_at_ist) + "</div>" : "") +
+          "</td>" +
+          "<td>" + ynPill(c.take_trade_enabled, "pill-take", "ARMED") +
+            (c.take_trade_at_ist ? '<div class="meta mono">' + esc(c.take_trade_at_ist) + "</div>" : "") +
+          "</td>" +
           "</tr>";
       });
       html += "</tbody></table>";

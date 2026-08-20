@@ -6,8 +6,8 @@ Does not alter ranking, lock, or checklist logic.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 from sqlalchemy import text
@@ -23,6 +23,8 @@ from backend.services.rs_exclusion_audit import (
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 MIN_BARS = 40
+# Match checklist READY / Take Trade logs to RS scan slots (same window as Top-10 vs Ready).
+READY_NEAR_WINDOW = timedelta(minutes=5)
 
 REASON_LABELS = {
     "missing_key": "Missing instrument key / symbol",
@@ -65,6 +67,161 @@ def _ist_hm(ts: Any) -> Optional[str]:
         return None
     t = ts.astimezone(IST) if ts.tzinfo else IST.localize(ts)
     return t.strftime("%H:%M:%S")
+
+
+def _as_ist(ts: Any) -> Optional[datetime]:
+    if not isinstance(ts, datetime):
+        return None
+    return ts.astimezone(IST) if ts.tzinfo else IST.localize(ts)
+
+
+def _is_ready_family(state: Any) -> bool:
+    return (state or "").upper().startswith("READY")
+
+
+def _parse_inputs(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            import json
+
+            v = json.loads(raw)
+            return v if isinstance(v, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _fetch_ready_take_events(
+    db, session_date: str, symbol: str
+) -> List[Dict[str, Any]]:
+    """Checklist READY NOW / Take Trade telemetry for one symbol-day."""
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT logged_at, rendered_state, inputs
+                FROM kavach_ready_consistency_log
+                WHERE session_date = CAST(:d AS date)
+                  AND UPPER(TRIM(symbol)) = :s
+                ORDER BY logged_at, id
+                """
+            ),
+            {"d": session_date, "s": symbol},
+        ).fetchall()
+    except Exception as exc:
+        logger.debug("ready consistency fetch skipped: %s", exc)
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        inp = _parse_inputs(r.inputs)
+        ready = _is_ready_family(r.rendered_state)
+        take = bool(inp.get("trade_take_enabled"))
+        # Take Trade only meaningful when card is READY-family.
+        if take and not ready:
+            take = False
+        out.append(
+            {
+                "logged_at": r.logged_at,
+                "logged_at_ist": _ist_hm(r.logged_at),
+                "ready_now": ready,
+                "take_trade_enabled": take,
+                "rendered_state": r.rendered_state,
+                "ready_visible_since": inp.get("ready_visible_since"),
+            }
+        )
+    return out
+
+
+def _nearest_event(
+    scan_ts: datetime,
+    events: List[Dict[str, Any]],
+    *,
+    flag_key: str,
+) -> Optional[Dict[str, Any]]:
+    """Nearest event within READY_NEAR_WINDOW where flag_key is True."""
+    best: Optional[Tuple[timedelta, Dict[str, Any]]] = None
+    for e in events:
+        if not e.get(flag_key):
+            continue
+        et = _as_ist(e.get("logged_at"))
+        if et is None:
+            continue
+        delta = abs(et - scan_ts)
+        if delta > READY_NEAR_WINDOW:
+            continue
+        if best is None or delta < best[0]:
+            best = (delta, e)
+    return best[1] if best else None
+
+
+def _annotate_ready_take(
+    checkpoints: List[Dict[str, Any]], events: List[Dict[str, Any]]
+) -> None:
+    for c in checkpoints:
+        st_raw = c.get("scan_time")
+        st: Optional[datetime] = None
+        if isinstance(st_raw, datetime):
+            st = _as_ist(st_raw)
+        elif isinstance(st_raw, str) and st_raw:
+            try:
+                st = _as_ist(datetime.fromisoformat(st_raw.replace("Z", "+00:00")))
+            except ValueError:
+                st = None
+        if st is None:
+            c["ready_now"] = None
+            c["take_trade_enabled"] = None
+            c["ready_now_at_ist"] = None
+            c["take_trade_at_ist"] = None
+            continue
+        ready_ev = _nearest_event(st, events, flag_key="ready_now")
+        take_ev = _nearest_event(st, events, flag_key="take_trade_enabled")
+        c["ready_now"] = bool(ready_ev)
+        c["take_trade_enabled"] = bool(take_ev)
+        c["ready_now_at_ist"] = ready_ev.get("logged_at_ist") if ready_ev else None
+        c["take_trade_at_ist"] = take_ev.get("logged_at_ist") if take_ev else None
+
+
+def _ready_take_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    first_ready = next((e for e in events if e.get("ready_now")), None)
+    first_take = next((e for e in events if e.get("take_trade_enabled")), None)
+    ready_times: List[str] = []
+    take_times: List[str] = []
+    prev_ready = False
+    prev_take = False
+    ready_episodes = 0
+    take_episodes = 0
+    for e in events:
+        r = bool(e.get("ready_now"))
+        t = bool(e.get("take_trade_enabled"))
+        hm = e.get("logged_at_ist")
+        if r and not prev_ready:
+            ready_episodes += 1
+            if hm:
+                ready_times.append(hm)
+        if t and not prev_take:
+            take_episodes += 1
+            if hm:
+                take_times.append(hm)
+        prev_ready = r
+        prev_take = t
+    return {
+        "log_rows": len(events),
+        "first_ready_now_at_ist": first_ready.get("logged_at_ist") if first_ready else None,
+        "first_take_trade_at_ist": first_take.get("logged_at_ist") if first_take else None,
+        "ready_now_episodes": ready_episodes,
+        "take_trade_episodes": take_episodes,
+        "ready_now_times_ist": ready_times,
+        "take_trade_times_ist": take_times,
+        "source": "kavach_ready_consistency_log",
+        "note": (
+            "READY NOW / Take Trade from checklist consistency log "
+            f"(matched to RS scans within ±{int(READY_NEAR_WINDOW.total_seconds() // 60)}m). "
+            "Kavach column remains engine kavach_state only."
+        ),
+    }
 
 
 def _pass_fail(
@@ -222,6 +379,10 @@ def lookup_rs_journey(symbol: str, session_date: str) -> Dict[str, Any]:
                     "trade_score": None,
                     "confidence_grade": None,
                     "kavach_state": None,
+                    "ready_now": None,
+                    "take_trade_enabled": None,
+                    "ready_now_at_ist": None,
+                    "take_trade_at_ist": None,
                     "current_price": None,
                     "volume_ratio": None,
                     "volume_label": None,
@@ -272,6 +433,10 @@ def lookup_rs_journey(symbol: str, session_date: str) -> Dict[str, Any]:
                         "trade_score": _f(snap.get("trade_score")),
                         "confidence_grade": snap.get("confidence_grade"),
                         "kavach_state": snap.get("kavach_state"),
+                        "ready_now": None,
+                        "take_trade_enabled": None,
+                        "ready_now_at_ist": None,
+                        "take_trade_at_ist": None,
                         "current_price": _f(snap.get("current_price")),
                         "volume_ratio": _f(snap.get("volume_ratio")),
                         "volume_label": snap.get("volume_label"),
@@ -325,6 +490,10 @@ def lookup_rs_journey(symbol: str, session_date: str) -> Dict[str, Any]:
                         "trade_score": _f(excl.get("trade_score")),
                         "confidence_grade": excl.get("confidence_grade"),
                         "kavach_state": excl.get("kavach_state"),
+                        "ready_now": None,
+                        "take_trade_enabled": None,
+                        "ready_now_at_ist": None,
+                        "take_trade_at_ist": None,
                         "current_price": _f(excl.get("current_price")),
                         "volume_ratio": _f(excl.get("volume_ratio")),
                         "volume_label": excl.get("volume_label"),
@@ -355,6 +524,10 @@ def lookup_rs_journey(symbol: str, session_date: str) -> Dict[str, Any]:
                     "trade_score": None,
                     "confidence_grade": None,
                     "kavach_state": None,
+                    "ready_now": None,
+                    "take_trade_enabled": None,
+                    "ready_now_at_ist": None,
+                    "take_trade_at_ist": None,
                     "current_price": None,
                     "volume_ratio": None,
                     "volume_label": None,
@@ -480,6 +653,10 @@ def lookup_rs_journey(symbol: str, session_date: str) -> Dict[str, Any]:
         ever_persist = any(c.get("pass_persist") is True for c in checkpoints)
         data_gap = any(c["status"] == "absent_unknown" for c in checkpoints)
 
+        ready_events = _fetch_ready_take_events(db, session_date, sym)
+        _annotate_ready_take(checkpoints, ready_events)
+        ready_sum = _ready_take_summary(ready_events)
+
         return {
             "ok": True,
             "date": session_date,
@@ -513,7 +690,12 @@ def lookup_rs_journey(symbol: str, session_date: str) -> Dict[str, Any]:
                 ),
                 "locked": bool(lock_out),
                 "lock": lock_out,
+                "first_ready_now_at_ist": ready_sum.get("first_ready_now_at_ist"),
+                "first_take_trade_at_ist": ready_sum.get("first_take_trade_at_ist"),
+                "ready_now_episodes": ready_sum.get("ready_now_episodes"),
+                "take_trade_episodes": ready_sum.get("take_trade_episodes"),
             },
+            "ready_take": ready_sum,
             "checkpoints": checkpoints,
             "lock_audit": lock_audit,
             "anchors": anchors,
