@@ -71,6 +71,9 @@ def test_annotate_ready_take_within_window():
             "logged_at_ist": "10:05:00",
             "ready_now": True,
             "take_trade_enabled": True,
+            "source": "consistency",
+            "episode_start": None,
+            "episode_end": None,
         }
     ]
     _annotate_ready_take(cps, events)
@@ -79,3 +82,31 @@ def test_annotate_ready_take_within_window():
     assert cps[0]["ready_now_at_ist"] == "10:05:00"
     assert cps[1]["ready_now"] is False
     assert cps[1]["take_trade_enabled"] is False
+
+
+def test_annotate_sq_promotion_episode_covers_later_scans():
+    start = IST.localize(datetime(2026, 8, 20, 11, 5, 35))
+    end = IST.localize(datetime(2026, 8, 20, 15, 30, 0))
+    events = [
+        {
+            "logged_at": start,
+            "logged_at_ist": "11:05:35",
+            "ready_now": True,
+            "take_trade_enabled": True,
+            "source": "sq_promotion",
+            "episode_start": start,
+            "episode_end": end,
+        }
+    ]
+    cps = [
+        {"scan_time": IST.localize(datetime(2026, 8, 20, 10, 0, 0)).isoformat()},
+        {"scan_time": IST.localize(datetime(2026, 8, 20, 11, 10, 0)).isoformat()},
+        {"scan_time": IST.localize(datetime(2026, 8, 20, 14, 0, 0)).isoformat()},
+    ]
+    _annotate_ready_take(cps, events)
+    assert cps[0]["ready_now"] is False
+    assert cps[1]["ready_now"] is True
+    assert cps[1]["take_trade_enabled"] is True
+    assert cps[1]["ready_now_source"] == "sq_promotion"
+    assert cps[2]["ready_now"] is True
+

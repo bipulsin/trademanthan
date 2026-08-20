@@ -282,6 +282,7 @@
           "<td>" + esc(c.kavach_state || "—") + "</td>" +
           "<td>" + ynPill(c.ready_now, "pill-ready", "READY") +
             (c.ready_now_at_ist ? '<div class="meta mono">' + esc(c.ready_now_at_ist) + "</div>" : "") +
+            (c.ready_now_source ? '<div class="meta">' + esc(c.ready_now_source) + "</div>" : "") +
           "</td>" +
           "<td>" + ynPill(c.take_trade_enabled, "pill-take", "ARMED") +
             (c.take_trade_at_ist ? '<div class="meta mono">' + esc(c.take_trade_at_ist) + "</div>" : "") +

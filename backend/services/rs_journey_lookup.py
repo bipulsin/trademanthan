@@ -96,7 +96,13 @@ def _parse_inputs(raw: Any) -> Dict[str, Any]:
 def _fetch_ready_take_events(
     db, session_date: str, symbol: str
 ) -> List[Dict[str, Any]]:
-    """Checklist READY NOW / Take Trade telemetry for one symbol-day."""
+    """Checklist READY NOW / Take Trade telemetry for one symbol-day.
+
+    Sources (merged):
+      1. ``kavach_ready_consistency_log`` — organic READY refreshes
+      2. ``sq_ready_promotion_log`` — SQ ≥75 READY NOW promotes (often missing from #1)
+    """
+    out: List[Dict[str, Any]] = []
     try:
         rows = db.execute(
             text(
@@ -112,14 +118,12 @@ def _fetch_ready_take_events(
         ).fetchall()
     except Exception as exc:
         logger.debug("ready consistency fetch skipped: %s", exc)
-        return []
+        rows = []
 
-    out: List[Dict[str, Any]] = []
     for r in rows:
         inp = _parse_inputs(r.inputs)
         ready = _is_ready_family(r.rendered_state)
         take = bool(inp.get("trade_take_enabled"))
-        # Take Trade only meaningful when card is READY-family.
         if take and not ready:
             take = False
         out.append(
@@ -130,8 +134,62 @@ def _fetch_ready_take_events(
                 "take_trade_enabled": take,
                 "rendered_state": r.rendered_state,
                 "ready_visible_since": inp.get("ready_visible_since"),
+                "source": "consistency",
+                "episode_start": None,
+                "episode_end": None,
             }
         )
+
+    try:
+        sq_rows = db.execute(
+            text(
+                """
+                SELECT promoted_at, closed_at, rendered_state, direction,
+                       also_organic, total_score
+                FROM sq_ready_promotion_log
+                WHERE session_date = CAST(:d AS date)
+                  AND UPPER(TRIM(symbol)) = :s
+                ORDER BY promoted_at, id
+                """
+            ),
+            {"d": session_date, "s": symbol},
+        ).fetchall()
+    except Exception as exc:
+        logger.debug("sq ready promotion fetch skipped: %s", exc)
+        sq_rows = []
+
+    # Session end fallback when SQ episode has no closed_at.
+    try:
+        y, m, d = (int(x) for x in str(session_date)[:10].split("-"))
+        session_end = IST.localize(datetime(y, m, d, 15, 30, 0))
+    except Exception:
+        session_end = None
+
+    for r in sq_rows:
+        start = _as_ist(r.promoted_at)
+        if start is None:
+            continue
+        end = _as_ist(r.closed_at) if r.closed_at is not None else session_end
+        ready = True  # SQ promotion row means READY NOW card appeared
+        out.append(
+            {
+                "logged_at": r.promoted_at,
+                "logged_at_ist": _ist_hm(r.promoted_at),
+                "ready_now": ready,
+                # SQ promote forces READY card; Take Trade is typically armed at promote.
+                "take_trade_enabled": True,
+                "rendered_state": r.rendered_state or "READY",
+                "ready_visible_since": start.isoformat() if start else None,
+                "source": "sq_promotion",
+                "episode_start": start,
+                "episode_end": end,
+                "also_organic": bool(r.also_organic),
+            }
+        )
+
+    out.sort(
+        key=lambda e: _as_ist(e.get("logged_at")) or datetime.min.replace(tzinfo=IST)
+    )
     return out
 
 
@@ -141,7 +199,7 @@ def _nearest_event(
     *,
     flag_key: str,
 ) -> Optional[Dict[str, Any]]:
-    """Nearest event within READY_NEAR_WINDOW where flag_key is True."""
+    """Nearest point event within READY_NEAR_WINDOW, else active SQ episode covering scan."""
     best: Optional[Tuple[timedelta, Dict[str, Any]]] = None
     for e in events:
         if not e.get(flag_key):
@@ -154,7 +212,22 @@ def _nearest_event(
             continue
         if best is None or delta < best[0]:
             best = (delta, e)
-    return best[1] if best else None
+    if best:
+        return best[1]
+
+    # Interval coverage from SQ (and any event that stamped episode_start/end).
+    for e in events:
+        if not e.get(flag_key):
+            continue
+        start = e.get("episode_start") or _as_ist(e.get("logged_at"))
+        end = e.get("episode_end")
+        if start is None:
+            continue
+        if end is None:
+            end = start + READY_NEAR_WINDOW
+        if start <= scan_ts <= end:
+            return e
+    return None
 
 
 def _annotate_ready_take(
@@ -175,6 +248,7 @@ def _annotate_ready_take(
             c["take_trade_enabled"] = None
             c["ready_now_at_ist"] = None
             c["take_trade_at_ist"] = None
+            c["ready_now_source"] = None
             continue
         ready_ev = _nearest_event(st, events, flag_key="ready_now")
         take_ev = _nearest_event(st, events, flag_key="take_trade_enabled")
@@ -182,6 +256,7 @@ def _annotate_ready_take(
         c["take_trade_enabled"] = bool(take_ev)
         c["ready_now_at_ist"] = ready_ev.get("logged_at_ist") if ready_ev else None
         c["take_trade_at_ist"] = take_ev.get("logged_at_ist") if take_ev else None
+        c["ready_now_source"] = ready_ev.get("source") if ready_ev else None
 
 
 def _ready_take_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -193,6 +268,7 @@ def _ready_take_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     prev_take = False
     ready_episodes = 0
     take_episodes = 0
+    sources = sorted({str(e.get("source") or "") for e in events if e.get("source")})
     for e in events:
         r = bool(e.get("ready_now"))
         t = bool(e.get("take_trade_enabled"))
@@ -207,6 +283,7 @@ def _ready_take_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
                 take_times.append(hm)
         prev_ready = r
         prev_take = t
+    src_note = "+".join(sources) if sources else "none"
     return {
         "log_rows": len(events),
         "first_ready_now_at_ist": first_ready.get("logged_at_ist") if first_ready else None,
@@ -215,10 +292,12 @@ def _ready_take_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
         "take_trade_episodes": take_episodes,
         "ready_now_times_ist": ready_times,
         "take_trade_times_ist": take_times,
-        "source": "kavach_ready_consistency_log",
+        "source": src_note,
         "note": (
-            "READY NOW / Take Trade from checklist consistency log "
-            f"(matched to RS scans within ±{int(READY_NEAR_WINDOW.total_seconds() // 60)}m). "
+            "READY NOW / Take Trade from checklist consistency log + "
+            "SQ READY promotion log "
+            f"(point match ±{int(READY_NEAR_WINDOW.total_seconds() // 60)}m; "
+            "SQ episodes cover promote→close/15:30). "
             "Kavach column remains engine kavach_state only."
         ),
     }
