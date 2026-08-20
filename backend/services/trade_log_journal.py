@@ -87,6 +87,43 @@ def _clock_from_val(val: Optional[str]) -> Optional[str]:
     return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
 
 
+def _date_from_val(val: Optional[str]) -> Optional[str]:
+    """Normalize journal dates to YYYY-MM-DD (ISO).
+
+    Accepts:
+      - 2026-08-20
+      - 20/08/2026, 20-08-2026, 20.08.2026  (DD/MM/YYYY — Indian style)
+      - 08/20/2026 only when first part is clearly a month (1–12) and second > 12
+    """
+    if not val:
+        return None
+    s = str(val).strip()
+    iso = re.search(r"(20\d{2})-(\d{2})-(\d{2})", s)
+    if iso:
+        y, mo, d = int(iso.group(1)), int(iso.group(2)), int(iso.group(3))
+        try:
+            return date(y, mo, d).isoformat()
+        except ValueError:
+            return None
+    m = re.search(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](20\d{2})\b", s)
+    if not m:
+        return None
+    a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    # Prefer DD/MM/YYYY (NSE / India). Use MM/DD only when day-part is impossible as day.
+    if a > 31 or b > 31:
+        return None
+    if a > 12 and b <= 12:
+        day, month = a, b
+    elif b > 12 and a <= 12:
+        month, day = a, b
+    else:
+        day, month = a, b  # ambiguous → DD/MM
+    try:
+        return date(y, month, day).isoformat()
+    except ValueError:
+        return None
+
+
 def parse_journal_text(text_in: str) -> Dict[str, Any]:
     """Extract journal fields from a pasted trade note. Missing keys are None."""
     raw = text_in or ""
@@ -112,9 +149,9 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
     # Prefer explicit key/value lines (Cursor journal / structured paste).
     for date_key in ("trade_date", "session_date", "date"):
         if kv.get(date_key):
-            dm = re.search(r"(20\d{2}-\d{2}-\d{2})", kv[date_key])
-            if dm:
-                out["session_date"] = dm.group(1)
+            parsed = _date_from_val(kv[date_key])
+            if parsed:
+                out["session_date"] = parsed
                 break
     for sym_key in ("symbol", "symbol_instrument", "instrument", "underlying", "ticker"):
         if kv.get(sym_key):
@@ -151,9 +188,8 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
             :400
         ]
 
-    dm = re.search(r"(20\d{2}-\d{2}-\d{2})", t)
-    if not out["session_date"] and dm:
-        out["session_date"] = dm.group(1)
+    if not out["session_date"]:
+        out["session_date"] = _date_from_val(t)
 
     if not out["direction"]:
         dir_m = re.search(r"\b(LONG|SHORT)\b", t, re.I)
@@ -252,6 +288,8 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
         etype = re.search(r"exit_trigger_type\s*[=:]\s*([a-z_]+)", t, re.I)
         if etype:
             out["exit_trigger_type"] = normalize_exit_trigger_type(etype.group(1))
+        elif out.get("exit_trigger") and re.search(r"discretionary", str(out["exit_trigger"]), re.I):
+            out["exit_trigger_type"] = "discretionary"
         elif re.search(r"discretionary", t, re.I) and not re.search(
             r"rule_compliant|2-candle|F&O pause|pre-F&O", t, re.I
         ):

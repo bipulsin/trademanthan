@@ -87,3 +87,40 @@ def test_parse_open_trade_does_not_require_exit():
     assert p["entry_price"] == 400.5
     assert p["exit_time"] is None
     assert not any(str(w).startswith("missing:") for w in p["parse_warnings"])
+
+
+AXIS_NOTE = """
+Session Date: 20/08/2026
+Symbol: AXISBANK
+direction: LONG
+Entry Price: 1254.30
+Entry Time: 10:17:35 IST
+Entry Logic: Chased above red bar (R2 pivot resistance)
+Exit Price: 1253.70
+Exit Time: 10:41:53 IST
+Exit Trigger: Discretionary (resistance rejection)
+Confidence Grade: C (below minimum-B gate)
+"""
+
+
+def test_parse_dd_mm_yyyy_session_date():
+    p = parse_journal_text(AXIS_NOTE)
+    assert p["session_date"] == "2026-08-20"
+    assert p["symbol"] == "AXISBANK"
+    assert p["direction"] == "LONG"
+    assert p["entry_time"] == "10:17:35"
+    assert p["entry_price"] == 1254.30
+    assert p["exit_time"] == "10:41:53"
+    assert p["exit_price"] == 1253.70
+    assert p["exit_trigger_type"] == "discretionary"
+    assert not any(str(w).startswith("missing:") for w in p["parse_warnings"])
+
+
+def test_date_from_val_formats():
+    from backend.services.trade_log_journal import _date_from_val
+
+    assert _date_from_val("20/08/2026") == "2026-08-20"
+    assert _date_from_val("2026-08-20") == "2026-08-20"
+    assert _date_from_val("20-08-2026") == "2026-08-20"
+    assert _date_from_val("08/20/2026") == "2026-08-20"  # month/day when day>12
+
