@@ -151,7 +151,18 @@ _UPSERT = text(
 )
 
 
+_TRADE_LOG_ENSURED = False
+
+
 def ensure_trade_log_table() -> None:
+    """Create/migrate trade_log once per process — never on every request.
+
+    Re-running CREATE INDEX / ALTER on each list/save can deadlock behind an
+    open UPDATE (ShareLock vs RowExclusiveLock) and freeze the Trade Log UI.
+    """
+    global _TRADE_LOG_ENSURED
+    if _TRADE_LOG_ENSURED:
+        return
     with engine.begin() as conn:
         conn.execute(text(_CREATE_SQL))
         conn.execute(text(_INDEX_SQL))
@@ -259,6 +270,7 @@ def ensure_trade_log_table() -> None:
                 "ADD COLUMN IF NOT EXISTS peak_backfill_status TEXT"
             )
         )
+    _TRADE_LOG_ENSURED = True
 
 
 def normalize_exit_trigger_type(val: Any) -> Optional[str]:
@@ -517,10 +529,18 @@ def serialize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
     """JSON-safe trade_log row plus gross PnL."""
     out: Dict[str, Any] = {}
     for k, v in row.items():
-        if hasattr(v, "isoformat"):
-            out[k] = v.isoformat()
+        if isinstance(v, timedelta):
+            # Some drivers return TIME as timedelta — normalize to HH:MM:SS.
+            total = int(v.total_seconds()) % 86400
+            if total < 0:
+                total += 86400
+            h, rem = divmod(total, 3600)
+            m, s = divmod(rem, 60)
+            out[k] = f"{h:02d}:{m:02d}:{s:02d}"
         elif isinstance(v, time):
             out[k] = v.strftime("%H:%M:%S")
+        elif hasattr(v, "isoformat"):
+            out[k] = v.isoformat()
         else:
             out[k] = v
     qty = row.get("qty")

@@ -87,6 +87,7 @@
     padding: 8px 6px;
     text-align: left;
     white-space: nowrap;
+    color: var(--theme-text, #0f172a);
 }
 .tl-table tbody tr { cursor: pointer; }
 .tl-table tbody tr:hover { background: rgba(15, 118, 110, 0.08); }

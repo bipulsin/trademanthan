@@ -177,40 +177,62 @@
         var q = [];
         if (from) q.push("start_date=" + encodeURIComponent(from));
         if (to) q.push("end_date=" + encodeURIComponent(to));
-        var res = await fetch(apiBase() + "/api/trade-log" + (q.length ? "?" + q.join("&") : ""), {
-            headers: headers()
-        });
-        var data = await res.json();
         var tb = $("tlTable").querySelector("tbody");
-        tb.innerHTML = "";
-        (data.trades || []).forEach(function (row) {
-            var tr = document.createElement("tr");
-            tr.dataset.id = String(row.id);
-            var pnl = row.gross_pnl_inr;
-            tr.innerHTML =
-                "<td>" + (row.session_date || "").slice(0, 10) + "</td>" +
-                "<td>" + (row.symbol || "") + "</td>" +
-                "<td>" + (row.direction || "") + "</td>" +
-                "<td>" + (row.qty != null ? row.qty : "") + "</td>" +
-                "<td>" + (row.entry_price != null ? row.entry_price : "") + " @ " + (row.entry_time || "") + "</td>" +
-                "<td>" + (row.exit_price != null ? row.exit_price : "") + " @ " + (row.exit_time || "") + "</td>" +
-                "<td class='" + pnlClass(pnl) + "'>" + (pnl != null ? "₹" + pnl : "") + "</td>" +
-                "<td>" + (row.exit_trigger_type || "") + "</td>";
-            tr.onclick = function () {
-                Array.prototype.forEach.call(tb.querySelectorAll("tr"), function (x) { x.classList.remove("active"); });
-                tr.classList.add("active");
-                fillForm(row);
-                showTab("form");
-                setStatus("Editing trade #" + row.id + ". Change fields, then Save.", true);
-                var focusEl = $("tlEntryTime");
-                if (focusEl && focusEl.focus) focusEl.focus();
-            };
-            tb.appendChild(tr);
-        });
-        if (!(data.trades || []).length) {
-            var empty = document.createElement("tr");
-            empty.innerHTML = "<td colspan='8'>No trades in this range.</td>";
-            tb.appendChild(empty);
+        setStatus("Loading trades…", null);
+        $("tlLoadBtn").disabled = true;
+        var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+        var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 20000) : null;
+        try {
+            var res = await fetch(apiBase() + "/api/trade-log" + (q.length ? "?" + q.join("&") : ""), {
+                headers: headers(),
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            var data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+                setStatus(errDetail(data) || ("Load failed (" + res.status + ")"), false);
+                return;
+            }
+            tb.innerHTML = "";
+            var trades = data.trades || [];
+            trades.forEach(function (row) {
+                var tr = document.createElement("tr");
+                tr.dataset.id = String(row.id);
+                var pnl = row.gross_pnl_inr;
+                tr.innerHTML =
+                    "<td>" + (row.session_date || "").slice(0, 10) + "</td>" +
+                    "<td>" + (row.symbol || "") + "</td>" +
+                    "<td>" + (row.direction || "") + "</td>" +
+                    "<td>" + (row.qty != null ? row.qty : "") + "</td>" +
+                    "<td>" + (row.entry_price != null ? row.entry_price : "") + " @ " + (row.entry_time || "") + "</td>" +
+                    "<td>" + (row.exit_price != null ? row.exit_price : "") + " @ " + (row.exit_time || "") + "</td>" +
+                    "<td class='" + pnlClass(pnl) + "'>" + (pnl != null ? "₹" + pnl : "") + "</td>" +
+                    "<td>" + (row.exit_trigger_type || "") + "</td>";
+                tr.onclick = function () {
+                    Array.prototype.forEach.call(tb.querySelectorAll("tr"), function (x) { x.classList.remove("active"); });
+                    tr.classList.add("active");
+                    fillForm(row);
+                    showTab("form");
+                    setStatus("Editing trade #" + row.id + ". Change fields, then Save.", true);
+                    var focusEl = $("tlEntryTime");
+                    if (focusEl && focusEl.focus) focusEl.focus();
+                };
+                tb.appendChild(tr);
+            });
+            if (!trades.length) {
+                var empty = document.createElement("tr");
+                empty.innerHTML = "<td colspan='8'>No trades in this range.</td>";
+                tb.appendChild(empty);
+                setStatus("No trades for " + (from || "?") + " → " + (to || "?"), null);
+            } else {
+                setStatus("Loaded " + trades.length + " trade(s).", true);
+            }
+        } catch (e) {
+            var msg = String(e && e.name === "AbortError" ? "Load timed out — try again" : e);
+            setStatus(msg, false);
+            tb.innerHTML = "<tr><td colspan='8'>" + msg + "</td></tr>";
+        } finally {
+            if (timer) clearTimeout(timer);
+            $("tlLoadBtn").disabled = false;
         }
     }
 
@@ -244,7 +266,10 @@
                 return saveForm();
             }).catch(function (e) { setStatus(String(e), false); });
         };
-        $("tlSaveFormBtn").onclick = function () { saveForm().catch(function (e) { setStatus(String(e), false); }); };
+        $("tlSaveFormBtn").onclick = function () {
+            setStatus("Saving…", null);
+            saveForm().catch(function (e) { setStatus(String(e), false); });
+        };
         $("tlClearFormBtn").onclick = clearForm;
         $("tlLoadBtn").onclick = function () { loadList().catch(function (e) { setStatus(String(e), false); }); };
         loadList().catch(function () {});
