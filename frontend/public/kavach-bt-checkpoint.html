@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Kavach BT Checkpoint · TWCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="left-menu.css?v=3.24">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <style>
+        .kbt-wrap { max-width: 1400px; margin: 0 auto; padding: 0 1rem 2rem; }
+        .kbt-banner {
+            background: #1e3a5f; color: #e8f0fe; padding: 0.75rem 1rem; border-radius: 6px;
+            margin-bottom: 1rem; font-size: 0.9rem;
+        }
+        .kbt-filters { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end; margin-bottom: 1rem; }
+        .kbt-filters label { display: flex; flex-direction: column; font-size: 0.75rem; gap: 0.25rem; }
+        .kbt-filters input, .kbt-filters select { padding: 0.4rem 0.5rem; min-width: 8rem; }
+        .kbt-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .kbt-btn {
+            border: 1px solid #334155; background: #0f172a; color: #e2e8f0;
+            padding: 0.45rem 0.85rem; border-radius: 4px; cursor: pointer;
+        }
+        .kbt-btn-primary { background: #2563eb; border-color: #2563eb; }
+        .kbt-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+        .kbt-card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 0.85rem; }
+        .kbt-card h3 { margin: 0 0 0.35rem; font-size: 0.8rem; color: #94a3b8; font-weight: 600; }
+        .kbt-card .val { font-size: 1.25rem; font-weight: 700; color: #f8fafc; }
+        .kbt-section { margin-bottom: 1.5rem; }
+        .kbt-section h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+        .kbt-table-wrap { overflow-x: auto; border: 1px solid #1f2937; border-radius: 8px; }
+        table.kbt { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        table.kbt th, table.kbt td { padding: 0.4rem 0.55rem; border-bottom: 1px solid #1f2937; text-align: left; white-space: nowrap; }
+        table.kbt th { background: #0f172a; color: #94a3b8; position: sticky; top: 0; }
+        .badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; font-weight: 700; }
+        .badge-block { background: #7f1d1d; color: #fecaca; }
+        .badge-warn { background: #78350f; color: #fde68a; }
+        .badge-ok { background: #14532d; color: #bbf7d0; }
+        .badge-na { background: #334155; color: #cbd5e1; }
+        .kbt-status { min-height: 1.25rem; color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.5rem; }
+        .kbt-recs li { margin-bottom: 0.35rem; }
+    </style>
+</head>
+<body class="theme-page">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <h1 class="mobile-title">Kavach BT Checkpoint</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title"><i class="fas fa-flask"></i> Kavach BT Checkpoint (22-Aug)</h1>
+                    <p class="settings-subtitle">Research only — BT-1 pullback · BT-2 resistance warning · BT-3 exits · BT-4 Garuda shadow</p>
+                </div>
+            </div>
+            <div class="kbt-wrap">
+                <div class="kbt-banner">
+                    Resistance confluence = <strong>warning only</strong>.
+                    Garuda = <strong>shadow only</strong>.
+                    Pullback 5+ = <strong>hard-block display</strong> (live gate deferred).
+                    Rule 15 = <strong>entry only</strong>.
+                </div>
+                <p class="kbt-status" id="kbtStatus">Loading…</p>
+                <div class="kbt-filters">
+                    <label>Symbol <input type="text" id="fSymbol" placeholder="e.g. ITC"></label>
+                    <label>From <input type="date" id="fFrom" value="2026-07-22"></label>
+                    <label>To <input type="date" id="fTo" value="2026-08-21"></label>
+                    <label>Garuda
+                        <select id="fGaruda">
+                            <option value="">All</option>
+                            <option value="MATCH">MATCH</option>
+                            <option value="NO_MATCH">NO_MATCH</option>
+                            <option value="NOT_AVAILABLE">NOT_AVAILABLE</option>
+                        </select>
+                    </label>
+                    <label>Resistance
+                        <select id="fRes">
+                            <option value="">All</option>
+                            <option value="true">Warning on</option>
+                            <option value="false">Clear</option>
+                        </select>
+                    </label>
+                    <label>PB hard-block
+                        <select id="fPb">
+                            <option value="">All</option>
+                            <option value="true">Blocked</option>
+                            <option value="false">Allowed</option>
+                        </select>
+                    </label>
+                    <div class="kbt-actions">
+                        <button type="button" class="kbt-btn kbt-btn-primary" id="btnLoad">Load</button>
+                        <button type="button" class="kbt-btn" id="btnCsvDetail">Export trades CSV</button>
+                        <button type="button" class="kbt-btn" id="btnCsvSummary">Export summary CSV</button>
+                    </div>
+                </div>
+
+                <div class="kbt-cards" id="kbtCards"></div>
+
+                <section class="kbt-section">
+                    <h2>Recommendations</h2>
+                    <ul class="kbt-recs" id="kbtRecs"></ul>
+                </section>
+
+                <section class="kbt-section">
+                    <h2>Cohorts</h2>
+                    <div class="kbt-table-wrap">
+                        <table class="kbt" id="tblCohorts">
+                            <thead><tr>
+                                <th>Type</th><th>Key</th><th>N</th><th>Win%</th><th>Avg R</th><th>PnL</th><th>Avg MFE</th><th>Avg MAE</th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="kbt-section">
+                    <h2>Trade detail</h2>
+                    <div class="kbt-table-wrap">
+                        <table class="kbt" id="tblTrades">
+                            <thead><tr>
+                                <th>Date</th><th>Symbol</th><th>Side</th><th>PB leg</th><th>PB v2</th><th>Block</th>
+                                <th>Res</th><th>Pivot</th><th>Exit A</th><th>Exit B</th><th>Exit C</th><th>Best</th>
+                                <th>Garuda</th><th>Rank</th><th>R</th><th>MFE</th>
+                            </tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="left-menu.js?v=3.25"></script>
+    <script src="kavach-bt-checkpoint.js?v=1"></script>
+</body>
+</html>

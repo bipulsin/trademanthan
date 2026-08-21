@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint/.test(path);
     }
 
     getCurrentPage() {
@@ -46,6 +46,7 @@ class LeftMenu {
         if (path.includes('scan')) return 'scan';
         if (path.includes('settings')) return 'settings';
         if (path.includes('tradelog')) return 'tradelog';
+        if (path.includes('kavach-bt-checkpoint')) return 'kavach-bt-checkpoint';
         if (path.includes('reports')) return 'reports';
         if (path.includes('intraoption')) return 'intraoption';
         if (path.includes('smartfuture')) return 'smartfuture';
@@ -210,7 +211,7 @@ class LeftMenu {
 
     /** Redirect non-admins away from admin-only pages (direct URL access). */
     enforceAdminOnlyPageAccess() {
-        const adminOnly = new Set(['settings', 'admin', 'kavachIgnitionDiag', 'rs-journey']);
+        const adminOnly = new Set(['settings', 'admin', 'kavachIgnitionDiag', 'rs-journey', 'kavach-bt-checkpoint']);
         if (!adminOnly.has(this.currentPage)) return;
         let user = {};
         try {
@@ -281,6 +282,7 @@ class LeftMenu {
                 <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
                 <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
                 <li class="nav-item" data-page="tradelog.html"><i class="fas fa-book"></i><span>Trade Log</span></li>
+                <li class="nav-item nav-item-admin" data-page="kavach-bt-checkpoint.html" style="display: none;" title="Administrator only"><i class="fas fa-flask"></i><span>Kavach BT Checkpoint</span></li>
                 <li class="nav-item" data-page="future_screener.html"><i class="fas fa-filter"></i><span>Future Screener</span></li>
                 <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
@@ -702,6 +704,7 @@ class LeftMenu {
             strategy: 'Strategy Management',
             reports: 'Trading Reports',
             tradelog: 'Trade Log',
+            'kavach-bt-checkpoint': 'Kavach BT Checkpoint',
             future_screener: 'Future Screener',
             settings: 'Settings',
             algo: 'Algo Trading',
@@ -778,6 +781,7 @@ class LeftMenu {
             case 'strategy': return 'strategy.html';
             case 'reports': return 'reports.html';
             case 'tradelog': return 'tradelog.html';
+            case 'kavach-bt-checkpoint': return 'kavach-bt-checkpoint.html';
             case 'intraoption': return 'intraoption.html';
             case 'smartfuture': return 'smartfuture.html';
             case 'vajrafutures': return 'vajrafutures.html';

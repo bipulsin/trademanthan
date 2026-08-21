@@ -1,0 +1,152 @@
+//@version=6
+// TWCTO Kavach v3.1 Checkpoint — ADDITIVE RESEARCH LAYERS (22-Aug-2026)
+// -------------------------------------------------------------------------
+// Base system of truth: TWCTO_Kavach_v3_0.txt (do not strip existing layers).
+// This file is a research overlay / merge pack for:
+//   BT-1 Pullback v2 (dual VWAP+EMA10 reset; EMA5 increment; HARD BLOCK ≥5)
+//   BT-2 Resistance confluence warning (±0.2% pivot zone) — WARNING ONLY
+//   BT-3 Dynamic trail after 2R (trail 1R per +1R) — RESEARCH EXIT VISUAL
+//
+// Parity with Python:
+//   backend/services/kavach_bt_checkpoint/pullback.py
+//   backend/services/kavach_bt_checkpoint/resistance.py
+//   backend/services/kavach_bt_checkpoint/exits.py
+//
+// Live gating: NONE. Resistance + Garuda remain warning/shadow.
+// Pullback ≥5 hard-block is DISPLAY only until live flip is signed off.
+// Rule 15 remains ENTRY-ONLY (not an exit trigger).
+// -------------------------------------------------------------------------
+
+indicator("TWCTO Kavach v3.1 Checkpoint Layers", overlay=true, max_boxes_count=100, max_labels_count=100)
+
+grpVis = "v3.1 Checkpoint visuals"
+showPbV2     = input.bool(true, "Show Pullback v2", group=grpVis)
+showResWarn  = input.bool(true, "Show Resistance warning zones", group=grpVis)
+showDynTrail = input.bool(true, "Show 2R dynamic trail (research)", group=grpVis)
+
+grpPb = "BT-1 Pullback v2"
+pbHardN = input.int(5, "Hard-block at pullback ≥", minval=3, maxval=10, group=grpPb)
+
+grpRes = "BT-2 Resistance"
+pivotZonePct = input.float(0.2, "Pivot zone ±%", step=0.05, group=grpRes)
+dangerPct    = input.float(0.35, "Danger zone % from entry/close", step=0.05, group=grpRes)
+pivotLeft    = input.int(2, "Pivot left bars", group=grpRes)
+pivotRight   = input.int(2, "Pivot right bars", group=grpRes)
+
+grpEx = "BT-3 Dynamic trail"
+riskPts = input.float(0.0, "Risk pts (0 = 0.3% of close)", group=grpEx)
+armR    = input.float(2.0, "Arm trail at R", group=grpEx)
+stepR   = input.float(1.0, "Trail lock step R", group=grpEx)
+
+ema5  = ta.ema(close, 5)
+ema10 = ta.ema(close, 10)
+vwapV = ta.vwap
+
+// --- BT-1 Pullback v2 ---
+touchVwap  = not na(vwapV) and low <= vwapV and high >= vwapV
+touchEma10 = not na(ema10) and low <= ema10 and high >= ema10
+touchEma5  = not na(ema5) and low <= ema5 and high >= ema5
+dualReset  = touchVwap and touchEma10
+
+var int pbLongV2  = 0
+var int pbShortV2 = 0
+var bool inTouchL = false
+var bool inTouchS = false
+
+legLong  = not na(ema5) and not na(vwapV) and ema5 > vwapV
+legShort = not na(ema5) and not na(vwapV) and ema5 < vwapV
+
+if dualReset
+    pbLongV2  := 0
+    pbShortV2 := 0
+    inTouchL  := false
+    inTouchS  := false
+
+if not dualReset and touchEma5 and legLong
+    if not inTouchL
+        pbLongV2 += 1
+        inTouchL := true
+else if not touchEma5
+    inTouchL := false
+
+if not dualReset and touchEma5 and legShort
+    if not inTouchS
+        pbShortV2 += 1
+        inTouchS := true
+else if not touchEma5
+    inTouchS := false
+
+pbShow = legLong ? pbLongV2 : legShort ? pbShortV2 : 0
+hardBlocked = pbShow >= pbHardN
+
+plotchar(showPbV2 and dualReset, title="Dual reset", char="R", location=location.belowbar, color=color.orange, size=size.tiny)
+plotshape(showPbV2 and hardBlocked, title="PB hard block", style=shape.labelup, location=location.abovebar, color=color.red, text="PB HARD BLOCK", textcolor=color.white, size=size.small)
+var table pbTbl = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70))
+if showPbV2 and barstate.islast
+    table.cell(pbTbl, 0, 0, "PB v2", text_color=color.gray)
+    table.cell(pbTbl, 1, 0, str.tostring(pbShow), text_color=hardBlocked ? color.red : color.lime)
+    table.cell(pbTbl, 0, 1, "Blocked", text_color=color.gray)
+    table.cell(pbTbl, 1, 1, hardBlocked ? "YES" : "no", text_color=hardBlocked ? color.red : color.silver)
+    table.cell(pbTbl, 0, 2, "Rule15", text_color=color.gray)
+    table.cell(pbTbl, 1, 2, "ENTRY ONLY", text_color=color.aqua)
+
+// --- BT-2 Resistance warning zones ---
+ph = ta.pivothigh(high, pivotLeft, pivotRight)
+pl = ta.pivotlow(low, pivotLeft, pivotRight)
+var float lastRes = na
+var float lastSup = na
+if not na(ph)
+    lastRes := ph
+if not na(pl)
+    lastSup := pl
+
+zoneHi(level) => level * (1.0 + pivotZonePct / 100.0)
+zoneLo(level) => level * (1.0 - pivotZonePct / 100.0)
+
+distRes = not na(lastRes) ? math.abs(close - lastRes) / close * 100.0 : na
+distSup = not na(lastSup) ? math.abs(close - lastSup) / close * 100.0 : na
+resWarn = showResWarn and not na(distRes) and distRes <= dangerPct and close <= lastRes * (1.0 + dangerPct / 100.0)
+supWarn = showResWarn and not na(distSup) and distSup <= dangerPct and close >= lastSup * (1.0 - dangerPct / 100.0)
+
+plot(showResWarn and not na(lastRes) ? lastRes : na, "Nearest resistance", color=color.new(color.red, 40), style=plot.style_linebr)
+plot(showResWarn and not na(lastSup) ? lastSup : na, "Nearest support", color=color.new(color.green, 40), style=plot.style_linebr)
+bgcolor(resWarn or supWarn ? color.new(color.orange, 92) : na, title="Resistance confluence warn")
+
+if showResWarn and (resWarn or supWarn) and barstate.isconfirmed
+    label.new(bar_index, high, "RES WARN", style=label.style_label_down, color=color.orange, textcolor=color.black, size=size.tiny)
+
+// --- BT-3 Dynamic trail visual (requires manual entry mark for research) ---
+grpEnt = "Research entry (for trail plot)"
+useEntry = input.bool(false, "Enable trail from manual entry", group=grpEnt)
+entryPx  = input.float(0.0, "Entry price", group=grpEnt)
+isLong   = input.bool(true, "Long trade", group=grpEnt)
+
+riskEff = riskPts > 0 ? riskPts : close * 0.003
+var float peakR = 0.0
+var float trailStop = na
+
+if useEntry and entryPx > 0 and showDynTrail
+    fav = isLong ? high : low
+    rExt = isLong ? (fav - entryPx) / riskEff : (entryPx - fav) / riskEff
+    peakR := math.max(peakR, rExt)
+    if peakR >= armR
+        locked = math.max(stepR, math.floor(peakR) - stepR)
+        trailStop := isLong ? entryPx + locked * riskEff : entryPx - locked * riskEff
+else
+    peakR := 0.0
+    trailStop := na
+
+plot(showDynTrail and useEntry ? trailStop : na, "R26 dynamic trail", color=color.fuchsia, style=plot.style_linebr, linewidth=2)
+plot(showDynTrail and useEntry ? entryPx : na, "Research entry", color=color.aqua, style=plot.style_linebr)
+
+var table rTbl = table.new(position.bottom_right, 2, 3, bgcolor=color.new(color.black, 70))
+if showDynTrail and useEntry and barstate.islast
+    curR = isLong ? (close - entryPx) / riskEff : (entryPx - close) / riskEff
+    table.cell(rTbl, 0, 0, "Peak R", text_color=color.gray)
+    table.cell(rTbl, 1, 0, str.tostring(peakR, "#.##"), text_color=color.lime)
+    table.cell(rTbl, 0, 1, "Cur R", text_color=color.gray)
+    table.cell(rTbl, 1, 1, str.tostring(curR, "#.##"), text_color=color.silver)
+    table.cell(rTbl, 0, 2, "Trail", text_color=color.gray)
+    table.cell(rTbl, 1, 2, na(trailStop) ? "—" : str.tostring(trailStop, "#.##"), text_color=color.fuchsia)
+
+// End of v3.1 additive pack — merge visually with Kavach v3.0 on the same chart.
