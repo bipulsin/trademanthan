@@ -23,6 +23,16 @@ def main() -> int:
     p.add_argument("--run-id", default=None)
     p.add_argument("--no-db", action="store_true", help="Skip DB write")
     p.add_argument("--merge", action="store_true", help="Merge chunk into existing artifact JSON")
+    p.add_argument(
+        "--full-replace",
+        action="store_true",
+        help="Discard existing artifact rows for the date range (fresh run)",
+    )
+    p.add_argument(
+        "--reverse",
+        action="store_true",
+        help="Process session days newest-first (Aug 21 → Jul 22); JSON written after each day",
+    )
     p.add_argument("--tp", choices=["TP1", "TP2", "TP3", "TP4"], default=None)
     p.add_argument("--day-pause", type=float, default=2.0, help="Seconds between session days")
     p.add_argument("--symbol-pause", type=float, default=0.12, help="Seconds before each M15 REST fetch")
@@ -50,6 +60,8 @@ def main() -> int:
         day_pause_sec=args.day_pause,
         symbol_pause_sec=args.symbol_pause,
         merge_into=args.merge,
+        reverse_order=args.reverse,
+        full_replace=args.full_replace,
     )
     slim = {k: v for k, v in result.items() if k != "rows"}
     slim["row_count"] = len(result.get("rows") or [])

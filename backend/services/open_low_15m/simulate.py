@@ -2,23 +2,19 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pytz
 
 from backend.services.open_low_15m.config import (
-    ATR_LEN,
     FORCE_EXIT_TIME,
-    OPEN_LOW_TOL_PCT,
-    RANGE_ATR_MULT,
-    RISK_INR_MAX,
-    RISK_INR_MIN,
     TP_R_LEVELS,
     TRAIL_MOVE_R,
     TRAIL_STEP_R,
 )
-from backend.services.open_low_15m.indicators import bar_indicators, daily_ema10_as_of, signal_exit_long
-from backend.services.volume_mismatch.candles import _parse_ts, first_15m_bar_for_session
+from backend.services.open_low_15m.indicators import bar_indicators, signal_exit_long
+from backend.services.open_low_15m.signals import evaluate_setup
+from backend.services.volume_mismatch.candles import _parse_ts
 
 IST = pytz.timezone("Asia/Kolkata")
 POST_1245 = time(12, 45)
@@ -29,12 +25,6 @@ def _f(v: Any, default: float = 0.0) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
-
-
-def _open_equals_low(o: float, l: float) -> bool:
-    if o <= 0:
-        return False
-    return abs(o - l) <= o * (OPEN_LOW_TOL_PCT / 100.0)
 
 
 def _session_bars_sorted(candles: List[Dict[str, Any]], session_date: date) -> List[Dict[str, Any]]:
@@ -60,8 +50,6 @@ def _trail_sl_price(entry: float, r_dist: float, mfe_price: float) -> float:
     steps = int(mfe_r // TRAIL_STEP_R)
     if steps <= 0:
         return entry - r_dist
-    locked_r = (steps - 1) * TRAIL_MOVE_R * TRAIL_STEP_R / TRAIL_MOVE_R
-    # At 1.5R MFE -> breakeven; at 3R -> +1.5R locked
     locked_r = max(0.0, (steps - 1) * TRAIL_STEP_R)
     return entry + locked_r * r_dist
 
@@ -93,90 +81,22 @@ def detect_setup(
     session_date: date,
     candles_15m: List[Dict[str, Any]],
     prev_close: float,
-    daily_closes_before: List[float],
+    daily_closes_before: List[float] | None = None,
     lot_size: int,
     max_gap_pct: float = 2.0,
 ) -> Optional[Dict[str, Any]]:
-    bars = _session_bars_sorted(candles_15m, session_date)
-    first = first_15m_bar_for_session(candles_15m, session_date)
-    if first is None and bars:
-        first = bars[0]
-    if first is None:
-        return None
-    o, h, l, close_px = _f(first.get("open")), _f(first.get("high")), _f(first.get("low")), _f(first.get("close"))
-    if o <= 0 or not _open_equals_low(o, l):
-        return None
-    if prev_close > 0:
-        gap_pct = abs(o - prev_close) / prev_close * 100.0
-        if gap_pct > max_gap_pct:
-            return None
-
-    # Indicator warmup: all 15m bars through end of first session bar
-    warmup: List[Dict[str, Any]] = []
-    for candle in sorted(candles_15m, key=lambda x: str(x.get("timestamp") or "")):
-        ts = _parse_ts(candle.get("timestamp"))
-        if ts is None:
-            continue
-        t = ts.astimezone(IST)
-        if t.date() > session_date:
-            continue
-        if t.date() == session_date and t.time() > time(9, 15):
-            break
-        warmup.append(candle)
-    if first not in warmup:
-        warmup.append(first)
-    hist_h = [_f(b.get("high")) for b in warmup]
-    hist_l = [_f(b.get("low")) for b in warmup]
-    hist_c = [_f(b.get("close")) for b in warmup]
-    hist_v = [_f(b.get("volume")) for b in warmup]
-    ind0 = bar_indicators(hist_h, hist_l, hist_c, hist_v)
-    ema10_daily = daily_ema10_as_of(daily_closes_before)
-    if ema10_daily is not None and close_px <= ema10_daily:
-        return None
-    if close_px <= ind0["vwap"]:
-        return None
-    if ind0["supertrend_dir"] != 1:
-        return None
-
-    rng = h - l
-    atr14 = ind0.get("atr14")
-    use_alt_sl = atr14 is not None and rng > RANGE_ATR_MULT * float(atr14)
-    sl_primary = l
-    sl_alt = l + 0.5 * rng
-    entry_px = h
-    sl_used = sl_alt if use_alt_sl else sl_primary
-    sl_type = "alternative" if use_alt_sl else "primary"
-    r_dist = entry_px - sl_used
-    if r_dist <= 0:
-        return None
-    risk_inr = r_dist * lot_size
-    if risk_inr < RISK_INR_MIN or risk_inr > RISK_INR_MAX:
-        return None
-
-    gain_pct = (close_px - o) / o * 100.0 if o > 0 else 0.0
-    return {
-        "symbol": symbol,
-        "future_symbol": future_symbol,
-        "instrument_key": instrument_key,
-        "session_date": session_date.isoformat(),
-        "setup_open": o,
-        "setup_high": h,
-        "setup_low": l,
-        "setup_close": close_px,
-        "setup_range": rng,
-        "first_15m_gain_pct": round(gain_pct, 4),
-        "prev_close": prev_close,
-        "entry_trigger": entry_px,
-        "sl_type": sl_type,
-        "sl_price": sl_used,
-        "sl_primary": sl_primary,
-        "sl_alternative": sl_alt,
-        "r_distance": r_dist,
-        "lot_size": lot_size,
-        "risk_inr": round(risk_inr, 2),
-        "atr14_at_setup": atr14,
-        "use_alt_sl": use_alt_sl,
-    }
+    """Backward-compatible wrapper; ignores daily_closes_before (uses intraday EMA10)."""
+    setup, _reason = evaluate_setup(
+        symbol=symbol,
+        future_symbol=future_symbol,
+        instrument_key=instrument_key,
+        session_date=session_date,
+        candles_15m=candles_15m,
+        prev_close=prev_close,
+        lot_size=lot_size,
+        max_gap_pct=max_gap_pct,
+    )
+    return setup
 
 
 def simulate_trade(
@@ -198,18 +118,22 @@ def simulate_trade(
     entry_idx: Optional[int] = None
     entry_time: Optional[datetime] = None
     for i, b in enumerate(bars[1:], start=1):
-        if _f(b.get("high")) >= entry_px:
-            bt: datetime = b["_dt"]
-            if bt.time() >= POST_1245:
-                fib_mid = _fib_mid_30m(bars, i)
-                if fib_mid is not None:
-                    lo = _f(b.get("low"))
-                    cl = _f(b.get("close"))
-                    if not (lo < fib_mid and cl > fib_mid):
-                        continue
-            entry_idx = i
-            entry_time = bt
-            break
+        hi, lo = _f(b.get("high")), _f(b.get("low"))
+        if hi < entry_px:
+            continue
+        bt: datetime = b["_dt"]
+        if bt.time() >= POST_1245:
+            fib_mid = _fib_mid_30m(bars, i)
+            if fib_mid is not None:
+                cl = _f(b.get("close"))
+                if not (lo < fib_mid and cl > fib_mid):
+                    continue
+        # Conservative: if SL touched on entry bar before/at trigger, skip entry on this bar.
+        if lo <= sl0:
+            continue
+        entry_idx = i
+        entry_time = bt
+        break
     if entry_idx is None or entry_time is None:
         return None
 
@@ -235,13 +159,7 @@ def simulate_trade(
         trail_sl = _trail_sl_price(entry_px, r_dist, mfe)
         sl = max(sl0, trail_sl)
 
-        if j > entry_idx:
-            highs.append(hi)
-            lows.append(lo)
-            closes.append(cl)
-            vols.append(_f(b.get("volume")))
-        ind = bar_indicators(highs, lows, closes, vols)
-
+        # Touch-based SL / TP (intrabar), before close-based signal exits.
         if lo <= sl:
             exit_px = sl
             exit_time = bt
@@ -254,6 +172,14 @@ def simulate_trade(
             exit_reason = f"take_profit_{tp_variant}"
             tp_hit = True
             break
+
+        if j > entry_idx:
+            highs.append(hi)
+            lows.append(lo)
+            closes.append(cl)
+            vols.append(_f(b.get("volume")))
+        ind = bar_indicators(highs, lows, closes, vols)
+
         if prev_ind is not None and len(closes) >= 2:
             sig, sig_reason = signal_exit_long(
                 prev_close=closes[-2],

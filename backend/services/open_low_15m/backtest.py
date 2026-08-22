@@ -18,25 +18,27 @@ from backend.services.open_low_15m.config import (
     TP_R_LEVELS,
 )
 from backend.services.open_low_15m.db import ensure_open_low_tables, upsert_trades
-from backend.services.open_low_15m.simulate import detect_setup, simulate_trade
+from backend.services.open_low_15m.candles import (
+    ensure_m15_for_session,
+    native_first_15m_bar,
+    reset_fetch_caches,
+)
+from backend.services.open_low_15m.signals import evaluate_setup
+from backend.services.open_low_15m.simulate import simulate_trade
 from backend.services.open_low_15m.universe import load_open_low_universe_for_session
+from backend.services.volume_mismatch.candle_cache import VolumeMismatchCandleCache, default_cache_dir
+from backend.services.volume_mismatch.candles import BacktestDailyCache
 from backend.services.smart_futures_picker.position_sizing import get_futures_lot_size_by_instrument_key
 from backend.services.upstox_service import UpstoxService
-from backend.services.open_low_15m.candles import ensure_m15_for_session, reset_fetch_caches
-from backend.services.volume_mismatch.candle_cache import VolumeMismatchCandleCache, default_cache_dir
-from backend.services.volume_mismatch.candles import (
-    BacktestDailyCache,
-    _daily_candle_date,
-    first_15m_bar_for_session,
-)
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 STRATEGY_CRITERIA = (
-    "LONG on current-month stock FUT: first 15m (09:15–09:30) OPEN≈LOW, "
-    "entry on break of setup HIGH, SL at setup LOW or 50% range if candle > 2×ATR(14), "
-    "force exit 15:15 IST. TP variants 1R/1.5R/2R/3R tested independently."
+    "LONG on current-month stock FUT: native 09:15–09:30 15m candle OPEN≈LOW (not 10m aggregate), "
+    "intraday EMA10/VWAP/Supertrend filters, entry on break of setup HIGH, "
+    "SL touch at setup LOW or 50% range if candle > 2×ATR(14), force exit 15:15 IST. "
+    "TP variants 1R/1.5R/2R/3R tested independently."
 )
 
 
@@ -64,19 +66,19 @@ def _iter_trading_days(d0: date, d1: date, holidays: set[date]) -> List[date]:
     return out
 
 
-def _daily_closes_before(bars: List[Dict[str, Any]], session_date: date) -> List[float]:
-    out: List[float] = []
-    for c in bars:
-        d = _daily_candle_date(c)
-        if d is None or d >= session_date:
-            continue
+def _first_bar_ohlc(first: Dict[str, Any]) -> Dict[str, float]:
+    def _fx(v: Any) -> float:
         try:
-            cl = float(c.get("close") or 0)
+            return float(v)
         except (TypeError, ValueError):
-            continue
-        if cl > 0:
-            out.append(cl)
-    return out
+            return 0.0
+
+    return {
+        "open": _fx(first.get("open")),
+        "high": _fx(first.get("high")),
+        "low": _fx(first.get("low")),
+        "close": _fx(first.get("close")),
+    }
 
 
 def _aggregate_metrics(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -198,6 +200,8 @@ def run_open_low_15m_backtest(
     day_pause_sec: float = 2.0,
     symbol_pause_sec: float = 0.12,
     merge_into: bool = False,
+    reverse_order: bool = False,
+    full_replace: bool = False,
 ) -> Dict[str, Any]:
     if from_date > to_date:
         return {"ok": False, "error": "from_date must be <= to_date", "rows": []}
@@ -210,6 +214,8 @@ def run_open_low_15m_backtest(
     rid = run_id or f"open_low_15m_{datetime.now(IST).strftime('%Y%m%d_%H%M%S')}"
     holidays = _load_holiday_dates(upstox, from_date, to_date)
     session_days = _iter_trading_days(from_date, to_date, holidays)
+    if reverse_order:
+        session_days = list(reversed(session_days))
     persistent = VolumeMismatchCandleCache(cache_dir=default_cache_dir())
     daily_cache = BacktestDailyCache(persistent_cache=persistent)
 
@@ -227,7 +233,11 @@ def run_open_low_15m_backtest(
             out_path = candidate
             break
 
-    if merge_into and out_path is not None:
+    if full_replace:
+        base_doc = None
+        merge_into = False
+
+    if merge_into and out_path is not None and not full_replace:
         base_doc = _load_artifact(out_path)
 
     chunk_setups = 0
@@ -274,6 +284,7 @@ def run_open_low_15m_backtest(
             "trading_days_scanned": len(day_scan_log),
             "chunk_from": from_date.isoformat(),
             "chunk_to": to_date.isoformat(),
+            "reverse_order": reverse_order,
             "partial": partial,
             "summary": _aggregate_metrics(all_trades),
             "by_tp_variant": _by_tp(all_trades),
@@ -288,6 +299,7 @@ def run_open_low_15m_backtest(
     for session_date in session_days:
         universe = load_open_low_universe_for_session(session_date)
         day_setups: List[Dict[str, Any]] = []
+        setup_rejects: List[Dict[str, Any]] = []
         m15_miss = 0
         for u in universe:
             ik = u.get("instrument_key") or ""
@@ -296,32 +308,49 @@ def run_open_low_15m_backtest(
                 continue
             try:
                 prev_close, _ = daily_cache.previous_close(upstox, ik, session_date)
-                daily_bars, _ = daily_cache.daily_bars_for_bb(upstox, ik, session_date, min_closes=10)
-                closes_before = _daily_closes_before(daily_bars, session_date)
                 m15, fetched = ensure_m15_for_session(
                     upstox,
                     persistent,
                     ik,
                     session_date,
                     symbol_pause_sec=symbol_pause_sec,
+                    force_refetch=full_replace,
                 )
                 if fetched:
                     m15_miss += 1
-                if not m15 or first_15m_bar_for_session(m15, session_date) is None:
+                first = native_first_15m_bar(m15 or [], session_date)
+                if not m15 or first is None:
                     continue
                 lot = get_futures_lot_size_by_instrument_key(ik) or 1
-                setup = detect_setup(
+                setup, reject_reason = evaluate_setup(
                     symbol=sym,
                     future_symbol=u.get("future_symbol") or sym,
                     instrument_key=ik,
                     session_date=session_date,
                     candles_15m=m15,
                     prev_close=float(prev_close or 0),
-                    daily_closes_before=closes_before,
                     lot_size=lot,
                 )
                 if setup:
                     day_setups.append(setup)
+                elif reject_reason == "open_not_low":
+                    ohlc = _first_bar_ohlc(first)
+                    setup_rejects.append(
+                        {
+                            "symbol": sym,
+                            "reason": reject_reason,
+                            **ohlc,
+                        }
+                    )
+                elif reject_reason not in ("no_native_15m_bar", "bad_open"):
+                    ohlc = _first_bar_ohlc(first)
+                    setup_rejects.append(
+                        {
+                            "symbol": sym,
+                            "reason": reject_reason,
+                            **ohlc,
+                        }
+                    )
             except Exception as e:
                 errors.append({"session_date": session_date.isoformat(), "symbol": sym, "error": str(e)})
                 logger.debug("open_low scan %s %s: %s", session_date, sym, e)
@@ -334,7 +363,7 @@ def run_open_low_15m_backtest(
             ik = setup["instrument_key"]
             sd = date.fromisoformat(setup["session_date"])
             m15, _ = ensure_m15_for_session(
-                upstox, persistent, ik, sd, symbol_pause_sec=0.0,
+                upstox, persistent, ik, sd, symbol_pause_sec=0.0, force_refetch=full_replace,
             )
             for tp in tp_variants:
                 trade = simulate_trade(setup, m15 or [], tp)
@@ -351,6 +380,7 @@ def run_open_low_15m_backtest(
                 "trades_added": len(all_trades) - day_trades_before,
                 "trades_total": len(all_trades),
                 "m15_api_fetches": m15_miss,
+                "setup_rejects": setup_rejects[:40],
             }
         )
         day_scan_log.sort(key=lambda x: str(x.get("session_date") or ""))
