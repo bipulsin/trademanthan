@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>Open-Low 15m Backtest | TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="volume-mismatch-backtest.css?v=2">
+    <style>
+        .olt-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+        .olt-chart-box { background: var(--card-bg, #1a1a2e); border-radius: 8px; padding: 0.75rem; min-height: 200px; }
+        .olt-chart-box h3 { margin: 0 0 0.5rem; font-size: 0.95rem; opacity: 0.85; }
+        canvas.olt-chart { width: 100%; height: 180px; }
+        @media (max-width: 900px) { .olt-charts { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body class="theme-page" data-theme="dark">
+    <div class="vmb-wrap">
+        <header class="vmb-header">
+            <div>
+                <h1><i class="fas fa-arrow-trend-up" style="color:#059669;"></i> Open-Low 15m Strategy Backtest</h1>
+                <p class="vmb-lede">
+                    August 2026 expiry window (22 Jul – 21 Aug 2026) on <strong>arbitrage_master</strong> stock futures.
+                    Setup: first 15m candle with OPEN≈LOW; entry on break of setup HIGH; SL at LOW or 50% range if range &gt; 2×ATR(14).
+                    Force exit <strong>15:15 IST</strong>. TP variants TP1–TP4 (1R / 1.5R / 2R / 3R) simulated independently.
+                </p>
+            </div>
+            <div class="vmb-header-actions">
+                <button type="button" class="vmb-theme-btn" id="oltThemeBtn" title="Toggle theme"><i class="fas fa-moon"></i></button>
+            </div>
+        </header>
+
+        <div class="vmb-callout" id="oltErr" hidden></div>
+
+        <div class="vmb-summary" id="oltSummary">
+            <div class="vmb-stat"><span class="vmb-stat-label">Trades</span><span class="vmb-stat-val" id="oltStatTrades">—</span></div>
+            <div class="vmb-stat"><span class="vmb-stat-label">Win rate</span><span class="vmb-stat-val" id="oltStatWin">—</span></div>
+            <div class="vmb-stat"><span class="vmb-stat-label">Avg R</span><span class="vmb-stat-val" id="oltStatAvgR">—</span></div>
+            <div class="vmb-stat"><span class="vmb-stat-label">Max DD (R)</span><span class="vmb-stat-val" id="oltStatDD">—</span></div>
+            <div class="vmb-stat"><span class="vmb-stat-label">Best / Worst R</span><span class="vmb-stat-val vmb-stat-small" id="oltStatBestWorst">—</span></div>
+            <div class="vmb-stat"><span class="vmb-stat-label">Run</span><span class="vmb-stat-val vmb-stat-small" id="oltStatRun">—</span></div>
+        </div>
+
+        <div class="vmb-summary" id="oltTpSummary"></div>
+        <div class="vmb-summary" id="oltSlSummary"></div>
+
+        <div class="olt-charts">
+            <div class="olt-chart-box"><h3>Equity curve (cumulative R)</h3><canvas id="oltEquityChart" class="olt-chart"></canvas></div>
+            <div class="olt-chart-box"><h3>Win rate by day (rolling 5d)</h3><canvas id="oltWinChart" class="olt-chart"></canvas></div>
+        </div>
+
+        <div class="vmb-filters">
+            <label>Date from <input type="date" id="oltFrom"></label>
+            <label>Date to <input type="date" id="oltTo"></label>
+            <label>TP variant
+                <select id="oltTp">
+                    <option value="">All</option>
+                    <option value="TP1">TP1 (1R)</option>
+                    <option value="TP2">TP2 (1.5R)</option>
+                    <option value="TP3">TP3 (2R)</option>
+                    <option value="TP4">TP4 (3R)</option>
+                </select>
+            </label>
+            <label>SL type
+                <select id="oltSl">
+                    <option value="">All</option>
+                    <option value="primary">Primary</option>
+                    <option value="alternative">Alternative</option>
+                </select>
+            </label>
+            <label>Symbol <input type="search" id="oltSymbol" placeholder="e.g. RELIANCE"></label>
+            <label><input type="checkbox" id="oltTopGainer"> Top gainer only</label>
+            <span class="vmb-count" id="oltCount">—</span>
+        </div>
+
+        <h2 style="margin:1rem 0 0.5rem;font-size:1rem;">Daily summary</h2>
+        <div class="vmb-table-wrap">
+            <table class="vmb-table" id="oltDailyTable">
+                <thead>
+                    <tr>
+                        <th>Date</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg R</th>
+                    </tr>
+                </thead>
+                <tbody id="oltDailyBody"><tr><td colspan="4" class="vmb-empty">—</td></tr></tbody>
+            </table>
+        </div>
+
+        <h2 style="margin:1rem 0 0.5rem;font-size:1rem;">Trade detail</h2>
+        <div class="vmb-table-wrap">
+            <table class="vmb-table" id="oltTable">
+                <thead>
+                    <tr>
+                        <th data-sort="session_date">Date</th>
+                        <th data-sort="symbol">Symbol</th>
+                        <th data-sort="tp_variant">TP</th>
+                        <th data-sort="sl_type">SL</th>
+                        <th class="num" data-sort="entry_price">Entry</th>
+                        <th class="num" data-sort="sl_price">SL</th>
+                        <th class="num" data-sort="exit_price">Exit</th>
+                        <th data-sort="exit_reason">Reason</th>
+                        <th class="num" data-sort="r_realized">R</th>
+                        <th class="num" data-sort="pnl_inr">PnL ₹</th>
+                        <th class="num" data-sort="holding_minutes">Hold m</th>
+                        <th data-sort="is_top_gainer">Top?</th>
+                    </tr>
+                </thead>
+                <tbody id="oltTbody"><tr><td colspan="12" class="vmb-empty">Loading…</td></tr></tbody>
+            </table>
+        </div>
+        <p class="vmb-footer" id="oltFooter"></p>
+    </div>
+    <script src="open-low-15m-backtest.js?v=1"></script>
+</body>
+</html>

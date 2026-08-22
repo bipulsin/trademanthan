@@ -31,6 +31,7 @@ import backend.routers.futures_reports as futures_reports
 import backend.routers.iron_condor as iron_condor
 import backend.routers.volume_mismatch_futures as volume_mismatch_futures
 import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
+import backend.routers.open_low_15m_backtest as open_low_15m_backtest
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -333,6 +334,8 @@ app.include_router(volume_mismatch_futures.router, prefix="/api")
 app.include_router(volume_mismatch_futures.router, prefix="")
 app.include_router(volume_mismatch_backtest.router, prefix="/api")
 app.include_router(volume_mismatch_backtest.router, prefix="")
+app.include_router(open_low_15m_backtest.router, prefix="/api")
+app.include_router(open_low_15m_backtest.router, prefix="")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")

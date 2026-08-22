@@ -1,0 +1,41 @@
+-- Open-Low 15m backtest trade log (Smart Future Algo research)
+CREATE TABLE IF NOT EXISTS open_low_15m_backtest_trade (
+    id BIGSERIAL PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    session_date DATE NOT NULL,
+    symbol TEXT NOT NULL,
+    future_symbol TEXT,
+    instrument_key TEXT,
+    tp_variant TEXT NOT NULL,
+    is_top_gainer BOOLEAN NOT NULL DEFAULT FALSE,
+    setup_open DOUBLE PRECISION,
+    setup_high DOUBLE PRECISION,
+    setup_low DOUBLE PRECISION,
+    setup_close DOUBLE PRECISION,
+    entry_time TIMESTAMPTZ,
+    entry_price DOUBLE PRECISION,
+    sl_type TEXT,
+    sl_price DOUBLE PRECISION,
+    tp_r DOUBLE PRECISION,
+    tp_price DOUBLE PRECISION,
+    exit_time TIMESTAMPTZ,
+    exit_price DOUBLE PRECISION,
+    exit_reason TEXT,
+    r_realized DOUBLE PRECISION,
+    pnl_inr DOUBLE PRECISION,
+    holding_minutes INTEGER,
+    risk_inr DOUBLE PRECISION,
+    lot_size INTEGER,
+    tp_hit BOOLEAN NOT NULL DEFAULT FALSE,
+    trail_stop_used BOOLEAN NOT NULL DEFAULT FALSE,
+    exit_vwap DOUBLE PRECISION,
+    exit_ema5 DOUBLE PRECISION,
+    exit_ema10 DOUBLE PRECISION,
+    exit_supertrend_dir INTEGER,
+    components JSONB,
+    computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (run_id, session_date, symbol, tp_variant)
+);
+
+CREATE INDEX IF NOT EXISTS idx_open_low_bt_run
+ON open_low_15m_backtest_trade (run_id, session_date, symbol);
