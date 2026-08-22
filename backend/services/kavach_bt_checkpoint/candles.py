@@ -36,9 +36,10 @@ def fetch_5m_candles(
     lookback_days: int = 8,
 ) -> List[Dict[str, Any]]:
     """Fetch 5m candles via Upstox (historical). Never uses Dhan."""
+    from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
-    svc = UpstoxService()
+    svc = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     raw = svc.get_historical_candles_by_instrument_key(
         instrument_key,
         interval="minutes/5",
