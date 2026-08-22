@@ -1,7 +1,7 @@
 (function () {
     'use strict';
 
-    const API_PATHS = ['/open-low-15m-backtest/data', '/api/open-low-15m-backtest/data'];
+    const API_PATHS = ['/api/open-low-15m-backtest/data', '/open-low-15m-backtest/data'];
 
     function apiBase() {
         if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
@@ -220,23 +220,28 @@
     }
 
     async function load() {
-        try {
-            let res = null;
-            for (const path of API_PATHS) {
+        let lastErr = null;
+        for (const path of API_PATHS) {
+            try {
                 const r = await fetch(apiBase() + path, { cache: 'no-store' });
-                if (r.ok) { res = r; break; }
+                const ct = (r.headers.get('content-type') || '').toLowerCase();
+                if (!r.ok || !ct.includes('json')) {
+                    throw new Error(r.status === 503 ? 'Artifact not found' : 'Non-JSON response');
+                }
+                raw = await r.json();
+                rows = raw.rows || [];
+                if (raw.from_date) $('oltFrom').value = raw.from_date;
+                if (raw.to_date) $('oltTo').value = raw.to_date;
+                showErr('');
+                renderTpSlCards();
+                applyFilters();
+                return;
+            } catch (e) {
+                lastErr = e;
             }
-            if (!res) throw new Error('Artifact not found (503)');
-            raw = await res.json();
-            rows = raw.rows || [];
-            if (raw.from_date) $('oltFrom').value = raw.from_date;
-            if (raw.to_date) $('oltTo').value = raw.to_date;
-            renderTpSlCards();
-            applyFilters();
-        } catch (e) {
-            showErr('Failed to load backtest: ' + (e.message || e));
-            $('oltTbody').innerHTML = '<tr><td colspan="12" class="vmb-empty">No artifact — run scripts/run_open_low_15m_backtest.py</td></tr>';
         }
+        showErr('Failed to load backtest: ' + (lastErr && lastErr.message ? lastErr.message : 'Artifact not found'));
+        $('oltTbody').innerHTML = '<tr><td colspan="12" class="vmb-empty">No artifact — run scripts/run_open_low_15m_backtest.py</td></tr>';
     }
 
     bindSort();
