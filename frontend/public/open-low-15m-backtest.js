@@ -1,7 +1,7 @@
 (function () {
     'use strict';
 
-    const API = '/open-low-15m-backtest/data';
+    const API_PATHS = ['/open-low-15m-backtest/data', '/api/open-low-15m-backtest/data'];
     let raw = null;
     let rows = [];
     let sortKey = 'session_date';
