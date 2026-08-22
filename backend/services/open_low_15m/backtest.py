@@ -160,6 +160,20 @@ def _mark_top_gainers(setups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return setups
 
 
+def _write_incremental_artifact(
+    path: Optional[Path],
+    *,
+    doc: Dict[str, Any],
+) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({**doc, "partial": True}, f, indent=2, default=str)
+    tmp.replace(path)
+
+
 def run_open_low_15m_backtest(
     from_date: date = DATE_FROM,
     to_date: date = DATE_TO,
@@ -168,6 +182,7 @@ def run_open_low_15m_backtest(
     out_path: Optional[Path] = None,
     write_db: bool = True,
     tp_filter: Optional[str] = None,
+    day_pause_sec: float = 0.75,
 ) -> Dict[str, Any]:
     if from_date > to_date:
         return {"ok": False, "error": "from_date must be <= to_date", "rows": []}
@@ -185,8 +200,22 @@ def run_open_low_15m_backtest(
     all_trades: List[Dict[str, Any]] = []
     setups_found = 0
     errors: List[Dict[str, str]] = []
+    day_scan_log: List[Dict[str, Any]] = []
 
     tp_variants = [tp_filter] if tp_filter in TP_R_LEVELS else list(TP_R_LEVELS.keys())
+
+    if out_path is None:
+        root = Path(__file__).resolve().parents[2]
+        for candidate in (
+            Path("/home/ubuntu/trademanthan/data") / ARTIFACT_NAME,
+            root / "backend" / "data" / ARTIFACT_NAME,
+            root / "data" / ARTIFACT_NAME,
+        ):
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            out_path = candidate
+            break
+
+    import time as _time
 
     for session_date in session_days:
         universe = load_open_low_universe_for_session(session_date)
@@ -230,6 +259,7 @@ def run_open_low_15m_backtest(
         day_setups = _mark_top_gainers(day_setups)
         setups_found += len(day_setups)
 
+        day_trades_before = len(all_trades)
         for setup in day_setups:
             ik = setup["instrument_key"]
             m15 = fetch_candles_cached(
@@ -247,6 +277,15 @@ def run_open_low_15m_backtest(
                     trade["is_top_gainer"] = setup.get("is_top_gainer", False)
                     all_trades.append(trade)
 
+        day_scan_log.append(
+            {
+                "session_date": session_date.isoformat(),
+                "universe": len(universe),
+                "setups": len(day_setups),
+                "trades_added": len(all_trades) - day_trades_before,
+                "trades_total": len(all_trades),
+            }
+        )
         logger.info(
             "open_low_15m %s: universe=%s setups=%s trades=%s",
             session_date,
@@ -254,6 +293,31 @@ def run_open_low_15m_backtest(
             len(day_setups),
             len(all_trades),
         )
+
+        partial_doc = {
+            "ok": True,
+            "algo": "open_low_15m_backtest",
+            "run_id": rid,
+            "strategy_criteria": STRATEGY_CRITERIA,
+            "generated_at": datetime.now(IST).isoformat(),
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+            "force_exit_ist": "15:15",
+            "trading_days_total": len(session_days),
+            "trading_days_scanned": len(day_scan_log),
+            "summary": _aggregate_metrics(all_trades),
+            "by_tp_variant": _by_tp(all_trades),
+            "by_sl_type": _by_sl_type(all_trades),
+            "daily_summary": _daily_summary(all_trades),
+            "day_scan_log": day_scan_log,
+            "setups_found": setups_found,
+            "errors": errors,
+            "rows": all_trades,
+        }
+        _write_incremental_artifact(out_path, doc=partial_doc)
+
+        if day_pause_sec > 0:
+            _time.sleep(day_pause_sec)
 
     summary = _aggregate_metrics(all_trades)
     doc = {
@@ -265,10 +329,14 @@ def run_open_low_15m_backtest(
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
         "force_exit_ist": "15:15",
+        "trading_days_total": len(session_days),
+        "trading_days_scanned": len(day_scan_log),
+        "partial": False,
         "summary": summary,
         "by_tp_variant": _by_tp(all_trades),
         "by_sl_type": _by_sl_type(all_trades),
         "daily_summary": _daily_summary(all_trades),
+        "day_scan_log": day_scan_log,
         "setups_found": setups_found,
         "errors": errors,
         "rows": all_trades,
@@ -277,17 +345,6 @@ def run_open_low_15m_backtest(
     if write_db:
         ensure_open_low_tables()
         upsert_trades(rid, all_trades)
-
-    if out_path is None:
-        root = Path(__file__).resolve().parents[2]
-        for candidate in (
-            Path("/home/ubuntu/trademanthan/data") / ARTIFACT_NAME,
-            root / "backend" / "data" / ARTIFACT_NAME,
-            root / "data" / ARTIFACT_NAME,
-        ):
-            candidate.parent.mkdir(parents=True, exist_ok=True)
-            out_path = candidate
-            break
 
     if out_path is not None:
         tmp = out_path.with_suffix(".json.tmp")

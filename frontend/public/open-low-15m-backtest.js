@@ -9,7 +9,9 @@
         }
         return location.origin;
     }
+
     let raw = null;
+    let allRows = [];
     let rows = [];
     let sortKey = 'session_date';
     let sortAsc = false;
@@ -27,24 +29,53 @@
         el.textContent = msg || '';
     }
 
+    function aggregateMetrics(list) {
+        const rs = list.map((r) => Number(r.r_realized) || 0);
+        const n = rs.length;
+        if (!n) {
+            return { total_trades: 0, win_rate: 0, avg_r: 0 };
+        }
+        const wins = rs.filter((x) => x > 0).length;
+        return {
+            total_trades: n,
+            win_rate: 100 * wins / n,
+            avg_r: rs.reduce((a, b) => a + b, 0) / n,
+        };
+    }
+
     function applyFilters() {
-        const f = $('oltFrom').value;
-        const t = $('oltTo').value;
-        const tp = $('oltTp').value;
-        const sl = $('oltSl').value;
+        if (!raw) return;
+        const f = ($('oltFrom').value || '').trim();
+        const t = ($('oltTo').value || '').trim();
+        const tp = ($('oltTp').value || '').trim();
+        const sl = ($('oltSl').value || '').trim();
         const sym = ($('oltSymbol').value || '').trim().toUpperCase();
         const topOnly = $('oltTopGainer').checked;
-        rows = (raw.rows || []).filter((r) => {
-            if (f && r.session_date < f) return false;
-            if (t && r.session_date > t) return false;
-            if (tp && r.tp_variant !== tp) return false;
-            if (sl && r.sl_type !== sl) return false;
-            if (sym && !(r.symbol || '').toUpperCase().includes(sym)) return false;
+
+        rows = allRows.filter((r) => {
+            const sd = String(r.session_date || '');
+            if (f && sd < f) return false;
+            if (t && sd > t) return false;
+            if (tp && String(r.tp_variant || '') !== tp) return false;
+            if (sl && String(r.sl_type || '') !== sl) return false;
+            if (sym && !String(r.symbol || '').toUpperCase().includes(sym)) return false;
             if (topOnly && !r.is_top_gainer) return false;
             return true;
         });
+
         sortRows();
         renderAll();
+    }
+
+    function resetFilters() {
+        if (!raw) return;
+        if (raw.from_date) $('oltFrom').value = raw.from_date;
+        if (raw.to_date) $('oltTo').value = raw.to_date;
+        $('oltTp').value = '';
+        $('oltSl').value = '';
+        $('oltSymbol').value = '';
+        $('oltTopGainer').checked = false;
+        applyFilters();
     }
 
     function sortRows() {
@@ -76,7 +107,11 @@
         $('oltStatDD').textContent = fmt(dd, 3);
         $('oltStatBestWorst').textContent = n ? fmt(Math.max(...rs), 2) + ' / ' + fmt(Math.min(...rs), 2) : '—';
         $('oltStatRun').textContent = raw.run_id || '—';
-        $('oltCount').textContent = n + ' trades';
+
+        const parts = [n + ' trades shown'];
+        if (allRows.length !== n) parts.push(allRows.length + ' total');
+        if (raw.partial) parts.push('partial run — refresh later');
+        $('oltCount').textContent = parts.join(' · ');
     }
 
     function renderTpSlCards() {
@@ -84,22 +119,24 @@
         const slEl = $('oltSlSummary');
         tpEl.innerHTML = '';
         slEl.innerHTML = '';
-        const byTp = raw.by_tp_variant || {};
-        Object.keys(byTp).forEach((k) => {
-            const m = byTp[k];
+
+        ['TP1', 'TP2', 'TP3', 'TP4'].forEach((k) => {
+            const sub = rows.filter((r) => r.tp_variant === k);
+            const m = aggregateMetrics(sub);
             const d = document.createElement('div');
             d.className = 'vmb-stat';
             d.innerHTML = '<span class="vmb-stat-label">' + k + '</span><span class="vmb-stat-val">' +
                 fmt(m.win_rate, 1) + '% · avgR ' + fmt(m.avg_r, 2) + ' · n=' + m.total_trades + '</span>';
             tpEl.appendChild(d);
         });
-        const bySl = raw.by_sl_type || {};
+
         ['primary', 'alternative'].forEach((k) => {
-            const m = bySl[k] || {};
+            const sub = rows.filter((r) => r.sl_type === k);
+            const m = aggregateMetrics(sub);
             const d = document.createElement('div');
             d.className = 'vmb-stat';
             d.innerHTML = '<span class="vmb-stat-label">SL ' + k + '</span><span class="vmb-stat-val">' +
-                fmt(m.win_rate, 1) + '% · avgR ' + fmt(m.avg_r, 2) + ' · n=' + (m.total_trades || 0) + '</span>';
+                fmt(m.win_rate, 1) + '% · avgR ' + fmt(m.avg_r, 2) + ' · n=' + m.total_trades + '</span>';
             slEl.appendChild(d);
         });
     }
@@ -114,7 +151,7 @@
         const body = $('oltDailyBody');
         const keys = Object.keys(byDate).sort();
         if (!keys.length) {
-            body.innerHTML = '<tr><td colspan="4" class="vmb-empty">No data</td></tr>';
+            body.innerHTML = '<tr><td colspan="4" class="vmb-empty">No data for current filters</td></tr>';
             return;
         }
         body.innerHTML = keys.map((d) => {
@@ -142,7 +179,7 @@
         ).join('');
     }
 
-    function drawLine(canvasId, labels, values, color) {
+    function drawLine(canvasId, values, color) {
         const c = $(canvasId);
         if (!c) return;
         const ctx = c.getContext('2d');
@@ -172,7 +209,7 @@
         const sorted = rows.slice().sort((a, b) => String(a.session_date).localeCompare(String(b.session_date)));
         let cum = 0;
         const equity = sorted.map((r) => { cum += Number(r.r_realized) || 0; return cum; });
-        drawLine('oltEquityChart', [], equity, '#059669');
+        drawLine('oltEquityChart', equity, '#059669');
 
         const byDate = {};
         sorted.forEach((r) => {
@@ -188,15 +225,20 @@
             window.forEach((dd) => { w += byDate[dd].w; n += byDate[dd].n; });
             return n ? (100 * w / n) : 0;
         });
-        drawLine('oltWinChart', dates, winRoll, '#7c3aed');
+        drawLine('oltWinChart', winRoll, '#7c3aed');
     }
 
     function renderAll() {
         renderSummary();
+        renderTpSlCards();
         renderDaily();
         renderTrades();
         renderCharts();
-        $('oltFooter').textContent = raw.generated_at ? 'Generated ' + raw.generated_at + ' · ' + (raw.artifact_path || '') : '';
+        const scan = raw.trading_days_scanned && raw.trading_days_total
+            ? ' · scanned ' + raw.trading_days_scanned + '/' + raw.trading_days_total + ' days'
+            : '';
+        $('oltFooter').textContent = (raw.generated_at ? 'Generated ' + raw.generated_at : '') +
+            scan + (raw.artifact_path ? ' · ' + raw.artifact_path : '');
     }
 
     function bindSort() {
@@ -212,14 +254,17 @@
     }
 
     function bindFilters() {
-        ['oltFrom', 'oltTo', 'oltTp', 'oltSl', 'oltSymbol', 'oltTopGainer'].forEach((id) => {
-            const el = $(id);
-            el.addEventListener('change', applyFilters);
-            el.addEventListener('input', applyFilters);
+        $('oltApplyBtn').addEventListener('click', applyFilters);
+        $('oltResetBtn').addEventListener('click', resetFilters);
+        $('oltRefreshBtn').addEventListener('click', load);
+        $('oltSymbol').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') applyFilters();
         });
     }
 
     async function load() {
+        showErr('');
+        $('oltTbody').innerHTML = '<tr><td colspan="12" class="vmb-empty">Loading…</td></tr>';
         let lastErr = null;
         for (const path of API_PATHS) {
             try {
@@ -229,11 +274,10 @@
                     throw new Error(r.status === 503 ? 'Artifact not found' : 'Non-JSON response');
                 }
                 raw = await r.json();
-                rows = raw.rows || [];
+                allRows = raw.rows || [];
+                rows = allRows.slice();
                 if (raw.from_date) $('oltFrom').value = raw.from_date;
                 if (raw.to_date) $('oltTo').value = raw.to_date;
-                showErr('');
-                renderTpSlCards();
                 applyFilters();
                 return;
             } catch (e) {
