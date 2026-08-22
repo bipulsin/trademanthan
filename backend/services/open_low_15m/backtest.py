@@ -22,12 +22,13 @@ from backend.services.open_low_15m.simulate import detect_setup, simulate_trade
 from backend.services.open_low_15m.universe import load_open_low_universe_for_session
 from backend.services.smart_futures_picker.position_sizing import get_futures_lot_size_by_instrument_key
 from backend.services.upstox_service import UpstoxService
+from backend.services.open_low_15m.candles import ensure_m15_for_session, reset_fetch_caches
+from backend.services.volume_mismatch.candle_cache import VolumeMismatchCandleCache, default_cache_dir
 from backend.services.volume_mismatch.candles import (
     BacktestDailyCache,
     _daily_candle_date,
-    fetch_candles_cached,
+    first_15m_bar_for_session,
 )
-from backend.services.volume_mismatch.candle_cache import VolumeMismatchCandleCache, default_cache_dir
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -174,6 +175,18 @@ def _write_incremental_artifact(
     tmp.replace(path)
 
 
+def _load_artifact(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.is_file():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning("open_low read artifact %s: %s", path, e)
+        return None
+
+
 def run_open_low_15m_backtest(
     from_date: date = DATE_FROM,
     to_date: date = DATE_TO,
@@ -182,7 +195,9 @@ def run_open_low_15m_backtest(
     out_path: Optional[Path] = None,
     write_db: bool = True,
     tp_filter: Optional[str] = None,
-    day_pause_sec: float = 0.75,
+    day_pause_sec: float = 2.0,
+    symbol_pause_sec: float = 0.12,
+    merge_into: bool = False,
 ) -> Dict[str, Any]:
     if from_date > to_date:
         return {"ok": False, "error": "from_date must be <= to_date", "rows": []}
@@ -191,18 +206,15 @@ def run_open_low_15m_backtest(
     if not getattr(upstox, "access_token", None):
         return {"ok": False, "error": "Upstox token unavailable", "rows": []}
 
+    reset_fetch_caches()
     rid = run_id or f"open_low_15m_{datetime.now(IST).strftime('%Y%m%d_%H%M%S')}"
     holidays = _load_holiday_dates(upstox, from_date, to_date)
     session_days = _iter_trading_days(from_date, to_date, holidays)
     persistent = VolumeMismatchCandleCache(cache_dir=default_cache_dir())
     daily_cache = BacktestDailyCache(persistent_cache=persistent)
 
-    all_trades: List[Dict[str, Any]] = []
-    setups_found = 0
-    errors: List[Dict[str, str]] = []
-    day_scan_log: List[Dict[str, Any]] = []
-
-    tp_variants = [tp_filter] if tp_filter in TP_R_LEVELS else list(TP_R_LEVELS.keys())
+    replace_dates = {d.isoformat() for d in session_days}
+    base_doc: Optional[Dict[str, Any]] = None
 
     if out_path is None:
         root = Path(__file__).resolve().parents[2]
@@ -215,11 +227,68 @@ def run_open_low_15m_backtest(
             out_path = candidate
             break
 
+    if merge_into and out_path is not None:
+        base_doc = _load_artifact(out_path)
+
+    chunk_setups = 0
+    errors: List[Dict[str, str]] = []
+    day_scan_log: List[Dict[str, Any]] = []
+
+    if base_doc and merge_into:
+        all_trades = [
+            r for r in (base_doc.get("rows") or []) if str(r.get("session_date") or "") not in replace_dates
+        ]
+        day_scan_log = [
+            d for d in (base_doc.get("day_scan_log") or []) if str(d.get("session_date") or "") not in replace_dates
+        ]
+        errors = list(base_doc.get("errors") or [])
+        rid = str(base_doc.get("run_id") or rid)
+    else:
+        all_trades = []
+
+    tp_variants = [tp_filter] if tp_filter in TP_R_LEVELS else list(TP_R_LEVELS.keys())
+
     import time as _time
+
+    def _artifact_from_date() -> str:
+        if base_doc and merge_into:
+            return str(base_doc.get("from_date") or from_date.isoformat())
+        return from_date.isoformat()
+
+    def _artifact_to_date() -> str:
+        if base_doc and merge_into:
+            return str(base_doc.get("to_date") or to_date.isoformat())
+        return to_date.isoformat()
+
+    def _build_doc(*, partial: bool) -> Dict[str, Any]:
+        return {
+            "ok": True,
+            "algo": "open_low_15m_backtest",
+            "run_id": rid,
+            "strategy_criteria": STRATEGY_CRITERIA,
+            "generated_at": datetime.now(IST).isoformat(),
+            "from_date": _artifact_from_date(),
+            "to_date": _artifact_to_date(),
+            "force_exit_ist": "15:15",
+            "trading_days_total": base_doc.get("trading_days_total") if base_doc else len(session_days),
+            "trading_days_scanned": len(day_scan_log),
+            "chunk_from": from_date.isoformat(),
+            "chunk_to": to_date.isoformat(),
+            "partial": partial,
+            "summary": _aggregate_metrics(all_trades),
+            "by_tp_variant": _by_tp(all_trades),
+            "by_sl_type": _by_sl_type(all_trades),
+            "daily_summary": _daily_summary(all_trades),
+            "day_scan_log": day_scan_log,
+            "setups_found": sum(int(d.get("setups") or 0) for d in day_scan_log),
+            "errors": errors,
+            "rows": all_trades,
+        }
 
     for session_date in session_days:
         universe = load_open_low_universe_for_session(session_date)
         day_setups: List[Dict[str, Any]] = []
+        m15_miss = 0
         for u in universe:
             ik = u.get("instrument_key") or ""
             sym = u.get("symbol") or ""
@@ -229,15 +298,16 @@ def run_open_low_15m_backtest(
                 prev_close, _ = daily_cache.previous_close(upstox, ik, session_date)
                 daily_bars, _ = daily_cache.daily_bars_for_bb(upstox, ik, session_date, min_closes=10)
                 closes_before = _daily_closes_before(daily_bars, session_date)
-                m15 = fetch_candles_cached(
+                m15, fetched = ensure_m15_for_session(
                     upstox,
+                    persistent,
                     ik,
-                    "minutes/15",
-                    days_back=5,
-                    range_end_date=session_date,
-                    allow_rest=True,
+                    session_date,
+                    symbol_pause_sec=symbol_pause_sec,
                 )
-                if not m15:
+                if fetched:
+                    m15_miss += 1
+                if not m15 or first_15m_bar_for_session(m15, session_date) is None:
                     continue
                 lot = get_futures_lot_size_by_instrument_key(ik) or 1
                 setup = detect_setup(
@@ -257,18 +327,14 @@ def run_open_low_15m_backtest(
                 logger.debug("open_low scan %s %s: %s", session_date, sym, e)
 
         day_setups = _mark_top_gainers(day_setups)
-        setups_found += len(day_setups)
+        chunk_setups += len(day_setups)
 
         day_trades_before = len(all_trades)
         for setup in day_setups:
             ik = setup["instrument_key"]
-            m15 = fetch_candles_cached(
-                upstox,
-                ik,
-                "minutes/15",
-                days_back=5,
-                range_end_date=session_date,
-                allow_rest=True,
+            sd = date.fromisoformat(setup["session_date"])
+            m15, _ = ensure_m15_for_session(
+                upstox, persistent, ik, sd, symbol_pause_sec=0.0,
             )
             for tp in tp_variants:
                 trade = simulate_trade(setup, m15 or [], tp)
@@ -284,63 +350,27 @@ def run_open_low_15m_backtest(
                 "setups": len(day_setups),
                 "trades_added": len(all_trades) - day_trades_before,
                 "trades_total": len(all_trades),
+                "m15_api_fetches": m15_miss,
             }
         )
+        day_scan_log.sort(key=lambda x: str(x.get("session_date") or ""))
         logger.info(
-            "open_low_15m %s: universe=%s setups=%s trades=%s",
+            "open_low_15m %s: universe=%s setups=%s trades=%s m15_fetch=%s",
             session_date,
             len(universe),
             len(day_setups),
             len(all_trades),
+            m15_miss,
         )
 
-        partial_doc = {
-            "ok": True,
-            "algo": "open_low_15m_backtest",
-            "run_id": rid,
-            "strategy_criteria": STRATEGY_CRITERIA,
-            "generated_at": datetime.now(IST).isoformat(),
-            "from_date": from_date.isoformat(),
-            "to_date": to_date.isoformat(),
-            "force_exit_ist": "15:15",
-            "trading_days_total": len(session_days),
-            "trading_days_scanned": len(day_scan_log),
-            "summary": _aggregate_metrics(all_trades),
-            "by_tp_variant": _by_tp(all_trades),
-            "by_sl_type": _by_sl_type(all_trades),
-            "daily_summary": _daily_summary(all_trades),
-            "day_scan_log": day_scan_log,
-            "setups_found": setups_found,
-            "errors": errors,
-            "rows": all_trades,
-        }
-        _write_incremental_artifact(out_path, doc=partial_doc)
+        _write_incremental_artifact(out_path, doc=_build_doc(partial=True))
 
         if day_pause_sec > 0:
             _time.sleep(day_pause_sec)
 
-    summary = _aggregate_metrics(all_trades)
-    doc = {
-        "ok": True,
-        "algo": "open_low_15m_backtest",
-        "run_id": rid,
-        "strategy_criteria": STRATEGY_CRITERIA,
-        "generated_at": datetime.now(IST).isoformat(),
-        "from_date": from_date.isoformat(),
-        "to_date": to_date.isoformat(),
-        "force_exit_ist": "15:15",
-        "trading_days_total": len(session_days),
-        "trading_days_scanned": len(day_scan_log),
-        "partial": False,
-        "summary": summary,
-        "by_tp_variant": _by_tp(all_trades),
-        "by_sl_type": _by_sl_type(all_trades),
-        "daily_summary": _daily_summary(all_trades),
-        "day_scan_log": day_scan_log,
-        "setups_found": setups_found,
-        "errors": errors,
-        "rows": all_trades,
-    }
+    doc = _build_doc(partial=False)
+    if base_doc and merge_into:
+        doc["trading_days_total"] = base_doc.get("trading_days_total") or len(day_scan_log)
 
     if write_db:
         ensure_open_low_tables()

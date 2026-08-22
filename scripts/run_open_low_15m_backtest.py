@@ -22,7 +22,10 @@ def main() -> int:
     p.add_argument("--to", dest="date_to", default=DATE_TO.isoformat())
     p.add_argument("--run-id", default=None)
     p.add_argument("--no-db", action="store_true", help="Skip DB write")
+    p.add_argument("--merge", action="store_true", help="Merge chunk into existing artifact JSON")
     p.add_argument("--tp", choices=["TP1", "TP2", "TP3", "TP4"], default=None)
+    p.add_argument("--day-pause", type=float, default=2.0, help="Seconds between session days")
+    p.add_argument("--symbol-pause", type=float, default=0.12, help="Seconds before each M15 REST fetch")
     p.add_argument(
         "--out",
         default=None,
@@ -30,7 +33,13 @@ def main() -> int:
     )
     args = p.parse_args()
 
-    out_path = Path(args.out) if args.out else ROOT / "backend" / "data" / "open_low_15m_backtest.json"
+    out_path = (
+        Path(args.out)
+        if args.out
+        else Path("/home/ubuntu/trademanthan/data/open_low_15m_backtest.json")
+        if Path("/home/ubuntu/trademanthan/data").is_dir()
+        else ROOT / "backend" / "data" / "open_low_15m_backtest.json"
+    )
     result = run_open_low_15m_backtest(
         date.fromisoformat(args.date_from),
         date.fromisoformat(args.date_to),
@@ -38,6 +47,9 @@ def main() -> int:
         out_path=out_path,
         write_db=not args.no_db,
         tp_filter=args.tp,
+        day_pause_sec=args.day_pause,
+        symbol_pause_sec=args.symbol_pause,
+        merge_into=args.merge,
     )
     slim = {k: v for k, v in result.items() if k != "rows"}
     slim["row_count"] = len(result.get("rows") or [])
