@@ -2,6 +2,13 @@
     'use strict';
 
     const API_PATHS = ['/open-low-15m-backtest/data', '/api/open-low-15m-backtest/data'];
+
+    function apiBase() {
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+            return 'http://localhost:8000';
+        }
+        return location.origin;
+    }
     let raw = null;
     let rows = [];
     let sortKey = 'session_date';
@@ -214,8 +221,12 @@
 
     async function load() {
         try {
-            const res = await fetch(API, { cache: 'no-store' });
-            if (!res.ok) throw new Error(await res.text());
+            let res = null;
+            for (const path of API_PATHS) {
+                const r = await fetch(apiBase() + path, { cache: 'no-store' });
+                if (r.ok) { res = r; break; }
+            }
+            if (!res) throw new Error('Artifact not found (503)');
             raw = await res.json();
             rows = raw.rows || [];
             if (raw.from_date) $('oltFrom').value = raw.from_date;
