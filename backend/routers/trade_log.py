@@ -13,6 +13,7 @@ from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.rule27_trade_log import (
     ensure_trade_log_table,
+    delete_trade,
     get_trade,
     list_trades,
     update_trade_fields,
@@ -196,3 +197,27 @@ def patch_journal(
             detail="Entry time conflicts with another trade for this symbol/side/date",
         ) from exc
     return {"ok": True, "id": trade_id, "trade": _row_after(db, trade_id)}
+
+
+@router.delete("/{trade_id}")
+def delete_journal(
+    trade_id: int,
+    user: User = Depends(_auth_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    ensure_trade_log_table()
+    try:
+        deleted = delete_trade(db, trade_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="trade not found")
+        session_date = str(deleted.get("session_date") or "")[:10]
+        if session_date:
+            refresh_session_log(db, session_date, deleted.get("exit_time"), SOURCE)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"ok": True, "id": trade_id, "deleted": deleted}

@@ -171,6 +171,30 @@
         return Number(v) >= 0 ? "tl-pnl-pos" : "tl-pnl-neg";
     }
 
+    async function deleteTrade(row) {
+        var label = (row.symbol || "?") + " " + (row.direction || "") +
+            " · " + (row.session_date || "").slice(0, 10) +
+            " @ " + (row.entry_time || "");
+        if (!window.confirm("Delete trade #" + row.id + " (" + label + ")?\n\nThis cannot be undone.")) {
+            return;
+        }
+        setStatus("Deleting trade #" + row.id + "…", null);
+        var res = await fetch(apiBase() + "/api/trade-log/" + row.id, {
+            method: "DELETE",
+            headers: headers()
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) {
+            setStatus(errDetail(data) || "Delete failed", false);
+            return;
+        }
+        if (String($("tlEditId").value) === String(row.id)) {
+            clearForm();
+        }
+        setStatus("Deleted trade #" + row.id + ".", true);
+        loadList();
+    }
+
     async function loadList() {
         var from = $("tlFrom").value;
         var to = $("tlTo").value;
@@ -206,7 +230,17 @@
                     "<td>" + (row.entry_price != null ? row.entry_price : "") + " @ " + (row.entry_time || "") + "</td>" +
                     "<td>" + (row.exit_price != null ? row.exit_price : "") + " @ " + (row.exit_time || "") + "</td>" +
                     "<td class='" + pnlClass(pnl) + "'>" + (pnl != null ? "₹" + pnl : "") + "</td>" +
-                    "<td>" + (row.exit_trigger_type || "") + "</td>";
+                    "<td>" + (row.exit_trigger_type || "") + "</td>" +
+                    '<td class="tl-td-actions">' +
+                    '<button type="button" class="tl-del-btn" title="Delete trade" aria-label="Delete trade #' + row.id + '">' +
+                    '<i class="fas fa-trash-alt" aria-hidden="true"></i></button></td>';
+                var delBtn = tr.querySelector(".tl-del-btn");
+                if (delBtn) {
+                    delBtn.addEventListener("click", function (ev) {
+                        ev.stopPropagation();
+                        deleteTrade(row).catch(function (e) { setStatus(String(e), false); });
+                    });
+                }
                 tr.onclick = function () {
                     Array.prototype.forEach.call(tb.querySelectorAll("tr"), function (x) { x.classList.remove("active"); });
                     tr.classList.add("active");
@@ -220,7 +254,7 @@
             });
             if (!trades.length) {
                 var empty = document.createElement("tr");
-                empty.innerHTML = "<td colspan='8'>No trades in this range.</td>";
+                empty.innerHTML = "<td colspan='9'>No trades in this range.</td>";
                 tb.appendChild(empty);
                 setStatus("No trades for " + (from || "?") + " → " + (to || "?"), null);
             } else {
@@ -229,7 +263,7 @@
         } catch (e) {
             var msg = String(e && e.name === "AbortError" ? "Load timed out — try again" : e);
             setStatus(msg, false);
-            tb.innerHTML = "<tr><td colspan='8'>" + msg + "</td></tr>";
+            tb.innerHTML = "<tr><td colspan='9'>" + msg + "</td></tr>";
         } finally {
             if (timer) clearTimeout(timer);
             $("tlLoadBtn").disabled = false;

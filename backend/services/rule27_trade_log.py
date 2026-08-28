@@ -577,6 +577,16 @@ def get_trade(db, trade_id: int) -> Optional[Dict[str, Any]]:
     return serialize_trade(dict(row)) if row else None
 
 
+def delete_trade(db, trade_id: int) -> Optional[Dict[str, Any]]:
+    """Delete one trade_log row by id. Returns the deleted row snapshot or None."""
+    ensure_trade_log_table()
+    existing = get_trade(db, trade_id)
+    if not existing:
+        return None
+    db.execute(text(f"DELETE FROM {TABLE} WHERE id = :id"), {"id": int(trade_id)})
+    return existing
+
+
 _UPDATE_BY_ID = text(
     f"""
     UPDATE {TABLE} SET

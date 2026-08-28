@@ -92,6 +92,20 @@
 .tl-table tbody tr { cursor: pointer; }
 .tl-table tbody tr:hover { background: rgba(15, 118, 110, 0.08); }
 .tl-table tbody tr.active { outline: 2px solid #0f766e; }
+.tl-th-actions { width: 2.5rem; text-align: center !important; }
+.tl-td-actions { text-align: center; cursor: default; }
+.tl-del-btn {
+    border: none;
+    background: transparent;
+    color: var(--theme-muted, #94a3b8);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    line-height: 1;
+}
+.tl-del-btn:hover { color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+.tl-del-btn:disabled { opacity: 0.45; cursor: wait; }
 .tl-pnl-pos { color: #047857; font-weight: 700; }
 .tl-pnl-neg { color: #b91c1c; font-weight: 700; }
 .tl-header-link {
