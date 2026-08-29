@@ -16,6 +16,7 @@ from backend.services.breakfast_strategy.universe import (
     SECTOR_UNIVERSE,
     build_instrument_indexes,
     load_arbitrage_by_sector,
+    resolve_eq_spot_with_fut_lot,
     resolve_stock_instrument,
     sector_index_key_for_label,
 )
@@ -43,19 +44,29 @@ def collect_instrument_keys(
     stocks_by_sector: Dict[str, List[Dict[str, str]]],
     fut_by_und: Dict[str, Any],
     eq_by_symbol: Dict[str, Any],
+    *,
+    spot_proxy_fallback: bool = False,
 ) -> Set[str]:
     keys: Set[str] = {NIFTY50_KEY}
     for label, _y in SECTOR_UNIVERSE:
         ik = sector_index_key_for_label(label)
         if ik:
             keys.add(ik)
+    seen_syms: Set[str] = set()
+    for members in stocks_by_sector.values():
+        for m in members:
+            seen_syms.add(str(m.get("stock") or "").upper())
     for sd in session_dates:
-        for members in stocks_by_sector.values():
-            for m in members:
-                sym = str(m.get("stock") or "").upper()
-                ref = resolve_stock_instrument(sym, sd, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
-                if ref and ref.instrument_key:
-                    keys.add(ref.instrument_key)
+        for sym in seen_syms:
+            if not sym:
+                continue
+            ref = resolve_stock_instrument(sym, sd, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+            if ref and ref.instrument_key:
+                keys.add(ref.instrument_key)
+            if spot_proxy_fallback:
+                eq = resolve_eq_spot_with_fut_lot(sym, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+                if eq and eq.instrument_key:
+                    keys.add(eq.instrument_key)
     return keys
 
 
@@ -82,8 +93,14 @@ def write_artifact(doc: Dict[str, Any], *, basename: Optional[str] = None) -> Pa
     raise RuntimeError("could not write breakfast artifact")
 
 
-def find_artifact() -> Optional[Path]:
-    for p in _artifact_paths():
+def find_artifact(basename: Optional[str] = None) -> Optional[Path]:
+    name = basename or ARTIFACT_NAME
+    for base in (
+        Path("/home/ubuntu/trademanthan/data"),
+        Path(__file__).resolve().parents[3] / "data",
+        Path(__file__).resolve().parents[3] / "backend" / "data",
+    ):
+        p = base / name
         if p.is_file():
             return p
     return None
@@ -183,6 +200,7 @@ def _simulate_session_range(
     eq_by_symbol: Dict[str, Any],
     upstox: Any,
     pnl_cap_enabled: bool,
+    spot_proxy_fallback: bool = False,
 ) -> tuple[List[TradeResult], List[Dict[str, Any]]]:
     all_results: List[TradeResult] = []
     day_log: List[Dict[str, Any]] = []
@@ -197,6 +215,7 @@ def _simulate_session_range(
             eq_by_symbol=eq_by_symbol,
             upstox=upstox,
             pnl_cap_enabled=pnl_cap_enabled,
+            spot_proxy_fallback=spot_proxy_fallback,
         )
         all_results.extend(day_trades)
         day_log.append(
@@ -236,6 +255,7 @@ def run_backtest(
     pnl_cap_enabled: bool = False,
     artifact_basename: Optional[str] = None,
     write_artifact_file: bool = True,
+    spot_proxy_fallback: bool = False,
 ) -> Dict[str, Any]:
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     if not getattr(upstox, "access_token", None):
@@ -246,7 +266,11 @@ def run_backtest(
     fut_by_und, eq_by_symbol = build_instrument_indexes()
     session_dates = iter_session_dates(date_from, date_to)
     instrument_keys = collect_instrument_keys(
-        session_dates, stocks_by_sector, fut_by_und, eq_by_symbol
+        session_dates,
+        stocks_by_sector,
+        fut_by_und,
+        eq_by_symbol,
+        spot_proxy_fallback=spot_proxy_fallback,
     )
 
     warm_stats = warm_candle_cache(
@@ -291,10 +315,10 @@ def run_backtest(
         upstox=upstox,
     )
     all_results_off, day_log_off = _simulate_session_range(
-        session_dates, **sim_common, pnl_cap_enabled=False
+        session_dates, **sim_common, pnl_cap_enabled=False, spot_proxy_fallback=spot_proxy_fallback
     )
     all_results_on, day_log_on = _simulate_session_range(
-        session_dates, **sim_common, pnl_cap_enabled=True
+        session_dates, **sim_common, pnl_cap_enabled=True, spot_proxy_fallback=spot_proxy_fallback
     )
 
     rows_off = [t.to_db_row(mode=mode) for t in all_results_off]
@@ -319,11 +343,17 @@ def run_backtest(
         },
     }
     summary = variants["true" if pnl_cap_enabled else "false"]["summary"]
+    price_src_counts: Dict[str, int] = {}
+    for t in active_rows:
+        ps = str(t.get("price_source") or "futures")
+        price_src_counts[ps] = price_src_counts.get(ps, 0) + 1
     doc = {
         "strategy": "breakfast",
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
         "mode": mode,
+        "spot_proxy_fallback": spot_proxy_fallback,
+        "price_source_counts": price_src_counts,
         "stock_rank_metric": "vs_prev_close",
         "pnl_cap_enabled": pnl_cap_enabled,
         "pnl_cap_inr": PNL_CAP_INR,

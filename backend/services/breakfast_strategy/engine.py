@@ -16,6 +16,7 @@ from backend.services.breakfast_strategy.candles import (
     monitor_from_after_anchor,
     resolve_nifty_first_5m_bar,
     session_5m_bars_after_entry,
+    session_has_stock_bars,
     session_vwap_by_bar_time,
     setup_bar_vs_prev_close,
 )
@@ -31,9 +32,13 @@ from backend.services.breakfast_strategy.config import (
 )
 from backend.services.breakfast_strategy.universe import (
     StockRow,
+    display_symbol_for,
+    display_symbol_spot_proxy,
     fo_eligible_sector_keys,
+    format_instrument_label,
     pick_stocks_in_sector,
     rank_sectors,
+    resolve_eq_spot_with_fut_lot,
     resolve_stock_instrument,
 )
 
@@ -76,6 +81,7 @@ class TradeResult:
     exit_trigger_type: Optional[str] = None
     pnl_inr: Optional[float] = None
     pnl_points: Optional[float] = None
+    price_source: str = "futures"
     notes: List[str] = field(default_factory=list)
 
     def to_db_row(self, *, mode: str = "backtest") -> Dict[str, Any]:
@@ -103,6 +109,7 @@ class TradeResult:
             "setup_volume_5m": self.setup_volume_5m,
             "instrument_key": self.instrument_key,
             "lot_size": self.lot_size,
+            "price_source": self.price_source,
             "entry_time": self.entry_time.isoformat(),
             "entry_price": self.entry_price,
             "anchor_price": self.anchor_price,
@@ -118,13 +125,194 @@ class TradeResult:
         }
 
 
-def _nifty_bias(bar: Dict[str, Any]) -> Tuple[str, float]:
+def nifty_bias_from_bar(bar: Dict[str, Any]) -> Tuple[str, float]:
+    """NIFTY first-5m close vs open; flat (0%) → long branch."""
     pct = bar_move_pct(bar)
     if pct is None:
         return "positive", 0.0
     if pct < 0:
         return "negative", float(pct)
     return "positive", float(pct)
+
+
+def _nifty_bias(bar: Dict[str, Any]) -> Tuple[str, float]:
+    return nifty_bias_from_bar(bar)
+
+
+@dataclass
+class BreakfastStockPick:
+    row: StockRow
+    stock_rank: int
+    move_pct: float
+    signal_bar: Dict[str, Any]
+    anchor_bar: Dict[str, Any]
+    candles: List[Dict[str, Any]]
+
+
+@dataclass
+class BreakfastSectorPick:
+    sector_key: str
+    sector_rank: int
+    sector_move_pct: float
+    sector_volume: float
+    stocks: List[BreakfastStockPick]
+
+
+@dataclass
+class BreakfastSelection:
+    nifty_bar: Dict[str, Any]
+    nifty_bias: str
+    nifty_bias_pct: float
+    long_side: bool
+    ranked_sectors: List[Tuple[str, float, float]]
+    sector_picks: List[BreakfastSectorPick]
+    sym_to_candles: Dict[str, List[Dict[str, Any]]]
+    stock_bars: Dict[str, Dict[str, Any]]
+    anchor_bars: Dict[str, Dict[str, Any]]
+    stock_move_pcts: Dict[str, float]
+    session_rows: Dict[str, StockRow]
+
+
+def select_breakfast_picks(
+    session_date: date,
+    *,
+    nifty_candles: List[Dict[str, Any]],
+    sector_candles: Dict[str, List[Dict[str, Any]]],
+    stock_candles_by_key: Dict[str, List[Dict[str, Any]]],
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+    upstox: Optional[Any] = None,
+    nifty_bar: Optional[Dict[str, Any]] = None,
+    sector_bar_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    stock_signal_overrides: Optional[Dict[str, Tuple[Dict[str, Any], float]]] = None,
+    anchor_bar_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    sectors_to_pick: int = SECTORS_TO_PICK,
+    stocks_per_sector: int = STOCKS_PER_SECTOR,
+    spot_proxy_fallback: bool = False,
+) -> Optional[BreakfastSelection]:
+    """Rank sectors and pick stocks — shared by backtest and live display."""
+    resolved_nifty = nifty_bar or first_5m_bar(nifty_candles, session_date)
+    if not resolved_nifty and upstox is not None:
+        resolved_nifty = resolve_nifty_first_5m_bar(
+            nifty_candles, session_date, upstox, instrument_key=NIFTY50_KEY
+        )
+    if not resolved_nifty:
+        return None
+
+    bias, bias_pct = nifty_bias_from_bar(resolved_nifty)
+    long_side = bias == "positive"
+
+    eligible = fo_eligible_sector_keys(
+        stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
+    )
+    sector_bars: Dict[str, Dict[str, Any]] = {}
+    overrides = sector_bar_overrides or {}
+    for skey in eligible:
+        bar = overrides.get(skey) or first_5m_bar(sector_candles.get(skey, []), session_date)
+        if bar:
+            sector_bars[skey] = bar
+
+    ranked = rank_sectors(sector_bars, eligible_keys=eligible, descending=long_side)
+    top_sectors = ranked[: max(1, int(sectors_to_pick))]
+    if not top_sectors:
+        return None
+
+    stock_bars: Dict[str, Dict[str, Any]] = {}
+    anchor_bars: Dict[str, Dict[str, Any]] = {}
+    stock_move_pcts: Dict[str, float] = {}
+    sym_to_candles: Dict[str, List[Dict[str, Any]]] = {}
+    session_rows: Dict[str, StockRow] = {}
+    signal_overrides = stock_signal_overrides or {}
+    anchor_overrides = anchor_bar_overrides or {}
+
+    for members in stocks_by_sector.values():
+        for m in members:
+            sym = str(m.get("stock") or "").upper()
+            if sym in sym_to_candles:
+                continue
+            resolved = _resolve_session_stock_candles(
+                sym,
+                session_date,
+                stock_candles_by_key=stock_candles_by_key,
+                fut_by_und=fut_by_und,
+                eq_by_symbol=eq_by_symbol,
+                spot_proxy_fallback=spot_proxy_fallback,
+            )
+            if not resolved:
+                continue
+            candles, row_tpl = resolved
+            sym_to_candles[sym] = candles
+            session_rows[sym] = row_tpl
+            if sym in signal_overrides:
+                sig_bar, pct = signal_overrides[sym]
+                stock_bars[sym] = sig_bar
+                stock_move_pcts[sym] = pct
+            else:
+                setup = setup_bar_vs_prev_close(candles, session_date)
+                if setup:
+                    sig_bar, _prev, pct = setup
+                    stock_bars[sym] = sig_bar
+                    stock_move_pcts[sym] = pct
+            ab = anchor_overrides.get(sym) or anchor_bar(candles, session_date)
+            if ab:
+                anchor_bars[sym] = ab
+
+    sector_picks: List[BreakfastSectorPick] = []
+    for s_rank, (skey, spct, svol) in enumerate(top_sectors, start=1):
+        members = stocks_by_sector.get(skey, [])
+        picks = pick_stocks_in_sector(
+            members,
+            stock_bars,
+            stock_move_pcts,
+            session_date=session_date,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            long_side=long_side,
+            move_cap=STOCK_MOVE_CAP_PCT,
+            top_n=stocks_per_sector,
+            session_rows=session_rows if spot_proxy_fallback else None,
+        )
+        stock_picks: List[BreakfastStockPick] = []
+        for st_rank, row in enumerate(picks, start=1):
+            setup = stock_bars.get(row.stock)
+            anchor = anchor_bars.get(row.stock)
+            move_pct = stock_move_pcts.get(row.stock)
+            if not setup or not anchor or move_pct is None:
+                continue
+            stock_picks.append(
+                BreakfastStockPick(
+                    row=row,
+                    stock_rank=st_rank,
+                    move_pct=float(move_pct),
+                    signal_bar=setup,
+                    anchor_bar=anchor,
+                    candles=sym_to_candles.get(row.stock, []),
+                )
+            )
+        sector_picks.append(
+            BreakfastSectorPick(
+                sector_key=skey,
+                sector_rank=s_rank,
+                sector_move_pct=float(spct),
+                sector_volume=float(svol),
+                stocks=stock_picks,
+            )
+        )
+
+    return BreakfastSelection(
+        nifty_bar=resolved_nifty,
+        nifty_bias=bias,
+        nifty_bias_pct=bias_pct,
+        long_side=long_side,
+        ranked_sectors=ranked,
+        sector_picks=sector_picks,
+        sym_to_candles=sym_to_candles,
+        stock_bars=stock_bars,
+        anchor_bars=anchor_bars,
+        stock_move_pcts=stock_move_pcts,
+        session_rows=session_rows,
+    )
 
 
 def _simulate_exit_long(
@@ -270,6 +458,8 @@ def _build_trade(
         pnl_pts = entry_price - exit_px
 
     notes: List[str] = []
+    if row.price_source == "spot_proxy":
+        notes.append("spot_proxy; futures-equivalent lot sizing")
 
     n_o, n_c = None, None
     if nifty_bar:
@@ -297,6 +487,7 @@ def _build_trade(
         setup_volume_5m=s_vol,
         instrument_key=row.instrument_key,
         lot_size=lot,
+        price_source=row.price_source,
         entry_time=entry_time,
         entry_price=round(entry_price, 4),
         anchor_price=round(anchor_price, 4),
@@ -312,6 +503,59 @@ def _build_trade(
     )
 
 
+def _resolve_session_stock_candles(
+    sym: str,
+    session_date: date,
+    *,
+    stock_candles_by_key: Dict[str, List[Dict[str, Any]]],
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+    spot_proxy_fallback: bool,
+) -> Optional[Tuple[List[Dict[str, Any]], StockRow]]:
+    """Pick futures candles when available; optional spot fallback for OOS periods."""
+    fut_ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+    if not fut_ref or not fut_ref.instrument_key:
+        return None
+    lot = int(fut_ref.fut_lot_size or fut_ref.lot_size or 0)
+    if lot <= 0:
+        return None
+
+    fut_candles = stock_candles_by_key.get(fut_ref.instrument_key, [])
+    if session_has_stock_bars(fut_candles, session_date):
+        row = StockRow(
+            stock=sym,
+            display_symbol=display_symbol_for(sym, fut_ref),
+            instrument_label=format_instrument_label(sym, fut_ref),
+            sector="",
+            sector_index="",
+            instrument_key=str(fut_ref.instrument_key),
+            lot_size=lot,
+            price_source="futures",
+        )
+        return fut_candles, row
+
+    if not spot_proxy_fallback:
+        return None
+
+    eq_ref = resolve_eq_spot_with_fut_lot(sym, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+    if not eq_ref or not eq_ref.instrument_key:
+        return None
+    eq_candles = stock_candles_by_key.get(eq_ref.instrument_key, [])
+    if not session_has_stock_bars(eq_candles, session_date):
+        return None
+    row = StockRow(
+        stock=sym,
+        display_symbol=display_symbol_spot_proxy(sym),
+        instrument_label="SPOT*",
+        sector="",
+        sector_index="",
+        instrument_key=str(eq_ref.instrument_key),
+        lot_size=lot,
+        price_source="spot_proxy",
+    )
+    return eq_candles, row
+
+
 def simulate_session_day(
     session_date: date,
     *,
@@ -323,90 +567,38 @@ def simulate_session_day(
     eq_by_symbol: Dict[str, Dict[str, Any]],
     upstox: Optional[Any] = None,
     pnl_cap_enabled: bool = False,
+    spot_proxy_fallback: bool = False,
 ) -> List[TradeResult]:
-    nifty_bar = first_5m_bar(nifty_candles, session_date)
-    if not nifty_bar and upstox is not None:
-        nifty_bar = resolve_nifty_first_5m_bar(
-            nifty_candles, session_date, upstox, instrument_key=NIFTY50_KEY
-        )
-    if not nifty_bar:
-        return []
-
-    bias, bias_pct = _nifty_bias(nifty_bar)
-    long_side = bias == "positive"
-
-    eligible = fo_eligible_sector_keys(
-        stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
+    sel = select_breakfast_picks(
+        session_date,
+        nifty_candles=nifty_candles,
+        sector_candles=sector_candles,
+        stock_candles_by_key=stock_candles_by_key,
+        stocks_by_sector=stocks_by_sector,
+        fut_by_und=fut_by_und,
+        eq_by_symbol=eq_by_symbol,
+        upstox=upstox,
+        spot_proxy_fallback=spot_proxy_fallback,
     )
-    sector_bars: Dict[str, Dict[str, Any]] = {}
-    for skey in eligible:
-        bar = first_5m_bar(sector_candles.get(skey, []), session_date)
-        if bar:
-            sector_bars[skey] = bar
-
-    ranked = rank_sectors(sector_bars, eligible_keys=eligible, descending=long_side)
-    top_sectors = ranked[:SECTORS_TO_PICK]
-    if not top_sectors:
+    if not sel:
         return []
-
-    stock_bars: Dict[str, Dict[str, Any]] = {}
-    anchor_bars: Dict[str, Dict[str, Any]] = {}
-    stock_move_pcts: Dict[str, float] = {}
-    sym_to_candles: Dict[str, List[Dict[str, Any]]] = {}
-    for members in stocks_by_sector.values():
-        for m in members:
-            sym = str(m.get("stock") or "").upper()
-            if sym in sym_to_candles:
-                continue
-            ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
-            if not ref or not ref.instrument_key:
-                continue
-            candles = stock_candles_by_key.get(ref.instrument_key, [])
-            sym_to_candles[sym] = candles
-            setup = setup_bar_vs_prev_close(candles, session_date)
-            if setup:
-                sig_bar, _prev, pct = setup
-                stock_bars[sym] = sig_bar
-                stock_move_pcts[sym] = pct
-            ab = anchor_bar(candles, session_date)
-            if ab:
-                anchor_bars[sym] = ab
 
     trades: List[TradeResult] = []
-    for s_rank, (skey, _pct, _vol) in enumerate(top_sectors, start=1):
-        members = stocks_by_sector.get(skey, [])
-        picks = pick_stocks_in_sector(
-            members,
-            stock_bars,
-            stock_move_pcts,
-            session_date=session_date,
-            fut_by_und=fut_by_und,
-            eq_by_symbol=eq_by_symbol,
-            long_side=long_side,
-            move_cap=STOCK_MOVE_CAP_PCT,
-            top_n=STOCKS_PER_SECTOR,
-        )
-        for st_rank, row in enumerate(picks, start=1):
-            setup = stock_bars.get(row.stock)
-            anchor = anchor_bars.get(row.stock)
-            if not setup or not anchor:
-                continue
-            move_pct = stock_move_pcts.get(row.stock)
-            if move_pct is None:
-                continue
+    for sp in sel.sector_picks:
+        for stk in sp.stocks:
             tr = _build_trade(
                 session_date=session_date,
-                row=row,
-                stock_move_pct=move_pct,
-                anchor_setup_bar=anchor,
-                signal_bar=setup,
-                all_candles=sym_to_candles.get(row.stock, []),
-                long_side=long_side,
-                sector_rank=s_rank,
-                stock_rank=st_rank,
-                nifty_bias=bias,
-                nifty_bias_pct=bias_pct,
-                nifty_bar=nifty_bar,
+                row=stk.row,
+                stock_move_pct=stk.move_pct,
+                anchor_setup_bar=stk.anchor_bar,
+                signal_bar=stk.signal_bar,
+                all_candles=stk.candles,
+                long_side=sel.long_side,
+                sector_rank=sp.sector_rank,
+                stock_rank=stk.stock_rank,
+                nifty_bias=sel.nifty_bias,
+                nifty_bias_pct=sel.nifty_bias_pct,
+                nifty_bar=sel.nifty_bar,
                 pnl_cap_enabled=pnl_cap_enabled,
             )
             if tr:

@@ -123,6 +123,11 @@ def covers_session_dates(
     return True
 
 
+def session_has_stock_bars(candles: List[Dict[str, Any]], session_date: date) -> bool:
+    """True when both signal (9:20) and anchor bars exist for the session."""
+    return signal_bar(candles, session_date) is not None and anchor_bar(candles, session_date) is not None
+
+
 def ensure_5m_cached(
     upstox: Any,
     cache_dir: Path,
@@ -171,6 +176,84 @@ def _ohlcv(c: Dict[str, Any]) -> Tuple[float, float, float, float, float]:
 
 def ist_ts(session_date: date, hh: int, mm: int) -> datetime:
     return IST.localize(datetime.combine(session_date, dt_time(hh, mm)))
+
+
+def aggregate_1m_to_session_5m(
+    bars_1m: List[Dict[str, Any]],
+    session_date: date,
+    *,
+    from_hhmm: Tuple[int, int] = (9, 15),
+    to_hhmm: Tuple[int, int] = (9, 20),
+) -> Optional[Dict[str, Any]]:
+    """Build a synthetic 9:15–9:20 5m bar from 1-minute OHLCV rows."""
+    fh, fm = from_hhmm
+    th, tm = to_hhmm
+    start_m = fh * 60 + fm
+    end_m = th * 60 + tm
+    window: List[Dict[str, Any]] = []
+    for c in bars_1m or []:
+        dt = _bar_dt(c)
+        if dt is None:
+            continue
+        t = dt.astimezone(IST)
+        if t.date() != session_date:
+            continue
+        mins = t.hour * 60 + t.minute
+        if start_m <= mins < end_m:
+            window.append(c)
+    if not window:
+        return None
+    window.sort(key=lambda x: _bar_dt(x) or datetime.min.replace(tzinfo=IST))
+    o, _, _, _, _ = _ohlcv(window[0])
+    _, _, _, cl, _ = _ohlcv(window[-1])
+    hi = max(_ohlcv(c)[1] for c in window)
+    lo = min(_ohlcv(c)[2] for c in window)
+    vol = sum(_ohlcv(c)[4] for c in window)
+    if o <= 0 or cl <= 0:
+        return None
+    return {
+        "timestamp": ist_ts(session_date, to_hhmm[0], to_hhmm[1]).isoformat(),
+        "open": o,
+        "high": hi,
+        "low": lo,
+        "close": cl,
+        "volume": vol,
+    }
+
+
+def bars_ohlc_close_match(
+    a: Optional[Dict[str, Any]],
+    b: Optional[Dict[str, Any]],
+    *,
+    abs_tol: float = 0.05,
+    rel_tol: float = 0.0005,
+) -> bool:
+    """True when OHLC close values agree within tolerance."""
+    if not a or not b:
+        return False
+
+    def _close(c: Dict[str, Any]) -> float:
+        return float(_ohlcv(c)[3])
+
+    for c in (_close(a), _close(b)):
+        if c <= 0:
+            return False
+    fields = ("open", "high", "low", "close")
+    for field in fields:
+        av = float(a.get(field) or 0)
+        bv = float(b.get(field) or 0)
+        if av <= 0 or bv <= 0:
+            return False
+        tol = max(abs_tol, rel_tol * max(abs(av), abs(bv)))
+        if abs(av - bv) > tol:
+            return False
+    return True
+
+
+def move_pct_vs_prev_close(close_px: float, prev_close: float) -> Optional[float]:
+    if prev_close <= 0 or close_px <= 0:
+        return None
+    return (close_px - prev_close) / prev_close * 100.0
 
 
 def _synthetic_5m_bar(session_date: date, open_px: float, close_px: float) -> Dict[str, Any]:

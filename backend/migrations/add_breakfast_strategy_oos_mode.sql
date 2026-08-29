@@ -4,4 +4,4 @@ ALTER TABLE breakfast_strategy_trades
 
 ALTER TABLE breakfast_strategy_trades
     ADD CONSTRAINT breakfast_strategy_trades_mode_check
-    CHECK (mode IN ('backtest', 'forward', 'backtest_oos'));
+    CHECK (mode IN ('backtest', 'forward', 'backtest_oos', 'backtest_oos_spot'));

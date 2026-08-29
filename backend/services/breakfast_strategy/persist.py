@@ -21,6 +21,12 @@ _MIGRATION_INSTRUMENT = (
 _MIGRATION_OOS_MODE = (
     Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_strategy_oos_mode.sql"
 )
+_MIGRATION_SPOT_PROXY = (
+    Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_strategy_spot_proxy.sql"
+)
+_MIGRATION_PERIOD = (
+    Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_strategy_period_label.sql"
+)
 _ENSURED = False
 
 
@@ -34,6 +40,8 @@ def ensure_breakfast_strategy_table() -> None:
         _MIGRATION_PNL_CAP,
         _MIGRATION_INSTRUMENT,
         _MIGRATION_OOS_MODE,
+        _MIGRATION_SPOT_PROXY,
+        _MIGRATION_PERIOD,
     ):
         if not mig.is_file():
             logger.warning("breakfast migration file missing: %s", mig)
@@ -92,7 +100,7 @@ def insert_trade(db: Session, row: Dict[str, Any]) -> bool:
                 nifty_bias, nifty_bias_pct, nifty_open_5m, nifty_close_5m,
                 stock_move_pct_at_entry,
                 setup_open_5m, setup_high_5m, setup_low_5m, setup_close_5m, setup_volume_5m,
-                instrument_key, lot_size,
+                instrument_key, lot_size, price_source, period_label,
                 entry_time, entry_price, anchor_price, sl_price, tp_price, pre_exit_extreme,
                 exit_time, exit_price, exit_trigger_type,
                 pnl_inr, pnl_points, notes
@@ -102,7 +110,7 @@ def insert_trade(db: Session, row: Dict[str, Any]) -> bool:
                 :nifty_bias, :nifty_bias_pct, :nifty_open_5m, :nifty_close_5m,
                 :stock_move_pct_at_entry,
                 :setup_open_5m, :setup_high_5m, :setup_low_5m, :setup_close_5m, :setup_volume_5m,
-                :instrument_key, :lot_size,
+                :instrument_key, :lot_size, :price_source, :period_label,
                 CAST(:entry_time AS timestamptz), :entry_price, :anchor_price, :sl_price, :tp_price,
                 :pre_exit_extreme,
                 CAST(:exit_time AS timestamptz), :exit_price, :exit_trigger_type,
@@ -124,6 +132,8 @@ def persist_trades(rows: List[Dict[str, Any]], *, mode: str = "backtest") -> Dic
             payload = dict(r)
             payload["mode"] = mode
             payload.setdefault("strategy_status", "shadow")
+            payload.setdefault("price_source", "futures")
+            payload.setdefault("period_label", None)
             if insert_trade(db, payload):
                 inserted += 1
             else:

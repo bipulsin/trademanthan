@@ -21,21 +21,22 @@ from backend.services.nks_intraday_backtest import (
 from backend.services.sector_movers import UPSTOX_SECTOR_INDEX_KEYS, normalize_sector_instrument_key
 
 SECTOR_UNIVERSE: List[Tuple[str, str]] = [
-    ("Nifty Bank", "^NSEBANK"),
+    ("Nifty Private Bank", "NIFTY_PVT_BANK.NS"),
     ("Nifty IT", "^CNXIT"),
     ("Nifty Auto", "^CNXAUTO"),
-    ("Nifty Pharma", "^CNXPHARMA"),
     ("Nifty FMCG", "^CNXFMCG"),
     ("Nifty Metal", "^CNXMETAL"),
     ("Nifty Realty", "^CNXREALTY"),
     ("Nifty Energy", "^CNXENERGY"),
     ("Nifty Infra", "^CNXINFRA"),
     ("Nifty PSU Bank", "^CNXPSUBANK"),
-    ("Nifty Media", "^CNXMEDIA"),
     ("Nifty Healthcare", "NIFTY_HEALTHCARE.NS"),
     ("Nifty Consumer Durables", "NIFTY_CONSR_DURBL.NS"),
     ("Nifty Oil & Gas", "NIFTY_OIL_AND_GAS.NS"),
     ("Nifty Financial Services", "^CNXFIN"),
+    ("Nifty Chemicals", "NIFTY_CHEMICALS.NS"),
+    ("Nifty Services", "^CNXSERVICE"),
+    ("Nifty Telecom", "NIFTY_MS_IT_TELCM.NS"),
 ]
 
 
@@ -48,7 +49,7 @@ class StockRow:
     sector_index: str
     instrument_key: str
     lot_size: int
-    price_source: str  # FUT or EQ
+    price_source: str  # futures | spot_proxy | FUT | EQ (legacy)
 
 
 def sector_index_key_for_label(label: str) -> Optional[str]:
@@ -138,6 +139,36 @@ def format_instrument_label(symbol: str, ref: InstrumentRef) -> str:
     if m:
         return f"{m.group(2)}{m.group(3)} FUT"
     return "FUT"
+
+
+def display_symbol_spot_proxy(symbol: str) -> str:
+    return f"{(symbol or '').strip().upper()} SPOT*"
+
+
+def resolve_eq_spot_with_fut_lot(
+    symbol: str,
+    *,
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+) -> Optional[InstrumentRef]:
+    """EQ spot instrument with futures lot size for P&L (1-lot FUT equivalent)."""
+    sym_u = (symbol or "").strip().upper()
+    if not sym_u:
+        return None
+    eq = eq_by_symbol.get(sym_u)
+    if not eq or not eq.get("instrument_key"):
+        return None
+    fut_lot = _current_fut_lot_size(sym_u, fut_by_und=fut_by_und)
+    if not fut_lot or fut_lot <= 0:
+        return None
+    return InstrumentRef(
+        source="EQ",
+        trading_symbol=str(eq.get("trading_symbol") or sym_u),
+        instrument_key=str(eq.get("instrument_key") or ""),
+        expiry_date=None,
+        lot_size=int(eq.get("lot_size") or 1) or 1,
+        fut_lot_size=fut_lot,
+    )
 
 
 def display_symbol_for(symbol: str, ref: InstrumentRef) -> str:
@@ -238,6 +269,7 @@ def pick_stocks_in_sector(
     long_side: bool,
     move_cap: float = 4.0,
     top_n: int = 2,
+    session_rows: Optional[Dict[str, StockRow]] = None,
 ) -> List[StockRow]:
     candidates: List[Tuple[float, str, Dict[str, Any], InstrumentRef, Dict[str, str]]] = []
     for m in members:
@@ -252,6 +284,13 @@ def pick_stocks_in_sector(
             if not (0.0 < pct < move_cap):
                 continue
         elif not (-move_cap < pct < 0.0):
+            continue
+        tpl = (session_rows or {}).get(sym)
+        if tpl:
+            lot = int(tpl.lot_size or 0)
+            if lot <= 0:
+                continue
+            candidates.append((pct, sym, bar, tpl, m))
             continue
         ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
         if not ref or not ref.instrument_key:
@@ -268,23 +307,39 @@ def pick_stocks_in_sector(
 
     out: List[StockRow] = []
     seen: Set[str] = set()
-    for pct, sym, _bar, ref, m in candidates:
+    for pct, sym, _bar, ref_or_tpl, m in candidates:
         if sym in seen:
             continue
         seen.add(sym)
-        label = format_instrument_label(sym, ref)
-        out.append(
-            StockRow(
-                stock=sym,
-                display_symbol=display_symbol_for(sym, ref),
-                instrument_label=label,
-                sector=str(m.get("sector") or ""),
-                sector_index=str(m.get("sector_index") or ""),
-                instrument_key=str(ref.instrument_key),
-                lot_size=int(ref.fut_lot_size or 0),
-                price_source=str(ref.source or "FUT"),
+        if isinstance(ref_or_tpl, StockRow):
+            tpl = ref_or_tpl
+            out.append(
+                StockRow(
+                    stock=sym,
+                    display_symbol=tpl.display_symbol,
+                    instrument_label=tpl.instrument_label,
+                    sector=str(m.get("sector") or ""),
+                    sector_index=str(m.get("sector_index") or ""),
+                    instrument_key=str(tpl.instrument_key),
+                    lot_size=int(tpl.lot_size),
+                    price_source=str(tpl.price_source),
+                )
             )
-        )
+        else:
+            ref = ref_or_tpl
+            label = format_instrument_label(sym, ref)
+            out.append(
+                StockRow(
+                    stock=sym,
+                    display_symbol=display_symbol_for(sym, ref),
+                    instrument_label=label,
+                    sector=str(m.get("sector") or ""),
+                    sector_index=str(m.get("sector_index") or ""),
+                    instrument_key=str(ref.instrument_key),
+                    lot_size=int(ref.fut_lot_size or 0),
+                    price_source="futures",
+                )
+            )
         if len(out) >= top_n:
             break
     return out

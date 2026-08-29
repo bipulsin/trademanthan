@@ -1,6 +1,12 @@
 """Breakfast Strategy unit tests (no Upstox)."""
 from datetime import date
 
+from backend.services.breakfast_strategy.universe import (
+    SECTOR_UNIVERSE,
+    rank_sectors,
+    sector_index_key_for_label,
+)
+
 from backend.services.breakfast_strategy.candles import (
     _synthetic_5m_bar,
     bar_move_pct,
@@ -11,6 +17,32 @@ from backend.services.breakfast_strategy.engine import _nifty_bias, _simulate_ex
 
 def _bar(ts: str, o, h, l, c, v=1000):
     return {"timestamp": ts, "open": o, "high": h, "low": l, "close": c, "volume": v}
+
+
+def test_sector_universe_includes_services_and_telecom():
+    labels = [lbl for lbl, _ in SECTOR_UNIVERSE]
+    assert "Nifty Services" in labels
+    assert "Nifty Telecom" in labels
+    assert len(SECTOR_UNIVERSE) == 16
+    assert sector_index_key_for_label("Nifty Services") == "NSE_INDEX|Nifty Serv Sector"
+    assert sector_index_key_for_label("Nifty Telecom") == "NSE_INDEX|Nifty MS IT Telcm"
+
+
+def test_rank_sectors_includes_services_when_eligible():
+    serv_key = sector_index_key_for_label("Nifty Services")
+    tel_key = sector_index_key_for_label("Nifty Telecom")
+    sector_bars = {
+        serv_key: _bar("2026-08-01T09:20:00+05:30", 100, 101, 99, 100.5),
+        tel_key: _bar("2026-08-01T09:20:00+05:30", 100, 100.5, 99, 99.5),
+    }
+    ranked = rank_sectors(
+        sector_bars,
+        eligible_keys={serv_key, tel_key},
+        descending=True,
+    )
+    keys = [r[0] for r in ranked]
+    assert serv_key in keys
+    assert tel_key in keys
 
 
 def test_flat_nifty_is_positive_bias():

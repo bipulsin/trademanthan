@@ -29,3 +29,5 @@ CANDLE_DAYS_BACK = 40  # span for Jul–Aug window + buffer
 FETCH_THROTTLE_SEC = 0.12
 
 ARTIFACT_NAME = "breakfast_strategy_backtest.json"
+OOS_SPOT_ARTIFACT_NAME = "breakfast_strategy_oos_spot_jun2026.json"
+HISTORY_ARTIFACT_NAME = "breakfast_strategy_history.json"
