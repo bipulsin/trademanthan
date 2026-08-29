@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Breakfast Strategy | TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="settings.css">
+    <link rel="stylesheet" href="theme.css?v=1.3">
+    <link rel="stylesheet" href="volume-mismatch-backtest.css?v=2">
+    <link rel="stylesheet" href="breakfast.css?v=4">
+</head>
+<body class="theme-page" data-theme="dark">
+    <div class="vmb-wrap">
+        <header class="vmb-header">
+            <div>
+                <h1><i class="fas fa-mug-hot" style="color:#f59e0b;"></i> Breakfast Strategy</h1>
+                <p class="vmb-lede">
+                    9:15–9:20 NIFTY50 bias → top or bottom 1 F&amp;O-eligible sector → 2 stocks
+                    (0–4% move filter). Anchor = first 5m close; TP/SL ±1% from anchor; entry ±0.03% slippage.
+                    Paper only. Backtest: <strong>29 Jul – 28 Aug 2026</strong>.
+                </p>
+            </div>
+            <div class="vmb-header-actions">
+                <label class="bf-toggle" title="Re-runs backtest when changed">
+                    <input type="checkbox" id="bfPnlCapToggle">
+                    <span>Exit at ₹5,000 profit</span>
+                </label>
+                <button type="button" class="vmb-theme-btn" id="bfThemeBtn" title="Toggle theme"><i class="fas fa-moon"></i></button>
+                <button type="button" class="vmb-theme-btn" id="bfReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
+            </div>
+        </header>
+
+        <div id="bfStatus" class="vmb-callout" hidden></div>
+
+        <section class="bf-rules" aria-label="Strategy rules">
+            <div class="bf-rule"><h3>Bias (9:20)</h3><ul><li>NIFTY50 first 5m close vs open.</li><li>Flat (0%) → <strong>Long</strong> branch.</li><li>Negative → Short branch.</li></ul></div>
+            <div class="bf-rule"><h3>Sectors</h3><ul><li>Rank 15 Nifty sector indices on first 5m %.</li><li>Discard sectors with no F&amp;O stocks in <code>arbitrage_master</code>.</li><li>Top 1 sector (long) or bottom 1 (short).</li></ul></div>
+            <div class="bf-rule"><h3>Stocks</h3><ul><li>Rank by % vs <strong>prev close</strong> at 9:20.</li><li>Long: 0% &lt; move &lt; 4%.</li><li>Short: −4% &lt; move &lt; 0%.</li><li>Top 2 in sector; nearest FUT (e.g. SEP26) or SPOT.</li></ul></div>
+            <div class="bf-rule"><h3>Exit</h3><ul><li>Anchor = <strong>9:15 bar close</strong> (TP/SL ±1%); entry ±0.03% slippage.</li><li>Stock rank uses 9:20 close vs prev day.</li><li>Monitor from 9:20 (9:15 entry) or 9:25; optional ₹5K cap.</li><li>VWAP breach on close; 10:15 time exit if still open.</li></ul></div>
+        </section>
+
+        <section class="vmb-summary" id="bfSummary"></section>
+
+        <h2 class="bf-section-title">Per-sector breakdown</h2>
+        <div class="vmb-table-wrap">
+            <table class="vmb-table" id="bfSectorTable">
+                <thead><tr><th>Sector</th><th>Trades</th><th>Win %</th><th>P&amp;L ₹</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <h2 class="bf-section-title">Trade sheet</h2>
+        <div class="vmb-table-wrap">
+            <table class="vmb-table" id="bfTradesTable">
+                <thead>
+                    <tr>
+                        <th>Date</th><th>Symbol</th><th>Side</th><th>Sector</th>
+                        <th>NIFTY %</th><th>vs Prev %</th>
+                        <th>Anchor</th><th>TP</th><th>SL</th>
+                        <th>Max H / Min L</th>
+                        <th>Entry</th><th>Exit</th>
+                        <th>Trigger</th><th>Lot</th><th>P&amp;L ₹</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <script src="breakfast.js?v=6"></script>
+</body>
+</html>

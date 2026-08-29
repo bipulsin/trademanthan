@@ -1,0 +1,56 @@
+/* Breakfast Strategy — TWCTO template fonts + P&L cell styling */
+.bf-pnl-pos,
+.bf-pnl-neg {
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+.bf-pnl-pos {
+    background-color: #4caf50 !important;
+}
+
+.bf-pnl-neg {
+    background-color: #e57373 !important;
+}
+
+.bf-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.86rem;
+    color: var(--theme-text, #f1f5f9);
+    cursor: pointer;
+    user-select: none;
+    margin-right: 0.5rem;
+}
+
+.bf-toggle input {
+    width: 1rem;
+    height: 1rem;
+    accent-color: #f59e0b;
+    cursor: pointer;
+}
+
+.bf-rules {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+}
+.bf-rule {
+    background: var(--theme-card, #1a1a2e);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+}
+.bf-rule h3 {
+    margin: 0 0 0.45rem;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #f59e0b;
+}
+.bf-rule ul { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; line-height: 1.45; opacity: 0.92; }
+.bf-section-title { margin: 1.25rem 0 0.5rem; font-size: 1rem; color: var(--theme-text, #f1f5f9); }
+@media (max-width: 1000px) { .bf-rules { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .bf-rules { grid-template-columns: 1fr; } }
