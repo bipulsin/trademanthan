@@ -20,7 +20,7 @@ import ssl
 import threading
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -831,6 +831,47 @@ def get_ws_quote_for_instrument(instrument_key: str) -> Optional[Dict[str, Any]]
             "oi_change": row.get("oi_change", 0),
             "age_sec": round(age, 2),
         }
+
+
+def get_ws_1m_bars_for_session(instrument_key: str, session_date: date) -> List[Dict[str, Any]]:
+    """In-memory WS 1m bars for instrument on session_date (09:00–10:00 IST)."""
+    ik = _normalize_ik(instrument_key)
+    day_prefix = session_date.isoformat()
+    out: List[Dict[str, Any]] = []
+    with _CANDLE_LOCK:
+        for (k_ik, minute_iso), c in _WS_1M_STATE.items():
+            if k_ik != ik or not minute_iso.startswith(day_prefix):
+                continue
+            try:
+                dt = datetime.fromisoformat(minute_iso)
+                if dt.tzinfo is None:
+                    dt = IST.localize(dt)
+                else:
+                    dt = dt.astimezone(IST)
+            except (TypeError, ValueError):
+                continue
+            if not (dt_time(9, 0) <= dt.time() <= dt_time(10, 0)):
+                continue
+            out.append(
+                {
+                    "timestamp": minute_iso,
+                    "open": float(c["open"]),
+                    "high": float(c["high"]),
+                    "low": float(c["low"]),
+                    "close": float(c["close"]),
+                    "volume": float(c.get("volume") or 0),
+                }
+            )
+    out.sort(key=lambda x: x.get("timestamp") or "")
+    return out
+
+
+def get_ws_forming_5m_bar(instrument_key: str, session_date: date) -> Optional[Dict[str, Any]]:
+    """Aggregate 09:15–09:20 5m from WS 1m cache when available."""
+    from backend.services.breakfast_strategy.candles import aggregate_1m_to_session_5m
+
+    bars_1m = get_ws_1m_bars_for_session(instrument_key, session_date)
+    return aggregate_1m_to_session_5m(bars_1m, session_date)
 
 
 def feed_status() -> Dict[str, Any]:
