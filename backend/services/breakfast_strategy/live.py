@@ -106,6 +106,11 @@ def _is_blank_slate(now: datetime) -> bool:
     return BLANK_SLATE_FROM <= t < SESSION_OPEN
 
 
+def _is_pre_live_window(now: datetime) -> bool:
+    """Trading day before 9:00 IST — outside the live feed window."""
+    return _is_trading_day_ist(now) and now.time() < BLANK_SLATE_FROM
+
+
 def _blank_live_payload(now: datetime, *, banner: str, state: str = "blank") -> Dict[str, Any]:
     return {
         "ok": True,
@@ -311,6 +316,10 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
             out["server_time"] = now.isoformat()
             out["refresh_allowed"] = False
             return out
+        return _last_session_snapshot(
+            now,
+            banner="Session locked — picks from 9:20 IST",
+        )
 
     if now.weekday() >= 5:
         return _last_session_snapshot(
@@ -323,6 +332,12 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
         return _last_session_snapshot(
             now,
             banner="NSE holiday — showing last session picks (locked at 9:20)",
+        )
+
+    if _is_pre_live_window(now):
+        return _last_session_snapshot(
+            now,
+            banner="Pre-market — live window opens 9:00 IST",
         )
 
     if _is_blank_slate(now):

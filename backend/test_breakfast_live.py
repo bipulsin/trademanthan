@@ -77,6 +77,15 @@ def test_build_live_state_weekend():
     assert out["state"] == "off_session"
 
 
+def test_build_live_state_pre_live_window_fast():
+    """Before 9:00 IST on a weekday — must not hit Upstox/WS (fast off-session)."""
+    replay = IST.localize(datetime(2026, 8, 31, 1, 15))
+    out = build_live_state(replay_at=replay)
+    assert out["state"] == "off_session"
+    assert out["phase"] == "waiting"
+    assert "9:00" in (out.get("banner") or "")
+
+
 @pytest.mark.skip(reason="requires PostgreSQL arbitrage_master")
 def test_live_replay_forming_phase():
     """Replay timestamp lands in forming phase with banner text."""
