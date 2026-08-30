@@ -35,29 +35,6 @@ COMPARABILITY_CAVEAT = (
     "corporate actions (splits/bonuses) — Upstox candles are unadjusted OHLC."
 )
 
-LIMITATIONS = {
-    "corporate_actions": (
-        "Upstox historical 5m candles return raw OHLCV (V2 1-minute aggregated to 5m, or V3). "
-        "There is no adjusted-close field in our pipeline. %-move vs prev close and VWAP can be "
-        "unreliable for symbols with splits/bonuses in the window — treat those symbols/months with caution."
-    ),
-    "arbitrage_master_point_in_time": (
-        "arbitrage_master is a current snapshot only (stock, sector_index, currmth keys). "
-        "No historical versioning or as-of-date sector/F&O membership. The full-year run applies "
-        "today's universe retroactively — composition/survivorship bias is a known limitation."
-    ),
-    "holiday_calendar": (
-        "Session days use iter_session_dates() with weekend skip + PostgreSQL holiday table "
-        "(is_nse_holiday_ist). Ensure holiday rows cover Jun-2025–May-2026 for accurate counts."
-    ),
-    "sector_tagging_exposure": (
-        "Sep 2025–Apr 2026 data was generated before a sector-tagging correction (a handful of "
-        "symbols including BHARTIARTL and ADANIENT were reclassified). Manual review of the "
-        "highest-exposure months found no trades directly involving reclassified symbols and "
-        "negligible plausible indirect exposure (~2 trades/month at most) — not material to results."
-    ),
-}
-
 ROLLING_MONTHS_BACKWARD: List[str] = [
     "2026-05",
     "2026-04",
@@ -162,7 +139,6 @@ def rebuild_history_doc(months: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "strategy": "breakfast",
         "comparability_caveat": COMPARABILITY_CAVEAT,
-        "limitations": LIMITATIONS,
         "months": months,
         "spot_proxy_rollup": rollup_spot_proxy_months(months),
         "rolling_months_target": ROLLING_MONTHS_BACKWARD,

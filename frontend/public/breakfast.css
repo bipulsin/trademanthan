@@ -80,14 +80,6 @@
     background: rgba(245, 158, 11, 0.15);
     color: #fde68a;
 }
-.bf-limitations {
-    border-color: rgba(148, 163, 184, 0.35) !important;
-    color: #cbd5e1 !important;
-    background: rgba(15, 23, 42, 0.5);
-    font-size: 0.82rem;
-    line-height: 1.45;
-    margin-bottom: 0.75rem;
-}
 .bf-hist-note, .bf-hist-sub {
     font-size: 0.84rem;
     opacity: 0.85;

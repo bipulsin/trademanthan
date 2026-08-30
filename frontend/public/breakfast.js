@@ -180,16 +180,6 @@
         var caveat = $("bfHistCaveat");
         if (caveat) caveat.textContent = doc.comparability_caveat || "";
 
-        var lim = $("bfHistLimitations");
-        if (lim && doc.limitations) {
-            var L = doc.limitations;
-            lim.innerHTML = "<strong>Known limitations</strong><ul>" +
-                "<li><strong>Corporate actions:</strong> " + (L.corporate_actions || "") + "</li>" +
-                "<li><strong>Universe snapshot:</strong> " + (L.arbitrage_master_point_in_time || "") + "</li>" +
-                "<li><strong>Holidays:</strong> " + (L.holiday_calendar || "") + "</li>" +
-                "<li><strong>Sector tagging (reviewed):</strong> " + (L.sector_tagging_exposure || "") + "</li></ul>";
-        }
-
         renderSummary(doc.spot_proxy_rollup || {}, "bfHistRollup");
 
         var tb = $("bfHistMonthTable") && $("bfHistMonthTable").querySelector("tbody");
