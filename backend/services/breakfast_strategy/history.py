@@ -50,6 +50,12 @@ LIMITATIONS = {
         "Session days use iter_session_dates() with weekend skip + PostgreSQL holiday table "
         "(is_nse_holiday_ist). Ensure holiday rows cover Jun-2025–May-2026 for accurate counts."
     ),
+    "sector_tagging_exposure": (
+        "Sep 2025–Apr 2026 data was generated before a sector-tagging correction (a handful of "
+        "symbols including BHARTIARTL and ADANIENT were reclassified). Manual review of the "
+        "highest-exposure months found no trades directly involving reclassified symbols and "
+        "negligible plausible indirect exposure (~2 trades/month at most) — not material to results."
+    ),
 }
 
 ROLLING_MONTHS_BACKWARD: List[str] = [

@@ -186,7 +186,8 @@
             lim.innerHTML = "<strong>Known limitations</strong><ul>" +
                 "<li><strong>Corporate actions:</strong> " + (L.corporate_actions || "") + "</li>" +
                 "<li><strong>Universe snapshot:</strong> " + (L.arbitrage_master_point_in_time || "") + "</li>" +
-                "<li><strong>Holidays:</strong> " + (L.holiday_calendar || "") + "</li></ul>";
+                "<li><strong>Holidays:</strong> " + (L.holiday_calendar || "") + "</li>" +
+                "<li><strong>Sector tagging (reviewed):</strong> " + (L.sector_tagging_exposure || "") + "</li></ul>";
         }
 
         renderSummary(doc.spot_proxy_rollup || {}, "bfHistRollup");
@@ -202,10 +203,15 @@
             var s = m.summary || {};
             var st = m.status || "";
             var stCls = st === "failed" ? "bf-status-failed" : (st === "running" ? "bf-status-running" : "");
+            var stLabel = st;
+            if (st === "failed" && m.error) {
+                stLabel = m.error.indexOf("data issue") >= 0 ? "discarded" : st;
+            }
+            var stTitle = m.error ? (" title=\"" + String(m.error).replace(/"/g, "&quot;") + "\"") : "";
             return "<tr data-period='" + (m.period_label || "") + "'>" +
                 "<td>" + periodDisplay(m) + "</td>" +
                 "<td>" + (m.price_source || "") + "</td>" +
-                "<td class='" + stCls + "'>" + st + "</td>" +
+                "<td class='" + stCls + "'" + stTitle + ">" + stLabel + "</td>" +
                 "<td>" + ((m.coverage && m.coverage.session_days) || "—") + "</td>" +
                 "<td>" + (s.total_trades != null ? s.total_trades : (m.trade_count || 0)) + "</td>" +
                 "<td>" + (s.win_rate_pct != null ? s.win_rate_pct + "%" : "—") + "</td>" +
