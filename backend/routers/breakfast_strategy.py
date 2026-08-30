@@ -131,6 +131,7 @@ def get_breakfast_history() -> Dict[str, Any]:
         )
     # Light payload for tab: omit full trade lists unless ?include_trades=1
     out = dict(doc)
+    out.pop("limitations", None)  # legacy key in on-disk artifact pre-1e34e34
     months_light = []
     for m in doc.get("months") or []:
         ml = {k: v for k, v in m.items() if k != "trades"}
