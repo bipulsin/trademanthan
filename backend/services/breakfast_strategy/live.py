@@ -25,6 +25,7 @@ from backend.services.breakfast_strategy.candles import (
     move_pct_vs_prev_close,
     prev_session_close,
     signal_bar,
+    session_has_stock_bars,
 )
 from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
 from backend.services.breakfast_strategy.engine import NIFTY50_KEY, nifty_bias_from_bar, select_breakfast_picks
@@ -407,6 +408,40 @@ def _build_ws_stock_overrides(
     return stock_signal_overrides, anchor_overrides
 
 
+def _warm_off_cycle_stock_candles(
+    *,
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    candidate_sector_keys: List[str],
+    session_date: date,
+    stock_candles_by_key: Dict[str, List[Dict[str, Any]]],
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+    upstox: UpstoxService,
+    cache_dir: Any,
+) -> None:
+    """Fetch 5m bars only for stocks in likely-picked sectors (off-cycle preview)."""
+    for skey in candidate_sector_keys:
+        for m in stocks_by_sector.get(skey, []):
+            sym = str(m.get("stock") or "").upper()
+            if not sym:
+                continue
+            ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+            if not ref or not ref.instrument_key:
+                continue
+            ik = ref.instrument_key
+            cached = stock_candles_by_key.get(ik, [])
+            if session_has_stock_bars(cached, session_date):
+                continue
+            stock_candles_by_key[ik] = ensure_5m_cached(
+                upstox,
+                cache_dir,
+                ik,
+                range_end=session_date,
+                session_dates=[session_date],
+                force=True,
+            )
+
+
 def _resort_sector_stocks(sectors_out: List[Dict[str, Any]], *, long_side: bool) -> None:
     """Re-rank stocks within each sector by live move % on every refresh."""
     for sec in sectors_out:
@@ -557,12 +592,7 @@ def _build_live_state_payload(
     for ik in keys:
         if ik == NIFTY50_KEY or ik in sector_candles:
             continue
-        if off_cycle:
-            stock_candles_by_key[ik] = ensure_5m_cached(
-                ux, cache_dir, ik, range_end=session_date, session_dates=[session_date], force=True
-            )
-        else:
-            stock_candles_by_key[ik] = load_cached_5m(cache_dir, ik)
+        stock_candles_by_key[ik] = load_cached_5m(cache_dir, ik)
 
     allow_proxy = phase in ("forming", "opening", "bar_closing", "waiting")
     # During 9:16–9:20 forming, rely on WS + disk cache only — no per-instrument REST quotes.
@@ -584,6 +614,28 @@ def _build_live_state_payload(
             sector_overrides[ik] = bar
         if src == "mismatch":
             mismatch_keys.append(ik)
+
+    if off_cycle and nifty_bar:
+        candidate_sectors = _candidate_sector_keys_for_live(
+            stocks_by_sector=stocks_by_sector,
+            session_date=session_date,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            sector_overrides=sector_overrides,
+            sector_candles=sector_candles,
+            nifty_bar=nifty_bar,
+            sectors_to_pick=LIVE_SECTORS_TO_PICK,
+        )
+        _warm_off_cycle_stock_candles(
+            stocks_by_sector=stocks_by_sector,
+            candidate_sector_keys=candidate_sectors,
+            session_date=session_date,
+            stock_candles_by_key=stock_candles_by_key,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            upstox=ux,
+            cache_dir=cache_dir,
+        )
 
     stock_signal_overrides: Dict[str, Tuple[Dict[str, Any], float]] = {}
     anchor_overrides: Dict[str, Dict[str, Any]] = {}
