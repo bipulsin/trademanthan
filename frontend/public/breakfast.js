@@ -296,6 +296,7 @@
 
     function liveEmptySubtext(data) {
         data = data || {};
+        if (data.loading) return "Loading…";
         var phase = data.phase || "";
         var state = data.state || "";
         if (phase === "frozen" || phase === "locked" || state === "off_session" || state === "locked") {
@@ -307,11 +308,73 @@
         return "Waiting for 9:15…";
     }
 
+    function niftyIsFilled(n) {
+        return !!(n && n.direction);
+    }
+
+    function sectorIsFilled(s) {
+        return !!(s && (s.sector_key || s.sector_label) && s.direction);
+    }
+
+    function stockIsFilled(st) {
+        return !!(st && st.symbol);
+    }
+
+    function mergeStocksPreserve(prevStocks, nextStocks) {
+        prevStocks = prevStocks || [];
+        nextStocks = nextStocks || [];
+        var max = Math.max(prevStocks.length, nextStocks.length);
+        var out = [];
+        for (var i = 0; i < max; i++) {
+            var n = nextStocks[i];
+            var p = prevStocks[i];
+            if (stockIsFilled(n)) out.push(n);
+            else if (stockIsFilled(p)) out.push(p);
+            else out.push(n || p || {});
+        }
+        return out;
+    }
+
+    function mergeLivePreserve(prev, next) {
+        if (!prev) return next;
+        if (!next) return prev;
+        var out = Object.assign({}, prev, next);
+        if (!niftyIsFilled(next.nifty) && niftyIsFilled(prev.nifty)) {
+            out.nifty = prev.nifty;
+        }
+        var prevS = prev.sectors || [];
+        var nextS = next.sectors || [];
+        var max = Math.max(prevS.length, nextS.length);
+        if (max === 0) {
+            out.sectors = nextS;
+            return out;
+        }
+        var merged = [];
+        for (var i = 0; i < max; i++) {
+            var n = nextS[i];
+            var p = prevS[i];
+            if (sectorIsFilled(n)) {
+                merged.push(Object.assign({}, n, {
+                    stocks: mergeStocksPreserve((p && p.stocks) || [], n.stocks || [])
+                }));
+            } else if (sectorIsFilled(p)) {
+                merged.push(p);
+            } else if (n) {
+                merged.push(n);
+            } else if (p) {
+                merged.push(p);
+            }
+        }
+        out.sectors = merged;
+        return out;
+    }
+
     function renderLiveNifty(n, data) {
         var box = $("bfLiveNifty");
         if (!box) return;
-        if (!n || !n.direction) {
-            box.className = "bf-live-box bf-nifty-box bf-empty";
+        if (!niftyIsFilled(n)) {
+            if (box.classList.contains("bf-long") || box.classList.contains("bf-short")) return;
+            box.className = "bf-live-box bf-nifty-box bf-empty bf-skeleton";
             box.innerHTML = "<h3>NIFTY50</h3><div class='bf-live-pct'>—</div><div class='bf-live-sub'>" +
                 liveEmptySubtext(data) + "</div>";
             return;
@@ -356,43 +419,73 @@
         return liveSignalsCache[signalKey(sym, dir)] || null;
     }
 
-    function renderLiveSectors(sectors, data) {
+    function ensureSectorColumns(count) {
         var wrap = $("bfLiveSectors");
-        if (!wrap) return;
-        if (!sectors || !sectors.length) {
-            var hint = liveEmptySubtext(data);
-            wrap.innerHTML = "<div class='bf-live-empty-hint'>" + hint + "</div>" +
-                "<div class='bf-sector-column'>" +
-                "<section class='bf-live-box bf-sector-box bf-empty'><span class='bf-sector-num'>1</span><h3>Sector 1</h3><div class='bf-live-pct'>—</div></section>" +
-                "<div class='bf-sector-stocks'><div class='bf-stock-box bf-empty'>—</div><div class='bf-stock-box bf-empty'>—</div><div class='bf-stock-box bf-empty'>—</div></div>" +
-                "</div>" +
-                "<div class='bf-sector-column'>" +
-                "<section class='bf-live-box bf-sector-box bf-empty'><span class='bf-sector-num'>2</span><h3>Sector 2</h3><div class='bf-live-pct'>—</div></section>" +
-                "<div class='bf-sector-stocks'><div class='bf-stock-box bf-empty'>—</div><div class='bf-stock-box bf-empty'>—</div><div class='bf-stock-box bf-empty'>—</div></div>" +
+        if (!wrap) return null;
+        var hint = wrap.querySelector(".bf-live-empty-hint");
+        if (hint) hint.remove();
+        var n = Math.max(2, count || 0);
+        for (var i = 0; i < n; i++) {
+            if ($("bfLiveSectorCol" + i)) continue;
+            var col = document.createElement("div");
+            col.className = "bf-sector-column";
+            col.id = "bfLiveSectorCol" + i;
+            wrap.appendChild(col);
+        }
+        return wrap;
+    }
+
+    function renderLiveSector(i, sector, data) {
+        ensureSectorColumns(i + 1);
+        var col = $("bfLiveSectorCol" + i);
+        if (!col) return;
+        if (!sectorIsFilled(sector)) {
+            if (col.querySelector(".bf-sector-box:not(.bf-empty)")) return;
+            var num = i + 1;
+            col.innerHTML =
+                "<section class='bf-live-box bf-sector-box bf-empty bf-skeleton'><span class='bf-sector-num'>" + num +
+                "</span><h3>Sector " + num + "</h3><div class='bf-live-pct'>—</div></section>" +
+                "<div class='bf-sector-stocks'>" +
+                "<div class='bf-stock-box bf-empty bf-skeleton'>—</div>" +
+                "<div class='bf-stock-box bf-empty bf-skeleton'>—</div>" +
+                "<div class='bf-stock-box bf-empty bf-skeleton'>—</div>" +
                 "</div>";
             return;
         }
-        wrap.innerHTML = sectors.map(function (s) {
-            var longSide = s.direction === "LONG";
-            var secNum = s.sector_rank || 1;
-            var stocks = s.stocks || [];
-            while (stocks.length < 3) stocks.push({});
-            var stockHtml = stocks.slice(0, 3).map(function (st, i) {
-                if (!st || !st.symbol) {
-                    return "<article class='bf-stock-box bf-empty'><div class='bf-stock-num'>" + (i + 1) + "</div>—</article>";
-                }
-                return renderStockBox(st, i + 1, lookupSignal(st.symbol, st.direction));
-            }).join("");
-            return "<div class='bf-sector-column'>" +
-                "<section class='bf-live-box bf-sector-box " + (longSide ? "bf-long" : "bf-short") + "'>" +
-                "<span class='bf-sector-num'>" + secNum + "</span>" +
-                "<h3>" + (s.sector_label || s.sector_key) +
-                "<span class='bf-live-tag " + (longSide ? "long" : "short") + "'>" + s.direction + "</span></h3>" +
-                "<div class='bf-live-pct'>" + (s.move_pct >= 0 ? "+" : "") + fmt(s.move_pct, 2) + "%</div>" +
-                "</section>" +
-                "<div class='bf-sector-stocks'>" + stockHtml + "</div>" +
-                "</div>";
+        var longSide = sector.direction === "LONG";
+        var secNum = sector.sector_rank || (i + 1);
+        var stocks = (sector.stocks || []).slice();
+        while (stocks.length < 3) stocks.push({});
+        var stockHtml = stocks.slice(0, 3).map(function (st, si) {
+            if (!stockIsFilled(st)) {
+                return "<article class='bf-stock-box bf-empty'><div class='bf-stock-num'>" + (si + 1) + "</div>—</article>";
+            }
+            return renderStockBox(st, si + 1, lookupSignal(st.symbol, st.direction));
         }).join("");
+        col.innerHTML = "<section class='bf-live-box bf-sector-box " + (longSide ? "bf-long" : "bf-short") + "'>" +
+            "<span class='bf-sector-num'>" + secNum + "</span>" +
+            "<h3>" + (sector.sector_label || sector.sector_key) +
+            "<span class='bf-live-tag " + (longSide ? "long" : "short") + "'>" + sector.direction + "</span></h3>" +
+            "<div class='bf-live-pct'>" + (sector.move_pct >= 0 ? "+" : "") + fmt(sector.move_pct, 2) + "%</div>" +
+            "</section>" +
+            "<div class='bf-sector-stocks'>" + stockHtml + "</div>";
+        bindLiveLogButtons(col);
+    }
+
+    function renderLiveSectors(sectors, data) {
+        sectors = sectors || [];
+        var n = Math.max(sectors.length, 2);
+        ensureSectorColumns(n);
+        for (var i = 0; i < n; i++) {
+            renderLiveSector(i, sectors[i], data);
+        }
+    }
+
+    function showLiveSkeletons() {
+        var loading = { loading: true };
+        renderLiveNifty({}, loading);
+        renderLiveSector(0, null, loading);
+        renderLiveSector(1, null, loading);
     }
 
     function renderLive(data) {
@@ -406,7 +499,6 @@
         }
         renderLiveNifty(data.nifty || {}, data);
         renderLiveSectors(data.sectors || [], data);
-        bindLiveLogButtons();
     }
 
     function istTimeFromIso(ts) {
@@ -447,8 +539,8 @@
         if (modal) modal.hidden = true;
     }
 
-    function bindLiveLogButtons() {
-        var wrap = $("bfLiveSectors");
+    function bindLiveLogButtons(root) {
+        var wrap = root || $("bfLiveSectors");
         if (!wrap) return;
         Array.prototype.forEach.call(wrap.querySelectorAll("[data-bf-log-open]"), function (btn) {
             btn.addEventListener("click", function (e) {
@@ -466,18 +558,31 @@
         });
     }
 
+    function applyLiveSignals(data) {
+        if (!data) return;
+        (data.signals || []).forEach(function (s) {
+            liveSignalsCache[signalKey(s.symbol, s.direction)] = s;
+        });
+    }
+
+    function fetchLiveSignals(sessionDate) {
+        var url = LIVE_SIGNALS_API;
+        if (sessionDate) url += "?session_date=" + encodeURIComponent(sessionDate);
+        return fetch(url, { cache: "no-store", credentials: "same-origin" })
+            .then(function (res) {
+                return parseJsonResponse(res).then(function (data) {
+                    return { ok: res.ok, data: data };
+                });
+            })
+            .catch(function () { return null; });
+    }
+
     async function loadLiveSignals(sessionDate) {
         if (!sessionDate) return;
         try {
-            var res = await fetch(LIVE_SIGNALS_API + "?session_date=" + encodeURIComponent(sessionDate), {
-                cache: "no-store", credentials: "same-origin"
-            });
-            var data = await parseJsonResponse(res);
-            if (!res.ok) return;
-            liveSignalsCache = {};
-            (data.signals || []).forEach(function (s) {
-                liveSignalsCache[signalKey(s.symbol, s.direction)] = s;
-            });
+            var sig = await fetchLiveSignals(sessionDate);
+            if (!sig || !sig.ok) return;
+            applyLiveSignals(sig.data);
         } catch (_e) { /* optional pre-fill */ }
     }
 
@@ -538,15 +643,21 @@
 
     async function loadLive() {
         setStatus("Loading live…", false, "bfLiveStatus");
+        if (!liveLastData) showLiveSkeletons();
+        var signalsP = fetchLiveSignals(liveSessionDate);
         try {
             var res = await fetchWithTimeout(LIVE_API, { cache: "no-store", credentials: "same-origin" }, 45000);
             var data = await parseJsonResponse(res);
             if (!res.ok) throw new Error(data.detail || data.message || "Load failed");
-            liveSessionDate = data.session_date || "";
-            await loadLiveSignals(liveSessionDate);
-            liveLastData = data;
-            renderLive(data);
+            liveSessionDate = data.session_date || liveSessionDate || "";
+            liveLastData = mergeLivePreserve(liveLastData, data);
+            renderLive(liveLastData);
             setStatus("", false, "bfLiveStatus");
+            signalsP.then(function (sig) {
+                if (!sig || !sig.ok) return;
+                applyLiveSignals(sig.data);
+                if (liveLastData) renderLiveSectors(liveLastData.sectors || [], liveLastData);
+            });
             stopLivePoll();
             if (data.refresh_allowed && (data.poll_interval_sec || 0) > 0) {
                 livePollTimer = setInterval(loadLive, (data.poll_interval_sec || 5) * 1000);
