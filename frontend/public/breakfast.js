@@ -399,15 +399,15 @@
         var logged = sig && sig.trade_taken;
         return "<article class='bf-stock-box " + (longSide ? "bf-long" : "bf-short") +
             (logged ? " bf-has-log" : "") + "' data-symbol='" + sym + "' data-direction='" + dir + "'>" +
-            "<button type='button' class='bf-stock-log-btn' data-bf-log-open title='Log manual trade'>Log</button>" +
+            "<button type='button' class='bf-stock-log-btn' data-bf-log-open title='Record trade'>Trade</button>" +
             "<div class='bf-stock-num'>" + rankInSector + "</div>" +
             "<div class='bf-stock-row1'>" +
             "<span class='bf-stock-name'>" + (st.display_symbol || st.symbol) + "</span>" +
-            "<span class='bf-stock-move'>" + (move != null ? (move >= 0 ? "+" : "") + fmt(move, 2) + "%" : "—") + "</span>" +
             "</div>" +
             "<div class='bf-stock-row2'>LTP " + fmt(st.ltp, 2) + " · Risk ₹" + fmt(risk, 0) +
             (logged ? " · <span class='bf-logged-tag'>Logged</span>" : "") + "</div>" +
-            "<div class='bf-stock-row3'>Vol " + fmt(st.volume, 0) + " · Rank #" + rankInSector + "</div>" +
+            "<div class='bf-stock-row3'>Vol " + fmt(st.volume, 0) +
+            " · <span class='bf-stock-move'>" + (move != null ? (move >= 0 ? "+" : "") + fmt(move, 2) + "%" : "—") + "</span></div>" +
             "</article>";
     }
 
