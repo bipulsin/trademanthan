@@ -11,6 +11,7 @@ import pytest
 from backend.services.breakfast_strategy.candles import aggregate_1m_to_session_5m, bars_ohlc_close_match
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import (
+    live_state_from_persisted_rows,
     persist_live_signals,
     rows_from_live_state,
     update_manual_capture,
@@ -129,6 +130,40 @@ def test_rows_from_live_state_builds_row():
     assert r["rank_at_lock"] == 1
     assert r["websocket_rest_cross_check_status"] == "matched"
     assert r["stock_move_pct_at_lock"] == 1.2
+
+
+def test_live_state_from_persisted_rows_roundtrip():
+    db_rows = rows_from_live_state(SAMPLE_STATE, "matched")
+    state = live_state_from_persisted_rows("2026-08-28", db_rows)
+    assert state["session_date"] == "2026-08-28"
+    assert state["nifty"]["direction"] == "LONG"
+    assert len(state["sectors"]) == 1
+    assert state["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
+
+
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
+def test_build_live_state_frozen_missing_data(mock_load):
+    mock_load.return_value = None
+    replay = IST.localize(datetime(2026, 8, 31, 10, 4))
+    out = build_live_state(replay_at=replay)
+    assert out["state"] == "off_session"
+    assert out["phase"] == "frozen"
+    assert out.get("data_missing")
+    assert "2026-08-31" in (out.get("data_missing_reason") or "")
+    assert "No picks captured" in (out.get("banner") or "")
+
+
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
+def test_build_live_state_frozen_loads_persisted(mock_load):
+    mock_load.return_value = live_state_from_persisted_rows(
+        "2026-08-31",
+        rows_from_live_state(SAMPLE_STATE, "matched"),
+    )
+    replay = IST.localize(datetime(2026, 8, 31, 10, 4))
+    out = build_live_state(replay_at=replay)
+    assert out["nifty"]["direction"] == "LONG"
+    assert len(out["sectors"]) == 1
+    assert out["from_persisted"]
 
 
 @patch("backend.services.breakfast_strategy.live_persist._insert_signal")

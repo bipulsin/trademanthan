@@ -292,12 +292,30 @@
         else el.classList.add("bf-banner-forming");
     }
 
-    function renderLiveNifty(n) {
+    function liveEmptySubtext(data) {
+        data = data || {};
+        if (data.data_missing_reason) return data.data_missing_reason;
+        var phase = data.phase || "";
+        var state = data.state || "";
+        if (phase === "frozen" || phase === "locked" || state === "off_session" || state === "locked") {
+            if (data.session_date) {
+                return "No picks captured for " + data.session_date + " (session error)";
+            }
+            return "Session locked — no pick data";
+        }
+        if (phase === "forming" || phase === "opening" || phase === "bar_closing") {
+            return "Forming 9:15–9:20 bar…";
+        }
+        return "Waiting for 9:15…";
+    }
+
+    function renderLiveNifty(n, data) {
         var box = $("bfLiveNifty");
         if (!box) return;
         if (!n || !n.direction) {
             box.className = "bf-live-box bf-nifty-box bf-empty";
-            box.innerHTML = "<h3>NIFTY50</h3><div class='bf-live-pct'>—</div><div class='bf-live-sub'>Waiting for 9:15…</div>";
+            box.innerHTML = "<h3>NIFTY50</h3><div class='bf-live-pct'>—</div><div class='bf-live-sub'>" +
+                liveEmptySubtext(data) + "</div>";
             return;
         }
         var longSide = n.direction === "LONG";
@@ -340,11 +358,13 @@
         return liveSignalsCache[signalKey(sym, dir)] || null;
     }
 
-    function renderLiveSectors(sectors) {
+    function renderLiveSectors(sectors, data) {
         var wrap = $("bfLiveSectors");
         if (!wrap) return;
         if (!sectors || !sectors.length) {
-            wrap.innerHTML = "<div class='bf-sector-column'>" +
+            var hint = liveEmptySubtext(data);
+            wrap.innerHTML = "<div class='bf-live-empty-hint'>" + hint + "</div>" +
+                "<div class='bf-sector-column'>" +
                 "<section class='bf-live-box bf-sector-box bf-empty'><span class='bf-sector-num'>1</span><h3>Sector 1</h3><div class='bf-live-pct'>—</div></section>" +
                 "<div class='bf-sector-stocks'><div class='bf-stock-box bf-empty'>—</div><div class='bf-stock-box bf-empty'>—</div><div class='bf-stock-box bf-empty'>—</div></div>" +
                 "</div>" +
@@ -386,8 +406,8 @@
                 " · " + (data.universe_instruments || 0) + " WS instruments · updated " +
                 (data.server_time || "").slice(11, 19);
         }
-        renderLiveNifty(data.nifty || {});
-        renderLiveSectors(data.sectors || []);
+        renderLiveNifty(data.nifty || {}, data);
+        renderLiveSectors(data.sectors || [], data);
         bindLiveLogButtons();
     }
 

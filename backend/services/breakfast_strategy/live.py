@@ -46,7 +46,11 @@ from backend.services.upstox_market_feed import (
     get_ws_forming_5m_bar,
     get_ws_quote_for_instrument,
 )
-from backend.services.breakfast_strategy.live_persist import persist_live_signals
+from backend.services.breakfast_strategy.live_persist import (
+    fetch_live_signals,
+    live_state_from_persisted_rows,
+    persist_live_signals,
+)
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -120,11 +124,18 @@ def _is_pre_live_window(now: datetime) -> bool:
     return _is_trading_day_ist(now) and now.time() < BLANK_SLATE_FROM
 
 
-def _blank_live_payload(now: datetime, *, banner: str, state: str = "blank") -> Dict[str, Any]:
-    return {
+def _blank_live_payload(
+    now: datetime,
+    *,
+    banner: str,
+    state: str = "blank",
+    phase: str = "waiting",
+    data_missing_reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
         "ok": True,
         "state": state,
-        "phase": "waiting",
+        "phase": phase,
         "session_date": now.date().isoformat(),
         "banner": banner,
         "server_time": now.isoformat(),
@@ -136,15 +147,49 @@ def _blank_live_payload(now: datetime, *, banner: str, state: str = "blank") -> 
         "mismatch_instruments": [],
         "universe_instruments": 0,
     }
+    if data_missing_reason:
+        out["data_missing"] = True
+        out["data_missing_reason"] = data_missing_reason
+    return out
+
+
+def _load_persisted_live_state(session_date: str) -> Optional[Dict[str, Any]]:
+    try:
+        rows = fetch_live_signals(session_date)
+        if rows:
+            return live_state_from_persisted_rows(session_date, rows)
+    except Exception as e:
+        logger.warning("breakfast live persist load failed for %s: %s", session_date, e)
+    return None
 
 
 def _last_session_snapshot(now: datetime, *, banner: str) -> Dict[str, Any]:
+    session_key = now.date().isoformat()
     with _LOCK:
         snap = dict(_LAST_SESSION_STATE) if _LAST_SESSION_STATE else None
         if not snap and _FROZEN_STATE:
             latest_key = max(_FROZEN_STATE.keys())
             snap = dict(_FROZEN_STATE[latest_key])
     if not snap:
+        persisted = _load_persisted_live_state(session_key)
+        if persisted:
+            out = dict(persisted)
+            out["state"] = "off_session"
+            out["phase"] = "frozen"
+            out["banner"] = banner
+            out["server_time"] = now.isoformat()
+            out["refresh_allowed"] = False
+            out["poll_interval_sec"] = 0
+            return out
+        if _is_trading_day_ist(now) and now.time() >= FREEZE_AFTER:
+            reason = f"No picks captured for {session_key} (session error or restart before 9:20 lock)"
+            return _blank_live_payload(
+                now,
+                banner=reason,
+                state="off_session",
+                phase="frozen",
+                data_missing_reason=reason,
+            )
         return _blank_live_payload(
             now,
             banner=banner,
@@ -384,6 +429,13 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
             out = dict(cached)
             out["server_time"] = now.isoformat()
             out["refresh_allowed"] = False
+            return out
+        persisted = _load_persisted_live_state(cache_key)
+        if persisted:
+            out = dict(persisted)
+            out["server_time"] = now.isoformat()
+            out["refresh_allowed"] = False
+            out["poll_interval_sec"] = 0
             return out
         return _last_session_snapshot(
             now,

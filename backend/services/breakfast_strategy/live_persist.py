@@ -179,6 +179,90 @@ def persist_live_signals(state: Dict[str, Any], cross_check_status: str) -> Dict
     return {"inserted": inserted, "skipped": skipped}
 
 
+def live_state_from_persisted_rows(session_date: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Reconstruct locked live-state dict from breakfast_live_signals rows."""
+    sd = str(session_date or "")[:10]
+    if not sd or not rows:
+        return {}
+
+    nifty_pct = rows[0].get("nifty_bias_pct")
+    long_side = True
+    if nifty_pct is not None:
+        long_side = float(nifty_pct) >= 0
+
+    nifty: Dict[str, Any] = {
+        "bias": "positive" if long_side else "negative",
+        "bias_pct": round(float(nifty_pct), 3) if nifty_pct is not None else None,
+        "direction": "LONG" if long_side else "SHORT",
+    }
+
+    sectors_map: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        sr = int(r.get("sector_rank") or 0)
+        if sr < 1:
+            continue
+        if sr not in sectors_map:
+            sectors_map[sr] = {
+                "sector_key": "",
+                "sector_label": str(r.get("sector") or "").strip(),
+                "sector_rank": sr,
+                "move_pct": round(float(r.get("sector_move_pct") or 0), 3),
+                "direction": str(r.get("direction") or "LONG").strip().upper(),
+                "stocks": [],
+            }
+        lot = int(r.get("lot_size") or 0)
+        anchor = float(r.get("anchor_price") or 0)
+        sl = float(r.get("sl_price") or 0)
+        tp = float(r.get("tp_price") or 0)
+        risk_inr = round(abs(anchor - sl) * lot, 2) if lot > 0 else None
+        move = r.get("stock_move_pct_at_lock")
+        rank = int(r.get("rank_at_lock") or 0)
+        sym = str(r.get("symbol") or "").strip().upper()
+        dir_u = str(r.get("direction") or "").strip().upper()
+        sectors_map[sr]["stocks"].append(
+            {
+                "rank_label": str(rank),
+                "stock_rank": rank,
+                "rank_in_sector": rank,
+                "symbol": sym,
+                "display_symbol": sym,
+                "direction": dir_u,
+                "move_pct_at_entry": round(float(move), 3) if move is not None else None,
+                "ltp": r.get("ltp_at_lock"),
+                "lot_size": lot,
+                "anchor_price": anchor,
+                "sl_price": sl,
+                "tp_price": tp,
+                "risk_inr": risk_inr,
+                "risk_inr_1lot": risk_inr,
+                "instrument_key": r.get("instrument_key"),
+            }
+        )
+
+    sectors = sorted(sectors_map.values(), key=lambda s: s["sector_rank"])
+    locked_at = rows[0].get("locked_at_timestamp")
+    server_time = locked_at.isoformat() if hasattr(locked_at, "isoformat") else str(locked_at or "")
+    if not server_time:
+        server_time = datetime.now(IST).isoformat()
+
+    return {
+        "ok": True,
+        "state": "locked",
+        "phase": "frozen",
+        "session_date": sd,
+        "banner": "LOCKED — 9:20 CONFIRMED",
+        "server_time": server_time,
+        "refresh_allowed": False,
+        "poll_interval_sec": 0,
+        "nifty": nifty,
+        "sectors": sectors,
+        "ranked_sector_count": len(sectors),
+        "mismatch_instruments": [],
+        "universe_instruments": 0,
+        "from_persisted": True,
+    }
+
+
 def fetch_live_signals(session_date: str) -> List[Dict[str, Any]]:
     ensure_breakfast_live_signals_table()
     sd = str(session_date or "")[:10]
