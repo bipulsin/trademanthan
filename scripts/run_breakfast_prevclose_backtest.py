@@ -29,12 +29,14 @@ def main() -> int:
     ap.add_argument("--from", dest="date_from", default=PREVCLOSE_DATE_FROM.isoformat())
     ap.add_argument("--to", dest="date_to", default=PREVCLOSE_DATE_TO.isoformat())
     ap.add_argument("--force-fetch", action="store_true")
+    ap.add_argument("--skip-warm", action="store_true", help="Use existing candle cache only")
     args = ap.parse_args()
 
     out = run_prevclose_backtest(
         date_from=date.fromisoformat(args.date_from),
         date_to=date.fromisoformat(args.date_to),
         force_fetch=args.force_fetch,
+        skip_warm=args.skip_warm,
     )
     logger.info("artifact: %s", out.get("artifact_path"))
     logger.info("summary: %s", json.dumps(out.get("summary") or {}, indent=2))

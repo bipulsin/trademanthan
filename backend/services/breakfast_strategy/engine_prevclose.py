@@ -138,8 +138,9 @@ def select_breakfast_picks_prevclose(
     sym_to_candles: Dict[str, List[Dict[str, Any]]] = {}
     session_rows: Dict[str, StockRow] = {}
 
-    for members in stocks_by_sector.values():
-        for m in members:
+    picked_keys = {skey for skey, _p, _v in top_sectors}
+    for skey in picked_keys:
+        for m in stocks_by_sector.get(skey, []):
             sym = str(m.get("stock") or "").upper()
             if sym in sym_to_candles:
                 continue

@@ -61,6 +61,7 @@ def run_prevclose_backtest(
     date_from: date = PREVCLOSE_DATE_FROM,
     date_to: date = PREVCLOSE_DATE_TO,
     force_fetch: bool = False,
+    skip_warm: bool = False,
 ) -> Dict[str, Any]:
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     if not getattr(upstox, "access_token", None):
@@ -80,29 +81,46 @@ def run_prevclose_backtest(
     eq_index_keys = {k for k in instrument_keys if k.startswith("NSE_EQ|") or k.startswith("NSE_INDEX|")}
     fo_index_keys = {k for k in instrument_keys if k.startswith("NSE_FO|") or k.startswith("NSE_INDEX|")}
 
-    warm_stats: Dict[str, Any] = {"instruments": len(instrument_keys), "months": []}
-    for ms, me in _month_windows(date_from, date_to):
-        month_sessions = iter_session_dates(ms, me)
-        if not month_sessions:
-            continue
-        # Spot months: EQ+index only. Aug futures: FO+index. Skip expired FO on earlier months.
-        keys = fo_index_keys if me >= PREVCLOSE_FUTURES_FROM else eq_index_keys
-        logger.info(
-            "prevclose cache warm %s → %s (%s sessions, %s keys)",
-            ms, me, len(month_sessions), len(keys),
-        )
-        month_stats = warm_candle_cache(
-            upstox,
-            cache_dir,
-            keys,
-            range_start=ms,
-            range_end=me,
-            session_dates=month_sessions,
-            force=force_fetch,
-        )
-        warm_stats["months"].append({"from": ms.isoformat(), "to": me.isoformat(), **month_stats})
+    warm_stats: Dict[str, Any] = {"instruments": len(instrument_keys), "months": [], "skipped": skip_warm}
+    if not skip_warm:
+        for ms, me in _month_windows(date_from, date_to):
+            month_sessions = iter_session_dates(ms, me)
+            if not month_sessions:
+                continue
+            keys = fo_index_keys if me >= PREVCLOSE_FUTURES_FROM else eq_index_keys
+            logger.info(
+                "prevclose cache warm %s → %s (%s sessions, %s keys)",
+                ms, me, len(month_sessions), len(keys),
+            )
+            month_stats = warm_candle_cache(
+                upstox,
+                cache_dir,
+                keys,
+                range_start=ms,
+                range_end=me,
+                session_dates=month_sessions,
+                force=force_fetch,
+            )
+            warm_stats["months"].append({"from": ms.isoformat(), "to": me.isoformat(), **month_stats})
 
-    candles_by_key = {ik: load_cached_5m(cache_dir, ik) for ik in instrument_keys}
+    class _LazyCandles(dict):
+        def __missing__(self, key: str) -> List[Dict[str, Any]]:
+            rows = load_cached_5m(cache_dir, str(key))
+            self[key] = rows
+            return rows
+
+        def get(self, key, default=None):  # type: ignore[override]
+            if key is None:
+                return default
+            try:
+                return self[key]
+            except KeyError:
+                return default
+
+    candles_by_key: Dict[str, List[Dict[str, Any]]] = _LazyCandles()
+    for ik in list(eq_index_keys) + list(fo_index_keys):
+        if ik.startswith("NSE_INDEX|"):
+            candles_by_key[ik]  # prefetch indexes only
 
     sector_candles = {
         ik: candles_by_key.get(ik, [])
