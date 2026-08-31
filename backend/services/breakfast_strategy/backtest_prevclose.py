@@ -70,7 +70,6 @@ def run_prevclose_backtest(
     stocks_by_sector = load_arbitrage_by_sector()
     fut_by_und, eq_by_symbol = build_instrument_indexes()
     session_dates = iter_session_dates(date_from, date_to)
-    cache_start = date_from - timedelta(days=14)
     instrument_keys = collect_instrument_keys(
         session_dates,
         stocks_by_sector,
@@ -78,17 +77,24 @@ def run_prevclose_backtest(
         eq_by_symbol,
         spot_proxy_fallback=True,
     )
+    eq_index_keys = {k for k in instrument_keys if k.startswith("NSE_EQ|") or k.startswith("NSE_INDEX|")}
+    fo_index_keys = {k for k in instrument_keys if k.startswith("NSE_FO|") or k.startswith("NSE_INDEX|")}
 
     warm_stats: Dict[str, Any] = {"instruments": len(instrument_keys), "months": []}
-    for ms, me in _month_windows(cache_start, date_to):
+    for ms, me in _month_windows(date_from, date_to):
         month_sessions = iter_session_dates(ms, me)
         if not month_sessions:
             continue
-        logger.info("prevclose cache warm %s → %s (%s sessions)", ms, me, len(month_sessions))
+        # Spot months: EQ+index only. Aug futures: FO+index. Skip expired FO on earlier months.
+        keys = fo_index_keys if me >= PREVCLOSE_FUTURES_FROM else eq_index_keys
+        logger.info(
+            "prevclose cache warm %s → %s (%s sessions, %s keys)",
+            ms, me, len(month_sessions), len(keys),
+        )
         month_stats = warm_candle_cache(
             upstox,
             cache_dir,
-            instrument_keys,
+            keys,
             range_start=ms,
             range_end=me,
             session_dates=month_sessions,
