@@ -5,8 +5,9 @@ Never writes breakfast_strategy_trades or breakfast_live_signals.
 from __future__ import annotations
 
 import logging
+from calendar import monthrange
 from datetime import date, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List, Tuple
 
 from backend.config import settings
 from backend.services.breakfast_strategy.backtest import (
@@ -16,7 +17,7 @@ from backend.services.breakfast_strategy.backtest import (
     warm_candle_cache,
     write_artifact,
 )
-from backend.services.breakfast_strategy.candles import default_cache_dir, ensure_5m_cached
+from backend.services.breakfast_strategy.candles import default_cache_dir, load_cached_5m
 from backend.services.breakfast_strategy.config import (
     PREVCLOSE_ARTIFACT_NAME,
     PREVCLOSE_DATE_FROM,
@@ -43,6 +44,18 @@ COMPARABILITY_CAVEAT = (
 )
 
 
+def _month_windows(start: date, end: date) -> Iterator[Tuple[date, date]]:
+    """Inclusive calendar-month slices so 5m fetches stay within Upstox's 31-day cap."""
+    y, m = start.year, start.month
+    while date(y, m, 1) <= end:
+        last = monthrange(y, m)[1]
+        yield max(start, date(y, m, 1)), min(end, date(y, m, last))
+        if m == 12:
+            y, m = y + 1, 1
+        else:
+            m += 1
+
+
 def run_prevclose_backtest(
     *,
     date_from: date = PREVCLOSE_DATE_FROM,
@@ -66,27 +79,24 @@ def run_prevclose_backtest(
         spot_proxy_fallback=True,
     )
 
-    warm_stats = warm_candle_cache(
-        upstox,
-        cache_dir,
-        instrument_keys,
-        range_start=cache_start,
-        range_end=date_to,
-        session_dates=session_dates,
-        force=force_fetch,
-    )
-
-    candles_by_key: Dict[str, List[Dict[str, Any]]] = {}
-    for ik in instrument_keys:
-        candles_by_key[ik] = ensure_5m_cached(
+    warm_stats: Dict[str, Any] = {"instruments": len(instrument_keys), "months": []}
+    for ms, me in _month_windows(cache_start, date_to):
+        month_sessions = iter_session_dates(ms, me)
+        if not month_sessions:
+            continue
+        logger.info("prevclose cache warm %s → %s (%s sessions)", ms, me, len(month_sessions))
+        month_stats = warm_candle_cache(
             upstox,
             cache_dir,
-            ik,
-            range_end=date_to,
-            range_start=cache_start,
-            session_dates=session_dates,
+            instrument_keys,
+            range_start=ms,
+            range_end=me,
+            session_dates=month_sessions,
             force=force_fetch,
         )
+        warm_stats["months"].append({"from": ms.isoformat(), "to": me.isoformat(), **month_stats})
+
+    candles_by_key = {ik: load_cached_5m(cache_dir, ik) for ik in instrument_keys}
 
     sector_candles = {
         ik: candles_by_key.get(ik, [])
