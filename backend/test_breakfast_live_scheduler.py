@@ -211,6 +211,16 @@ def test_freeze_persists_lock_and_signals(mock_trading, _lock, mock_persist_lock
     mock_persist_lock.assert_called_once()
 
 
+def test_freeze_cron_trigger_timezone_is_ist():
+    """CronTrigger must carry Asia/Kolkata explicitly; scheduler timezone is not inherited."""
+    from backend.services.breakfast_strategy.live_scheduler import _freeze_cron_trigger
+
+    trigger = _freeze_cron_trigger()
+    tz_name = str(trigger.timezone)
+    assert "Asia/Kolkata" in tz_name
+    assert tz_name != "Etc/UTC"
+
+
 @patch("backend.services.breakfast_strategy.live_tick.run_breakfast_minute_tick")
 @patch("backend.services.breakfast_strategy.live_tick.persist_session_lock")
 @patch("backend.services.breakfast_strategy.live_tick.fetch_session_lock", return_value=None)

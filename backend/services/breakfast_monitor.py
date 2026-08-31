@@ -279,7 +279,7 @@ def start_breakfast_monitor_scheduler() -> None:
     sch = BackgroundScheduler(timezone="Asia/Kolkata")
     sch.add_job(
         run_breakfast_morning_telegram_ping,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=0, second=0),
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=0, second=0, timezone="Asia/Kolkata"),
         id="breakfast_monitor_morning_900",
         replace_existing=True,
         max_instances=1,
@@ -288,7 +288,7 @@ def start_breakfast_monitor_scheduler() -> None:
     )
     sch.add_job(
         run_breakfast_post_session_telegram_report,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=0),
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=0, timezone="Asia/Kolkata"),
         id="breakfast_monitor_post_session_925",
         replace_existing=True,
         max_instances=1,
