@@ -116,3 +116,12 @@ def start_breakfast_live_scheduler() -> None:
 
 def stop_breakfast_live_scheduler() -> None:
     _breakfast_live_scheduler.stop()
+
+
+def breakfast_live_scheduler_status() -> dict:
+    """Runtime status for preflight checks (job ids, running flag)."""
+    sch = _breakfast_live_scheduler
+    job_ids: list[str] = []
+    if sch._started:
+        job_ids = sorted(j.id for j in sch.scheduler.get_jobs())
+    return {"running": sch._started, "job_ids": job_ids}

@@ -54,3 +54,12 @@ def stop_breakfast_prev_close_scheduler() -> None:
             _SCHEDULER.shutdown(wait=False)
         finally:
             _SCHEDULER = None
+
+
+def breakfast_prev_close_scheduler_status() -> dict:
+    """Runtime status for preflight checks."""
+    job_ids: list[str] = []
+    running = _SCHEDULER is not None
+    if _SCHEDULER is not None:
+        job_ids = sorted(j.id for j in _SCHEDULER.get_jobs())
+    return {"running": running, "job_ids": job_ids}

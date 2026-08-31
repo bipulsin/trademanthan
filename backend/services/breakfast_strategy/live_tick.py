@@ -60,6 +60,8 @@ _SESSION_CACHE: Dict[str, "BreakfastSessionCache"] = {}
 _LIVE_TICK_SNAPSHOT: Optional[Dict[str, Any]] = None
 _FREEZE_ATTEMPTS: Dict[str, int] = {}
 _MAX_FREEZE_RETRIES = 3
+_SESSION_MONITOR: Dict[str, Dict[str, Any]] = {}
+_LAST_WARMUP: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -115,6 +117,64 @@ def _get_cache(session_date: str) -> BreakfastSessionCache:
 def get_live_tick_snapshot() -> Optional[Dict[str, Any]]:
     with _LOCK:
         return dict(_LIVE_TICK_SNAPSHOT) if _LIVE_TICK_SNAPSHOT else None
+
+
+def get_breakfast_session_monitor_stats(session_date: str) -> Dict[str, Any]:
+    """In-memory tick-source / re-pick stats for post-session Telegram report."""
+    sd = str(session_date or "")[:10]
+    with _LOCK:
+        raw = _SESSION_MONITOR.get(sd)
+        warmup = dict(_LAST_WARMUP) if _LAST_WARMUP else None
+    if not raw:
+        return {"session_date": sd, "tick_sources": [], "repicks": [], "warmup": warmup}
+    return {
+        "session_date": sd,
+        "tick_sources": [dict(r) for r in raw.get("tick_sources") or []],
+        "repicks": [dict(r) for r in raw.get("repicks") or []],
+        "warmup": warmup or raw.get("warmup"),
+    }
+
+
+def get_last_warmup_result() -> Optional[Dict[str, Any]]:
+    with _LOCK:
+        return dict(_LAST_WARMUP) if _LAST_WARMUP else None
+
+
+def _monitor_bucket(session_date: str) -> Dict[str, Any]:
+    with _LOCK:
+        if session_date not in _SESSION_MONITOR:
+            _SESSION_MONITOR[session_date] = {
+                "tick_sources": [],
+                "repicks": [],
+                "warmup": None,
+            }
+        return _SESSION_MONITOR[session_date]
+
+
+def _record_tick_sources(session_date: str, tick_source_log: List[Dict[str, Any]]) -> None:
+    if not tick_source_log:
+        return
+    bucket = _monitor_bucket(session_date)
+    bucket["tick_sources"].extend(dict(r) for r in tick_source_log)
+
+
+def _record_sector_repick(
+    session_date: str,
+    *,
+    minute: int,
+    prev_picked: List[str],
+    picked: List[str],
+    stock_count: int,
+) -> None:
+    bucket = _monitor_bucket(session_date)
+    bucket["repicks"].append(
+        {
+            "minute": minute,
+            "from": list(prev_picked),
+            "to": list(picked),
+            "stocks": stock_count,
+        }
+    )
 
 
 def _all_sector_keys() -> List[str]:
@@ -247,7 +307,15 @@ def run_breakfast_ws_warmup() -> Dict[str, Any]:
     keys = _warmup_instrument_keys(now.date())
     ensure_market_feed_running(keys)
     logger.info("breakfast WS warmup: subscribed %s instruments", len(keys))
-    return {"ok": True, "instrument_count": len(keys), "session_date": now.date().isoformat()}
+    out = {"ok": True, "instrument_count": len(keys), "session_date": now.date().isoformat()}
+    global _LAST_WARMUP
+    with _LOCK:
+        _LAST_WARMUP = dict(out)
+        sd = out["session_date"]
+        if sd not in _SESSION_MONITOR:
+            _SESSION_MONITOR[sd] = {"tick_sources": [], "repicks": [], "warmup": None}
+        _SESSION_MONITOR[sd]["warmup"] = dict(out)
+    return out
 
 
 def _resolve_stock_keys(
@@ -510,12 +578,20 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             cache.stock_symbols_by_sector = sym_map
             cache.instrument_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys + stock_iks))
             if sectors_changed:
+                stock_n = sum(len(v) for v in sym_map.values())
                 logger.info(
                     "breakfast sector re-pick %s: %s -> %s stocks=%s",
                     cache_key,
                     prev_picked,
                     picked,
-                    sum(len(v) for v in sym_map.values()),
+                    stock_n,
+                )
+                _record_sector_repick(
+                    cache_key,
+                    minute=minute,
+                    prev_picked=prev_picked,
+                    picked=picked,
+                    stock_count=stock_n,
                 )
         stock_iks = [
             ik
@@ -595,6 +671,8 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
         if elapsed > MAX_TICK_SEC:
             payload["tick_slow"] = True
             logger.warning("breakfast tick :%02d took %.1fs (>%.0fs)", minute, elapsed, MAX_TICK_SEC)
+
+        _record_tick_sources(cache_key, tick_source_log)
 
         with _LOCK:
             _LIVE_TICK_SNAPSHOT = dict(payload)
@@ -792,8 +870,10 @@ def _failed_freeze_payload(session_date: str, reason: str) -> Dict[str, Any]:
 
 
 def reset_session_cache_for_tests() -> None:
-    global _LIVE_TICK_SNAPSHOT
+    global _LIVE_TICK_SNAPSHOT, _LAST_WARMUP
     with _LOCK:
         _SESSION_CACHE.clear()
         _LIVE_TICK_SNAPSHOT = None
         _FREEZE_ATTEMPTS.clear()
+        _SESSION_MONITOR.clear()
+        _LAST_WARMUP = None
