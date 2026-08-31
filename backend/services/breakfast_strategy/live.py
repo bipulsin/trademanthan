@@ -251,6 +251,7 @@ def _serialize_stock_pick(
     *,
     long_side: bool,
     upstox: UpstoxService,
+    allow_rest_quote: bool = True,
 ) -> Dict[str, Any]:
     anchor = stk.anchor_bar
     _, _, _, anchor_px, _ = candle_ohlcv(anchor)
@@ -261,7 +262,7 @@ def _serialize_stock_pick(
     risk_inr = round(abs(anchor_px - sl_px) * lot, 2) if lot > 0 else None
     wsq = get_ws_quote_for_instrument(stk.row.instrument_key) or {}
     ltp = wsq.get("ltp")
-    if ltp is None:
+    if ltp is None and allow_rest_quote:
         try:
             q = upstox.get_market_quote_by_key(stk.row.instrument_key) or {}
             ltp = q.get("last_price")
@@ -487,8 +488,10 @@ def _build_live_state_payload(
         stock_candles_by_key[ik] = load_cached_5m(cache_dir, ik)
 
     allow_proxy = phase in ("forming", "opening", "bar_closing", "waiting")
+    # During 9:16–9:20 forming, rely on WS + disk cache only — no per-instrument REST quotes.
+    allow_quote_proxy = phase in ("opening", "waiting")
     nifty_bar, nifty_src = _resolve_session_bar(
-        NIFTY50_KEY, session_date, nifty_candles, ux, phase=phase, allow_quote_proxy=allow_proxy
+        NIFTY50_KEY, session_date, nifty_candles, ux, phase=phase, allow_quote_proxy=allow_quote_proxy
     )
 
     sector_overrides: Dict[str, Dict[str, Any]] = {}
@@ -498,7 +501,7 @@ def _build_live_state_payload(
         if not ik:
             continue
         bar, src = _resolve_session_bar(
-            ik, session_date, sector_candles.get(ik, []), ux, phase=phase, allow_quote_proxy=allow_proxy
+            ik, session_date, sector_candles.get(ik, []), ux, phase=phase, allow_quote_proxy=allow_quote_proxy
         )
         if bar:
             sector_overrides[ik] = bar
@@ -568,7 +571,15 @@ def _build_live_state_payload(
                     "move_pct": round(sp.sector_move_pct, 3),
                     "direction": "LONG" if long_side else "SHORT",
                     "volume": sp.sector_volume,
-                    "stocks": [_serialize_stock_pick(s, long_side=long_side, upstox=ux) for s in sp.stocks],
+                    "stocks": [
+                        _serialize_stock_pick(
+                            s,
+                            long_side=long_side,
+                            upstox=ux,
+                            allow_rest_quote=allow_quote_proxy,
+                        )
+                        for s in sp.stocks
+                    ],
                 }
             )
         _resort_sector_stocks(sectors_out, long_side=long_side)

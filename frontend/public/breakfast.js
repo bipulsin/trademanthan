@@ -521,7 +521,7 @@
     async function loadLive() {
         setStatus("Loading live…", false, "bfLiveStatus");
         try {
-            var res = await fetchWithTimeout(LIVE_API, { cache: "no-store", credentials: "same-origin" }, 25000);
+            var res = await fetchWithTimeout(LIVE_API, { cache: "no-store", credentials: "same-origin" }, 45000);
             var data = await parseJsonResponse(res);
             if (!res.ok) throw new Error(data.detail || data.message || "Load failed");
             liveSessionDate = data.session_date || "";
