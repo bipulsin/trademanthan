@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from backend.services.breakfast_strategy.backtest import run_backtest
-from backend.services.breakfast_strategy.config import DATE_FROM, DATE_TO
+from backend.services.breakfast_strategy.config import ARTIFACT_NAME, DATE_FROM, DATE_TO
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("run_breakfast_backtest")
@@ -28,6 +28,11 @@ def main() -> int:
     ap.add_argument("--pnl-cap", action="store_true", help="Enable ₹5,000 profit exit cap")
     ap.add_argument("--no-db", action="store_true", help="Skip DB persist")
     ap.add_argument("--mode", default="backtest", choices=["backtest", "forward"])
+    ap.add_argument(
+        "--artifact",
+        default=None,
+        help="Write this JSON basename instead of the default",
+    )
     args = ap.parse_args()
 
     d0 = date.fromisoformat(args.date_from)
@@ -39,6 +44,7 @@ def main() -> int:
         force_fetch=args.force_fetch,
         persist_db=not args.no_db,
         pnl_cap_enabled=args.pnl_cap,
+        artifact_basename=args.artifact or ARTIFACT_NAME,
     )
     logger.info("artifact: %s", out.get("artifact_path"))
     logger.info("summary: %s", json.dumps(out.get("summary") or {}, indent=2))

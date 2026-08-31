@@ -235,7 +235,7 @@ def covers_session_dates(
     *,
     require_signal_bar: bool = True,
 ) -> bool:
-    """True when every session date has a usable 9:20 (or 9:15) bar."""
+    """True when every session date has a usable 9:15 (or 9:20 fallback) bar."""
     if not session_dates:
         return bool(candles)
     for sd in session_dates:
@@ -248,7 +248,7 @@ def covers_session_dates(
 
 
 def session_has_stock_bars(candles: List[Dict[str, Any]], session_date: date) -> bool:
-    """True when both signal (9:20) and anchor bars exist for the session."""
+    """True when both signal (9:15 stamp) and anchor bars exist for the session."""
     return signal_bar(candles, session_date) is not None and anchor_bar(candles, session_date) is not None
 
 
@@ -532,18 +532,18 @@ def bar_at_session_time(
 
 
 def anchor_bar(candles: List[Dict[str, Any]], session_date: date) -> Optional[Dict[str, Any]]:
-    """9:15-stamp bar for anchor/entry/TP/SL; fallback to 9:20 bar."""
+    """9:15-stamp bar for anchor/entry/TP/SL; fallback to 9:20 stamp if missing."""
     from backend.services.breakfast_strategy.config import ANCHOR_BAR_TIME
 
     return bar_at_session_time(candles, session_date, ANCHOR_BAR_TIME) or bar_at_session_time(
-        candles, session_date, SIGNAL_BAR_TIME
+        candles, session_date, (9, 20)
     )
 
 
 def signal_bar(candles: List[Dict[str, Any]], session_date: date) -> Optional[Dict[str, Any]]:
-    """9:20-stamp bar (9:15–9:20 session candle) for ranking vs prev close."""
+    """9:15-stamp bar (9:15–9:20 opening candle, Upstox start-labeled) for ranking."""
     return bar_at_session_time(candles, session_date, SIGNAL_BAR_TIME) or bar_at_session_time(
-        candles, session_date, (9, 15)
+        candles, session_date, (9, 20)
     )
 
 
@@ -559,11 +559,11 @@ def monitor_from_after_anchor(anchor: Dict[str, Any]) -> Tuple[int, int]:
 
 
 def first_5m_bar(candles: List[Dict[str, Any]], session_date: date) -> Optional[Dict[str, Any]]:
-    """Session signal bar (9:20 stamp) for NIFTY/sector first-5m move."""
+    """Session signal bar (9:15 stamp = 9:15–9:20 opening window) for NIFTY/sector first-5m."""
     bar = signal_bar(candles, session_date)
     if bar:
         return bar
-    # Legacy fallback: any bar between 9:15–9:20
+    # Legacy fallback: prefer 9:15 over 9:20 if signal_bar missed both exact lookups
     hits: List[Tuple[datetime, Dict[str, Any]]] = []
     for c in candles or []:
         dt = _bar_dt(c)
@@ -572,7 +572,7 @@ def first_5m_bar(candles: List[Dict[str, Any]], session_date: date) -> Optional[
         t = dt.astimezone(IST)
         if t.date() != session_date:
             continue
-        if t.time() in (dt_time(9, 20), dt_time(9, 15)):
+        if t.time() in (dt_time(9, 15), dt_time(9, 20)):
             hits.append((t, c))
     if not hits:
         for c in candles or []:
@@ -583,7 +583,7 @@ def first_5m_bar(candles: List[Dict[str, Any]], session_date: date) -> Optional[
             if t.date() == session_date and dt_time(9, 15) <= t.time() <= dt_time(9, 20):
                 return c
         return None
-    hits.sort(key=lambda x: (0 if x[0].time() == dt_time(9, 20) else 1, x[0]))
+    hits.sort(key=lambda x: (0 if x[0].time() == dt_time(9, 15) else 1, x[0]))
     return hits[0][1]
 
 
@@ -664,7 +664,7 @@ def setup_bar_vs_prev_close(
     candles: List[Dict[str, Any]],
     session_date: date,
 ) -> Optional[Tuple[Dict[str, Any], float, float]]:
-    """Signal bar (9:20) close vs previous session close — used for stock ranking."""
+    """Signal bar (9:15 stamp) close vs previous session close — used for stock ranking."""
     bar = signal_bar(candles, session_date)
     if not bar:
         return None

@@ -355,6 +355,8 @@ def run_backtest(
         "spot_proxy_fallback": spot_proxy_fallback,
         "price_source_counts": price_src_counts,
         "stock_rank_metric": "vs_prev_close",
+        "signal_bar_stamp": "09:15",
+        "bar_label": artifact_basename or ARTIFACT_NAME,
         "pnl_cap_enabled": pnl_cap_enabled,
         "pnl_cap_inr": PNL_CAP_INR,
         "session_days": len(session_dates),

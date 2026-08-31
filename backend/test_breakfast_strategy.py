@@ -144,7 +144,7 @@ def test_long_tracks_max_high_before_sl():
     assert extreme == 103
 
 
-def test_first_5m_bar_prefers_0920():
+def test_first_5m_bar_prefers_0915():
     sd = date(2026, 8, 1)
     candles = [
         _bar("2026-08-01T09:15:00+05:30", 1, 2, 1, 2),
@@ -152,7 +152,8 @@ def test_first_5m_bar_prefers_0920():
     ]
     b = first_5m_bar(candles, sd)
     assert b is not None
-    assert bar_move_pct(b) is not None
+    assert b["close"] == 2
+    assert bar_move_pct(b) == 100.0
 
 
 def test_synthetic_5m_bar_move_pct():

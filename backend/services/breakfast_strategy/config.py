@@ -14,9 +14,9 @@ SECTORS_TO_PICK = 1  # topmost (long) or bottommost (short) sector only
 STOCKS_PER_SECTOR = 2
 MAX_TRADES_PER_DAY = SECTORS_TO_PICK * STOCKS_PER_SECTOR
 
-FIRST_BAR_END = (9, 20)  # 9:15–9:20 IST 5m bar end (signal / ranking bar)
-ANCHOR_BAR_TIME = (9, 15)  # 9:15 stamp — anchor TP/SL/entry close when present
-SIGNAL_BAR_TIME = (9, 20)  # 9:20 stamp — stock rank vs prev close
+FIRST_BAR_END = (9, 20)  # unused; wall-clock end of 9:15–9:20 IST window (not an Upstox stamp)
+ANCHOR_BAR_TIME = (9, 15)  # 9:15 stamp — opening-bar close for TP/SL/entry
+SIGNAL_BAR_TIME = (9, 15)  # 9:15 stamp = 9:15–9:20 opening bar (Upstox start-labeled)
 MONITOR_FROM = (9, 25)   # default when entry is on 9:20 bar close
 MONITOR_FROM_AFTER_915 = (9, 20)  # when anchor is 9:15 bar close
 TIME_EXIT = (10, 15)     # force exit at 10:15 5m bar close if TP/SL not hit
@@ -34,6 +34,8 @@ LIVE_1M_THROTTLE_SEC = 0.0
 ARTIFACT_NAME = "breakfast_strategy_backtest.json"
 OOS_SPOT_ARTIFACT_NAME = "breakfast_strategy_oos_spot_jun2026.json"
 HISTORY_ARTIFACT_NAME = "breakfast_strategy_history.json"
+CORRECTED_915_ARTIFACT_NAME = "breakfast_strategy_backtest_corrected_915_bar.json"
+CORRECTED_915_HISTORY_ARTIFACT_NAME = "breakfast_strategy_history_corrected_915_bar.json"
 PREVCLOSE_ARTIFACT_NAME = "breakfast_strategy_prevclose.json"
 PREVCLOSE_DATE_FROM = date(2026, 5, 1)
 PREVCLOSE_DATE_TO = date(2026, 8, 28)

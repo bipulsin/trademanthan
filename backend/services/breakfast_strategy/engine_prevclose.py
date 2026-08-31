@@ -45,7 +45,7 @@ def nifty_bias_from_bar_vs_prev_close(
     bar: Dict[str, Any],
     prev_close: Optional[float],
 ) -> Tuple[str, float]:
-    """NIFTY 9:20 5m close vs previous session close; flat (0%) → long branch."""
+    """NIFTY opening 5m close vs previous session close; flat (0%) → long branch."""
     if prev_close is None or prev_close <= 0:
         return "positive", 0.0
     _, _, _, cl, _ = candle_ohlcv(bar)
