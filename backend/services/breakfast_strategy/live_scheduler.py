@@ -11,6 +11,7 @@ from backend.services.breakfast_strategy.live_tick import (
     FREEZE_AT,
     run_breakfast_freeze_lock,
     run_breakfast_minute_tick,
+    run_breakfast_ws_warmup,
 )
 from backend.services.breakfast_upstox_gate import is_breakfast_priority_window
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
@@ -18,6 +19,16 @@ from backend.services.market_holiday import should_skip_scheduled_market_jobs_is
 logger = logging.getLogger(__name__)
 
 _SCHEDULER: Optional[BackgroundScheduler] = None
+
+
+def _warmup_job() -> None:
+    if should_skip_scheduled_market_jobs_ist():
+        return
+    try:
+        out = run_breakfast_ws_warmup()
+        logger.info("breakfast WS warmup 9:10 -> %s", out)
+    except Exception as e:
+        logger.exception("breakfast WS warmup 9:10 failed: %s", e)
 
 
 def _tick_job(minute: int) -> None:
@@ -50,6 +61,15 @@ class BreakfastLiveScheduler:
     def start(self) -> None:
         if self._started:
             return
+        self.scheduler.add_job(
+            _warmup_job,
+            CronTrigger(day_of_week="mon-fri", hour=9, minute=10, second=0),
+            id="breakfast_ws_warmup_910",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
         for minute in (16, 17, 18, 19, 20):
             self.scheduler.add_job(
                 _tick_job,
@@ -77,7 +97,7 @@ class BreakfastLiveScheduler:
         )
         self.scheduler.start()
         self._started = True
-        logger.info("Breakfast live scheduler started (9:16–9:20 ticks, 9:20:30 freeze IST)")
+        logger.info("Breakfast live scheduler started (9:10 WS warmup, 9:16–9:20 ticks, 9:20:30 freeze IST)")
 
     def stop(self) -> None:
         if not self._started:

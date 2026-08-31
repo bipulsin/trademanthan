@@ -1,4 +1,4 @@
-"""Breakfast live minute ticks (9:16–9:20) and 9:20:30 freeze — 1m REST path."""
+"""Breakfast live minute ticks (9:16–9:20) and 9:20:30 freeze — WS-primary 1m path."""
 from __future__ import annotations
 
 import logging
@@ -49,6 +49,11 @@ LIVE_STOCKS_PER_SECTOR = 3
 TICK_MINUTES = (16, 17, 18, 19, 20)
 FREEZE_AT = dt_time(9, 20, 30)
 MAX_TICK_SEC = 20.0
+# Per-instrument WS freshness for 9:16–9:20 forming ticks (seconds since last WS tick).
+# 90s: liquid names tick every few seconds at the open; brief hiccups tolerated but we
+# fall back to REST sooner than UPSTOX_MARKET_FEED_STALE_SEC (120s), which governs the
+# global OI/LTP cache used elsewhere. WS warms from 9:10 so staleness here is rare.
+BREAKFAST_WS_1M_STALE_SEC = 90.0
 
 _LOCK = threading.Lock()
 _SESSION_CACHE: Dict[str, "BreakfastSessionCache"] = {}
@@ -119,6 +124,130 @@ def _all_sector_keys() -> List[str]:
         if ik:
             keys.append(ik)
     return keys
+
+
+def _merge_today_ws_with_cached(
+    ws_bars: List[Dict[str, Any]],
+    cached: List[Dict[str, Any]],
+    session_date: date,
+) -> List[Dict[str, Any]]:
+    """Today's session 1m from WS; prior sessions from disk cache."""
+    day = session_date.isoformat()
+    hist = [c for c in (cached or []) if not str(c.get("timestamp") or "").startswith(day)]
+    by_ts: Dict[str, Dict[str, Any]] = {}
+    for c in hist + list(ws_bars or []):
+        ts = str(c.get("timestamp") or "")
+        if ts:
+            by_ts[ts] = c
+    return [by_ts[k] for k in sorted(by_ts)]
+
+
+def _ws_usable_for_forming(
+    instrument_key: str,
+    ws_bars: List[Dict[str, Any]],
+    *,
+    session_date: date,
+    upto_hhmm: Tuple[int, int],
+    cache_dir: Any,
+) -> Tuple[bool, Optional[str]]:
+    """True when WS feed is fresh and yields a forming bar for upto_hhmm."""
+    from backend.services.upstox_market_feed import get_ws_feed_row
+
+    row = get_ws_feed_row(instrument_key)
+    if not row:
+        return False, "no_ws_feed"
+    age = float(row.get("age_sec") or 999)
+    if age > BREAKFAST_WS_1M_STALE_SEC:
+        return False, f"ws_feed_stale_{age:.0f}s"
+    cached = load_cached_1m(cache_dir, instrument_key)
+    merged = _merge_today_ws_with_cached(ws_bars, cached, session_date)
+    if not forming_bar_from_1m_upto(merged, session_date, upto_hhmm):
+        return False, "ws_insufficient_1m_bars"
+    return True, None
+
+
+def _resolve_candles_ws_primary(
+    ux: UpstoxService,
+    cache_dir: Any,
+    instrument_keys: List[str],
+    *,
+    session_date: date,
+    upto_hhmm: Tuple[int, int],
+    tick_minute: int,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
+    """WS-first 1m candles; per-instrument REST fallback when WS missing/stale."""
+    from backend.services.upstox_market_feed import get_ws_1m_bars_for_session
+
+    keys = [str(k).strip() for k in instrument_keys if str(k or "").strip()]
+    candles_out: Dict[str, List[Dict[str, Any]]] = {}
+    source_log: List[Dict[str, Any]] = []
+    fallback_keys: List[str] = []
+
+    ws_by_key: Dict[str, List[Dict[str, Any]]] = {
+        ik: get_ws_1m_bars_for_session(ik, session_date) for ik in keys
+    }
+
+    for ik in keys:
+        ok, reason = _ws_usable_for_forming(
+            ik, ws_by_key.get(ik, []), session_date=session_date, upto_hhmm=upto_hhmm, cache_dir=cache_dir
+        )
+        if ok:
+            cached = load_cached_1m(cache_dir, ik)
+            candles_out[ik] = _merge_today_ws_with_cached(ws_by_key.get(ik, []), cached, session_date)
+            source_log.append(
+                {"minute": tick_minute, "instrument_key": ik, "source": "ws", "reason": None}
+            )
+        else:
+            fallback_keys.append(ik)
+            source_log.append(
+                {"minute": tick_minute, "instrument_key": ik, "source": "rest_fallback", "reason": reason}
+            )
+
+    if fallback_keys:
+        rest = fetch_1m_parallel(ux, cache_dir, fallback_keys, session_date=session_date)
+        for ik in fallback_keys:
+            candles_out[ik] = rest.get(ik) or load_cached_1m(cache_dir, ik)
+
+    for row in source_log:
+        logger.info(
+            "breakfast_tick_source minute=%s instrument_key=%s source=%s reason=%s",
+            row["minute"],
+            row["instrument_key"],
+            row["source"],
+            row.get("reason") or "",
+        )
+
+    return candles_out, source_log
+
+
+def _warmup_instrument_keys(session_date: date) -> List[str]:
+    """NIFTY + 16 sector indices + full arbitrage_master candidate stock pool."""
+    from backend.services.breakfast_strategy.backtest import collect_instrument_keys
+
+    stocks_by_sector = load_arbitrage_by_sector()
+    fut_by_und, eq_by_symbol = build_instrument_indexes()
+    return sorted(
+        collect_instrument_keys(
+            [session_date],
+            stocks_by_sector,
+            fut_by_und,
+            eq_by_symbol,
+            spot_proxy_fallback=False,
+        )
+    )
+
+
+def run_breakfast_ws_warmup() -> Dict[str, Any]:
+    """9:10 IST — ensure WS feed covers breakfast universe before 9:16 ticks."""
+    from backend.services.upstox_market_feed import ensure_market_feed_running
+
+    now = _now_ist()
+    if not _is_trading_day(now):
+        return {"ok": False, "skipped": "not_trading_day"}
+    keys = _warmup_instrument_keys(now.date())
+    ensure_market_feed_running(keys)
+    logger.info("breakfast WS warmup: subscribed %s instruments", len(keys))
+    return {"ok": True, "instrument_count": len(keys), "session_date": now.date().isoformat()}
 
 
 def _resolve_stock_keys(
@@ -257,6 +386,8 @@ def _build_payload_from_selection(
     tick_minute: int,
     elapsed_sec: float,
     capture_source: str = "live_scheduler",
+    data_source: str = "ws_1m",
+    tick_source_log: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     long_side = sel.long_side if sel else True
     nifty_pct = None
@@ -298,7 +429,7 @@ def _build_payload_from_selection(
             "bias": sel.nifty_bias if sel else ("positive" if (nifty_pct or 0) >= 0 else "negative"),
             "bias_pct": round(sel.nifty_bias_pct, 3) if sel else (round(nifty_pct, 3) if nifty_pct is not None else None),
             "direction": "LONG" if long_side else "SHORT",
-            "bar_source": "rest_1m",
+            "bar_source": data_source,
             "open": nifty_bar.get("open") if nifty_bar else None,
             "close": nifty_bar.get("close") if nifty_bar else None,
         },
@@ -309,7 +440,8 @@ def _build_payload_from_selection(
         "tick_minute": tick_minute,
         "tick_elapsed_sec": round(elapsed_sec, 2),
         "capture_source": capture_source,
-        "data_source": "upstox_1m",
+        "data_source": data_source,
+        "tick_source_log": tick_source_log or [],
     }
 
 
@@ -341,12 +473,24 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
 
         sector_keys = _all_sector_keys()
         cache.sector_keys = sector_keys
-        fetch_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys))
-        fresh = fetch_1m_parallel(ux, cache_dir, fetch_keys, session_date=session_date)
-        cache.candles_1m.update(fresh)
-        for ik in fetch_keys:
+        index_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys))
+        index_candles, index_source_log = _resolve_candles_ws_primary(
+            ux,
+            cache_dir,
+            index_keys,
+            session_date=session_date,
+            upto_hhmm=upto_hhmm,
+            tick_minute=minute,
+        )
+        cache.candles_1m.update(index_candles)
+        for ik in index_keys:
             if ik not in cache.candles_1m:
                 cache.candles_1m[ik] = load_cached_1m(cache_dir, ik)
+
+        tick_source_log: List[Dict[str, Any]] = list(index_source_log)
+        data_source = "ws_1m"
+        if any(r.get("source") == "rest_fallback" for r in tick_source_log):
+            data_source = "ws_1m+rest_fallback"
 
         prev_picked = list(cache.picked_sector_keys)
         picked, _long = _rank_picked_sectors(
@@ -379,8 +523,18 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             if ik != NIFTY50_KEY and ik not in sector_keys
         ]
         if stock_iks:
-            stock_fresh = fetch_1m_parallel(ux, cache_dir, stock_iks, session_date=session_date)
-            cache.candles_1m.update(stock_fresh)
+            stock_candles, stock_source_log = _resolve_candles_ws_primary(
+                ux,
+                cache_dir,
+                stock_iks,
+                session_date=session_date,
+                upto_hhmm=upto_hhmm,
+                tick_minute=minute,
+            )
+            cache.candles_1m.update(stock_candles)
+            tick_source_log.extend(stock_source_log)
+            if any(r.get("source") == "rest_fallback" for r in stock_source_log):
+                data_source = "ws_1m+rest_fallback"
 
         nifty_bar = forming_bar_from_1m_upto(cache.candles_1m.get(NIFTY50_KEY, []), session_date, upto_hhmm)
         sector_overrides: Dict[str, Dict[str, Any]] = {}
@@ -435,6 +589,8 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             nifty_bar=nifty_bar or {},
             tick_minute=minute,
             elapsed_sec=elapsed,
+            data_source=data_source,
+            tick_source_log=tick_source_log,
         )
         if elapsed > MAX_TICK_SEC:
             payload["tick_slow"] = True
@@ -449,6 +605,9 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             "elapsed_sec": round(elapsed, 2),
             "sectors": len(payload.get("sectors") or []),
             "session_date": cache_key,
+            "data_source": data_source,
+            "ws_count": sum(1 for r in tick_source_log if r.get("source") == "ws"),
+            "rest_fallback_count": sum(1 for r in tick_source_log if r.get("source") == "rest_fallback"),
         }
 
 
