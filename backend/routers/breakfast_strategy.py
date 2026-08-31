@@ -17,7 +17,12 @@ from backend.services.breakfast_strategy.backtest import (
     run_backtest,
     run_forward_today,
 )
-from backend.services.breakfast_strategy.config import DATE_FROM, DATE_TO, OOS_SPOT_ARTIFACT_NAME
+from backend.services.breakfast_strategy.config import (
+    DATE_FROM,
+    DATE_TO,
+    OOS_SPOT_ARTIFACT_NAME,
+    PREVCLOSE_ARTIFACT_NAME,
+)
 from backend.services.breakfast_strategy.history import load_history
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import fetch_live_signals, fetch_session_lock, update_manual_capture
@@ -119,6 +124,24 @@ def run_forward_now() -> JSONResponse:
     except Exception as e:
         logger.exception("breakfast forward: %s", e)
         return JSONResponse(status_code=500, content={"ok": False, "message": str(e)})
+
+
+@router.get("/prevclose-backtest")
+def get_prevclose_backtest() -> Dict[str, Any]:
+    """Experimental parallel backtest. Reads dedicated artifact only — not breakfast_strategy_trades."""
+    path = find_artifact(PREVCLOSE_ARTIFACT_NAME)
+    if not path:
+        raise HTTPException(
+            status_code=503,
+            detail="Prev-close backtest artifact not found. Run scripts/run_breakfast_prevclose_backtest.py",
+        )
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read artifact: {e}") from e
+    out = dict(doc)
+    out.pop("day_log", None)
+    return out
 
 
 @router.get("/history")

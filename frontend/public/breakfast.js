@@ -4,6 +4,7 @@
     const HIST_TRADES_API = "/api/breakfast-strategy/history";
     const LIVE_API = "/api/breakfast-strategy/live";
     const LIVE_SIGNALS_API = "/api/breakfast-strategy/live/signals";
+    const PREVCLOSE_API = "/api/breakfast-strategy/prevclose-backtest";
     var livePollTimer = null;
     var liveSignalsCache = {};
     var liveSessionDate = "";
@@ -68,8 +69,8 @@
         }).join("");
     }
 
-    function renderSectorTable(rows) {
-        var tb = $("bfSectorTable") && $("bfSectorTable").querySelector("tbody");
+    function renderSectorTable(rows, tableId) {
+        var tb = $(tableId || "bfSectorTable") && $(tableId || "bfSectorTable").querySelector("tbody");
         if (!tb) return;
         if (!rows || !rows.length) {
             tb.innerHTML = "<tr><td colspan='4'>No sector data</td></tr>";
@@ -678,22 +679,54 @@
         }
     }
 
+    async function loadPrevclose() {
+        setStatus("Loading prev-close backtest…", false, "bfPcStatus");
+        try {
+            var res = await fetch(PREVCLOSE_API, { cache: "no-store", credentials: "same-origin" });
+            var data = await parseJsonResponse(res);
+            if (!res.ok) throw new Error(data.detail || data.message || "Load failed");
+            var caveat = $("bfPcCaveat");
+            if (caveat) {
+                caveat.textContent = data.comparability_caveat || caveat.textContent;
+            }
+            renderSummary(data.summary || {}, "bfPcSummary");
+            renderSectorTable((data.summary && data.summary.by_sector) || [], "bfPcSectorTable");
+            renderTrades(data.trades || [], "bfPcTradesTable");
+            setStatus(
+                "Loaded " + (data.trades || []).length + " trades · " +
+                (data.date_from || "?") + " → " + (data.date_to || "?") +
+                " · 2 sectors × 2 stocks",
+                false,
+                "bfPcStatus"
+            );
+        } catch (e) {
+            setStatus(String(e), true, "bfPcStatus");
+            renderSummary({}, "bfPcSummary");
+            renderSectorTable([], "bfPcSectorTable");
+            renderTrades([], "bfPcTradesTable");
+        }
+    }
+
     function switchTab(tab) {
         var primary = tab === "primary";
         var history = tab === "history";
         var live = tab === "live";
+        var prevclose = tab === "prevclose";
         $("bfPanelPrimary").hidden = !primary;
         $("bfPanelHistory").hidden = !history;
         $("bfPanelLive").hidden = !live;
+        if ($("bfPanelPrevclose")) $("bfPanelPrevclose").hidden = !prevclose;
         $("bfTabPrimary").classList.toggle("active", primary);
         $("bfTabHistory").classList.toggle("active", history);
         $("bfTabLive").classList.toggle("active", live);
+        if ($("bfTabPrevclose")) $("bfTabPrevclose").classList.toggle("active", prevclose);
         document.querySelectorAll(".bf-primary-only").forEach(function (el) {
             el.style.display = primary ? "" : "none";
         });
         stopLivePoll();
         if (primary) loadPrimary(null);
         else if (history) loadHistory();
+        else if (prevclose) loadPrevclose();
         else if (live) loadLive();
     }
 
@@ -701,6 +734,9 @@
         $("bfTabPrimary").addEventListener("click", function () { switchTab("primary"); });
         $("bfTabHistory").addEventListener("click", function () { switchTab("history"); });
         $("bfTabLive").addEventListener("click", function () { switchTab("live"); });
+        if ($("bfTabPrevclose")) {
+            $("bfTabPrevclose").addEventListener("click", function () { switchTab("prevclose"); });
+        }
     }
 
     function initPnlCapToggle() {
@@ -717,6 +753,7 @@
         if (reload) reload.addEventListener("click", function () {
             if (!$("bfPanelHistory").hidden) loadHistory();
             else if (!$("bfPanelLive").hidden) loadLive();
+            else if ($("bfPanelPrevclose") && !$("bfPanelPrevclose").hidden) loadPrevclose();
             else loadPrimary(null);
         });
         switchTab("live");

@@ -75,6 +75,10 @@
     cursor: pointer;
     font-size: 0.88rem;
 }
+.bf-tab.bf-tab-exp {
+    border-color: rgba(245, 158, 11, 0.45);
+    color: #fde68a;
+}
 .bf-tab.active {
     border-color: #f59e0b;
     background: rgba(245, 158, 11, 0.15);
