@@ -389,7 +389,6 @@
                 "<h3>" + (s.sector_label || s.sector_key) +
                 "<span class='bf-live-tag " + (longSide ? "long" : "short") + "'>" + s.direction + "</span></h3>" +
                 "<div class='bf-live-pct'>" + (s.move_pct >= 0 ? "+" : "") + fmt(s.move_pct, 2) + "%</div>" +
-                "<div class='bf-live-sub'>Vol " + fmt(s.volume, 0) + " · Rank #" + s.sector_rank + "</div>" +
                 "</section>" +
                 "<div class='bf-sector-stocks'>" + stockHtml + "</div>" +
                 "</div>";

@@ -50,15 +50,6 @@
                     <div id="bfLiveStatus" class="vmb-callout" hidden></div>
                     <p class="bf-live-meta" id="bfLiveMeta"></p>
 
-                    <section class="bf-rules bf-live-rules" aria-label="Live session config">
-                        <div class="bf-rule"><h3>Window</h3><ul><li>Live ticks <strong>9:16–9:20</strong> IST (1m REST).</li><li>Freeze lock <strong>9:20:30</strong>.</li><li>Sectors re-ranked <strong>every minute</strong>.</li></ul></div>
-                        <div class="bf-rule"><h3>Sectors</h3><ul><li><strong>Top 2</strong> sectors by forming 5m %.</li><li>16 Breakfast indices from <code>nifty_benchmark_reference</code>.</li><li>FO-eligible only.</li></ul></div>
-                        <div class="bf-rule"><h3>Stocks</h3><ul><li><strong>3</strong> per sector (rank 1–3).</li><li>Move vs <strong>prev close</strong> (FUT daily, pre-filled).</li><li>Long: 0–4%; Short: −4–0%.</li></ul></div>
-                        <div class="bf-rule"><h3>Bias</h3><ul><li>NIFTY50 forming bar at tick boundary.</li><li>Flat → Long branch.</li><li>Negative → Short branch.</li></ul></div>
-                        <div class="bf-rule"><h3>Prev close</h3><ul><li>Prefill job <strong>16:00 / 16:30 / 09:05</strong> IST.</li><li>Stocks: currmth FUT <code>days/1</code>.</li><li>Sectors + NIFTY: benchmark table.</li></ul></div>
-                        <div class="bf-rule"><h3>Observation</h3><ul><li>WS vs REST 5m logged at freeze (informational).</li><li>Lock fail → off-cycle 5m preview + banner.</li><li>Primary path still REST 1m (WS switch TBD).</li></ul></div>
-                    </section>
-
                     <div class="bf-live-grid">
                         <section class="bf-live-box bf-nifty-box" id="bfLiveNifty" aria-label="NIFTY50 bias"></section>
                         <div class="bf-live-sectors" id="bfLiveSectors"></div>
