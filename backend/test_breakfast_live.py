@@ -102,14 +102,18 @@ def test_build_ws_stock_overrides_ws_only_no_rest():
         mock_resolve.assert_not_called()
 
 
-def test_build_live_state_pre_live_window_fast():
+@patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
+def test_build_live_state_pre_live_window_fast(_lock):
     """Before 9:00 IST on a weekday — must not hit Upstox/WS (fast off-session)."""
+    from backend.services.breakfast_strategy import live as live_mod
+
+    live_mod._FROZEN_STATE.clear()
+    live_mod._LAST_SESSION_STATE = None
     replay = IST.localize(datetime(2026, 8, 31, 1, 15))
     out = build_live_state(replay_at=replay)
     assert out["state"] == "off_session"
     assert out["phase"] == "waiting"
     assert "9:00" in (out.get("banner") or "")
-
 
 @pytest.mark.skip(reason="requires PostgreSQL arbitrage_master")
 def test_live_replay_forming_phase():
@@ -141,9 +145,10 @@ def test_live_state_from_persisted_rows_roundtrip():
     assert state["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
 
 
+@patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
 @patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
-def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load):
+def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load, _lock):
     mock_load.return_value = None
     mock_off_cycle.return_value = {
         "ok": True,
@@ -165,8 +170,9 @@ def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load):
     mock_off_cycle.assert_called_once()
 
 
+@patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
-def test_build_live_state_frozen_loads_persisted(mock_load):
+def test_build_live_state_frozen_loads_persisted(mock_load, _lock):
     mock_load.return_value = live_state_from_persisted_rows(
         "2026-08-31",
         rows_from_live_state(SAMPLE_STATE, "matched"),

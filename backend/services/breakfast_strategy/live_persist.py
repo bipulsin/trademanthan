@@ -1,6 +1,7 @@
 """Persist Breakfast Strategy live lock signals to PostgreSQL."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 _MIGRATION = Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_live_signals.sql"
+_SESSION_LOCK_MIGRATION = Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_session_lock.sql"
 _ENSURED = False
 
 _MANUAL_FIELDS = frozenset(
@@ -34,14 +36,15 @@ def ensure_breakfast_live_signals_table() -> None:
     global _ENSURED
     if _ENSURED:
         return
-    if not _MIGRATION.is_file():
-        logger.warning("breakfast live signals migration missing: %s", _MIGRATION)
-        return
-    sql = _MIGRATION.read_text(encoding="utf-8")
-    with engine.begin() as conn:
-        conn.execute(text(sql))
+    for mig in (_MIGRATION, _SESSION_LOCK_MIGRATION):
+        if not mig.is_file():
+            logger.warning("breakfast live migration missing: %s", mig)
+            continue
+        sql = mig.read_text(encoding="utf-8")
+        with engine.begin() as conn:
+            conn.execute(text(sql))
     _ENSURED = True
-    logger.info("breakfast_live_signals table ensured")
+    logger.info("breakfast_live_signals + breakfast_session_lock tables ensured")
 
 
 def _parse_ts(raw: Optional[str]) -> Optional[datetime]:
@@ -59,6 +62,8 @@ def _parse_ts(raw: Optional[str]) -> Optional[datetime]:
 def rows_from_live_state(
     state: Dict[str, Any],
     cross_check_status: str,
+    *,
+    capture_source: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Build insert payloads from a locked live-state dict (pure, no DB)."""
     session_date = str(state.get("session_date") or "")[:10]
@@ -67,6 +72,7 @@ def rows_from_live_state(
 
     locked_at = _parse_ts(state.get("server_time")) or datetime.now(IST)
     nifty_pct = (state.get("nifty") or {}).get("bias_pct")
+    cap_src = capture_source or state.get("capture_source")
     rows: List[Dict[str, Any]] = []
 
     for sec in state.get("sectors") or []:
@@ -111,6 +117,7 @@ def rows_from_live_state(
                     "locked_at_timestamp": locked_at.isoformat(),
                     "websocket_rest_cross_check_status": cross_check_status,
                     "instrument_key": stk.get("instrument_key"),
+                    "capture_source": cap_src,
                 }
             )
     return rows
@@ -137,13 +144,13 @@ def _insert_signal(db: Session, row: Dict[str, Any]) -> bool:
                 session_date, symbol, direction, sector, sector_rank, rank_at_lock,
                 nifty_bias_pct, sector_move_pct, stock_move_pct_at_lock, ltp_at_lock,
                 anchor_price, tp_price, sl_price, lot_size, locked_at_timestamp,
-                websocket_rest_cross_check_status, instrument_key
+                websocket_rest_cross_check_status, instrument_key, capture_source
             ) VALUES (
                 CAST(:session_date AS date), :symbol, :direction, :sector, :sector_rank, :rank_at_lock,
                 :nifty_bias_pct, :sector_move_pct, :stock_move_pct_at_lock, :ltp_at_lock,
                 :anchor_price, :tp_price, :sl_price, :lot_size,
                 CAST(:locked_at_timestamp AS timestamptz),
-                :websocket_rest_cross_check_status, :instrument_key
+                :websocket_rest_cross_check_status, :instrument_key, :capture_source
             )
             """
         ),
@@ -152,12 +159,17 @@ def _insert_signal(db: Session, row: Dict[str, Any]) -> bool:
     return True
 
 
-def persist_live_signals(state: Dict[str, Any], cross_check_status: str) -> Dict[str, int]:
+def persist_live_signals(
+    state: Dict[str, Any],
+    cross_check_status: str,
+    *,
+    capture_source: Optional[str] = None,
+) -> Dict[str, int]:
     """Idempotent insert for all stocks in locked state (up to 6 rows)."""
     status = str(cross_check_status or "matched").strip().lower()
     if status not in ("matched", "mismatched"):
         status = "matched"
-    rows = rows_from_live_state(state, status)
+    rows = rows_from_live_state(state, status, capture_source=capture_source)
     if not rows:
         return {"inserted": 0, "skipped": 0}
 
@@ -280,6 +292,85 @@ def fetch_live_signals(session_date: str) -> List[Dict[str, Any]]:
             {"sd": sd},
         ).mappings().all()
         return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def fetch_session_lock(session_date: str) -> Optional[Dict[str, Any]]:
+    ensure_breakfast_live_signals_table()
+    sd = str(session_date or "")[:10]
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT * FROM breakfast_session_lock WHERE session_date = CAST(:sd AS date)"),
+            {"sd": sd},
+        ).mappings().first()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def is_session_locked(session_date: str) -> bool:
+    row = fetch_session_lock(session_date)
+    return bool(row and str(row.get("lock_status") or "").lower() == "locked")
+
+
+def persist_session_lock(
+    state: Dict[str, Any],
+    *,
+    lock_status: str,
+    failure_reason: Optional[str] = None,
+    signal_count: int = 0,
+    capture_source: str = "live_scheduler",
+    locked_by: str = "auto",
+) -> Dict[str, Any]:
+    ensure_breakfast_live_signals_table()
+    sd = str(state.get("session_date") or "")[:10]
+    locked_at = _parse_ts(state.get("server_time")) or datetime.now(IST)
+    status = str(lock_status or "locked").strip().lower()
+    if status not in ("locked", "failed"):
+        status = "locked"
+    payload_json = json.dumps(state, default=str)
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                INSERT INTO breakfast_session_lock (
+                    session_date, locked_at, locked_by, lock_status, failure_reason,
+                    signal_count, capture_source, payload_json, updated_at
+                ) VALUES (
+                    CAST(:sd AS date), CAST(:locked_at AS timestamptz), :locked_by, :lock_status,
+                    :failure_reason, :signal_count, :capture_source, CAST(:payload_json AS jsonb), NOW()
+                )
+                ON CONFLICT (session_date) DO UPDATE SET
+                    locked_at = EXCLUDED.locked_at,
+                    locked_by = EXCLUDED.locked_by,
+                    lock_status = EXCLUDED.lock_status,
+                    failure_reason = EXCLUDED.failure_reason,
+                    signal_count = EXCLUDED.signal_count,
+                    capture_source = EXCLUDED.capture_source,
+                    payload_json = EXCLUDED.payload_json,
+                    updated_at = NOW()
+                RETURNING *
+                """
+            ),
+            {
+                "sd": sd,
+                "locked_at": locked_at.isoformat(),
+                "locked_by": locked_by,
+                "lock_status": status,
+                "failure_reason": failure_reason,
+                "signal_count": int(signal_count),
+                "capture_source": capture_source,
+                "payload_json": payload_json,
+            },
+        ).mappings().first()
+        db.commit()
+        return dict(row) if row else {}
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

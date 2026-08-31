@@ -418,6 +418,18 @@ def run_arbitrage_daily_setup(execution: _Execution = None) -> Dict:
     execution: None = on-demand / script; no morning state side effects here (state is set by scheduler).
     """
     try:
+        from backend.services.breakfast_upstox_gate import is_breakfast_priority_window
+
+        if is_breakfast_priority_window():
+            logger.info("arbitrage daily setup skipped — breakfast Upstox priority window")
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": "breakfast_priority_window",
+                "job_name": "arbitrage_dailySetup",
+                "execution": execution,
+                "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+            }
         return _run_arbitrage_daily_setup_impl(execution=execution)
     except Exception as e:
         logger.error("run_arbitrage_daily_setup failed: %s", e, exc_info=True)
@@ -631,6 +643,18 @@ def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
 def run_arbitrage_ltp_refresh(execution: _Execution = "intraday_ltp") -> Dict:
     """Intraday: stock/next LTP via WS; morning paths may still warm curr-month candles."""
     try:
+        from backend.services.breakfast_upstox_gate import is_breakfast_priority_window
+
+        if is_breakfast_priority_window():
+            logger.info("arbitrage LTP refresh skipped — breakfast Upstox priority window")
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": "breakfast_priority_window",
+                "job_name": "arbitrage_ltpRefresh",
+                "execution": execution,
+                "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
+            }
         _ensure_arbitrage_table()
         from backend.services.market_data.engine import (
             refresh_arbitrage_master_market_data,

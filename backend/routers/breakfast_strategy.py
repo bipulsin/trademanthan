@@ -20,7 +20,7 @@ from backend.services.breakfast_strategy.backtest import (
 from backend.services.breakfast_strategy.config import DATE_FROM, DATE_TO, OOS_SPOT_ARTIFACT_NAME
 from backend.services.breakfast_strategy.history import load_history
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
-from backend.services.breakfast_strategy.live_persist import fetch_live_signals, update_manual_capture
+from backend.services.breakfast_strategy.live_persist import fetch_live_signals, fetch_session_lock, update_manual_capture
 from backend.services.breakfast_strategy.persist import fetch_trades
 
 logger = logging.getLogger(__name__)
@@ -178,6 +178,15 @@ def breakfast_live_validate(
 ) -> Dict[str, Any]:
     sd = session_date or date.today()
     return validate_ws_vs_rest(instrument_key, sd)
+
+
+@router.get("/live/session-lock")
+def get_breakfast_session_lock(
+    session_date: Optional[date] = Query(None, description="Session date (default today IST)"),
+) -> Dict[str, Any]:
+    sd = session_date or date.today()
+    row = fetch_session_lock(sd.isoformat())
+    return {"ok": True, "session_date": sd.isoformat(), "lock": row}
 
 
 @router.get("/live/signals")

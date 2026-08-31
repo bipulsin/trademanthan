@@ -447,6 +447,14 @@ class UpstoxService:
                     except Exception:
                         pass
 
+                try:
+                    from backend.services.breakfast_upstox_gate import breakfast_upstox_allowed
+
+                    if not breakfast_upstox_allowed(caller=url):
+                        return None
+                except Exception:
+                    pass
+
                 headers = self.get_headers()
                 
                 # Make request

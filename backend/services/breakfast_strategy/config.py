@@ -25,8 +25,11 @@ EOD_EXIT = (15, 15)      # legacy label only (unused for exit sim)
 PNL_CAP_INR = 5000.0     # optional intraday profit lock (toggle on UI)
 
 CANDLE_INTERVAL = "minutes/5"
+CANDLE_1M_INTERVAL = "minutes/1"
 CANDLE_DAYS_BACK = 40  # span for Jul–Aug window + buffer
+LIVE_1M_DAYS_BACK = 5
 FETCH_THROTTLE_SEC = 0.12
+LIVE_1M_THROTTLE_SEC = 0.0
 
 ARTIFACT_NAME = "breakfast_strategy_backtest.json"
 OOS_SPOT_ARTIFACT_NAME = "breakfast_strategy_oos_spot_jun2026.json"

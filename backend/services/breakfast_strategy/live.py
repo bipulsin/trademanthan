@@ -49,6 +49,7 @@ from backend.services.upstox_market_feed import (
 )
 from backend.services.breakfast_strategy.live_persist import (
     fetch_live_signals,
+    fetch_session_lock,
     live_state_from_persisted_rows,
     persist_live_signals,
 )
@@ -60,9 +61,8 @@ IST = pytz.timezone("Asia/Kolkata")
 LIVE_SECTORS_TO_PICK = 2
 LIVE_STOCKS_PER_SECTOR = 3
 FORMING_FROM = dt_time(9, 16)
-LOCK_WINDOW_START = dt_time(9, 20, 5)
-LOCK_WINDOW_END = dt_time(9, 20, 10)
-FREEZE_AFTER = dt_time(9, 21)
+LOCK_AT = dt_time(9, 20, 30)
+FREEZE_AFTER = LOCK_AT
 
 _LOCK = threading.Lock()
 _LIVE_BUILD_LOCK = threading.Lock()
@@ -99,13 +99,20 @@ def _live_phase(now: datetime) -> str:
         return "opening"
     if t < dt_time(9, 20):
         return "forming"
-    if t < LOCK_WINDOW_START:
-        return "bar_closing"
-    if t <= LOCK_WINDOW_END:
-        return "locking"
     if t < FREEZE_AFTER:
-        return "locked"
+        return "bar_closing"
     return "frozen"
+
+
+def ingest_frozen_snapshot(payload: Dict[str, Any]) -> None:
+    """Called by live_tick freeze job to sync in-memory frozen state."""
+    cache_key = str(payload.get("session_date") or "")[:10]
+    if not cache_key:
+        return
+    with _LOCK:
+        _FROZEN_STATE[cache_key] = dict(payload)
+        global _LAST_SESSION_STATE
+        _LAST_SESSION_STATE = dict(payload)
 
 
 def _is_trading_day_ist(now: datetime) -> bool:
@@ -466,13 +473,34 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
     phase = _live_phase(now)
     cache_key = session_date.isoformat()
 
-    if phase == "frozen":
+    if phase == "frozen" or now.time() >= FREEZE_AFTER:
         with _LOCK:
             cached = _FROZEN_STATE.get(cache_key)
         if cached:
             out = dict(cached)
             out["server_time"] = now.isoformat()
             out["refresh_allowed"] = False
+            out["poll_interval_sec"] = 0
+            return out
+        lock_row = fetch_session_lock(cache_key)
+        if lock_row and str(lock_row.get("lock_status")) == "locked":
+            persisted = _load_persisted_live_state(cache_key)
+            if persisted:
+                ingest_frozen_snapshot(persisted)
+                out = dict(persisted)
+                out["server_time"] = now.isoformat()
+                out["refresh_allowed"] = False
+                out["poll_interval_sec"] = 0
+                return out
+        if lock_row and str(lock_row.get("lock_status")) == "failed":
+            out = _blank_live_payload(
+                now,
+                banner=f"LOCK FAILED — {lock_row.get('failure_reason') or 'see logs'}",
+                state="lock_failed",
+                phase="frozen",
+            )
+            out["lock_failed"] = True
+            out["failure_reason"] = lock_row.get("failure_reason")
             return out
         persisted = _load_persisted_live_state(cache_key)
         if persisted:
@@ -490,6 +518,20 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
             now,
             banner="Session locked — picks from 9:20 IST",
         )
+
+    # During scheduler-driven forming window, serve tick snapshot (no heavy rebuild on poll).
+    if replay_at is None and phase in ("forming", "bar_closing"):
+        try:
+            from backend.services.breakfast_strategy.live_tick import get_live_tick_snapshot
+
+            tick_snap = get_live_tick_snapshot()
+            if tick_snap and str(tick_snap.get("session_date")) == cache_key:
+                out = dict(tick_snap)
+                out["server_time"] = now.isoformat()
+                out["phase"] = phase
+                return out
+        except Exception as e:
+            logger.debug("breakfast tick snapshot read: %s", e)
 
     if now.weekday() >= 5:
         return _last_session_snapshot(
@@ -742,19 +784,9 @@ def _build_live_state_payload(
     }
 
     if phase in ("locking", "locked", "frozen") and not mismatch and not off_cycle:
-        with _LOCK:
-            _FROZEN_STATE[cache_key] = dict(payload)
-            global _LAST_SESSION_STATE
-            _LAST_SESSION_STATE = dict(payload)
+        ingest_frozen_snapshot(payload)
 
-    if phase in ("locked", "frozen") and sectors_out and not stale and not off_cycle:
-        cross_status = "mismatched" if mismatch else "matched"
-        try:
-            stats = persist_live_signals(payload, cross_status)
-            if stats.get("inserted"):
-                logger.info("breakfast live signals persisted: %s", stats)
-        except Exception as e:
-            logger.warning("breakfast live signals persist failed: %s", e)
+    # Persist handled by live_scheduler freeze at 9:20:30 — avoid duplicate rows here.
 
     return payload
 

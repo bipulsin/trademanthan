@@ -13,9 +13,12 @@ from sqlalchemy import text
 
 from backend.database import SessionLocal
 from backend.services.breakfast_strategy.config import (
+    CANDLE_1M_INTERVAL,
     CANDLE_DAYS_BACK,
     CANDLE_INTERVAL,
     FETCH_THROTTLE_SEC,
+    LIVE_1M_DAYS_BACK,
+    LIVE_1M_THROTTLE_SEC,
     MONITOR_FROM,
     MONITOR_FROM_AFTER_915,
     SIGNAL_BAR_TIME,
@@ -44,6 +47,10 @@ def _sanitize_key(instrument_key: str) -> str:
 
 def _cache_path(cache_dir: Path, instrument_key: str) -> Path:
     return cache_dir / f"{_sanitize_key(instrument_key)}_5m.json"
+
+
+def _cache_path_1m(cache_dir: Path, instrument_key: str) -> Path:
+    return cache_dir / f"{_sanitize_key(instrument_key)}_1m.json"
 
 
 def _merge_candles(existing: List[Dict[str, Any]], fresh: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -80,6 +87,123 @@ def save_cached_5m(cache_dir: Path, instrument_key: str, candles: List[Dict[str,
     }
     tmp.write_text(json.dumps(payload, default=str), encoding="utf-8")
     tmp.replace(p)
+
+
+def load_cached_1m(cache_dir: Path, instrument_key: str) -> List[Dict[str, Any]]:
+    p = _cache_path_1m(cache_dir, instrument_key)
+    if not p.is_file():
+        return []
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        rows = doc.get("candles") if isinstance(doc, dict) else None
+        return list(rows) if isinstance(rows, list) else []
+    except Exception as e:
+        logger.debug("breakfast 1m cache read %s: %s", p, e)
+        return []
+
+
+def save_cached_1m(cache_dir: Path, instrument_key: str, candles: List[Dict[str, Any]]) -> None:
+    p = _cache_path_1m(cache_dir, instrument_key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    payload = {
+        "instrument_key": instrument_key,
+        "interval": CANDLE_1M_INTERVAL,
+        "updated_at": datetime.now(IST).isoformat(),
+        "candles": candles,
+    }
+    tmp.write_text(json.dumps(payload, default=str), encoding="utf-8")
+    tmp.replace(p)
+
+
+def fetch_1m_range(
+    upstox: Any,
+    instrument_key: str,
+    *,
+    range_end: date,
+    days_back: int = LIVE_1M_DAYS_BACK,
+    throttle_sec: float = LIVE_1M_THROTTLE_SEC,
+) -> List[Dict[str, Any]]:
+    if throttle_sec > 0:
+        time.sleep(throttle_sec)
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            instrument_key,
+            interval=CANDLE_1M_INTERVAL,
+            days_back=days_back,
+            range_end_date=range_end,
+        )
+        return list(raw or [])
+    except Exception as e:
+        logger.warning("breakfast 1m fetch %s: %s", instrument_key, e)
+        return []
+
+
+def ensure_1m_cached(
+    upstox: Any,
+    cache_dir: Path,
+    instrument_key: str,
+    *,
+    range_end: date,
+    force: bool = False,
+) -> List[Dict[str, Any]]:
+    ik = (instrument_key or "").strip()
+    if not ik:
+        return []
+    if not force:
+        cached = load_cached_1m(cache_dir, ik)
+        if cached:
+            return cached
+    fresh = fetch_1m_range(upstox, ik, range_end=range_end)
+    merged = _merge_candles(load_cached_1m(cache_dir, ik) if not force else [], fresh)
+    if merged:
+        save_cached_1m(cache_dir, ik, merged)
+    return merged
+
+
+def fetch_1m_parallel(
+    upstox: Any,
+    cache_dir: Path,
+    instrument_keys: List[str],
+    *,
+    session_date: date,
+    max_workers: int = 8,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Fetch/update 1m candles for many keys concurrently (Breakfast live ticks)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    keys = [str(k).strip() for k in instrument_keys if str(k or "").strip()]
+    if not keys:
+        return {}
+
+    def _one(ik: str) -> tuple[str, List[Dict[str, Any]]]:
+        return ik, ensure_1m_cached(upstox, cache_dir, ik, range_end=session_date, force=True)
+
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    workers = max(1, min(int(max_workers), len(keys)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_one, ik) for ik in keys]
+        for fut in as_completed(futures):
+            try:
+                ik, candles = fut.result()
+                out[ik] = candles
+            except Exception as e:
+                logger.warning("breakfast 1m parallel fetch failed: %s", e)
+    return out
+
+
+def forming_bar_from_1m_upto(
+    bars_1m: List[Dict[str, Any]],
+    session_date: date,
+    upto_hhmm: Tuple[int, int],
+) -> Optional[Dict[str, Any]]:
+    """Synthetic 9:15→upto_hhmm bar from 1m closes (minute-close at each tick)."""
+    return aggregate_1m_to_session_5m(
+        bars_1m,
+        session_date,
+        from_hhmm=(9, 15),
+        to_hhmm=upto_hhmm,
+    )
 
 
 def fetch_5m_range(
