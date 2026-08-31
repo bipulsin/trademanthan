@@ -162,6 +162,9 @@ def run_prevclose_backtest(
             "spot" if spot else "fut",
             len(day_trades),
         )
+        for k in list(candles_by_key):
+            if not str(k).startswith("NSE_INDEX|"):
+                del candles_by_key[k]
 
     rows = [t.to_db_row(mode="backtest") for t in all_results]
     price_src_counts: Dict[str, int] = {}
