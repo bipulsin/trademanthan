@@ -145,10 +145,16 @@ def test_live_state_from_persisted_rows_roundtrip():
     assert state["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
 
 
+@patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)
 @patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
 @patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
-def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load, _lock):
+def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load, _lock, _tick, caplog):
+    from backend.services.breakfast_strategy import live as live_mod
+
+    live_mod._FROZEN_STATE.clear()
+    live_mod._LAST_SESSION_STATE = None
+    live_mod._OFF_CYCLE_SNAPSHOT = None
     mock_load.return_value = None
     mock_off_cycle.return_value = {
         "ok": True,
@@ -161,18 +167,111 @@ def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load, _lock):
         "sectors": [{"sector_label": "Bank", "stocks": [{"symbol": "HDFCBANK"}]}],
     }
     replay = IST.localize(datetime(2026, 8, 31, 10, 4))
-    out = build_live_state(replay_at=replay)
+    with caplog.at_level("WARNING"):
+        out = build_live_state(replay_at=replay)
     assert out["state"] == "off_cycle"
     assert out.get("off_cycle")
     assert "Off cycle data" in (out.get("banner") or "")
     assert out["nifty"]["direction"] == "LONG"
     assert len(out["sectors"]) == 1
     mock_off_cycle.assert_called_once()
+    assert any("taking off-cycle path" in r.message for r in caplog.records)
+
+
+LOCKED_PAYLOAD = {
+    "session_date": "2026-08-31",
+    "state": "locked",
+    "phase": "frozen",
+    "banner": "LOCKED — 9:20 CONFIRMED",
+    "nifty": {"direction": "LONG", "bias_pct": 0.12, "bias": "LONG"},
+    "sectors": SAMPLE_STATE["sectors"],
+}
+
+
+def test_payload_from_lock_row_parses_json_string():
+    import json as json_mod
+
+    from backend.services.breakfast_strategy.live import _payload_from_lock_row
+
+    parsed = _payload_from_lock_row({"payload_json": json_mod.dumps(LOCKED_PAYLOAD)})
+    assert parsed["nifty"]["direction"] == "LONG"
+    assert _payload_from_lock_row({"payload_json": LOCKED_PAYLOAD})["session_date"] == "2026-08-31"
+    assert _payload_from_lock_row({"payload_json": None}) is None
+    assert _payload_from_lock_row(None) is None
+
+
+def _clear_frozen_live():
+    from backend.services.breakfast_strategy import live as live_mod
+
+    live_mod._FROZEN_STATE.clear()
+    live_mod._LAST_SESSION_STATE = None
+    live_mod._OFF_CYCLE_SNAPSHOT = None
+
+
+@patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state", return_value=None)
+@patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
+@patch(
+    "backend.services.breakfast_strategy.live.fetch_session_lock",
+    return_value={"lock_status": "locked", "payload_json": LOCKED_PAYLOAD},
+)
+def test_build_live_state_frozen_uses_lock_payload_json(mock_lock, mock_off_cycle, _persist, _tick):
+    """Locked row with payload_json must not take the slow off-cycle path."""
+    _clear_frozen_live()
+    replay = IST.localize(datetime(2026, 8, 31, 10, 4))
+    out = build_live_state(replay_at=replay)
+    assert out["nifty"]["direction"] == "LONG"
+    assert out["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
+    assert not out.get("off_cycle")
+    mock_off_cycle.assert_not_called()
+
+
+@patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state", return_value=None)
+@patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
+@patch(
+    "backend.services.breakfast_strategy.live._tick_snapshot_for_session",
+    return_value={
+        "session_date": "2026-08-31",
+        "phase": "bar_closing",
+        "nifty": {"direction": "SHORT", "bias_pct": -0.2},
+        "sectors": [{"sector_label": "IT", "direction": "SHORT", "stocks": [{"symbol": "TCS"}]}],
+    },
+)
+def test_build_live_state_frozen_uses_tick_snapshot_during_gap(mock_tick, mock_off_cycle, _persist, _lock):
+    """Post-9:20:30 persist gap: serve in-memory tick snapshot, never off-cycle."""
+    _clear_frozen_live()
+    replay = IST.localize(datetime(2026, 8, 31, 9, 21))
+    out = build_live_state(replay_at=replay)
+    assert out["nifty"]["direction"] == "SHORT"
+    assert out["sectors"][0]["stocks"][0]["symbol"] == "TCS"
+    assert not out.get("off_cycle")
+    mock_off_cycle.assert_not_called()
+    mock_tick.assert_called_once()
+
+
+@patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state", return_value=None)
+@patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
+@patch(
+    "backend.services.breakfast_strategy.live.fetch_session_lock",
+    return_value={"lock_status": "locked", "payload_json": None},
+)
+def test_build_live_state_frozen_locked_never_off_cycle(mock_lock, mock_off_cycle, _persist, _tick):
+    """lock_status=locked must never call build_off_cycle_preview_state."""
+    _clear_frozen_live()
+    replay = IST.localize(datetime(2026, 8, 31, 10, 4))
+    out = build_live_state(replay_at=replay)
+    mock_off_cycle.assert_not_called()
+    assert not out.get("off_cycle")
+    assert out.get("state") == "locked"
+    assert out.get("phase") == "frozen"
 
 
 @patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
 def test_build_live_state_frozen_loads_persisted(mock_load, _lock):
+    _clear_frozen_live()
     mock_load.return_value = live_state_from_persisted_rows(
         "2026-08-31",
         rows_from_live_state(SAMPLE_STATE, "matched"),
