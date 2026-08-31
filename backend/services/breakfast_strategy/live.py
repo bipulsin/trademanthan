@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import date, datetime, time as dt_time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -26,11 +27,14 @@ from backend.services.breakfast_strategy.candles import (
     signal_bar,
 )
 from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
-from backend.services.breakfast_strategy.engine import NIFTY50_KEY, select_breakfast_picks
+from backend.services.breakfast_strategy.engine import NIFTY50_KEY, nifty_bias_from_bar, select_breakfast_picks
 from backend.services.breakfast_strategy.universe import (
     SECTOR_UNIVERSE,
     build_instrument_indexes,
+    fo_eligible_sector_keys,
     load_arbitrage_by_sector,
+    rank_sectors,
+    resolve_stock_instrument,
     sector_index_key_for_label,
 )
 from backend.services.market_holiday import is_nse_holiday_ist
@@ -56,6 +60,11 @@ LOCK_WINDOW_END = dt_time(9, 20, 10)
 FREEZE_AFTER = dt_time(9, 21)
 
 _LOCK = threading.Lock()
+_LIVE_BUILD_LOCK = threading.Lock()
+_LIVE_SNAPSHOT: Optional[Dict[str, Any]] = None
+_LIVE_SNAPSHOT_AT: float = 0.0
+_LIVE_CACHE_TTL_SEC = 4.0
+_LIVE_BUILDING = False
 _FROZEN_STATE: Dict[str, Dict[str, Any]] = {}
 _LAST_SESSION_STATE: Optional[Dict[str, Any]] = None
 BLANK_SLATE_FROM = dt_time(9, 0)
@@ -285,6 +294,64 @@ def _serialize_stock_pick(
     }
 
 
+def _candidate_sector_keys_for_live(
+    *,
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    session_date: date,
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+    sector_overrides: Dict[str, Dict[str, Any]],
+    sector_candles: Dict[str, List[Dict[str, Any]]],
+    nifty_bar: Dict[str, Any],
+    sectors_to_pick: int,
+) -> List[str]:
+    """Top sector keys likely to be picked — limits WS-only stock scan during live window."""
+    bias, _ = nifty_bias_from_bar(nifty_bar)
+    long_side = bias == "positive"
+    eligible = fo_eligible_sector_keys(
+        stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
+    )
+    sector_bars: Dict[str, Dict[str, Any]] = {}
+    for skey in eligible:
+        bar = sector_overrides.get(skey) or first_5m_bar(sector_candles.get(skey, []), session_date)
+        if bar:
+            sector_bars[skey] = bar
+    ranked = rank_sectors(sector_bars, eligible_keys=eligible, descending=long_side)
+    take = min(len(ranked), max(sectors_to_pick + 2, sectors_to_pick))
+    return [skey for skey, _, _ in ranked[:take]]
+
+
+def _build_ws_stock_overrides(
+    *,
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    candidate_sector_keys: List[str],
+    session_date: date,
+    stock_candles_by_key: Dict[str, List[Dict[str, Any]]],
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+) -> Tuple[Dict[str, Tuple[Dict[str, Any], float]], Dict[str, Dict[str, Any]]]:
+    """WS-only partial bars for candidate sector members (no per-stock REST quotes)."""
+    stock_signal_overrides: Dict[str, Tuple[Dict[str, Any], float]] = {}
+    anchor_overrides: Dict[str, Dict[str, Any]] = {}
+    for skey in candidate_sector_keys:
+        for m in stocks_by_sector.get(skey, []):
+            sym = str(m.get("stock") or "").upper()
+            if not sym or sym in stock_signal_overrides:
+                continue
+            ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
+            if not ref or not ref.instrument_key:
+                continue
+            candles = stock_candles_by_key.get(ref.instrument_key, [])
+            partial = get_ws_forming_5m_bar(ref.instrument_key, session_date)
+            ov = _stock_signal_override(sym, candles, session_date, partial)
+            if ov:
+                stock_signal_overrides[sym] = ov
+            ab = anchor_bar(candles, session_date) or _ws_anchor_bar(ref.instrument_key, session_date)
+            if ab:
+                anchor_overrides[sym] = ab
+    return stock_signal_overrides, anchor_overrides
+
+
 def _resort_sector_stocks(sectors_out: List[Dict[str, Any]], *, long_side: bool) -> None:
     """Re-rank stocks within each sector by live move % on every refresh."""
     for sec in sectors_out:
@@ -303,6 +370,7 @@ def _resort_sector_stocks(sectors_out: List[Dict[str, Any]], *, long_side: bool)
 
 
 def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
+    global _LIVE_SNAPSHOT, _LIVE_SNAPSHOT_AT, _LIVE_BUILDING
     now = _now_ist(replay_at)
     session_date = now.date()
     phase = _live_phase(now)
@@ -343,6 +411,48 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
     if _is_blank_slate(now):
         return _blank_live_payload(now, banner="Pre-market — session opens 9:15 IST")
 
+    is_realtime = replay_at is None
+    if is_realtime:
+        with _LIVE_BUILD_LOCK:
+            age = time.monotonic() - _LIVE_SNAPSHOT_AT
+            if _LIVE_SNAPSHOT and age < _LIVE_CACHE_TTL_SEC:
+                out = dict(_LIVE_SNAPSHOT)
+                out["server_time"] = now.isoformat()
+                return out
+            if _LIVE_BUILDING and _LIVE_SNAPSHOT:
+                out = dict(_LIVE_SNAPSHOT)
+                out["server_time"] = now.isoformat()
+                out["refresh_pending"] = True
+                return out
+            _LIVE_BUILDING = True
+
+    try:
+        payload = _build_live_state_payload(
+            now=now,
+            session_date=session_date,
+            phase=phase,
+            cache_key=cache_key,
+        )
+    finally:
+        if is_realtime:
+            with _LIVE_BUILD_LOCK:
+                _LIVE_BUILDING = False
+
+    if is_realtime:
+        with _LIVE_BUILD_LOCK:
+            _LIVE_SNAPSHOT = dict(payload)
+            _LIVE_SNAPSHOT_AT = time.monotonic()
+
+    return payload
+
+
+def _build_live_state_payload(
+    *,
+    now: datetime,
+    session_date: date,
+    phase: str,
+    cache_key: str,
+) -> Dict[str, Any]:
     stocks_by_sector = load_arbitrage_by_sector()
     fut_by_und, eq_by_symbol = build_instrument_indexes()
     keys = collect_instrument_keys(
@@ -358,9 +468,12 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
     ux.reload_token_from_storage()
     cache_dir = default_cache_dir()
 
-    nifty_candles = ensure_5m_cached(
-        ux, cache_dir, NIFTY50_KEY, range_end=session_date, session_dates=[session_date], force=phase in ("locking", "locked")
-    )
+    if phase in ("locking", "locked"):
+        nifty_candles = ensure_5m_cached(
+            ux, cache_dir, NIFTY50_KEY, range_end=session_date, session_dates=[session_date], force=True
+        )
+    else:
+        nifty_candles = load_cached_5m(cache_dir, NIFTY50_KEY)
     sector_candles: Dict[str, List[Dict[str, Any]]] = {}
     for label, _yh in SECTOR_UNIVERSE:
         ik = sector_index_key_for_label(label)
@@ -395,33 +508,24 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
     stock_signal_overrides: Dict[str, Tuple[Dict[str, Any], float]] = {}
     anchor_overrides: Dict[str, Dict[str, Any]] = {}
     if allow_proxy and nifty_bar:
-        for members in stocks_by_sector.values():
-            for m in members:
-                sym = str(m.get("stock") or "").upper()
-                if sym in stock_signal_overrides:
-                    continue
-                from backend.services.breakfast_strategy.universe import resolve_stock_instrument
-
-                ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
-                if not ref or not ref.instrument_key:
-                    continue
-                candles = stock_candles_by_key.get(ref.instrument_key, [])
-                partial = get_ws_forming_5m_bar(ref.instrument_key, session_date)
-                if not partial:
-                    partial, _ = _resolve_session_bar(
-                        ref.instrument_key,
-                        session_date,
-                        candles,
-                        ux,
-                        phase=phase,
-                        allow_quote_proxy=True,
-                    )
-                ov = _stock_signal_override(sym, candles, session_date, partial)
-                if ov:
-                    stock_signal_overrides[sym] = ov
-                ab = anchor_bar(candles, session_date) or _ws_anchor_bar(ref.instrument_key, session_date)
-                if ab:
-                    anchor_overrides[sym] = ab
+        candidate_sectors = _candidate_sector_keys_for_live(
+            stocks_by_sector=stocks_by_sector,
+            session_date=session_date,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            sector_overrides=sector_overrides,
+            sector_candles=sector_candles,
+            nifty_bar=nifty_bar,
+            sectors_to_pick=LIVE_SECTORS_TO_PICK,
+        )
+        stock_signal_overrides, anchor_overrides = _build_ws_stock_overrides(
+            stocks_by_sector=stocks_by_sector,
+            candidate_sector_keys=candidate_sectors,
+            session_date=session_date,
+            stock_candles_by_key=stock_candles_by_key,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+        )
 
     stale = False
     wsq_n = get_ws_quote_for_instrument(NIFTY50_KEY)

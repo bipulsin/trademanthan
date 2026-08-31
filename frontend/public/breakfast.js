@@ -7,6 +7,14 @@
     var livePollTimer = null;
     var liveSignalsCache = {};
     var liveSessionDate = "";
+    var liveLastData = null;
+
+    function fetchWithTimeout(url, opts, ms) {
+        var ctrl = new AbortController();
+        var timer = setTimeout(function () { ctrl.abort(); }, ms || 25000);
+        return fetch(url, Object.assign({}, opts || {}, { signal: ctrl.signal }))
+            .finally(function () { clearTimeout(timer); });
+    }
 
     function $(id) { return document.getElementById(id); }
 
@@ -513,11 +521,12 @@
     async function loadLive() {
         setStatus("Loading live…", false, "bfLiveStatus");
         try {
-            var res = await fetch(LIVE_API, { cache: "no-store", credentials: "same-origin" });
+            var res = await fetchWithTimeout(LIVE_API, { cache: "no-store", credentials: "same-origin" }, 25000);
             var data = await parseJsonResponse(res);
             if (!res.ok) throw new Error(data.detail || data.message || "Load failed");
             liveSessionDate = data.session_date || "";
             await loadLiveSignals(liveSessionDate);
+            liveLastData = data;
             renderLive(data);
             setStatus("", false, "bfLiveStatus");
             stopLivePoll();
@@ -525,7 +534,18 @@
                 livePollTimer = setInterval(loadLive, (data.poll_interval_sec || 5) * 1000);
             }
         } catch (e) {
-            setStatus(String(e), true, "bfLiveStatus");
+            var msg = String(e);
+            if (msg.indexOf("abort") >= 0 || msg.indexOf("AbortError") >= 0) {
+                msg = "Live refresh timed out — retrying…";
+            }
+            if (liveLastData) {
+                renderLive(liveLastData);
+                setStatus(msg + " (showing last update)", true, "bfLiveStatus");
+            } else {
+                setStatus(msg, true, "bfLiveStatus");
+            }
+            stopLivePoll();
+            livePollTimer = setInterval(loadLive, 5000);
         }
     }
 

@@ -77,6 +77,30 @@ def test_build_live_state_weekend():
     assert out["state"] == "off_session"
 
 
+def test_build_ws_stock_overrides_ws_only_no_rest():
+    """Live forming must not fan out per-stock REST quotes (WS-only overrides)."""
+    from backend.services.breakfast_strategy.live import _build_ws_stock_overrides
+
+    with patch(
+        "backend.services.breakfast_strategy.live.get_ws_forming_5m_bar",
+        return_value={"open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1},
+    ), patch(
+        "backend.services.breakfast_strategy.live._resolve_session_bar",
+    ) as mock_resolve, patch(
+        "backend.services.breakfast_strategy.live.resolve_stock_instrument",
+        return_value=MagicMock(instrument_key="NSE_FO|TEST"),
+    ):
+        overrides, anchors = _build_ws_stock_overrides(
+            stocks_by_sector={"NSE_FO|BANK": [{"stock": "HDFCBANK"}]},
+            candidate_sector_keys=["NSE_FO|BANK"],
+            session_date=date(2026, 8, 31),
+            stock_candles_by_key={"NSE_FO|TEST": []},
+            fut_by_und={},
+            eq_by_symbol={},
+        )
+        mock_resolve.assert_not_called()
+
+
 def test_build_live_state_pre_live_window_fast():
     """Before 9:00 IST on a weekday — must not hit Upstox/WS (fast off-session)."""
     replay = IST.localize(datetime(2026, 8, 31, 1, 15))
