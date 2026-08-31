@@ -69,6 +69,9 @@ _LIVE_SNAPSHOT: Optional[Dict[str, Any]] = None
 _LIVE_SNAPSHOT_AT: float = 0.0
 _LIVE_CACHE_TTL_SEC = 4.0
 _LIVE_BUILDING = False
+_OFF_CYCLE_SNAPSHOT: Optional[Dict[str, Any]] = None
+_OFF_CYCLE_SNAPSHOT_AT: float = 0.0
+_OFF_CYCLE_CACHE_KEY: str = ""
 _FROZEN_STATE: Dict[str, Dict[str, Any]] = {}
 _LAST_SESSION_STATE: Optional[Dict[str, Any]] = None
 BLANK_SLATE_FROM = dt_time(9, 0)
@@ -122,6 +125,10 @@ def _is_blank_slate(now: datetime) -> bool:
 def _is_pre_live_window(now: datetime) -> bool:
     """Trading day before 9:00 IST — outside the live feed window."""
     return _is_trading_day_ist(now) and now.time() < BLANK_SLATE_FROM
+
+
+def _off_cycle_banner(now: datetime) -> str:
+    return f"Off cycle data as of {now.strftime('%d-%b-%Y %H:%M')}"
 
 
 def _blank_live_payload(
@@ -182,14 +189,16 @@ def _last_session_snapshot(now: datetime, *, banner: str) -> Dict[str, Any]:
             out["poll_interval_sec"] = 0
             return out
         if _is_trading_day_ist(now) and now.time() >= FREEZE_AFTER:
-            reason = f"No picks captured for {session_key} (session error or restart before 9:20 lock)"
-            return _blank_live_payload(
-                now,
-                banner=reason,
-                state="off_session",
-                phase="frozen",
-                data_missing_reason=reason,
-            )
+            try:
+                return build_off_cycle_preview_state(now)
+            except Exception as e:
+                logger.warning("breakfast off-cycle preview failed in last_session: %s", e)
+                return _blank_live_payload(
+                    now,
+                    banner=_off_cycle_banner(now),
+                    state="off_session",
+                    phase="frozen",
+                )
         return _blank_live_payload(
             now,
             banner=banner,
@@ -437,6 +446,11 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
             out["refresh_allowed"] = False
             out["poll_interval_sec"] = 0
             return out
+        if _is_trading_day_ist(now):
+            try:
+                return _get_off_cycle_preview_cached(now)
+            except Exception as e:
+                logger.warning("breakfast off-cycle preview failed: %s", e)
         return _last_session_snapshot(
             now,
             banner="Session locked — picks from 9:20 IST",
@@ -505,6 +519,7 @@ def _build_live_state_payload(
     session_date: date,
     phase: str,
     cache_key: str,
+    off_cycle: bool = False,
 ) -> Dict[str, Any]:
     stocks_by_sector = load_arbitrage_by_sector()
     fut_by_und, eq_by_symbol = build_instrument_indexes()
@@ -521,7 +536,7 @@ def _build_live_state_payload(
     ux.reload_token_from_storage()
     cache_dir = default_cache_dir()
 
-    if phase in ("locking", "locked"):
+    if phase in ("locking", "locked") or off_cycle:
         nifty_candles = ensure_5m_cached(
             ux, cache_dir, NIFTY50_KEY, range_end=session_date, session_dates=[session_date], force=True
         )
@@ -531,17 +546,27 @@ def _build_live_state_payload(
     for label, _yh in SECTOR_UNIVERSE:
         ik = sector_index_key_for_label(label)
         if ik:
-            sector_candles[ik] = load_cached_5m(cache_dir, ik)
+            if off_cycle:
+                sector_candles[ik] = ensure_5m_cached(
+                    ux, cache_dir, ik, range_end=session_date, session_dates=[session_date], force=True
+                )
+            else:
+                sector_candles[ik] = load_cached_5m(cache_dir, ik)
 
     stock_candles_by_key: Dict[str, List[Dict[str, Any]]] = {}
     for ik in keys:
         if ik == NIFTY50_KEY or ik in sector_candles:
             continue
-        stock_candles_by_key[ik] = load_cached_5m(cache_dir, ik)
+        if off_cycle:
+            stock_candles_by_key[ik] = ensure_5m_cached(
+                ux, cache_dir, ik, range_end=session_date, session_dates=[session_date], force=True
+            )
+        else:
+            stock_candles_by_key[ik] = load_cached_5m(cache_dir, ik)
 
     allow_proxy = phase in ("forming", "opening", "bar_closing", "waiting")
     # During 9:16–9:20 forming, rely on WS + disk cache only — no per-instrument REST quotes.
-    allow_quote_proxy = phase in ("opening", "waiting")
+    allow_quote_proxy = phase in ("opening", "waiting") or off_cycle
     nifty_bar, nifty_src = _resolve_session_bar(
         NIFTY50_KEY, session_date, nifty_candles, ux, phase=phase, allow_quote_proxy=allow_quote_proxy
     )
@@ -664,13 +689,13 @@ def _build_live_state_payload(
         "universe_instruments": len(keys),
     }
 
-    if phase in ("locking", "locked", "frozen") and not mismatch:
+    if phase in ("locking", "locked", "frozen") and not mismatch and not off_cycle:
         with _LOCK:
             _FROZEN_STATE[cache_key] = dict(payload)
             global _LAST_SESSION_STATE
             _LAST_SESSION_STATE = dict(payload)
 
-    if phase in ("locked", "frozen") and sectors_out and not stale:
+    if phase in ("locked", "frozen") and sectors_out and not stale and not off_cycle:
         cross_status = "mismatched" if mismatch else "matched"
         try:
             stats = persist_live_signals(payload, cross_status)
@@ -679,6 +704,44 @@ def _build_live_state_payload(
         except Exception as e:
             logger.warning("breakfast live signals persist failed: %s", e)
 
+    return payload
+
+
+def build_off_cycle_preview_state(now: datetime) -> Dict[str, Any]:
+    """Compute breakfast picks from current Upstox data when 9:20 lock was never persisted."""
+    session_date = now.date()
+    cache_key = session_date.isoformat()
+    payload = _build_live_state_payload(
+        now=now,
+        session_date=session_date,
+        phase="locked",
+        cache_key=cache_key,
+        off_cycle=True,
+    )
+    payload["state"] = "off_cycle"
+    payload["phase"] = "frozen"
+    payload["off_cycle"] = True
+    payload["banner"] = _off_cycle_banner(now)
+    payload["refresh_allowed"] = False
+    payload["poll_interval_sec"] = 0
+    payload.pop("data_missing", None)
+    payload.pop("data_missing_reason", None)
+    return payload
+
+
+def _get_off_cycle_preview_cached(now: datetime) -> Dict[str, Any]:
+    global _OFF_CYCLE_SNAPSHOT, _OFF_CYCLE_SNAPSHOT_AT, _OFF_CYCLE_CACHE_KEY
+    cache_key = now.date().isoformat()
+    age = time.monotonic() - _OFF_CYCLE_SNAPSHOT_AT
+    if _OFF_CYCLE_SNAPSHOT and _OFF_CYCLE_CACHE_KEY == cache_key and age < _LIVE_CACHE_TTL_SEC:
+        out = dict(_OFF_CYCLE_SNAPSHOT)
+        out["server_time"] = now.isoformat()
+        out["banner"] = _off_cycle_banner(now)
+        return out
+    payload = build_off_cycle_preview_state(now)
+    _OFF_CYCLE_SNAPSHOT = dict(payload)
+    _OFF_CYCLE_SNAPSHOT_AT = time.monotonic()
+    _OFF_CYCLE_CACHE_KEY = cache_key
     return payload
 
 

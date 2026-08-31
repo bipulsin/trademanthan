@@ -288,20 +288,17 @@
         el.textContent = banner;
         el.className = "vmb-callout bf-live-banner";
         if (data.state === "mismatch" || data.state === "stale") el.classList.add("bf-banner-alert");
+        else if (data.off_cycle) el.classList.add("bf-banner-offcycle");
         else if (data.phase === "locked" || data.phase === "frozen" || data.state === "locked") el.classList.add("bf-banner-locked");
         else el.classList.add("bf-banner-forming");
     }
 
     function liveEmptySubtext(data) {
         data = data || {};
-        if (data.data_missing_reason) return data.data_missing_reason;
         var phase = data.phase || "";
         var state = data.state || "";
         if (phase === "frozen" || phase === "locked" || state === "off_session" || state === "locked") {
-            if (data.session_date) {
-                return "No picks captured for " + data.session_date + " (session error)";
-            }
-            return "Session locked — no pick data";
+            return "—";
         }
         if (phase === "forming" || phase === "opening" || phase === "bar_closing") {
             return "Forming 9:15–9:20 bar…";

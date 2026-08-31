@@ -142,15 +142,27 @@ def test_live_state_from_persisted_rows_roundtrip():
 
 
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
-def test_build_live_state_frozen_missing_data(mock_load):
+@patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
+def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load):
     mock_load.return_value = None
+    mock_off_cycle.return_value = {
+        "ok": True,
+        "state": "off_cycle",
+        "phase": "frozen",
+        "off_cycle": True,
+        "banner": "Off cycle data as of 31-Aug-2026 10:04",
+        "session_date": "2026-08-31",
+        "nifty": {"direction": "LONG", "bias_pct": 0.1},
+        "sectors": [{"sector_label": "Bank", "stocks": [{"symbol": "HDFCBANK"}]}],
+    }
     replay = IST.localize(datetime(2026, 8, 31, 10, 4))
     out = build_live_state(replay_at=replay)
-    assert out["state"] == "off_session"
-    assert out["phase"] == "frozen"
-    assert out.get("data_missing")
-    assert "2026-08-31" in (out.get("data_missing_reason") or "")
-    assert "No picks captured" in (out.get("banner") or "")
+    assert out["state"] == "off_cycle"
+    assert out.get("off_cycle")
+    assert "Off cycle data" in (out.get("banner") or "")
+    assert out["nifty"]["direction"] == "LONG"
+    assert len(out["sectors"]) == 1
+    mock_off_cycle.assert_called_once()
 
 
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
