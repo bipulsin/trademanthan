@@ -64,6 +64,10 @@ from backend.services.breakfast_strategy.live_scheduler import (
     start_breakfast_live_scheduler,
     stop_breakfast_live_scheduler,
 )
+from backend.services.breakfast_prev_close_scheduler import (
+    start_breakfast_prev_close_scheduler,
+    stop_breakfast_prev_close_scheduler,
+)
 from backend.services.chartink_df_webhook_inbox_scheduler import (
     start_chartink_df_webhook_inbox_scheduler,
     stop_chartink_df_webhook_inbox_scheduler,
@@ -183,6 +187,14 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Continuing without breakfast live scheduler")
 
         try:
+            logger.info("Starting Breakfast prev-close scheduler (16:00, 16:30, 09:05 IST)...")
+            start_breakfast_prev_close_scheduler()
+            logger.info("✅ Breakfast prev-close scheduler: STARTED")
+        except Exception as e:
+            logger.error(f"❌ Breakfast prev-close scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without breakfast prev-close scheduler")
+
+        try:
             logger.info("Starting ChartInk Daily Futures webhook inbox cleanup scheduler...")
             start_chartink_df_webhook_inbox_scheduler()
             logger.info(
@@ -283,6 +295,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Breakfast live scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping Breakfast live scheduler: {e}", exc_info=True)
+
+    try:
+        stop_breakfast_prev_close_scheduler()
+        logger.info("✅ Breakfast prev-close scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Breakfast prev-close scheduler: {e}", exc_info=True)
 
     try:
         stop_chartink_df_webhook_inbox_scheduler()

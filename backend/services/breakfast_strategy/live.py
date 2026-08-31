@@ -493,15 +493,28 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
                 out["poll_interval_sec"] = 0
                 return out
         if lock_row and str(lock_row.get("lock_status")) == "failed":
-            out = _blank_live_payload(
-                now,
-                banner=f"LOCK FAILED — {lock_row.get('failure_reason') or 'see logs'}",
-                state="lock_failed",
-                phase="frozen",
-            )
-            out["lock_failed"] = True
-            out["failure_reason"] = lock_row.get("failure_reason")
-            return out
+            try:
+                off = build_off_cycle_preview_state(now)
+                reason = lock_row.get("failure_reason") or "see logs"
+                off["lock_failed"] = True
+                off["failure_reason"] = reason
+                off["state"] = "lock_failed"
+                off["banner"] = f"LOCK FAILED — {reason} · {off.get('banner', '')}"
+                off["server_time"] = now.isoformat()
+                off["refresh_allowed"] = False
+                off["poll_interval_sec"] = 0
+                return off
+            except Exception as e:
+                logger.warning("breakfast lock_failed off-cycle preview failed: %s", e)
+                out = _blank_live_payload(
+                    now,
+                    banner=f"LOCK FAILED — {lock_row.get('failure_reason') or 'see logs'}",
+                    state="lock_failed",
+                    phase="frozen",
+                )
+                out["lock_failed"] = True
+                out["failure_reason"] = lock_row.get("failure_reason")
+                return out
         persisted = _load_persisted_live_state(cache_key)
         if persisted:
             out = dict(persisted)

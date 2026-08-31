@@ -166,9 +166,7 @@ def persist_live_signals(
     capture_source: Optional[str] = None,
 ) -> Dict[str, int]:
     """Idempotent insert for all stocks in locked state (up to 6 rows)."""
-    status = str(cross_check_status or "matched").strip().lower()
-    if status not in ("matched", "mismatched"):
-        status = "matched"
+    status = str(cross_check_status or "ws_rest:unknown").strip()
     rows = rows_from_live_state(state, status, capture_source=capture_source)
     if not rows:
         return {"inserted": 0, "skipped": 0}

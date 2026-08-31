@@ -74,7 +74,7 @@ def test_tick_minutes_constant():
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
 @patch("backend.services.breakfast_strategy.live_tick.select_breakfast_picks")
-def test_first_tick_scans_sectors_then_stocks(
+def test_tick_re_picks_sectors_each_minute(
     mock_select,
     mock_indexes,
     mock_load_sector,

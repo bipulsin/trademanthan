@@ -287,7 +287,8 @@
         el.hidden = false;
         el.textContent = banner;
         el.className = "vmb-callout bf-live-banner";
-        if (data.state === "mismatch" || data.state === "stale") el.classList.add("bf-banner-alert");
+        if (data.lock_failed) el.classList.add("bf-banner-alert");
+        else if (data.state === "mismatch" || data.state === "stale") el.classList.add("bf-banner-alert");
         else if (data.off_cycle) el.classList.add("bf-banner-offcycle");
         else if (data.phase === "locked" || data.phase === "frozen" || data.state === "locked") el.classList.add("bf-banner-locked");
         else el.classList.add("bf-banner-forming");
@@ -399,9 +400,10 @@
         renderLiveBanner(data);
         var meta = $("bfLiveMeta");
         if (meta) {
+            var cross = data.cross_check_status ? (" · " + data.cross_check_status) : "";
             meta.textContent = "Session " + (data.session_date || "") + " · " + (data.phase || "") +
-                " · " + (data.universe_instruments || 0) + " WS instruments · updated " +
-                (data.server_time || "").slice(11, 19);
+                " · " + (data.universe_instruments || 0) + " instruments · updated " +
+                (data.server_time || "").slice(11, 19) + cross;
         }
         renderLiveNifty(data.nifty || {}, data);
         renderLiveSectors(data.sectors || [], data);

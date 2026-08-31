@@ -65,7 +65,6 @@ class BreakfastSessionCache:
     stock_symbols_by_sector: Dict[str, List[str]] = field(default_factory=dict)
     instrument_keys: List[str] = field(default_factory=list)
     candles_1m: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
-    first_scan_done: bool = False
     locked: bool = False
 
 
@@ -340,47 +339,47 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
         stocks_by_sector = load_arbitrage_by_sector()
         fut_by_und, eq_by_symbol = build_instrument_indexes()
 
-        fetch_keys: List[str] = [NIFTY50_KEY]
-        if not cache.first_scan_done:
-            fetch_keys.extend(_all_sector_keys())
-        else:
-            fetch_keys.extend(cache.instrument_keys)
-
+        sector_keys = _all_sector_keys()
+        cache.sector_keys = sector_keys
+        fetch_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys))
         fresh = fetch_1m_parallel(ux, cache_dir, fetch_keys, session_date=session_date)
         cache.candles_1m.update(fresh)
         for ik in fetch_keys:
             if ik not in cache.candles_1m:
                 cache.candles_1m[ik] = load_cached_1m(cache_dir, ik)
 
-        if not cache.first_scan_done:
-            picked, _long = _rank_picked_sectors(
-                session_date=session_date,
-                candles_1m=cache.candles_1m,
-                stocks_by_sector=stocks_by_sector,
-                fut_by_und=fut_by_und,
-                eq_by_symbol=eq_by_symbol,
-                upto_hhmm=upto_hhmm,
-            )
-            cache.sector_keys = _all_sector_keys()
-            cache.picked_sector_keys = picked
+        prev_picked = list(cache.picked_sector_keys)
+        picked, _long = _rank_picked_sectors(
+            session_date=session_date,
+            candles_1m=cache.candles_1m,
+            stocks_by_sector=stocks_by_sector,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            upto_hhmm=upto_hhmm,
+        )
+        cache.picked_sector_keys = picked
+        sectors_changed = picked != prev_picked
+        if sectors_changed or not cache.stock_symbols_by_sector:
             sym_map, stock_iks = _resolve_stock_keys(
                 picked, stocks_by_sector, session_date, fut_by_und, eq_by_symbol
             )
             cache.stock_symbols_by_sector = sym_map
-            cache.instrument_keys = list(dict.fromkeys([NIFTY50_KEY] + cache.sector_keys + stock_iks))
-            if picked and stock_iks:
-                stock_fresh = fetch_1m_parallel(ux, cache_dir, stock_iks, session_date=session_date)
-                cache.candles_1m.update(stock_fresh)
-            cache.first_scan_done = True
-            logger.info(
-                "breakfast first scan %s: sectors=%s stocks=%s",
-                cache_key,
-                picked,
-                sum(len(v) for v in sym_map.values()),
-            )
-        else:
-            scoped = list(dict.fromkeys(cache.instrument_keys))
-            stock_fresh = fetch_1m_parallel(ux, cache_dir, scoped, session_date=session_date)
+            cache.instrument_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys + stock_iks))
+            if sectors_changed:
+                logger.info(
+                    "breakfast sector re-pick %s: %s -> %s stocks=%s",
+                    cache_key,
+                    prev_picked,
+                    picked,
+                    sum(len(v) for v in sym_map.values()),
+                )
+        stock_iks = [
+            ik
+            for ik in cache.instrument_keys
+            if ik != NIFTY50_KEY and ik not in sector_keys
+        ]
+        if stock_iks:
+            stock_fresh = fetch_1m_parallel(ux, cache_dir, stock_iks, session_date=session_date)
             cache.candles_1m.update(stock_fresh)
 
         nifty_bar = forming_bar_from_1m_upto(cache.candles_1m.get(NIFTY50_KEY, []), session_date, upto_hhmm)
@@ -453,6 +452,52 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
         }
 
 
+def _ws_rest_cross_check_observation(
+    *,
+    session_date: date,
+    instrument_keys: List[str],
+    upstox: UpstoxService,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """Informational WS vs REST 5m delta — does not block freeze."""
+    from backend.services.breakfast_strategy.candles import bars_ohlc_close_match, ensure_5m_cached, signal_bar
+    from backend.services.breakfast_strategy.live import get_ws_forming_5m_bar
+
+    cache_dir = default_cache_dir()
+    rows: List[Dict[str, Any]] = []
+    matched = 0
+    for ik in instrument_keys:
+        if not ik:
+            continue
+        try:
+            candles = ensure_5m_cached(
+                upstox, cache_dir, ik, range_end=session_date, session_dates=[session_date], force=False
+            )
+            rest_bar = signal_bar(candles, session_date)
+            ws_bar = get_ws_forming_5m_bar(ik, session_date)
+            rest_cl = float((rest_bar or {}).get("close") or 0)
+            ws_cl = float((ws_bar or {}).get("close") or 0)
+            delta_pct = None
+            if rest_cl > 0 and ws_cl > 0:
+                delta_pct = round((ws_cl - rest_cl) / rest_cl * 100.0, 4)
+            is_match = bars_ohlc_close_match(ws_bar, rest_bar)
+            if is_match:
+                matched += 1
+            rows.append(
+                {
+                    "instrument_key": ik,
+                    "ws_close": ws_cl or None,
+                    "rest_close": rest_cl or None,
+                    "delta_pct": delta_pct,
+                    "matched": is_match,
+                }
+            )
+        except Exception as e:
+            rows.append({"instrument_key": ik, "error": str(e), "matched": False})
+    total = len(rows)
+    status = f"ws_rest:{matched}/{total}_matched" if total else "ws_rest:no_instruments"
+    return status, rows
+
+
 def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
     """9:20:30 IST — final 1m snapshot, persist signals + session lock."""
     global _LIVE_TICK_SNAPSHOT
@@ -488,7 +533,27 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
     payload["server_time"] = now.isoformat()
 
     sectors = payload.get("sectors") or []
-    cross_status = "matched"
+    cross_keys: List[str] = [NIFTY50_KEY]
+    for sec in sectors:
+        sk = str(sec.get("sector_key") or "").strip()
+        if sk:
+            cross_keys.append(sk)
+        for stk in sec.get("stocks") or []:
+            ik = str(stk.get("instrument_key") or "").strip()
+            if ik:
+                cross_keys.append(ik)
+    cross_keys = list(dict.fromkeys(cross_keys))
+    ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    ux.reload_token_from_storage()
+    cross_status, cross_rows = _ws_rest_cross_check_observation(
+        session_date=session_date,
+        instrument_keys=cross_keys,
+        upstox=ux,
+    )
+    payload["ws_rest_cross_check"] = cross_rows
+    payload["cross_check_status"] = cross_status
+    logger.info("breakfast WS observation %s: %s", cache_key, cross_status)
+
     lock_status = "locked"
     failure_reason: Optional[str] = None
 
