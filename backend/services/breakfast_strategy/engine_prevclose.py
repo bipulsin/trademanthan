@@ -132,10 +132,12 @@ def select_breakfast_picks_prevclose(
     eligible = fo_eligible_sector_keys(
         stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
     )
+    book_keys = {skey for skey, _ls in (sector_books or []) if skey}
+    scan_keys = set(eligible) | book_keys
     sector_bars: Dict[str, Dict[str, Any]] = {}
     sector_prev: Dict[str, float] = dict(sector_prev_closes or {})
     overrides = sector_bar_overrides or {}
-    for skey in eligible:
+    for skey in scan_keys:
         bar = overrides.get(skey) or first_5m_bar(sector_candles.get(skey, []), session_date)
         if bar:
             sector_bars[skey] = bar
@@ -145,10 +147,10 @@ def select_breakfast_picks_prevclose(
                 sector_prev[skey] = prev
 
     ranked_desc = rank_sectors_vs_prev_close(
-        sector_bars, sector_prev, eligible_keys=eligible, descending=True
+        sector_bars, sector_prev, eligible_keys=scan_keys, descending=True
     )
     ranked_by_bias = rank_sectors_vs_prev_close(
-        sector_bars, sector_prev, eligible_keys=eligible, descending=long_side
+        sector_bars, sector_prev, eligible_keys=scan_keys, descending=long_side
     )
     books: List[Tuple[str, float, float, bool]] = []
     if sector_books:

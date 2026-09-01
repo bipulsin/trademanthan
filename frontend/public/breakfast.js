@@ -382,12 +382,24 @@
                 liveEmptySubtext(data) + "</div>";
             return;
         }
+        var pct = n.bias_pct;
         var longSide = n.direction === "LONG";
+        if (n.bias === "negative" || (pct != null && Number(pct) < 0)) {
+            longSide = false;
+        } else if (n.bias === "positive" || (pct != null && Number(pct) >= 0)) {
+            longSide = true;
+        }
+        var dirTag = n.direction || "";
+        if (n.bias === "negative" || (pct != null && Number(pct) < 0)) {
+            dirTag = "SHORT";
+        } else if (n.bias === "positive" || (pct != null && Number(pct) > 0) || (pct != null && Number(pct) === 0)) {
+            dirTag = "LONG";
+        }
         box.className = "bf-live-box bf-nifty-box " + (longSide ? "bf-long" : "bf-short");
         box.innerHTML = "<h3>NIFTY50</h3>" +
             "<div class='bf-live-pct'>" + (n.bias_pct != null ? (n.bias_pct >= 0 ? "+" : "") + fmt(n.bias_pct, 2) + "%" : "—") + "</div>" +
             "<div class='bf-live-row'>Bias: <strong>" + (n.bias || "—") + "</strong>" +
-            "<span class='bf-live-tag " + (longSide ? "long" : "short") + "'>" + (n.direction || "") + "</span></div>" +
+            "<span class='bf-live-tag " + (longSide ? "long" : "short") + "'>" + dirTag + "</span></div>" +
             "<div class='bf-live-sub'>O " + fmt(n.open, 2) + " · C " + fmt(n.close, 2) +
             (n.ltp != null ? " · LTP " + fmt(n.ltp, 2) : "") + "</div>";
     }

@@ -556,6 +556,12 @@ def _gainer_loser_books(
         sector_bars, sector_prev, eligible_keys=eligible, descending=True
     )
     if not ranked:
+        logger.warning(
+            "breakfast sector rank empty eligible=%s bars=%s prev_closes=%s",
+            len(eligible),
+            len(sector_bars),
+            len(sector_prev),
+        )
         return []
     gainer_key = ranked[0][0]
     loser_key = ranked[-1][0]
@@ -679,26 +685,24 @@ def _build_payload_from_selection(
     nifty_prev_close: Optional[float] = None,
     wick_by_symbol: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    long_side = True
-    nifty_bias = "positive"
+    nifty_bias = "unknown"
     nifty_pct = None
     if nifty_bar:
         cl = float(nifty_bar.get("close") or 0)
         nifty_pct = move_pct_vs_prev_close(cl, float(nifty_prev_close)) if nifty_prev_close else None
-        nifty_bias, _bp = nifty_bias_from_bar_vs_prev_close(
+        nifty_bias, nifty_pct = nifty_bias_from_bar_vs_prev_close(
             nifty_bar, nifty_prev_close, missing="unknown"
         )
-    if sel:
-        long_side = sel.long_side
+    if sel is not None:
         nifty_bias = sel.nifty_bias
-    elif nifty_bias == "unknown" or not nifty_bar:
-        long_side = False
-    else:
-        long_side = nifty_bias == "positive"
-
-    direction = "LONG" if long_side else "SHORT"
-    if nifty_bias == "unknown":
+        nifty_pct = sel.nifty_bias_pct
+    if nifty_bias == "negative" or (nifty_pct is not None and nifty_pct < 0):
+        nifty_bias = "negative"
+        direction = "SHORT"
+    elif nifty_bias == "unknown" or nifty_pct is None:
         direction = "UNKNOWN"
+    else:
+        direction = "LONG"
 
     wicks = wick_by_symbol or {}
     sectors_out: List[Dict[str, Any]] = []
@@ -975,15 +979,14 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             if ov and ov[0]
         }
         if freeze_5m and sector_books:
-            stocks_for_pick: Dict[str, List[Dict[str, str]]] = {}
+            stocks_for_pick: Dict[str, List[Dict[str, str]]] = dict(stocks_by_sector)
             for skey, book_long in sector_books:
-                stocks_for_pick.update(
-                    filter_sector_members_by_first_5m_color(
-                        {skey: wick_members.get(skey, [])},
-                        bar_map,
-                        long_side=book_long,
-                    )
+                colored = filter_sector_members_by_first_5m_color(
+                    {skey: wick_members.get(skey, [])},
+                    bar_map,
+                    long_side=book_long,
                 )
+                stocks_for_pick[skey] = colored.get(skey, [])
             sel = select_breakfast_picks_prevclose(
                 session_date,
                 nifty_candles=cache.candles_1m.get(NIFTY50_KEY, []),

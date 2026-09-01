@@ -30,6 +30,10 @@ from backend.services.breakfast_strategy.candles import (
 )
 from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
 from backend.services.breakfast_strategy.engine import NIFTY50_KEY, nifty_bias_from_bar, select_breakfast_picks
+from backend.services.breakfast_strategy.engine_prevclose import (
+    nifty_bias_from_bar_vs_prev_close,
+    select_breakfast_picks_prevclose,
+)
 from backend.services.breakfast_strategy.universe import (
     SECTOR_UNIVERSE,
     build_instrument_indexes,
@@ -44,8 +48,10 @@ from backend.services.breakfast_prev_close import (
     filter_live_stocks_by_wick_and_color,
     filter_sector_members_by_first_5m_color,
     filter_sector_members_by_wick,
+    load_stored_prev_closes_and_wicks,
     load_stored_wicks,
 )
+from backend.services.market_holiday import is_nse_holiday_ist
 from backend.services.sector_movers import _index_key_to_sector_label
 from backend.services.upstox_market_feed import (
     ensure_market_feed_running,
@@ -365,6 +371,26 @@ def _stock_signal_override(
     if pct is None:
         return None
     return partial_bar, float(pct)
+
+
+def _nifty_live_card(
+    *,
+    nifty_bar: Optional[Dict[str, Any]],
+    nifty_prev: Optional[float],
+    sel: Any = None,
+) -> Tuple[str, Optional[float], str]:
+    """Bias + signed % vs prev close, and LONG/SHORT/UNKNOWN matching that %."""
+    bias, pct = "unknown", None
+    if nifty_bar:
+        bias, pct = nifty_bias_from_bar_vs_prev_close(nifty_bar, nifty_prev, missing="unknown")
+    if sel is not None:
+        bias = sel.nifty_bias
+        pct = sel.nifty_bias_pct
+    if bias == "negative" or (pct is not None and pct < 0):
+        return "negative", (None if pct is None else float(pct)), "SHORT"
+    if bias == "unknown" or pct is None:
+        return "unknown", (None if pct is None else float(pct)), "UNKNOWN"
+    return "positive", float(pct), "LONG"
 
 
 def _serialize_stock_pick(
@@ -700,7 +726,9 @@ def _build_live_state_payload(
     off_cycle: bool = False,
 ) -> Dict[str, Any]:
     stocks_by_sector = load_arbitrage_by_sector()
-    stock_wicks = load_stored_wicks()
+    bench_prev, stock_prev, stock_wicks = load_stored_prev_closes_and_wicks()
+    if not stock_wicks:
+        stock_wicks = load_stored_wicks()
     fut_by_und, eq_by_symbol = build_instrument_indexes()
     keys = collect_instrument_keys(
         [session_date],
@@ -756,35 +784,56 @@ def _build_live_state_payload(
         )
         if bar:
             sector_overrides[ik] = bar
+        else:
+            logger.warning("breakfast sector 5m missing key=%s src=%s off_cycle=%s", ik, src, off_cycle)
         if src == "mismatch":
             mismatch_keys.append(ik)
 
-    if off_cycle and nifty_bar:
-        candidate_sectors = _candidate_sector_keys_for_live(
-            stocks_by_sector=stocks_by_sector,
+    nifty_prev = bench_prev.get(NIFTY50_KEY) or prev_session_close(nifty_candles, session_date)
+    sector_books: List[Tuple[str, bool]] = []
+    wick_members: Dict[str, List[Dict[str, str]]] = {}
+    if off_cycle:
+        from backend.services.breakfast_strategy.live_tick import _gainer_loser_books, _members_for_books
+
+        candles_for_rank: Dict[str, List[Dict[str, Any]]] = {
+            ik: list(bars) for ik, bars in sector_candles.items()
+        }
+        candles_for_rank[NIFTY50_KEY] = nifty_candles
+        for ik, bar in sector_overrides.items():
+            candles_for_rank[ik] = [bar] + list(candles_for_rank.get(ik) or [])
+        sector_books = _gainer_loser_books(
             session_date=session_date,
+            candles=candles_for_rank,
+            stocks_by_sector=stocks_by_sector,
             fut_by_und=fut_by_und,
             eq_by_symbol=eq_by_symbol,
-            sector_overrides=sector_overrides,
-            sector_candles=sector_candles,
-            nifty_bar=nifty_bar,
-            sectors_to_pick=LIVE_SECTORS_TO_PICK,
+            sector_prev_closes=bench_prev,
+            nifty_prev_close=nifty_prev,
         )
-        _warm_off_cycle_stock_candles(
-            stocks_by_sector=stocks_by_sector,
-            candidate_sector_keys=candidate_sectors,
-            session_date=session_date,
-            stock_candles_by_key=stock_candles_by_key,
-            fut_by_und=fut_by_und,
-            eq_by_symbol=eq_by_symbol,
-            upstox=ux,
-            cache_dir=cache_dir,
-        )
+        wick_members = _members_for_books(stocks_by_sector, stock_wicks, sector_books)
+        candidate_sectors = [skey for skey, _ls in sector_books]
+        if nifty_bar and candidate_sectors:
+            _warm_off_cycle_stock_candles(
+                stocks_by_sector=wick_members,
+                candidate_sector_keys=candidate_sectors,
+                session_date=session_date,
+                stock_candles_by_key=stock_candles_by_key,
+                fut_by_und=fut_by_und,
+                eq_by_symbol=eq_by_symbol,
+                upstox=ux,
+                cache_dir=cache_dir,
+            )
+        if not sector_books:
+            logger.warning(
+                "breakfast off-cycle no sector books bars=%s prev=%s",
+                len(sector_overrides),
+                len(bench_prev),
+            )
 
     stock_signal_overrides: Dict[str, Tuple[Dict[str, Any], float]] = {}
     anchor_overrides: Dict[str, Dict[str, Any]] = {}
     if allow_proxy and nifty_bar:
-        candidate_sectors = _candidate_sector_keys_for_live(
+        candidate_sectors = [skey for skey, _ls in sector_books] if sector_books else _candidate_sector_keys_for_live(
             stocks_by_sector=stocks_by_sector,
             session_date=session_date,
             fut_by_und=fut_by_und,
@@ -808,73 +857,110 @@ def _build_live_state_payload(
     if phase not in ("waiting", "off_session") and not wsq_n:
         stale = True
 
-    long_side_pick = (nifty_bias_from_bar(nifty_bar)[0] == "positive") if nifty_bar else True
-    stocks_for_pick = filter_sector_members_by_wick(
-        stocks_by_sector,
-        stock_wicks,
-        long_side=long_side_pick,
-    )
     bar_map = {
         str(sym).strip().upper(): ov[0]
         for sym, ov in (stock_signal_overrides or {}).items()
         if ov and ov[0]
     }
-    stocks_for_pick = filter_sector_members_by_first_5m_color(
-        stocks_for_pick, bar_map, long_side=long_side_pick
-    )
-    sel = select_breakfast_picks(
-        session_date,
-        nifty_candles=nifty_candles,
-        sector_candles=sector_candles,
-        stock_candles_by_key=stock_candles_by_key,
-        stocks_by_sector=stocks_for_pick,
-        fut_by_und=fut_by_und,
-        eq_by_symbol=eq_by_symbol,
-        upstox=ux,
-        nifty_bar=nifty_bar,
-        sector_bar_overrides=sector_overrides or None,
-        stock_signal_overrides=stock_signal_overrides or None,
-        anchor_bar_overrides=anchor_overrides or None,
-        sectors_to_pick=LIVE_SECTORS_TO_PICK,
-        stocks_per_sector=LIVE_STOCKS_PER_SECTOR,
-    )
+    stocks_for_pick = dict(stocks_by_sector)
+    if sector_books:
+        for skey, book_long in sector_books:
+            members = wick_members.get(skey, []) if wick_members else stocks_by_sector.get(skey, [])
+            if bar_map:
+                members = filter_sector_members_by_first_5m_color(
+                    {skey: members}, bar_map, long_side=book_long
+                ).get(skey, [])
+            stocks_for_pick[skey] = members
+        sel = select_breakfast_picks_prevclose(
+            session_date,
+            nifty_candles=nifty_candles,
+            sector_candles=sector_candles,
+            stock_candles_by_key=stock_candles_by_key,
+            stocks_by_sector=stocks_for_pick,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            upstox=ux,
+            nifty_bar=nifty_bar,
+            sector_bar_overrides=sector_overrides or None,
+            stock_signal_overrides=stock_signal_overrides or None,
+            anchor_bar_overrides=anchor_overrides or None,
+            nifty_prev_close=nifty_prev,
+            sector_prev_closes=bench_prev,
+            stock_prev_closes=stock_prev,
+            sectors_to_pick=LIVE_SECTORS_TO_PICK,
+            stocks_per_sector=LIVE_STOCKS_PER_SECTOR,
+            sector_books=sector_books,
+        )
+    else:
+        long_side_pick = (nifty_bias_from_bar_vs_prev_close(nifty_bar or {}, nifty_prev, missing="unknown")[0] == "positive") if nifty_bar else False
+        stocks_for_pick = filter_sector_members_by_wick(
+            stocks_by_sector,
+            stock_wicks,
+            long_side=long_side_pick,
+        )
+        if bar_map:
+            stocks_for_pick = filter_sector_members_by_first_5m_color(
+                stocks_for_pick, bar_map, long_side=long_side_pick
+            )
+        sel = select_breakfast_picks_prevclose(
+            session_date,
+            nifty_candles=nifty_candles,
+            sector_candles=sector_candles,
+            stock_candles_by_key=stock_candles_by_key,
+            stocks_by_sector=stocks_for_pick,
+            fut_by_und=fut_by_und,
+            eq_by_symbol=eq_by_symbol,
+            upstox=ux,
+            nifty_bar=nifty_bar,
+            sector_bar_overrides=sector_overrides or None,
+            stock_signal_overrides=stock_signal_overrides or None,
+            anchor_bar_overrides=anchor_overrides or None,
+            nifty_prev_close=nifty_prev,
+            sector_prev_closes=bench_prev,
+            stock_prev_closes=stock_prev,
+            sectors_to_pick=LIVE_SECTORS_TO_PICK,
+            stocks_per_sector=LIVE_STOCKS_PER_SECTOR,
+        )
 
     mismatch = bool(mismatch_keys) or nifty_src == "mismatch"
     state = "mismatch" if mismatch else ("stale" if stale else phase)
     if phase in ("locked", "frozen"):
         state = "locked" if not mismatch and not stale else state
 
-    nifty_pct = bar_move_pct(nifty_bar) if nifty_bar else None
-    long_side = sel.long_side if sel else True
+    nifty_bias, nifty_pct, nifty_dir = _nifty_live_card(
+        nifty_bar=nifty_bar, nifty_prev=nifty_prev, sel=sel
+    )
 
     sectors_out: List[Dict[str, Any]] = []
     if sel:
         for sp in sel.sector_picks:
+            sp_long = sel.long_side if getattr(sp, "long_side", None) is None else bool(sp.long_side)
+            sp_dir = "LONG" if sp_long else "SHORT"
             sectors_out.append(
                 {
                     "sector_key": sp.sector_key,
                     "sector_label": _sector_label(sp.sector_key),
                     "sector_rank": sp.sector_rank,
                     "move_pct": round(sp.sector_move_pct, 3),
-                    "direction": "LONG" if long_side else "SHORT",
+                    "direction": sp_dir,
                     "volume": sp.sector_volume,
                     "stocks": filter_live_stocks_by_wick_and_color(
                         [
                         _serialize_stock_pick(
                             s,
-                            long_side=long_side,
+                            long_side=sp_long,
                             upstox=ux,
                             allow_rest_quote=allow_quote_proxy,
                             wick=stock_wicks.get(str(s.row.stock or "").upper(), WICK_NONE),
                         )
                         for s in sp.stocks
                         ],
-                        direction="LONG" if long_side else "SHORT",
+                        direction=sp_dir,
                         wick_by_symbol=stock_wicks,
                     ),
                 }
             )
-        _resort_sector_stocks(sectors_out, long_side=long_side)
+            _resort_sector_stocks([sectors_out[-1]], long_side=sp_long)
 
     refresh_allowed = now.time() < FREEZE_AFTER and phase != "frozen"
 
@@ -889,9 +975,9 @@ def _build_live_state_payload(
         "poll_interval_sec": 5 if refresh_allowed else 0,
         "nifty": {
             "instrument_key": NIFTY50_KEY,
-            "bias": sel.nifty_bias if sel else ("positive" if (nifty_pct or 0) >= 0 else "negative"),
-            "bias_pct": round(sel.nifty_bias_pct, 3) if sel else (round(nifty_pct, 3) if nifty_pct is not None else None),
-            "direction": "LONG" if long_side else "SHORT",
+            "bias": nifty_bias,
+            "bias_pct": round(nifty_pct, 3) if nifty_pct is not None else None,
+            "direction": nifty_dir,
             "bar_source": nifty_src,
             "open": nifty_bar.get("open") if nifty_bar else None,
             "close": nifty_bar.get("close") if nifty_bar else None,

@@ -441,6 +441,30 @@ def test_live_payload_nifty_pct_uses_prev_close_not_auction():
     assert payload["nifty"]["bias"] == "positive"
     assert payload["nifty"]["bias_pct"] == round((101.0 - 50.0) / 50.0 * 100.0, 3)
     assert payload["nifty"]["bias_pct"] != 1.0
+    assert payload["nifty"]["direction"] == "LONG"
+
+
+def test_live_payload_negative_nifty_pct_is_short_not_long():
+    from datetime import datetime
+
+    from backend.services.breakfast_strategy.live_tick import _build_payload_from_selection
+
+    now = IST.localize(datetime(2026, 9, 1, 23, 45))
+    bar = {"open": 24077.55, "high": 24100, "low": 24000, "close": 24041.15, "volume": 1}
+    payload = _build_payload_from_selection(
+        now=now,
+        session_date=date(2026, 9, 1),
+        phase="frozen",
+        sel=None,
+        nifty_bar=bar,
+        tick_minute=20,
+        elapsed_sec=1.0,
+        data_source="rest_5m",
+        nifty_prev_close=24077.55,
+    )
+    assert payload["nifty"]["bias"] == "negative"
+    assert payload["nifty"]["bias_pct"] < 0
+    assert payload["nifty"]["direction"] == "SHORT"
 
 
 def test_gainer_loser_books_two_sectors():

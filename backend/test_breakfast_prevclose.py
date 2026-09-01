@@ -101,3 +101,34 @@ def test_rank_sectors_live_helper_unchanged():
     exp = rank_sectors_vs_prev_close(bars, prev, eligible_keys={serv, tel}, descending=True)
     assert live[0][0] == serv  # (100.5-100)/100 = +0.5% vs (99.5-100)/100 = -0.5%
     assert exp[0][0] == tel  # (99.5-50)/50 >> (100.5-200)/200
+
+
+def test_select_prevclose_keeps_sector_books_when_wick_members_empty():
+    """Index 5m + prev close must still emit Sector 1/2 even if no wick-passing stocks."""
+    from backend.services.breakfast_strategy.engine_prevclose import select_breakfast_picks_prevclose
+
+    bank = sector_index_key_for_label("Nifty Private Bank")
+    it = sector_index_key_for_label("Nifty IT")
+    session = __import__("datetime").date(2026, 9, 1)
+    nifty_bar = _bar("2026-09-01T09:15:00+05:30", 24077.55, 24100, 24000, 24041.15)
+    gainer = _bar("2026-09-01T09:15:00+05:30", 100, 105, 99, 104)
+    loser = _bar("2026-09-01T09:15:00+05:30", 100, 101, 94, 96)
+    sel = select_breakfast_picks_prevclose(
+        session,
+        nifty_candles=[nifty_bar],
+        sector_candles={bank: [gainer], it: [loser]},
+        stock_candles_by_key={},
+        stocks_by_sector={bank: [], it: []},
+        fut_by_und={},
+        eq_by_symbol={},
+        nifty_bar=nifty_bar,
+        sector_bar_overrides={bank: gainer, it: loser},
+        nifty_prev_close=24077.55,
+        sector_prev_closes={bank: 100.0, it: 100.0},
+        sector_books=[(bank, True), (it, False)],
+    )
+    assert sel is not None
+    assert [sp.sector_key for sp in sel.sector_picks] == [bank, it]
+    assert sel.sector_picks[0].stocks == []
+    assert sel.sector_picks[1].stocks == []
+    assert sel.nifty_bias == "negative"

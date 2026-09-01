@@ -394,6 +394,17 @@ def test_update_manual_capture_sets_trade_taken(mock_ensure, mock_session_local)
     mock_db.commit.assert_called_once()
 
 
+def test_nifty_live_card_negative_pct_is_short_not_blue_long():
+    from backend.services.breakfast_strategy.live import _nifty_live_card
+
+    bar = {"open": 24077.55, "high": 24100, "low": 24000, "close": 24041.15, "volume": 1}
+    bias, pct, direction = _nifty_live_card(nifty_bar=bar, nifty_prev=24077.55, sel=None)
+    assert bias == "negative"
+    assert pct < 0
+    assert direction == "SHORT"
+    assert direction != "LONG"
+
+
 def test_validate_ws_vs_rest_smoke():
     """Structure check only — match may be false off-hours when WS bar is absent."""
     out = validate_ws_vs_rest(UpstoxService.NIFTY50_KEY, date(2026, 8, 20))
