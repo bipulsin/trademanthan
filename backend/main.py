@@ -33,6 +33,7 @@ import backend.routers.volume_mismatch_futures as volume_mismatch_futures
 import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
 import backend.routers.open_low_15m_backtest as open_low_15m_backtest
 import backend.routers.breakfast_strategy as breakfast_strategy
+import backend.routers.trap_ce_live_webhook as trap_ce_live_webhook
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -401,6 +402,7 @@ app.include_router(volume_mismatch_backtest.router, prefix="")
 app.include_router(open_low_15m_backtest.router, prefix="/api")
 app.include_router(open_low_15m_backtest.router, prefix="")
 app.include_router(breakfast_strategy.router, prefix="")
+app.include_router(trap_ce_live_webhook.router)
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")

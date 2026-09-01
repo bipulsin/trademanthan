@@ -6,6 +6,7 @@
     const LIVE_SIGNALS_API = "/api/breakfast-strategy/live/signals";
     const PREVCLOSE_API = "/api/breakfast-strategy/prevclose-backtest";
     const TRAP_CE_API = "/api/breakfast-strategy/trap-ce";
+    const TRAP_CE_LIVE_API = "/api/breakfast-strategy/trap-ce-live";
     var livePollTimer = null;
     var liveSignalsCache = {};
     var liveSessionDate = "";
@@ -820,6 +821,66 @@
         }
     }
 
+    function escapeHtml(s) {
+        return String(s == null ? "" : s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+    }
+
+    function fillTrapLiveDateSelect(days, selected) {
+        var sel = $("bfTrapLiveDate");
+        if (!sel) return;
+        var opts = (days || []).slice();
+        if (selected && opts.indexOf(selected) < 0) opts.unshift(selected);
+        sel.innerHTML = opts.map(function (d) {
+            return "<option value=\"" + escapeHtml(d) + "\"" + (d === selected ? " selected" : "") + ">" + escapeHtml(d) + "</option>";
+        }).join("");
+    }
+
+    function renderTrapLiveRows(rows) {
+        var tb = $("bfTrapLiveTable") && $("bfTrapLiveTable").querySelector("tbody");
+        if (!tb) return;
+        if (!rows || !rows.length) {
+            tb.innerHTML = "<tr><td colspan='8'>No webhook rows for this day</td></tr>";
+            return;
+        }
+        tb.innerHTML = rows.map(function (r) {
+            var raw = "";
+            try { raw = JSON.stringify(r.raw_payload, null, 2); } catch (_e) { raw = String(r.raw_payload); }
+            return "<tr>" +
+                "<td>" + escapeHtml(r.received_at_hms || "") + "</td>" +
+                "<td>" + escapeHtml(r.symbol || "—") + "</td>" +
+                "<td>" + (r.trigger_price != null ? escapeHtml(r.trigger_price) : "—") + "</td>" +
+                "<td>" + escapeHtml(r.triggered_at_raw || "—") + "</td>" +
+                "<td>" + escapeHtml(r.scan_name || "—") + "</td>" +
+                "<td>" + escapeHtml(r.parse_status || "—") + "</td>" +
+                "<td>" + escapeHtml(r.source_ip || "—") + "</td>" +
+                "<td><details class=\"bf-raw-details\"><summary>View Raw</summary><pre class=\"bf-raw-pre\">" +
+                escapeHtml(raw) + "</pre></details></td>" +
+                "</tr>";
+        }).join("");
+    }
+
+    async function loadTrapCeLive(dateStr) {
+        setStatus("Loading Trap-CE-Live…", false, "bfTrapLiveStatus");
+        var sel = $("bfTrapLiveDate");
+        var d = dateStr || (sel && sel.value) || "";
+        var url = TRAP_CE_LIVE_API + (d ? ("?date=" + encodeURIComponent(d)) : "");
+        try {
+            var res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+            var data = await parseJsonResponse(res);
+            if (!res.ok) throw new Error(data.detail || data.message || "Load failed");
+            fillTrapLiveDateSelect(data.days || [], data.date);
+            renderTrapLiveRows(data.rows || []);
+            setStatus("Loaded " + (data.count || 0) + " row(s)", false, "bfTrapLiveStatus");
+        } catch (e) {
+            setStatus(String(e), true, "bfTrapLiveStatus");
+            renderTrapLiveRows([]);
+        }
+    }
+
     async function loadTrapCe() {
         setStatus("Loading Trap-CE backtest…", false, "bfTrapStatus");
         try {
@@ -847,16 +908,19 @@
         var live = tab === "live";
         var prevclose = tab === "prevclose";
         var trapce = tab === "trapce";
+        var trapcelive = tab === "trapcelive";
         $("bfPanelPrimary").hidden = !primary;
         $("bfPanelHistory").hidden = !history;
         $("bfPanelLive").hidden = !live;
         if ($("bfPanelPrevclose")) $("bfPanelPrevclose").hidden = !prevclose;
         if ($("bfPanelTrapCe")) $("bfPanelTrapCe").hidden = !trapce;
+        if ($("bfPanelTrapCeLive")) $("bfPanelTrapCeLive").hidden = !trapcelive;
         $("bfTabPrimary").classList.toggle("active", primary);
         $("bfTabHistory").classList.toggle("active", history);
         $("bfTabLive").classList.toggle("active", live);
         if ($("bfTabPrevclose")) $("bfTabPrevclose").classList.toggle("active", prevclose);
         if ($("bfTabTrapCe")) $("bfTabTrapCe").classList.toggle("active", trapce);
+        if ($("bfTabTrapCeLive")) $("bfTabTrapCeLive").classList.toggle("active", trapcelive);
         document.querySelectorAll(".bf-primary-only").forEach(function (el) {
             el.style.display = primary ? "" : "none";
         });
@@ -865,6 +929,7 @@
         else if (history) loadHistory();
         else if (prevclose) loadPrevclose();
         else if (trapce) loadTrapCe();
+        else if (trapcelive) loadTrapCeLive();
         else if (live) loadLive();
     }
 
@@ -877,6 +942,13 @@
         }
         if ($("bfTabTrapCe")) {
             $("bfTabTrapCe").addEventListener("click", function () { switchTab("trapce"); });
+        }
+        if ($("bfTabTrapCeLive")) {
+            $("bfTabTrapCeLive").addEventListener("click", function () { switchTab("trapcelive"); });
+        }
+        var dateSel = $("bfTrapLiveDate");
+        if (dateSel) {
+            dateSel.addEventListener("change", function () { loadTrapCeLive(dateSel.value); });
         }
     }
 
@@ -896,6 +968,7 @@
             else if (!$("bfPanelLive").hidden) loadLive();
             else if ($("bfPanelPrevclose") && !$("bfPanelPrevclose").hidden) loadPrevclose();
             else if ($("bfPanelTrapCe") && !$("bfPanelTrapCe").hidden) loadTrapCe();
+            else if ($("bfPanelTrapCeLive") && !$("bfPanelTrapCeLive").hidden) loadTrapCeLive();
             else loadPrimary(null);
         });
         switchTab("live");

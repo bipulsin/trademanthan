@@ -84,6 +84,19 @@
     background: rgba(245, 158, 11, 0.15);
     color: #fde68a;
 }
+.bf-raw-details summary { cursor: pointer; color: #93c5fd; }
+.bf-raw-pre {
+    margin: 0.4rem 0 0;
+    max-width: 42rem;
+    max-height: 16rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.75rem;
+    background: rgba(0,0,0,0.35);
+    padding: 0.5rem;
+    border-radius: 4px;
+}
 .bf-hist-note, .bf-hist-sub {
     font-size: 0.84rem;
     opacity: 0.85;

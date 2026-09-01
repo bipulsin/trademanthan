@@ -27,6 +27,7 @@ from backend.services.breakfast_strategy.history import load_history
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import fetch_live_signals, fetch_session_lock, update_manual_capture
 from backend.services.breakfast_strategy.persist import fetch_trades
+from backend.services.trap_ce_live_webhook import fetch_live_webhook_rows, now_ist_second
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,15 @@ def _find_trap_ce_artifact() -> Optional[Path]:
         if p.is_file():
             return p
     return None
+
+
+@router.get("/trap-ce-live")
+def get_trap_ce_live(
+    session_date: Optional[date] = Query(None, alias="date", description="IST calendar date (default today)"),
+) -> Dict[str, Any]:
+    """Chartink Trap-CE Live webhook log. Independent of Trap-CE CSV backtest."""
+    sd = session_date or now_ist_second().date()
+    return fetch_live_webhook_rows(sd)
 
 
 @router.get("/trap-ce")
