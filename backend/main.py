@@ -183,7 +183,7 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Continuing without arbitrage scheduler")
 
         try:
-            logger.info("Starting Breakfast live scheduler (9:16–9:20 ticks, 9:20:30 freeze)...")
+            logger.info("Starting Breakfast live scheduler (9:16–9:19 ticks, 9:20:05 freeze)...")
             start_breakfast_live_scheduler()
             logger.info("✅ Breakfast live scheduler: STARTED")
         except Exception as e:

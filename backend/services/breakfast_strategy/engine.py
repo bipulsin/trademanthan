@@ -125,10 +125,16 @@ class TradeResult:
         }
 
 
-def nifty_bias_from_bar(bar: Dict[str, Any]) -> Tuple[str, float]:
-    """NIFTY first-5m close vs open; flat (0%) → long branch."""
+def nifty_bias_from_bar(bar: Dict[str, Any], *, missing: str = "positive") -> Tuple[str, float]:
+    """NIFTY first-5m close vs open; flat (0%) → long branch.
+
+    Default ``missing="positive"`` keeps backtest/Primary ranking (no-pct → LONG).
+    Live freeze must pass ``missing="unknown"`` so a missing bar is not a fake LONG.
+    """
     pct = bar_move_pct(bar)
     if pct is None:
+        if missing in ("unknown", "no_data"):
+            return "unknown", 0.0
         return "positive", 0.0
     if pct < 0:
         return "negative", float(pct)
@@ -325,6 +331,7 @@ def _simulate_exit_long(
     lot_size: int,
     pnl_cap_enabled: bool = False,
     monitor_from: Tuple[int, int] = (9, 25),
+    vwap_exit_from: Optional[Tuple[int, int]] = None,
 ) -> Tuple[datetime, float, str, Optional[float]]:
     bars = session_5m_bars_after_entry(candles, session_date, from_hhmm=monitor_from, to_hhmm=TIME_EXIT)
     vwap_by_t = session_vwap_by_bar_time(candles, session_date)
@@ -340,7 +347,8 @@ def _simulate_exit_long(
         if cap_px is not None and h >= cap_px:
             return t, cap_px, "pnl_cap", max_hi
         vwap = vwap_by_t.get(t)
-        if vwap and vwap > 0 and cl < vwap:
+        vwap_ok = vwap_exit_from is None or (t.hour, t.minute) >= vwap_exit_from
+        if vwap_ok and vwap and vwap > 0 and cl < vwap:
             px = cl if cl > 0 else entry_price
             return t, px, "vwap_breach", max_hi
         if cl <= sl_price:
@@ -366,6 +374,7 @@ def _simulate_exit_short(
     lot_size: int,
     pnl_cap_enabled: bool = False,
     monitor_from: Tuple[int, int] = (9, 25),
+    vwap_exit_from: Optional[Tuple[int, int]] = None,
 ) -> Tuple[datetime, float, str, Optional[float]]:
     bars = session_5m_bars_after_entry(candles, session_date, from_hhmm=monitor_from, to_hhmm=TIME_EXIT)
     vwap_by_t = session_vwap_by_bar_time(candles, session_date)
@@ -381,7 +390,8 @@ def _simulate_exit_short(
         if cap_px is not None and lo <= cap_px:
             return t, cap_px, "pnl_cap", min_lo
         vwap = vwap_by_t.get(t)
-        if vwap and vwap > 0 and cl > vwap:
+        vwap_ok = vwap_exit_from is None or (t.hour, t.minute) >= vwap_exit_from
+        if vwap_ok and vwap and vwap > 0 and cl > vwap:
             px = cl if cl > 0 else entry_price
             return t, px, "vwap_breach", min_lo
         if cl >= sl_price:

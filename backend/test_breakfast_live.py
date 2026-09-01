@@ -283,6 +283,84 @@ def test_build_live_state_frozen_loads_persisted(mock_load, _lock):
     assert out["from_persisted"]
 
 
+@patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state", return_value=None)
+@patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
+@patch(
+    "backend.services.breakfast_strategy.live.fetch_session_lock",
+    return_value={"lock_status": "failed", "failure_reason": "no_sectors_at_freeze"},
+)
+def test_failed_freeze_does_not_block_5m_preview(mock_lock, mock_off_cycle, _persist, _tick):
+    """Failed freeze must not stick in _FROZEN_STATE; /live still builds 5m off-cycle preview."""
+    from backend.services.breakfast_strategy.live import ingest_frozen_snapshot
+
+    _clear_frozen_live()
+    ingest_frozen_snapshot(
+        {
+            "session_date": "2026-08-31",
+            "state": "lock_failed",
+            "lock_failed": True,
+            "sectors": [],
+            "nifty": {"direction": "UNKNOWN", "bias": "unknown"},
+        }
+    )
+    from backend.services.breakfast_strategy import live as live_mod
+
+    assert "2026-08-31" not in live_mod._FROZEN_STATE
+    mock_off_cycle.return_value = {
+        "ok": True,
+        "state": "off_cycle",
+        "phase": "frozen",
+        "off_cycle": True,
+        "banner": "Off cycle data as of 31-Aug-2026 10:04",
+        "session_date": "2026-08-31",
+        "nifty": {"direction": "SHORT", "bias_pct": -0.2},
+        "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "TCS"}]}],
+    }
+    replay = IST.localize(datetime(2026, 8, 31, 10, 4))
+    out = build_live_state(replay_at=replay)
+    mock_off_cycle.assert_called_once()
+    assert out.get("lock_failed")
+    assert out["nifty"]["direction"] == "SHORT"
+    assert out["sectors"][0]["stocks"][0]["symbol"] == "TCS"
+
+
+def test_leftover_failed_frozen_cache_still_allows_preview():
+    """Guard: even a leftover failed cache entry must not skip off-cycle preview."""
+    from backend.services.breakfast_strategy import live as live_mod
+
+    _clear_frozen_live()
+    live_mod._FROZEN_STATE["2026-08-31"] = {
+        "session_date": "2026-08-31",
+        "state": "lock_failed",
+        "lock_failed": True,
+        "sectors": [],
+    }
+    with patch(
+        "backend.services.breakfast_strategy.live.fetch_session_lock",
+        return_value={"lock_status": "failed", "failure_reason": "no_data"},
+    ), patch(
+        "backend.services.breakfast_strategy.live._load_persisted_live_state",
+        return_value=None,
+    ), patch(
+        "backend.services.breakfast_strategy.live._tick_snapshot_for_session",
+        return_value=None,
+    ), patch(
+        "backend.services.breakfast_strategy.live.build_off_cycle_preview_state",
+        return_value={
+            "ok": True,
+            "state": "off_cycle",
+            "off_cycle": True,
+            "banner": "Off cycle",
+            "nifty": {"direction": "LONG"},
+            "sectors": [{"stocks": [{"symbol": "HDFCBANK"}]}],
+        },
+    ) as mock_off:
+        out = build_live_state(replay_at=IST.localize(datetime(2026, 8, 31, 10, 4)))
+    mock_off.assert_called_once()
+    assert out["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
+
+
 @patch("backend.services.breakfast_strategy.live_persist._insert_signal")
 @patch("backend.services.breakfast_strategy.live_persist.ensure_breakfast_live_signals_table")
 def test_persist_live_signals_idempotent(mock_ensure, mock_insert):

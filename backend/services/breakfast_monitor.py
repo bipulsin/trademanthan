@@ -35,8 +35,7 @@ _EXPECTED_LIVE_JOBS = frozenset(
         "breakfast_live_tick_17",
         "breakfast_live_tick_18",
         "breakfast_live_tick_19",
-        "breakfast_live_tick_20",
-        "breakfast_live_freeze_92030",
+        "breakfast_live_freeze_92005",
     }
 )
 _EXPECTED_PREV_CLOSE_JOBS = frozenset(
@@ -121,7 +120,7 @@ def format_preflight_telegram(status: Dict[str, Any]) -> str:
 
     live_ok = status.get("live_scheduler", {}).get("running")
     prev_ok = status.get("prev_close_scheduler", {}).get("running")
-    lines.append(f"• Live scheduler: {'running' if live_ok else 'DOWN'} (9:10 warmup, 9:16–9:20 ticks, 9:20:30 freeze)")
+    lines.append(f"• Live scheduler: {'running' if live_ok else 'DOWN'} (9:10 warmup, 9:16–9:19 ticks, 9:20:05 freeze)")
     lines.append(f"• Prev-close scheduler: {'running' if prev_ok else 'DOWN'}")
     lines.append(f"• Health: {'healthy' if status.get('health_ok') else 'unhealthy'}")
 
@@ -237,7 +236,7 @@ def build_post_session_report(session_date: Optional[str] = None) -> str:
     else:
         lines.append("• Freeze: no breakfast_session_lock row")
 
-    lines.append(f"• REST-vs-WS @9:20:30: {cross}")
+    lines.append(f"• REST-vs-WS @9:20:05: {cross}")
 
     repicks = stats.get("repicks") or []
     if repicks:

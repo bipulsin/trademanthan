@@ -17,8 +17,11 @@ from backend.services.breakfast_upstox_gate import (
 )
 from backend.services.breakfast_strategy.live_tick import (
     BREAKFAST_WS_1M_STALE_SEC,
+    FREEZE_AT,
+    SCHEDULER_TICK_MINUTES,
     TICK_MINUTES,
     _merge_today_ws_with_cached,
+    _resolve_candles_rest_5m,
     _resolve_candles_ws_primary,
     _upto_hhmm_for_tick,
     _ws_usable_for_forming,
@@ -72,6 +75,8 @@ def test_upto_hhmm_for_tick_minute_close():
 
 def test_tick_minutes_constant():
     assert TICK_MINUTES == (16, 17, 18, 19, 20)
+    assert SCHEDULER_TICK_MINUTES == (16, 17, 18, 19)
+    assert FREEZE_AT.hour == 9 and FREEZE_AT.minute == 20 and FREEZE_AT.second == 5
 
 
 def test_breakfast_ws_stale_sec_is_90():
@@ -133,8 +138,8 @@ def test_resolve_candles_ws_primary_fallback_per_instrument(mock_feed, mock_ws_b
     assert "NSE_FO|BANK" in candles
     assert mock_fetch.call_count == 1
     sources = {r["instrument_key"]: r["source"] for r in log}
-    assert sources["NSE_INDEX|Nifty 50"] == "ws"
-    assert sources["NSE_FO|BANK"] == "rest_fallback"
+    assert sources["NSE_INDEX|Nifty 50"] == "ws_1m"
+    assert sources["NSE_FO|BANK"] == "rest_1m"
 
 
 @patch("backend.services.upstox_market_feed.ensure_market_feed_running")
@@ -163,7 +168,7 @@ def test_tick_re_picks_sectors_each_minute(
     mock_indexes.return_value = ({}, {})
     mock_resolve.return_value = (
         {"NSE_INDEX|Nifty 50": [{"timestamp": "t", "open": 1, "high": 1, "low": 1, "close": 1}]},
-        [{"minute": 16, "instrument_key": "NSE_INDEX|Nifty 50", "source": "ws", "reason": None}],
+        [{"minute": 16, "instrument_key": "NSE_INDEX|Nifty 50", "source": "ws_1m", "reason": None}],
     )
     mock_select.return_value = MagicMock(
         long_side=True,
@@ -219,6 +224,9 @@ def test_freeze_cron_trigger_timezone_is_ist():
     tz_name = str(trigger.timezone)
     assert "Asia/Kolkata" in tz_name
     assert tz_name != "Etc/UTC"
+    next_fire = trigger.get_next_fire_time(None, IST.localize(datetime(2026, 9, 1, 9, 0, 0)))
+    assert next_fire is not None
+    assert next_fire.hour == 9 and next_fire.minute == 20 and next_fire.second == 5
 
 
 @patch("backend.services.breakfast_strategy.live_tick.run_breakfast_minute_tick")
@@ -226,6 +234,9 @@ def test_freeze_cron_trigger_timezone_is_ist():
 @patch("backend.services.breakfast_strategy.live_tick.fetch_session_lock", return_value=None)
 @patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
 def test_freeze_failure_ui_when_no_sectors(_trading, _lock, mock_persist_lock, mock_tick):
+    from backend.services.breakfast_strategy import live as live_mod
+
+    live_mod._FROZEN_STATE.clear()
     mock_tick.return_value = {"ok": True}
     with patch(
         "backend.services.breakfast_strategy.live_tick.get_live_tick_snapshot",
@@ -234,3 +245,113 @@ def test_freeze_failure_ui_when_no_sectors(_trading, _lock, mock_persist_lock, m
         out = run_breakfast_freeze_lock()
     assert out["lock_status"] == "failed"
     mock_persist_lock.assert_called()
+    assert "2026-08-31" not in live_mod._FROZEN_STATE
+
+
+@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
+def test_resolve_candles_freeze_uses_rest_5m_not_1m(mock_fetch, mock_5m, caplog):
+    from pathlib import Path
+
+    from backend.services.breakfast_strategy.live_tick import FREEZE_SOURCE_VALUES
+
+    session = date(2026, 9, 1)
+    bar_5m = {
+        "timestamp": "2026-09-01T09:15:00+05:30",
+        "open": 100,
+        "high": 101,
+        "low": 99,
+        "close": 100.5,
+        "volume": 10,
+    }
+    mock_5m.return_value = [bar_5m]
+    with caplog.at_level("INFO"):
+        candles, log = _resolve_candles_rest_5m(
+            MagicMock(),
+            Path("/tmp"),
+            ["NSE_INDEX|Nifty 50"],
+            session_date=session,
+            tick_minute=20,
+        )
+    mock_fetch.assert_not_called()
+    assert candles["NSE_INDEX|Nifty 50"] == [bar_5m]
+    assert log[0]["source"] == "rest_5m"
+    assert log[0]["source"] in FREEZE_SOURCE_VALUES
+    assert any("source=rest_5m" in r.message for r in caplog.records)
+
+
+@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
+def test_resolve_candles_none_when_5m_empty(mock_fetch, mock_5m, caplog):
+    from pathlib import Path
+
+    mock_5m.return_value = []
+    with caplog.at_level("INFO"):
+        _candles, log = _resolve_candles_rest_5m(
+            MagicMock(),
+            Path("/tmp"),
+            ["NSE_INDEX|Nifty 50"],
+            session_date=date(2026, 9, 1),
+            tick_minute=20,
+        )
+    mock_fetch.assert_not_called()
+    assert log[0]["source"] == "none"
+    assert any("source=none" in r.message for r in caplog.records)
+
+
+@patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
+@patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
+@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
+@patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
+@patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
+@patch("backend.services.breakfast_strategy.live_tick._all_sector_keys", return_value=[])
+@patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
+def test_minute_20_tick_does_not_call_1m(
+    _ux,
+    _sector_keys,
+    mock_indexes,
+    mock_load_sector,
+    _trading,
+    mock_5m,
+    mock_ws_resolve,
+    mock_fetch,
+):
+    mock_load_sector.return_value = {}
+    mock_indexes.return_value = ({}, {})
+    bar_5m = {
+        "timestamp": "2026-09-01T09:15:00+05:30",
+        "open": 100,
+        "high": 101,
+        "low": 99,
+        "close": 100.5,
+        "volume": 10,
+    }
+    mock_5m.return_value = [bar_5m]
+    with patch(
+        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
+        return_value=([], True),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._build_stock_overrides_from_1m",
+        return_value=({}, {}),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick.select_breakfast_picks",
+        return_value=None,
+    ):
+        out = run_breakfast_minute_tick(20)
+    assert out["ok"]
+    mock_ws_resolve.assert_not_called()
+    mock_fetch.assert_not_called()
+    assert mock_5m.call_count >= 1
+    assert out.get("data_source") == "rest_5m"
+
+
+def test_nifty_bias_unknown_not_long_when_missing_pct():
+    from backend.services.breakfast_strategy.engine import nifty_bias_from_bar
+
+    bar = {"open": 0, "high": 0, "low": 0, "close": 0}
+    default_bias, _ = nifty_bias_from_bar(bar)
+    assert default_bias == "positive"
+    unknown, pct = nifty_bias_from_bar(bar, missing="unknown")
+    assert unknown == "unknown"
+    assert pct == 0.0

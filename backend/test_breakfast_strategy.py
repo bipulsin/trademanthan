@@ -52,6 +52,14 @@ def test_flat_nifty_is_positive_bias():
     assert pct == 0.0
 
 
+def test_nifty_bias_missing_open_is_unknown_when_requested():
+    from backend.services.breakfast_strategy.engine import nifty_bias_from_bar
+
+    bar = _bar("2026-08-01T09:20:00+05:30", 0, 0, 0, 0)
+    assert nifty_bias_from_bar(bar)[0] == "positive"
+    assert nifty_bias_from_bar(bar, missing="unknown")[0] == "unknown"
+
+
 def test_long_tp_before_sl_same_candle():
     sd = date(2026, 8, 1)
     candles = [
@@ -142,6 +150,50 @@ def test_long_tracks_max_high_before_sl():
     assert kind == "vwap_breach"
     assert px == 98.5
     assert extreme == 103
+
+
+def test_vwap_exit_from_skips_0920_but_target_still_fires():
+    """DIAGNOSTIC helper: VWAP delay does not change default when vwap_exit_from is omitted."""
+    sd = date(2026, 8, 1)
+    candles = [
+        _bar("2026-08-01T09:15:00+05:30", 100, 101, 99, 100.5, v=1000),
+        _bar("2026-08-01T09:20:00+05:30", 100.5, 101, 99, 99.0, v=1000),
+        _bar("2026-08-01T09:25:00+05:30", 99.0, 102, 98.8, 101.5, v=1000),
+    ]
+    _t, px, kind, _e = _simulate_exit_long(
+        candles, sd, entry_price=100.0, sl_price=90.0, tp_price=200.0, lot_size=100, monitor_from=(9, 20)
+    )
+    assert kind == "vwap_breach"
+    assert px == 99.0
+    _t2, px2, kind2, _e2 = _simulate_exit_long(
+        candles,
+        sd,
+        entry_price=100.0,
+        sl_price=90.0,
+        tp_price=200.0,
+        lot_size=100,
+        monitor_from=(9, 20),
+        vwap_exit_from=(9, 25),
+    )
+    assert kind2 == "time_exit" or kind2 == "vwap_breach"
+    assert kind2 != "vwap_breach" or px2 != 99.0
+    candles_tp = [
+        _bar("2026-08-01T09:15:00+05:30", 100, 101, 99, 100, v=1000),
+        _bar("2026-08-01T09:20:00+05:30", 100, 111, 99, 99.0, v=1000),
+        _bar("2026-08-01T09:25:00+05:30", 99.0, 100, 98, 98.5, v=1000),
+    ]
+    _t3, px3, kind3, _e3 = _simulate_exit_long(
+        candles_tp,
+        sd,
+        entry_price=100.0,
+        sl_price=90.0,
+        tp_price=110.0,
+        lot_size=100,
+        monitor_from=(9, 20),
+        vwap_exit_from=(9, 25),
+    )
+    assert kind3 == "target_hit"
+    assert abs(px3 - 110.0) < 0.01
 
 
 def test_first_5m_bar_prefers_0915():

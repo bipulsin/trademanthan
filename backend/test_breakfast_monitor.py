@@ -42,8 +42,7 @@ def test_preflight_ok(mock_est, _warmup, mock_live, mock_prev, _health):
             "breakfast_live_tick_17",
             "breakfast_live_tick_18",
             "breakfast_live_tick_19",
-            "breakfast_live_tick_20",
-            "breakfast_live_freeze_92030",
+            "breakfast_live_freeze_92005",
         ],
     }
     mock_prev.return_value = {

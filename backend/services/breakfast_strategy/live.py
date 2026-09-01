@@ -106,9 +106,16 @@ def _live_phase(now: datetime) -> str:
 
 
 def ingest_frozen_snapshot(payload: Dict[str, Any]) -> None:
-    """Called by live_tick freeze job to sync in-memory frozen state."""
+    """Called by live_tick freeze job to sync in-memory frozen state.
+
+    Successful locks are sticky. Failed freezes must not be cached here or
+    ``build_live_state`` would skip off-cycle 5m preview / later backfill.
+    """
     cache_key = str(payload.get("session_date") or "")[:10]
     if not cache_key:
+        return
+    if payload.get("lock_failed") or str(payload.get("state") or "") == "lock_failed":
+        logger.info("breakfast skip sticky _FROZEN_STATE for failed freeze session=%s", cache_key)
         return
     with _LOCK:
         _FROZEN_STATE[cache_key] = dict(payload)
@@ -224,9 +231,13 @@ def _last_session_snapshot(now: datetime, *, banner: str) -> Dict[str, Any]:
     session_key = now.date().isoformat()
     with _LOCK:
         snap = dict(_LAST_SESSION_STATE) if _LAST_SESSION_STATE else None
+        if snap and (snap.get("lock_failed") or str(snap.get("state") or "") == "lock_failed"):
+            snap = None
         if not snap and _FROZEN_STATE:
             latest_key = max(_FROZEN_STATE.keys())
             snap = dict(_FROZEN_STATE[latest_key])
+            if snap.get("lock_failed") or str(snap.get("state") or "") == "lock_failed":
+                snap = None
     if not snap:
         persisted = _load_persisted_live_state(session_key)
         if persisted:
@@ -518,7 +529,7 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
     if phase == "frozen" or now.time() >= FREEZE_AFTER:
         with _LOCK:
             cached = _FROZEN_STATE.get(cache_key)
-        if cached:
+        if cached and not (cached.get("lock_failed") or str(cached.get("state") or "") == "lock_failed"):
             return _frozen_client_payload(cached, now)
 
         lock_row = fetch_session_lock(cache_key)

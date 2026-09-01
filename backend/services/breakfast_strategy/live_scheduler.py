@@ -1,4 +1,4 @@
-"""APScheduler jobs for Breakfast live 1m ticks (9:16–9:20) and 9:20:30 freeze."""
+"""APScheduler jobs for Breakfast live 1m ticks (9:16–9:19) and 9:20:05 freeze."""
 from __future__ import annotations
 
 import logging
@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from backend.services.breakfast_strategy.live_tick import (
     FREEZE_AT,
+    SCHEDULER_TICK_MINUTES,
     run_breakfast_freeze_lock,
     run_breakfast_minute_tick,
     run_breakfast_ws_warmup,
@@ -23,7 +24,7 @@ _IST = "Asia/Kolkata"
 
 
 def _freeze_cron_trigger() -> CronTrigger:
-    """9:20:30 IST weekday freeze. Timezone must be explicit: CronTrigger defaults to local TZ, not the scheduler's."""
+    """9:20:05 IST weekday freeze. Timezone must be explicit: CronTrigger defaults to local TZ, not the scheduler's."""
     return CronTrigger(
         day_of_week="mon-fri",
         hour=FREEZE_AT.hour,
@@ -82,7 +83,7 @@ class BreakfastLiveScheduler:
             coalesce=True,
             misfire_grace_time=300,
         )
-        for minute in (16, 17, 18, 19, 20):
+        for minute in SCHEDULER_TICK_MINUTES:
             self.scheduler.add_job(
                 _tick_job,
                 CronTrigger(day_of_week="mon-fri", hour=9, minute=minute, second=5, timezone=_IST),
@@ -96,7 +97,7 @@ class BreakfastLiveScheduler:
         self.scheduler.add_job(
             _freeze_job,
             _freeze_cron_trigger(),
-            id="breakfast_live_freeze_92030",
+            id="breakfast_live_freeze_92005",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -104,7 +105,7 @@ class BreakfastLiveScheduler:
         )
         self.scheduler.start()
         self._started = True
-        logger.info("Breakfast live scheduler started (9:10 WS warmup, 9:16–9:20 ticks, 9:20:30 freeze IST)")
+        logger.info("Breakfast live scheduler started (9:10 WS warmup, 9:16–9:19 ticks, 9:20:05 freeze IST)")
 
     def stop(self) -> None:
         if not self._started:
