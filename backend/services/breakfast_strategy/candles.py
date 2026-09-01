@@ -192,6 +192,46 @@ def fetch_1m_parallel(
     return out
 
 
+def fetch_5m_parallel(
+    upstox: Any,
+    cache_dir: Path,
+    instrument_keys: List[str],
+    *,
+    session_date: date,
+    max_workers: int = 8,
+    throttle_sec: float = 0.0,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Fetch/update minutes/5 for many keys concurrently (Breakfast freeze)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    keys = [str(k).strip() for k in instrument_keys if str(k or "").strip()]
+    if not keys:
+        return {}
+
+    def _one(ik: str) -> tuple[str, List[Dict[str, Any]]]:
+        return ik, ensure_5m_cached(
+            upstox,
+            cache_dir,
+            ik,
+            range_end=session_date,
+            session_dates=[session_date],
+            force=True,
+            throttle_sec=throttle_sec,
+        )
+
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    workers = max(1, min(int(max_workers), len(keys)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_one, ik) for ik in keys]
+        for fut in as_completed(futures):
+            try:
+                ik, candles = fut.result()
+                out[ik] = candles
+            except Exception as e:
+                logger.warning("breakfast 5m parallel fetch failed: %s", e)
+    return out
+
+
 def forming_bar_from_1m_upto(
     bars_1m: List[Dict[str, Any]],
     session_date: date,
@@ -261,6 +301,7 @@ def ensure_5m_cached(
     range_start: Optional[date] = None,
     session_dates: Optional[List[date]] = None,
     force: bool = False,
+    throttle_sec: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     ik = (instrument_key or "").strip()
     if not ik:
@@ -277,7 +318,8 @@ def ensure_5m_cached(
     days_back = CANDLE_DAYS_BACK
     if range_start is not None:
         days_back = max(days_back, (range_end - range_start).days + 10)
-    fresh = fetch_5m_range(upstox, ik, range_end=range_end, days_back=days_back)
+    tsec = FETCH_THROTTLE_SEC if throttle_sec is None else float(throttle_sec)
+    fresh = fetch_5m_range(upstox, ik, range_end=range_end, days_back=days_back, throttle_sec=tsec)
     merged = _merge_candles(load_cached_5m(cache_dir, ik) if not force else [], fresh)
     if merged:
         save_cached_5m(cache_dir, ik, merged)

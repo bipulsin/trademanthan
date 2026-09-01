@@ -312,3 +312,57 @@ def test_live_payload_drops_wrong_5m_color_even_with_wick():
     )
     stocks = payload["sectors"][0]["stocks"]
     assert [s["symbol"] for s in stocks] == ["AAA"]
+
+
+def test_pick_stocks_ranks_long_by_highest_prev_close_pct():
+    from backend.services.breakfast_strategy.universe import StockRow, pick_stocks_in_sector
+
+    members = [{"stock": "LOW", "sector": "IT", "sector_index": "IT"}, {"stock": "HIGH", "sector": "IT", "sector_index": "IT"}]
+    bars = {
+        "LOW": {"open": 100, "close": 101, "volume": 1},
+        "HIGH": {"open": 100, "close": 103, "volume": 1},
+    }
+    pcts = {"LOW": 1.0, "HIGH": 3.0}
+    rows = {
+        "LOW": StockRow("LOW", "LOW", "LOW", "IT", "IT", "NSE_FO|LOW", 50, "futures"),
+        "HIGH": StockRow("HIGH", "HIGH", "HIGH", "IT", "IT", "NSE_FO|HIGH", 50, "futures"),
+    }
+    out = pick_stocks_in_sector(
+        members,
+        bars,
+        pcts,
+        session_date=date(2026, 9, 1),
+        fut_by_und={},
+        eq_by_symbol={},
+        long_side=True,
+        top_n=2,
+        session_rows=rows,
+    )
+    assert [r.stock for r in out] == ["HIGH", "LOW"]
+
+
+def test_pick_stocks_ranks_short_by_lowest_prev_close_pct():
+    from backend.services.breakfast_strategy.universe import StockRow, pick_stocks_in_sector
+
+    members = [{"stock": "MILD", "sector": "IT", "sector_index": "IT"}, {"stock": "DEEP", "sector": "IT", "sector_index": "IT"}]
+    bars = {
+        "MILD": {"open": 100, "close": 99, "volume": 1},
+        "DEEP": {"open": 100, "close": 97, "volume": 1},
+    }
+    pcts = {"MILD": -1.0, "DEEP": -3.0}
+    rows = {
+        "MILD": StockRow("MILD", "MILD", "MILD", "IT", "IT", "NSE_FO|MILD", 50, "futures"),
+        "DEEP": StockRow("DEEP", "DEEP", "DEEP", "IT", "IT", "NSE_FO|DEEP", 50, "futures"),
+    }
+    out = pick_stocks_in_sector(
+        members,
+        bars,
+        pcts,
+        session_date=date(2026, 9, 1),
+        fut_by_und={},
+        eq_by_symbol={},
+        long_side=False,
+        top_n=2,
+        session_rows=rows,
+    )
+    assert [r.stock for r in out] == ["DEEP", "MILD"]

@@ -110,6 +110,7 @@ def select_breakfast_picks_prevclose(
     sectors_to_pick: int = PREVCLOSE_SECTORS_TO_PICK,
     stocks_per_sector: int = STOCKS_PER_SECTOR,
     spot_proxy_fallback: bool = False,
+    sector_books: Optional[List[Tuple[str, bool]]] = None,
 ) -> Optional[BreakfastSelection]:
     """Same stock picker/exits as engine.select_breakfast_picks; Nifty/sectors vs prev close."""
     resolved_nifty = nifty_bar or first_5m_bar(nifty_candles, session_date)
@@ -143,11 +144,35 @@ def select_breakfast_picks_prevclose(
             if prev is not None:
                 sector_prev[skey] = prev
 
-    ranked = rank_sectors_vs_prev_close(
+    ranked_desc = rank_sectors_vs_prev_close(
+        sector_bars, sector_prev, eligible_keys=eligible, descending=True
+    )
+    ranked_by_bias = rank_sectors_vs_prev_close(
         sector_bars, sector_prev, eligible_keys=eligible, descending=long_side
     )
-    top_sectors = ranked[: max(1, int(sectors_to_pick))]
-    if not top_sectors:
+    books: List[Tuple[str, float, float, bool]] = []
+    if sector_books:
+        lookup = {skey: (pct, vol) for skey, pct, vol in ranked_desc}
+        for skey, book_long in sector_books:
+            bar = sector_bars.get(skey)
+            if not bar:
+                continue
+            if skey in lookup:
+                pct, vol = lookup[skey]
+            else:
+                prev = sector_prev.get(skey)
+                pct = 0.0
+                if prev and prev > 0:
+                    _, _, _, cl, _ = candle_ohlcv(bar)
+                    mp = move_pct_vs_prev_close(float(cl), float(prev))
+                    if mp is not None:
+                        pct = float(mp)
+                vol = float(bar_volume(bar))
+            books.append((skey, float(pct), float(vol), bool(book_long)))
+    else:
+        top_sectors = ranked_by_bias[: max(1, int(sectors_to_pick))]
+        books = [(skey, pct, vol, long_side) for skey, pct, vol in top_sectors]
+    if not books:
         return None
 
     stock_bars: Dict[str, Dict[str, Any]] = {}
@@ -160,7 +185,7 @@ def select_breakfast_picks_prevclose(
     anchor_overrides = anchor_bar_overrides or {}
     stock_prev_map = stock_prev_closes or {}
 
-    picked_keys = {skey for skey, _p, _v in top_sectors}
+    picked_keys = {skey for skey, _p, _v, _ls in books}
     for skey in picked_keys:
         for m in stocks_by_sector.get(skey, []):
             sym = str(m.get("stock") or "").upper()
@@ -202,7 +227,7 @@ def select_breakfast_picks_prevclose(
                 anchor_bars[sym] = ab
 
     sector_picks: List[BreakfastSectorPick] = []
-    for s_rank, (skey, spct, svol) in enumerate(top_sectors, start=1):
+    for s_rank, (skey, spct, svol, book_long) in enumerate(books, start=1):
         members = stocks_by_sector.get(skey, [])
         picks = pick_stocks_in_sector(
             members,
@@ -211,7 +236,7 @@ def select_breakfast_picks_prevclose(
             session_date=session_date,
             fut_by_und=fut_by_und,
             eq_by_symbol=eq_by_symbol,
-            long_side=long_side,
+            long_side=book_long,
             move_cap=STOCK_MOVE_CAP_PCT,
             top_n=stocks_per_sector,
             session_rows=session_rows if spot_proxy_fallback else None,
@@ -240,6 +265,7 @@ def select_breakfast_picks_prevclose(
                 sector_move_pct=float(spct),
                 sector_volume=float(svol),
                 stocks=stock_picks,
+                long_side=book_long,
             )
         )
 
@@ -248,7 +274,7 @@ def select_breakfast_picks_prevclose(
         nifty_bias=bias,
         nifty_bias_pct=bias_pct,
         long_side=long_side,
-        ranked_sectors=ranked,
+        ranked_sectors=ranked_by_bias if not sector_books else ranked_desc,
         sector_picks=sector_picks,
         sym_to_candles=sym_to_candles,
         stock_bars=stock_bars,

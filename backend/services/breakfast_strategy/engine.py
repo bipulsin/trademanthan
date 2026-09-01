@@ -162,6 +162,7 @@ class BreakfastSectorPick:
     sector_move_pct: float
     sector_volume: float
     stocks: List[BreakfastStockPick]
+    long_side: Optional[bool] = None
 
 
 @dataclass

@@ -16,6 +16,7 @@ from backend.services.breakfast_strategy.candles import (
     default_cache_dir,
     ensure_5m_cached,
     fetch_1m_parallel,
+    fetch_5m_parallel,
     first_5m_bar,
     forming_bar_from_1m_upto,
     load_cached_1m,
@@ -383,31 +384,20 @@ def _resolve_candles_rest_5m(
     session_date: date,
     tick_minute: int,
 ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
-    """REST minutes/5 only — freeze / minute-20 lock snapshot."""
+    """REST minutes/5 only — freeze / minute-20 lock snapshot. Parallel HTTP."""
     keys = [str(k).strip() for k in instrument_keys if str(k or "").strip()]
     candles_out: Dict[str, List[Dict[str, Any]]] = {}
     source_log: List[Dict[str, Any]] = []
+    fetched = fetch_5m_parallel(ux, cache_dir, keys, session_date=session_date, throttle_sec=0.0)
     for ik in keys:
-        try:
-            candles_5m = ensure_5m_cached(
-                ux,
-                cache_dir,
-                ik,
-                range_end=session_date,
-                session_dates=[session_date],
-                force=True,
-            )
-        except Exception as e:
-            logger.warning("breakfast rest_5m fetch failed %s: %s", ik, e)
-            candles_5m = []
+        candles_5m = fetched.get(ik) or []
         bar_5m = first_5m_bar(candles_5m, session_date)
+        candles_out[ik] = candles_5m
         if bar_5m:
-            candles_out[ik] = candles_5m
             source_log.append(
                 {"minute": tick_minute, "instrument_key": ik, "source": "rest_5m", "reason": None}
             )
         else:
-            candles_out[ik] = candles_5m
             source_log.append(
                 {
                     "minute": tick_minute,
@@ -538,6 +528,65 @@ def _rank_picked_sectors(
     return [skey for skey, _, _ in ranked[:take]], long_side
 
 
+def _gainer_loser_books(
+    *,
+    session_date: date,
+    candles: Dict[str, List[Dict[str, Any]]],
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    fut_by_und: Dict[str, List[Dict[str, Any]]],
+    eq_by_symbol: Dict[str, Dict[str, Any]],
+    sector_prev_closes: Optional[Dict[str, float]] = None,
+    nifty_prev_close: Optional[float] = None,
+) -> List[Tuple[str, bool]]:
+    """Top gainer LONG, top loser SHORT. One sector if they collapse or Nifty-bias fallback."""
+    eligible = fo_eligible_sector_keys(
+        stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
+    )
+    sector_bars: Dict[str, Dict[str, Any]] = {}
+    sector_prev: Dict[str, float] = dict(sector_prev_closes or {})
+    for skey in eligible:
+        bar = first_5m_bar(candles.get(skey, []), session_date)
+        if bar:
+            sector_bars[skey] = bar
+        if skey not in sector_prev:
+            prev = prev_session_close(candles.get(skey, []), session_date)
+            if prev is not None:
+                sector_prev[skey] = prev
+    ranked = rank_sectors_vs_prev_close(
+        sector_bars, sector_prev, eligible_keys=eligible, descending=True
+    )
+    if not ranked:
+        return []
+    gainer_key = ranked[0][0]
+    loser_key = ranked[-1][0]
+    if LIVE_SECTORS_TO_PICK >= 2 and gainer_key != loser_key:
+        return [(gainer_key, True), (loser_key, False)]
+    nifty_bar = first_5m_bar(candles.get(NIFTY50_KEY, []), session_date)
+    nifty_prev = nifty_prev_close if nifty_prev_close and nifty_prev_close > 0 else prev_session_close(
+        candles.get(NIFTY50_KEY, []), session_date
+    )
+    bias, _ = nifty_bias_from_bar_vs_prev_close(nifty_bar or {}, nifty_prev, missing="unknown")
+    if bias == "negative":
+        return [(loser_key, False)]
+    return [(gainer_key, True)]
+
+
+def _members_for_books(
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    wick_by_symbol: Dict[str, str],
+    books: List[Tuple[str, bool]],
+) -> Dict[str, List[Dict[str, str]]]:
+    out: Dict[str, List[Dict[str, str]]] = {}
+    for skey, long_side in books:
+        filtered = filter_sector_members_by_wick(
+            {skey: stocks_by_sector.get(skey, [])},
+            wick_by_symbol,
+            long_side=long_side,
+        )
+        out[skey] = filtered.get(skey, [])
+    return out
+
+
 def _build_stock_overrides_from_1m(
     *,
     symbols: List[str],
@@ -655,16 +704,18 @@ def _build_payload_from_selection(
     sectors_out: List[Dict[str, Any]] = []
     if sel:
         for sp in sel.sector_picks:
+            sp_long = sel.long_side if getattr(sp, "long_side", None) is None else bool(sp.long_side)
+            sp_dir = "LONG" if sp_long else "SHORT"
             raw_stocks = [
                 _serialize_stock_pick(
                     s,
-                    long_side=long_side,
+                    long_side=sp_long,
                     wick=wicks.get(str(s.row.stock or "").upper(), WICK_NONE),
                 )
                 for s in sp.stocks
             ]
             stocks = filter_live_stocks_by_wick_and_color(
-                raw_stocks, direction=direction, wick_by_symbol=wicks
+                raw_stocks, direction=sp_dir, wick_by_symbol=wicks
             )
             sectors_out.append(
                 {
@@ -672,7 +723,7 @@ def _build_payload_from_selection(
                     "sector_label": _sector_label(sp.sector_key),
                     "sector_rank": sp.sector_rank,
                     "move_pct": round(sp.sector_move_pct, 3),
-                    "direction": "LONG" if long_side else "SHORT",
+                    "direction": sp_dir,
                     "volume": sp.sector_volume,
                     "stocks": stocks,
                 }
@@ -781,40 +832,75 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             cache.candles_1m.get(NIFTY50_KEY, []), session_date
         )
         prev_picked = list(cache.picked_sector_keys)
-        picked, _long = _rank_picked_sectors(
-            session_date=session_date,
-            candles_1m=cache.candles_1m,
-            stocks_by_sector=stocks_by_sector,
-            fut_by_und=fut_by_und,
-            eq_by_symbol=eq_by_symbol,
-            upto_hhmm=upto_hhmm,
-            nifty_prev_close=nifty_prev,
-            sector_prev_closes=bench_prev,
-        )
-        cache.picked_sector_keys = picked
-        sectors_changed = picked != prev_picked
-        if sectors_changed or not cache.stock_symbols_by_sector:
+        sector_books: List[Tuple[str, bool]] = []
+        wick_members: Dict[str, List[Dict[str, str]]] = {}
+        if freeze_5m:
+            sector_books = _gainer_loser_books(
+                session_date=session_date,
+                candles=cache.candles_1m,
+                stocks_by_sector=stocks_by_sector,
+                fut_by_und=fut_by_und,
+                eq_by_symbol=eq_by_symbol,
+                sector_prev_closes=bench_prev,
+                nifty_prev_close=nifty_prev,
+            )
+            picked = [skey for skey, _ls in sector_books]
+            wick_members = _members_for_books(stocks_by_sector, stock_wicks, sector_books)
+            cache.picked_sector_keys = picked
             sym_map, stock_iks = _resolve_stock_keys(
-                picked, stocks_by_sector, session_date, fut_by_und, eq_by_symbol
+                picked, wick_members, session_date, fut_by_und, eq_by_symbol
             )
             cache.stock_symbols_by_sector = sym_map
             cache.instrument_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys + stock_iks))
-            if sectors_changed:
-                stock_n = sum(len(v) for v in sym_map.values())
-                logger.info(
-                    "breakfast sector re-pick %s: %s -> %s stocks=%s",
-                    cache_key,
-                    prev_picked,
-                    picked,
-                    stock_n,
-                )
+            logger.info(
+                "breakfast freeze rest_budget indexes=%s stocks=%s books=%s",
+                len(index_keys),
+                len(stock_iks),
+                [(s, "LONG" if lg else "SHORT") for s, lg in sector_books],
+            )
+            if picked != prev_picked:
                 _record_sector_repick(
                     cache_key,
                     minute=minute,
                     prev_picked=prev_picked,
                     picked=picked,
-                    stock_count=stock_n,
+                    stock_count=sum(len(v) for v in sym_map.values()),
                 )
+        else:
+            picked, _long = _rank_picked_sectors(
+                session_date=session_date,
+                candles_1m=cache.candles_1m,
+                stocks_by_sector=stocks_by_sector,
+                fut_by_und=fut_by_und,
+                eq_by_symbol=eq_by_symbol,
+                upto_hhmm=upto_hhmm,
+                nifty_prev_close=nifty_prev,
+                sector_prev_closes=bench_prev,
+            )
+            cache.picked_sector_keys = picked
+            sectors_changed = picked != prev_picked
+            if sectors_changed or not cache.stock_symbols_by_sector:
+                sym_map, stock_iks = _resolve_stock_keys(
+                    picked, stocks_by_sector, session_date, fut_by_und, eq_by_symbol
+                )
+                cache.stock_symbols_by_sector = sym_map
+                cache.instrument_keys = list(dict.fromkeys([NIFTY50_KEY] + sector_keys + stock_iks))
+                if sectors_changed:
+                    stock_n = sum(len(v) for v in sym_map.values())
+                    logger.info(
+                        "breakfast sector re-pick %s: %s -> %s stocks=%s",
+                        cache_key,
+                        prev_picked,
+                        picked,
+                        stock_n,
+                    )
+                    _record_sector_repick(
+                        cache_key,
+                        minute=minute,
+                        prev_picked=prev_picked,
+                        picked=picked,
+                        stock_count=stock_n,
+                    )
         stock_iks = [
             ik
             for ik in cache.instrument_keys
@@ -883,16 +969,46 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             nifty_unknown = True
 
         sel = None
-        if not nifty_unknown:
+        bar_map = {
+            str(sym).strip().upper(): ov[0]
+            for sym, ov in (stock_signal_overrides or {}).items()
+            if ov and ov[0]
+        }
+        if freeze_5m and sector_books:
+            stocks_for_pick: Dict[str, List[Dict[str, str]]] = {}
+            for skey, book_long in sector_books:
+                stocks_for_pick.update(
+                    filter_sector_members_by_first_5m_color(
+                        {skey: wick_members.get(skey, [])},
+                        bar_map,
+                        long_side=book_long,
+                    )
+                )
+            sel = select_breakfast_picks_prevclose(
+                session_date,
+                nifty_candles=cache.candles_1m.get(NIFTY50_KEY, []),
+                sector_candles=sector_candles_5m_compat,
+                stock_candles_by_key=stock_candles_by_key,
+                stocks_by_sector=stocks_for_pick,
+                fut_by_und=fut_by_und,
+                eq_by_symbol=eq_by_symbol,
+                upstox=ux,
+                nifty_bar=nifty_bar,
+                sector_bar_overrides=sector_overrides or None,
+                stock_signal_overrides=stock_signal_overrides or None,
+                anchor_bar_overrides=anchor_overrides or None,
+                nifty_prev_close=nifty_prev,
+                sector_prev_closes=bench_prev,
+                stock_prev_closes=stock_prev,
+                sectors_to_pick=LIVE_SECTORS_TO_PICK,
+                stocks_per_sector=LIVE_STOCKS_PER_SECTOR,
+                sector_books=sector_books,
+            )
+        elif not nifty_unknown:
             long_side_pick = _nb == "positive"
             stocks_for_pick = filter_sector_members_by_wick(
                 stocks_by_sector, stock_wicks, long_side=long_side_pick
             )
-            bar_map = {
-                str(sym).strip().upper(): ov[0]
-                for sym, ov in (stock_signal_overrides or {}).items()
-                if ov and ov[0]
-            }
             stocks_for_pick = filter_sector_members_by_first_5m_color(
                 stocks_for_pick, bar_map, long_side=long_side_pick
             )
@@ -930,6 +1046,10 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             nifty_prev_close=nifty_prev,
             wick_by_symbol=stock_wicks,
         )
+        payload["rest_call_budget"] = {
+            "indexes": len(index_keys),
+            "stocks": len(stock_iks),
+        }
         if elapsed > MAX_TICK_SEC:
             payload["tick_slow"] = True
             logger.warning("breakfast tick :%02d took %.1fs (>%.0fs)", minute, elapsed, MAX_TICK_SEC)
@@ -946,6 +1066,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             "sectors": len(payload.get("sectors") or []),
             "session_date": cache_key,
             "data_source": data_source,
+            "rest_call_budget": payload.get("rest_call_budget"),
             "ws_count": sum(1 for r in tick_source_log if r.get("source") == "ws_1m"),
             "rest_fallback_count": sum(
                 1 for r in tick_source_log if r.get("source") in ("rest_1m", "rest_5m", "none")

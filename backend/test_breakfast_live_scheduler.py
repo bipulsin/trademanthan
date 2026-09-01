@@ -250,7 +250,7 @@ def test_freeze_failure_ui_when_no_sectors(_trading, _lock, mock_persist_lock, m
     assert "2026-08-31" not in live_mod._FROZEN_STATE
 
 
-@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
 @patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
 def test_resolve_candles_freeze_uses_rest_5m_not_1m(mock_fetch, mock_5m, caplog):
     from pathlib import Path
@@ -266,7 +266,7 @@ def test_resolve_candles_freeze_uses_rest_5m_not_1m(mock_fetch, mock_5m, caplog)
         "close": 100.5,
         "volume": 10,
     }
-    mock_5m.return_value = [bar_5m]
+    mock_5m.return_value = {"NSE_INDEX|Nifty 50": [bar_5m]}
     with caplog.at_level("INFO"):
         candles, log = _resolve_candles_rest_5m(
             MagicMock(),
@@ -282,12 +282,12 @@ def test_resolve_candles_freeze_uses_rest_5m_not_1m(mock_fetch, mock_5m, caplog)
     assert any("source=rest_5m" in r.message for r in caplog.records)
 
 
-@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
 @patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
 def test_resolve_candles_none_when_5m_empty(mock_fetch, mock_5m, caplog):
     from pathlib import Path
 
-    mock_5m.return_value = []
+    mock_5m.return_value = {"NSE_INDEX|Nifty 50": []}
     with caplog.at_level("INFO"):
         _candles, log = _resolve_candles_rest_5m(
             MagicMock(),
@@ -303,7 +303,7 @@ def test_resolve_candles_none_when_5m_empty(mock_fetch, mock_5m, caplog):
 
 @patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
 @patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
-@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
 @patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
@@ -331,10 +331,10 @@ def test_minute_20_tick_does_not_call_1m(
         "close": 100.5,
         "volume": 10,
     }
-    mock_5m.return_value = [bar_5m]
+    mock_5m.return_value = {"NSE_INDEX|Nifty 50": [bar_5m]}
     with patch(
-        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
-        return_value=([], True),
+        "backend.services.breakfast_strategy.live_tick._gainer_loser_books",
+        return_value=[],
     ), patch(
         "backend.services.breakfast_strategy.live_tick._build_stock_overrides_from_1m",
         return_value=({}, {}),
@@ -363,7 +363,7 @@ def test_nifty_bias_unknown_not_long_when_missing_pct():
 
 @patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
 @patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
-@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
 @patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
@@ -391,10 +391,13 @@ def test_minute_20_fetches_selected_stocks_via_rest_5m(
         "close": 100.5,
         "volume": 10,
     }
-    mock_5m.return_value = [bar_5m]
+    mock_5m.side_effect = lambda ux, cache_dir, keys, **kw: {k: [bar_5m] for k in keys}
     with patch(
-        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
-        return_value=(["NSE_INDEX|Nifty Bank"], True),
+        "backend.services.breakfast_strategy.live_tick._gainer_loser_books",
+        return_value=[("NSE_INDEX|Nifty Bank", True)],
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._members_for_books",
+        return_value={"NSE_INDEX|Nifty Bank": [{"stock": "HDFCBANK"}]},
     ), patch(
         "backend.services.breakfast_strategy.live_tick._resolve_stock_keys",
         return_value=({"NSE_INDEX|Nifty Bank": ["HDFCBANK"]}, ["NSE_FO|HDFCBANK"]),
@@ -409,10 +412,11 @@ def test_minute_20_fetches_selected_stocks_via_rest_5m(
     assert out["ok"]
     mock_ws_resolve.assert_not_called()
     mock_fetch.assert_not_called()
-    fetched = [c.args[2] for c in mock_5m.call_args_list]
-    assert "NSE_INDEX|Nifty 50" in fetched
-    assert "NSE_INDEX|Nifty Bank" in fetched
-    assert "NSE_FO|HDFCBANK" in fetched
+    fetched_batches = [c.args[2] for c in mock_5m.call_args_list]
+    flat = [ik for batch in fetched_batches for ik in batch]
+    assert "NSE_INDEX|Nifty 50" in flat
+    assert "NSE_INDEX|Nifty Bank" in flat
+    assert "NSE_FO|HDFCBANK" in flat
     assert out.get("data_source") == "rest_5m"
 
 
@@ -437,3 +441,144 @@ def test_live_payload_nifty_pct_uses_prev_close_not_auction():
     assert payload["nifty"]["bias"] == "positive"
     assert payload["nifty"]["bias_pct"] == round((101.0 - 50.0) / 50.0 * 100.0, 3)
     assert payload["nifty"]["bias_pct"] != 1.0
+
+
+def test_gainer_loser_books_two_sectors():
+    from backend.services.breakfast_strategy.live_tick import _gainer_loser_books
+
+    bank = "NSE_INDEX|Nifty Pvt Bank"
+    it = "NSE_INDEX|Nifty IT"
+    session = date(2026, 9, 1)
+    candles = {
+        "NSE_INDEX|Nifty 50": [
+            {"timestamp": "2026-09-01T09:15:00+05:30", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1}
+        ],
+        bank: [
+            {"timestamp": "2026-09-01T09:15:00+05:30", "open": 100, "high": 104, "low": 99, "close": 103, "volume": 1}
+        ],
+        it: [
+            {"timestamp": "2026-09-01T09:15:00+05:30", "open": 100, "high": 101, "low": 96, "close": 97, "volume": 1}
+        ],
+    }
+    stocks = {bank: [{"stock": "AAA"}], it: [{"stock": "CCC"}]}
+    prev = {"NSE_INDEX|Nifty 50": 100.0, bank: 100.0, it: 100.0}
+    with patch(
+        "backend.services.breakfast_strategy.live_tick.fo_eligible_sector_keys",
+        return_value={bank, it},
+    ):
+        books = _gainer_loser_books(
+            session_date=session,
+            candles=candles,
+            stocks_by_sector=stocks,
+            fut_by_und={},
+            eq_by_symbol={},
+            sector_prev_closes=prev,
+            nifty_prev_close=100.0,
+        )
+    assert books == [(bank, True), (it, False)]
+
+
+def test_members_for_books_uses_db_wick_only():
+    from backend.services.breakfast_prev_close import WICK_LONG_DOWN, WICK_LONG_UP
+    from backend.services.breakfast_strategy.live_tick import _members_for_books
+
+    bank = "NSE_INDEX|Nifty Bank"
+    it = "NSE_INDEX|Nifty IT"
+    members = {
+        bank: [{"stock": "AAA"}, {"stock": "BBB"}],
+        it: [{"stock": "CCC"}, {"stock": "DDD"}],
+    }
+    wicks = {
+        "AAA": WICK_LONG_DOWN,
+        "BBB": WICK_LONG_UP,
+        "CCC": WICK_LONG_UP,
+        "DDD": WICK_LONG_DOWN,
+    }
+    out = _members_for_books(members, wicks, [(bank, True), (it, False)])
+    assert [m["stock"] for m in out[bank]] == ["AAA"]
+    assert [m["stock"] for m in out[it]] == ["CCC"]
+
+
+@patch("backend.services.breakfast_prev_close.classify_daily_wick")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
+@patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
+@patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
+@patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
+@patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
+@patch(
+    "backend.services.breakfast_strategy.live_tick._all_sector_keys",
+    return_value=["NSE_INDEX|Nifty Bank", "NSE_INDEX|Nifty IT"],
+)
+@patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
+def test_freeze_stock_rest_only_wick_filtered_gainer_loser(
+    _ux,
+    _sector_keys,
+    mock_indexes,
+    mock_load_sector,
+    _trading,
+    mock_5m,
+    mock_ws_resolve,
+    mock_fetch,
+    mock_classify,
+):
+    from backend.services.breakfast_prev_close import WICK_LONG_DOWN, WICK_LONG_UP
+
+    bank = "NSE_INDEX|Nifty Bank"
+    it = "NSE_INDEX|Nifty IT"
+    mock_load_sector.return_value = {
+        bank: [{"stock": "AAA"}, {"stock": "BBB"}],
+        it: [{"stock": "CCC"}, {"stock": "DDD"}],
+    }
+    mock_indexes.return_value = ({}, {})
+    bar_5m = {
+        "timestamp": "2026-09-01T09:15:00+05:30",
+        "open": 100,
+        "high": 101,
+        "low": 99,
+        "close": 100.5,
+        "volume": 10,
+    }
+    mock_5m.side_effect = lambda ux, cache_dir, keys, **kw: {k: [bar_5m] for k in keys}
+    prev = {"NSE_INDEX|Nifty 50": 100.0, bank: 100.0, it: 100.0}
+    wicks = {
+        "AAA": WICK_LONG_DOWN,
+        "BBB": WICK_LONG_UP,
+        "CCC": WICK_LONG_UP,
+        "DDD": WICK_LONG_DOWN,
+    }
+
+    def _resolve(picked, members, *a, **k):
+        iks = []
+        for skey in picked:
+            for m in members.get(skey, []):
+                iks.append("NSE_FO|" + m["stock"])
+        return ({s: [m["stock"] for m in members.get(s, [])] for s in picked}, iks)
+
+    with patch(
+        "backend.services.breakfast_strategy.live_tick.load_stored_prev_closes_and_wicks",
+        return_value=(prev, {"AAA": 100.0, "BBB": 100.0, "CCC": 100.0, "DDD": 100.0}, wicks),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._gainer_loser_books",
+        return_value=[(bank, True), (it, False)],
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._resolve_stock_keys",
+        side_effect=_resolve,
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._build_stock_overrides_from_1m",
+        return_value=({}, {}),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose",
+        return_value=None,
+    ):
+        out = run_breakfast_minute_tick(20)
+    assert out["ok"]
+    mock_classify.assert_not_called()
+    mock_fetch.assert_not_called()
+    batches = [list(c.args[2]) for c in mock_5m.call_args_list]
+    assert batches[0] == ["NSE_INDEX|Nifty 50", bank, it]
+    stock_keys = batches[1] if len(batches) > 1 else []
+    assert stock_keys == ["NSE_FO|AAA", "NSE_FO|CCC"]
+    assert "NSE_FO|BBB" not in stock_keys
+    assert "NSE_FO|DDD" not in stock_keys
+    assert out["rest_call_budget"] == {"indexes": 3, "stocks": 2}
