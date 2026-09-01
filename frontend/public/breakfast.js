@@ -849,11 +849,14 @@
         tb.innerHTML = rows.map(function (r) {
             var raw = "";
             try { raw = JSON.stringify(r.raw_payload, null, 2); } catch (_e) { raw = String(r.raw_payload); }
+            var payload = r.raw_payload && typeof r.raw_payload === "object" ? r.raw_payload : {};
+            var received = r.received_at || r.received_at_hms || "";
+            var triggered = r.triggered_at_raw || r.triggered_at || payload.triggered_at || "";
             return "<tr>" +
-                "<td>" + escapeHtml(r.received_at_hms || "") + "</td>" +
+                "<td>" + escapeHtml(received) + "</td>" +
+                "<td>" + escapeHtml(triggered || "—") + "</td>" +
                 "<td>" + escapeHtml(r.symbol || "—") + "</td>" +
                 "<td>" + (r.trigger_price != null ? escapeHtml(r.trigger_price) : "—") + "</td>" +
-                "<td>" + escapeHtml(r.triggered_at_raw || "—") + "</td>" +
                 "<td>" + escapeHtml(r.scan_name || "—") + "</td>" +
                 "<td>" + escapeHtml(r.parse_status || "—") + "</td>" +
                 "<td>" + escapeHtml(r.source_ip || "—") + "</td>" +

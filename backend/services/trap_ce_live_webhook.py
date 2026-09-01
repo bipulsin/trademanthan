@@ -249,6 +249,11 @@ def fetch_live_webhook_rows(session_date: date) -> Dict[str, Any]:
                     payload = json.loads(payload)
                 except json.JSONDecodeError:
                     payload = {"_raw": payload}
+            triggered_raw = r["triggered_at_raw"]
+            if not triggered_raw and isinstance(payload, dict):
+                triggered_raw = payload.get("triggered_at")
+                if triggered_raw is not None:
+                    triggered_raw = str(triggered_raw).strip() or None
             rows.append(
                 {
                     "id": r["id"],
@@ -257,7 +262,8 @@ def fetch_live_webhook_rows(session_date: date) -> Dict[str, Any]:
                     "source_ip": r["source_ip"],
                     "symbol": r["symbol"],
                     "trigger_price": r["trigger_price"],
-                    "triggered_at_raw": r["triggered_at_raw"],
+                    "triggered_at": triggered_raw,
+                    "triggered_at_raw": triggered_raw,
                     "scan_name": r["scan_name"],
                     "alert_name": r["alert_name"],
                     "raw_payload": payload,
