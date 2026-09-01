@@ -139,7 +139,7 @@ def _find_trap_ce_artifact() -> Optional[Path]:
 
 @router.get("/trap-ce")
 def get_trap_ce_backtest() -> Dict[str, Any]:
-    """Trap-CE 10m CE long backtest artifact (FUT + Stock buckets, risk_inr). Independent of Live/Primary/Prev-Close."""
+    """Trap-CE 10m CE long backtest artifact (FUT + Stock buckets, 1 lot always). Independent of Live/Primary/Prev-Close."""
     path = _find_trap_ce_artifact()
     if not path:
         raise HTTPException(

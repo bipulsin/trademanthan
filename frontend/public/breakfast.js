@@ -746,52 +746,66 @@
         return "fut";
     }
 
-    function trapTradeRowHtml(t) {
-        var risk = t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—";
+    function trapRiskTxt(t) {
+        return t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—";
+    }
+
+    function trapFutRowHtml(t) {
         return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
             "<td>" + (t.symbol || "") + "</td>" +
             "<td>" + (t.trigger_time || "") + "</td>" +
             "<td>" + fmt(t.entry, 2) + "</td>" +
             "<td>" + fmt(t.sl_initial, 2) + "</td>" +
-            "<td>" + risk + "</td>" +
+            "<td>" + fmt(t.exit, 2) + "</td>" +
+            "<td>" + (t.exit_reason || "") + "</td>" +
+            "<td>" + fmt(t.r_realized, 2) + "</td>" +
+            "<td>" + trapRiskTxt(t) + "</td>" +
+            "<td class='" + pnlClass(t.pnl_inr) + "'>₹" + fmt(t.pnl_inr, 0) + "</td></tr>";
+    }
+
+    function trapStockRowHtml(t) {
+        return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
+            "<td>" + (t.symbol || "") + "</td>" +
+            "<td>" + (t.trigger_time || "") + "</td>" +
+            "<td>" + fmt(t.entry, 2) + "</td>" +
+            "<td>" + fmt(t.sl_initial, 2) + "</td>" +
+            "<td>" + trapRiskTxt(t) + "</td>" +
             "<td>" + fmt(t.exit, 2) + "</td>" +
             "<td>" + (t.exit_reason || "") + "</td>" +
             "<td>" + fmt(t.r_realized, 2) + "</td>" +
             "<td class='" + pnlClass(t.pnl_inr) + "'>₹" + fmt(t.pnl_inr, 0) + "</td></tr>";
     }
 
-    function fillTrapTable(tableId, rows, emptyMsg, cols) {
+    function fillTrapTable(tableId, rows, emptyMsg, cols, rowFn) {
         var tb = $(tableId) && $(tableId).querySelector("tbody");
         if (!tb) return;
         if (!rows.length) {
             tb.innerHTML = "<tr><td colspan='" + cols + "'>" + emptyMsg + "</td></tr>";
             return;
         }
-        tb.innerHTML = rows.map(trapTradeRowHtml).join("");
+        tb.innerHTML = rows.map(rowFn).join("");
     }
 
     function renderTrapRows(data) {
         var rows = data.rows || [];
         var futTaken = rows.filter(function (r) { return r.taken && trapBucket(r) !== "stock"; });
         var stockTaken = rows.filter(function (r) { return r.taken && trapBucket(r) === "stock"; });
-        var skipped = rows.filter(function (r) { return !r.taken; });
-        fillTrapTable("bfTrapTradesTable", futTaken, "No FUT trades taken", 10);
-        fillTrapTable("bfTrapStockTable", stockTaken, "No stock trades", 10);
+        var skipped = rows.filter(function (r) {
+            return !r.taken && String(r.skip_reason || "").indexOf("risk cap") < 0;
+        });
+        fillTrapTable("bfTrapTradesTable", futTaken, "No FUT trades taken", 10, trapFutRowHtml);
+        fillTrapTable("bfTrapStockTable", stockTaken, "No stock trades", 10, trapStockRowHtml);
         var sb = $("bfTrapSkipTable") && $("bfTrapSkipTable").querySelector("tbody");
         if (sb) {
             if (!skipped.length) {
                 sb.innerHTML = "<tr><td colspan='5'>No skips</td></tr>";
             } else {
                 sb.innerHTML = skipped.map(function (t) {
-                    var reason = t.skip_reason || "";
                     var riskTxt = t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—";
-                    if (reason.indexOf("risk cap") >= 0 && t.risk_inr != null) {
-                        reason = reason + " (Risk " + riskTxt + ")";
-                    }
                     return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
                         "<td>" + (t.symbol || "") + "</td>" +
                         "<td>" + (t.trigger_time || "") + "</td>" +
-                        "<td>" + reason + "</td>" +
+                        "<td>" + (t.skip_reason || "") + "</td>" +
                         "<td>" + riskTxt + "</td></tr>";
                 }).join("");
             }
@@ -802,7 +816,7 @@
             notes.textContent = "FUT exits: " + mixText(s.exit_reasons) +
                 ". Stock exits: " + mixText(s.stock_exit_reasons) +
                 ". Skip mix: " + mixText(s.skip_reasons) +
-                ". Risk ₹ = pts × lot qty; risk-cap skips exceeded ₹3,000. Stock qty = 1 share.";
+                ". Risk Amount = (entry − SL) × 1 lot qty. Stock qty = 1 share.";
         }
     }
 

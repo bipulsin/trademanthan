@@ -10,12 +10,10 @@ from backend.services.trap_ce.config import (
     BE_R,
     EMA_TRAIL_PERIOD,
     FORCE_EXIT_TIME,
-    RISK_CAP_INR,
     SKIP_NO_BARS,
     SKIP_NO_ENTRY,
     SKIP_NO_TRIGGER,
     SKIP_NON_POSITIVE_R,
-    SKIP_RISK_CAP,
     TRAIL_ARM_R,
 )
 from backend.services.vajra.indicators import ema_series
@@ -61,7 +59,7 @@ def simulate_trap_ce_long(
 ) -> Dict[str, Any]:
     """
     Entry = open of 10m bar after trigger. Initial SL = trigger 10m low.
-    Skip if 1R INR > RISK_CAP_INR (no resize). BE at +1R (high touch).
+    Always 1 lot (no skip / resize on 1R INR). BE at +1R (high touch).
     Trail at +1.5R: exit on confirmed close below EMA10. Square-off 15:15 IST.
     """
     base = {
@@ -91,15 +89,6 @@ def simulate_trap_ce_long(
     if r_pts <= 0:
         return {**base, "skip_reason": SKIP_NON_POSITIVE_R, "entry": entry, "sl_initial": sl0}
     risk_inr = r_pts * float(lot_size)
-    if risk_inr > RISK_CAP_INR:
-        return {
-            **base,
-            "skip_reason": SKIP_RISK_CAP,
-            "entry": entry,
-            "sl_initial": sl0,
-            "r_points": r_pts,
-            "risk_inr": risk_inr,
-        }
 
     closes = [_f(b.get("close")) for b in bars]
     emas = ema_series(closes, EMA_TRAIL_PERIOD)

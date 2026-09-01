@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from datetime import time
 
-RISK_CAP_INR = 3000.0
 # Cash/stock simulations use 1 share as lot qty for Risk ₹ (not FUT freeze lot).
 EQ_LOT_QTY = 1
 FORCE_EXIT_TIME = time(15, 15)
@@ -14,7 +13,6 @@ TRAIL_ARM_R = 1.5
 EMA_TRAIL_PERIOD = 10
 BAR_MINUTES = 10
 DEFAULT_CSV = "data/trap_ce/Backtest_Intraday_Trap_-_CE.csv"
-SKIP_RISK_CAP = "skipped — risk cap"
 SKIP_NO_LOT = "skipped — no lot size"
 SKIP_NO_BARS = "skipped — no 10m bars"
 SKIP_NO_TRIGGER = "skipped — trigger bar missing"

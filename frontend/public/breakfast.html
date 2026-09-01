@@ -194,12 +194,12 @@
                 </div>
 
                 <div id="bfPanelTrapCe" hidden>
-                    <div id="bfTrapCaveat" class="vmb-callout bf-caveat">CE longs from Chartink Intraday Trap CSV. 10m next-bar entry, trap-bar SL, skip if 1R &gt; ₹3,000 (no resize). Independent of Breakfast Live / Primary / Prev-Close.</div>
+                    <div id="bfTrapCaveat" class="vmb-callout bf-caveat">CE longs from Chartink Intraday Trap CSV. 10m next-bar entry, trap-bar SL, 1 lot even if 1R &gt; ₹3,000. Independent of Breakfast Live / Primary / Prev-Close.</div>
                     <div id="bfTrapStatus" class="vmb-callout" hidden></div>
 
                     <section class="bf-rules" aria-label="Trap-CE rules">
                         <div class="bf-rule"><h3>Entry</h3><ul><li>Trigger maps to the 10m bar that contains the signal time (9:15 / 9:25 / …).</li><li>Long only: buy open of the <strong>next</strong> 10m bar.</li><li>Initial SL = trigger 10m low.</li></ul></div>
-                        <div class="bf-rule"><h3>Risk</h3><ul><li>Risk ₹ = (entry − SL) pts × 1 lot qty. Shown on taken trades and risk-cap skips.</li><li>Skip if Risk ₹ &gt; ₹3,000 (no resize).</li><li>Shorts in CSV are skipped.</li></ul></div>
+                        <div class="bf-rule"><h3>Risk</h3><ul><li>Risk Amount = (entry − SL) pts × 1 lot qty (INR).</li><li>No skip for large 1R; always 1 lot.</li><li>Shorts in CSV are skipped.</li></ul></div>
                         <div class="bf-rule"><h3>Manage</h3><ul><li>BE at +1R (high touch).</li><li>Trail from +1.5R: exit on <strong>close</strong> below EMA10.</li><li>Force exit 15:15 IST.</li></ul></div>
                         <div class="bf-rule"><h3>Data</h3><ul><li>FUT: nearest listed key in instrument JSON (then front-month).</li><li>No FUT → cash NSE_EQ, qty = 1 share (Stock table).</li><li>5m Upstox → session-aligned 10m.</li></ul></div>
                     </section>
@@ -213,8 +213,8 @@
                             <thead>
                                 <tr>
                                     <th>Date</th><th>Symbol</th><th>Trigger</th>
-                                    <th>Entry</th><th>SL</th><th>Risk ₹</th><th>Exit</th>
-                                    <th>Reason</th><th>R</th><th>P&amp;L ₹</th>
+                                    <th>Entry</th><th>SL</th><th>Exit</th>
+                                    <th>Reason</th><th>R</th><th>Risk Amount</th><th>P&amp;L ₹</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -293,6 +293,6 @@
     </div>
 
     <script src="left-menu.js?v=3.28"></script>
-    <script src="breakfast.js?v=19"></script>
+    <script src="breakfast.js?v=20"></script>
 </body>
 </html>

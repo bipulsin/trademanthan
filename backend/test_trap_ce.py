@@ -1,4 +1,4 @@
-"""Unit tests for Trap-CE CSV mapping, risk skip, BE, EMA trail, EOD."""
+"""Unit tests for Trap-CE CSV mapping, 1-lot over cap, BE, EMA trail, EOD."""
 from __future__ import annotations
 
 from datetime import date, datetime, time
@@ -8,7 +8,7 @@ import pytest
 import pytz
 
 from backend.services.trap_ce.candles import session_10m_from_5m
-from backend.services.trap_ce.config import SKIP_RISK_CAP
+from backend.services.trap_ce.config import SKIP_NO_LOT
 from backend.services.trap_ce.csv_signals import load_trap_ce_csv, parse_trigger_datetime, trigger_bar_start
 from backend.services.trap_ce.simulate import find_trigger_index, simulate_trap_ce_long
 
@@ -55,8 +55,8 @@ def test_entry_is_next_10m_open():
     assert t["risk_inr"] == pytest.approx(1.8)
 
 
-def test_risk_cap_skips_no_resize():
-    # 1R = 10 pts, lot 400 → 4000 INR > 3000
+def test_over_3k_risk_takes_one_lot():
+    # 1R = 10 pts, lot 400 → 4000 INR; still take 1 lot
     bars = [
         _bar("09:15", 100, 101, 90.0, 100),
         _bar("09:25", 100.0, 101, 99, 100),
@@ -65,8 +65,8 @@ def test_risk_cap_skips_no_resize():
     t = simulate_trap_ce_long(
         bars, trigger_time=time(9, 15), lot_size=400, session_date=SESSION
     )
-    assert t["taken"] is False
-    assert t["skip_reason"] == SKIP_RISK_CAP
+    assert t["taken"] is True
+    assert t["qty"] == 400
     assert t["risk_inr"] == 4000.0
 
 
@@ -246,7 +246,7 @@ def test_summarize_separates_stock_bucket():
                 "exit_reason": "eod_1515",
                 "risk_inr": 4,
             },
-            {"taken": False, "skip_reason": SKIP_RISK_CAP, "risk_inr": 4000},
+            {"taken": False, "skip_reason": SKIP_NO_LOT},
         ]
     )
     assert s["trade_count"] == 1
