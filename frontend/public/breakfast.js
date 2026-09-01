@@ -8,9 +8,14 @@
     const TRAP_CE_API = "/api/breakfast-strategy/trap-ce";
     const TRAP_CE_LIVE_API = "/api/breakfast-strategy/trap-ce-live";
     var livePollTimer = null;
+    var liveWindowTimer = null;
+    var liveLoadInFlight = false;
     var liveSignalsCache = {};
     var liveSessionDate = "";
     var liveLastData = null;
+    var LIVE_POLL_MS = 5000;
+    var LIVE_POLL_START_SEC = 9 * 3600 + 10 * 60;
+    var LIVE_POLL_END_SEC = 9 * 3600 + 25 * 60;
 
     function fetchWithTimeout(url, opts, ms) {
         var ctrl = new AbortController();
@@ -275,10 +280,80 @@
         }
     }
 
+    function istSecondsOfDay() {
+        var parts = {};
+        new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+        }).formatToParts(new Date()).forEach(function (p) { parts[p.type] = p.value; });
+        return Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second);
+    }
+
+    function inLivePollWindow() {
+        var s = istSecondsOfDay();
+        return s >= LIVE_POLL_START_SEC && s < LIVE_POLL_END_SEC;
+    }
+
+    function isLiveTabVisible() {
+        var p = $("bfPanelLive");
+        return !!(p && !p.hidden);
+    }
+
+    function msUntilIstSeconds(targetSec) {
+        var delta = targetSec - istSecondsOfDay();
+        if (delta <= 0) delta += 86400;
+        return delta * 1000;
+    }
+
     function stopLivePoll() {
         if (livePollTimer) {
             clearInterval(livePollTimer);
             livePollTimer = null;
+        }
+    }
+
+    function stopLiveWindowWatch() {
+        if (liveWindowTimer) {
+            clearTimeout(liveWindowTimer);
+            liveWindowTimer = null;
+        }
+    }
+
+    function startLivePollIfNeeded() {
+        if (livePollTimer) return;
+        if (!isLiveTabVisible() || !inLivePollWindow()) return;
+        livePollTimer = setInterval(function () { loadLive(true); }, LIVE_POLL_MS);
+    }
+
+    function scheduleLiveWindowWatch() {
+        stopLiveWindowWatch();
+        if (!isLiveTabVisible()) return;
+        var s = istSecondsOfDay();
+        if (s >= LIVE_POLL_START_SEC && s < LIVE_POLL_END_SEC) {
+            startLivePollIfNeeded();
+            liveWindowTimer = setTimeout(function () {
+                stopLivePoll();
+                scheduleLiveWindowWatch();
+            }, Math.max(250, (LIVE_POLL_END_SEC - s) * 1000));
+        } else if (s < LIVE_POLL_START_SEC) {
+            stopLivePoll();
+            liveWindowTimer = setTimeout(function () {
+                if (isLiveTabVisible()) {
+                    loadLive(true);
+                    scheduleLiveWindowWatch();
+                }
+            }, Math.max(250, (LIVE_POLL_START_SEC - s) * 1000));
+        } else {
+            stopLivePoll();
+            liveWindowTimer = setTimeout(function () {
+                if (isLiveTabVisible()) {
+                    loadLive(true);
+                    scheduleLiveWindowWatch();
+                }
+            }, msUntilIstSeconds(LIVE_POLL_START_SEC));
         }
     }
 
@@ -657,9 +732,17 @@
         });
     }
 
-    async function loadLive() {
-        setStatus("Loading live…", false, "bfLiveStatus");
-        if (!liveLastData) showLiveSkeletons();
+    async function loadLive(isAuto) {
+        if (isAuto && (!isLiveTabVisible() || !inLivePollWindow())) {
+            stopLivePoll();
+            return;
+        }
+        if (liveLoadInFlight) return;
+        liveLoadInFlight = true;
+        if (!isAuto || !liveLastData) {
+            setStatus("Loading live…", false, "bfLiveStatus");
+            if (!liveLastData) showLiveSkeletons();
+        }
         var signalsP = fetchLiveSignals(liveSessionDate);
         try {
             var res = await fetchWithTimeout(LIVE_API, { cache: "no-store", credentials: "same-origin" }, 45000);
@@ -674,14 +757,12 @@
                 applyLiveSignals(sig.data);
                 if (liveLastData) renderLiveSectors(liveLastData.sectors || [], liveLastData);
             });
-            stopLivePoll();
-            if (data.refresh_allowed && (data.poll_interval_sec || 0) > 0) {
-                livePollTimer = setInterval(loadLive, (data.poll_interval_sec || 5) * 1000);
-            }
+            if (isLiveTabVisible() && inLivePollWindow()) startLivePollIfNeeded();
+            else stopLivePoll();
         } catch (e) {
             var msg = String(e);
             if (msg.indexOf("abort") >= 0 || msg.indexOf("AbortError") >= 0) {
-                msg = "Live refresh timed out — retrying…";
+                msg = isAuto && inLivePollWindow() ? "Live refresh timed out — retrying…" : "Live refresh timed out.";
             }
             if (liveLastData) {
                 renderLive(liveLastData);
@@ -689,8 +770,10 @@
             } else {
                 setStatus(msg, true, "bfLiveStatus");
             }
-            stopLivePoll();
-            livePollTimer = setInterval(loadLive, 5000);
+            if (isLiveTabVisible() && inLivePollWindow()) startLivePollIfNeeded();
+            else stopLivePoll();
+        } finally {
+            liveLoadInFlight = false;
         }
     }
 
@@ -941,12 +1024,16 @@
             el.style.display = primary ? "" : "none";
         });
         stopLivePoll();
+        stopLiveWindowWatch();
         if (primary) loadPrimary(null);
         else if (history) loadHistory();
         else if (prevclose) loadPrevclose();
         else if (trapce) loadTrapCe();
         else if (trapcelive) loadTrapCeLive();
-        else if (live) loadLive();
+        else if (live) {
+            loadLive();
+            scheduleLiveWindowWatch();
+        }
     }
 
     function initTabs() {
