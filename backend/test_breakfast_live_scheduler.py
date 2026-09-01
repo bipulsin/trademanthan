@@ -156,7 +156,7 @@ def test_ws_warmup_starts_feed(_trading, _keys, mock_ensure):
 @patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
-@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes", return_value=({}, {}))
+@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes_and_wicks", return_value=({}, {}, {}))
 @patch("backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose")
 def test_tick_re_picks_sectors_each_minute(
     mock_select,
@@ -308,7 +308,7 @@ def test_resolve_candles_none_when_5m_empty(mock_fetch, mock_5m, caplog):
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
 @patch("backend.services.breakfast_strategy.live_tick._all_sector_keys", return_value=[])
-@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes", return_value=({}, {}))
+@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes_and_wicks", return_value=({}, {}, {}))
 @patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
 def test_minute_20_tick_does_not_call_1m(
     _ux,
@@ -368,7 +368,7 @@ def test_nifty_bias_unknown_not_long_when_missing_pct():
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
 @patch("backend.services.breakfast_strategy.live_tick._all_sector_keys", return_value=["NSE_INDEX|Nifty Bank"])
-@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes", return_value=({}, {}))
+@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes_and_wicks", return_value=({}, {}, {}))
 @patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
 def test_minute_20_fetches_selected_stocks_via_rest_5m(
     _ux,

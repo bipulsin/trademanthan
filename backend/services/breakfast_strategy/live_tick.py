@@ -23,7 +23,12 @@ from backend.services.breakfast_strategy.candles import (
     prev_session_close,
 )
 from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
-from backend.services.breakfast_prev_close import load_stored_prev_closes
+from backend.services.breakfast_prev_close import (
+    WICK_NONE,
+    filter_live_stocks_by_wick,
+    filter_sector_members_by_wick,
+    load_stored_prev_closes_and_wicks,
+)
 from backend.services.breakfast_strategy.engine import NIFTY50_KEY
 from backend.services.breakfast_strategy.engine_prevclose import (
     nifty_bias_from_bar_vs_prev_close,
@@ -570,7 +575,7 @@ def _build_stock_overrides_from_1m(
     return signal_overrides, anchor_overrides
 
 
-def _serialize_stock_pick(stk: Any, *, long_side: bool) -> Dict[str, Any]:
+def _serialize_stock_pick(stk: Any, *, long_side: bool, wick: str = WICK_NONE) -> Dict[str, Any]:
     from backend.services.breakfast_strategy.candles import candle_ohlcv
 
     anchor = stk.anchor_bar
@@ -604,6 +609,7 @@ def _serialize_stock_pick(stk: Any, *, long_side: bool) -> Dict[str, Any]:
         "risk_inr_1lot": risk_inr,
         "instrument_key": stk.row.instrument_key,
         "price_source": stk.row.price_source,
+        "wick": wick or WICK_NONE,
     }
 
 
@@ -620,6 +626,7 @@ def _build_payload_from_selection(
     data_source: str = "ws_1m",
     tick_source_log: Optional[List[Dict[str, Any]]] = None,
     nifty_prev_close: Optional[float] = None,
+    wick_by_symbol: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     long_side = True
     nifty_bias = "positive"
@@ -642,9 +649,21 @@ def _build_payload_from_selection(
     if nifty_bias == "unknown":
         direction = "UNKNOWN"
 
+    wicks = wick_by_symbol or {}
     sectors_out: List[Dict[str, Any]] = []
     if sel:
         for sp in sel.sector_picks:
+            raw_stocks = [
+                _serialize_stock_pick(
+                    s,
+                    long_side=long_side,
+                    wick=wicks.get(str(s.row.stock or "").upper(), WICK_NONE),
+                )
+                for s in sp.stocks
+            ]
+            stocks = filter_live_stocks_by_wick(
+                raw_stocks, direction=direction, wick_by_symbol=wicks
+            )
             sectors_out.append(
                 {
                     "sector_key": sp.sector_key,
@@ -653,7 +672,7 @@ def _build_payload_from_selection(
                     "move_pct": round(sp.sector_move_pct, 3),
                     "direction": "LONG" if long_side else "SHORT",
                     "volume": sp.sector_volume,
-                    "stocks": [_serialize_stock_pick(s, long_side=long_side) for s in sp.stocks],
+                    "stocks": stocks,
                 }
             )
 
@@ -716,7 +735,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
         cache_dir = default_cache_dir()
         stocks_by_sector = load_arbitrage_by_sector()
         fut_by_und, eq_by_symbol = build_instrument_indexes()
-        bench_prev, stock_prev = load_stored_prev_closes()
+        bench_prev, stock_prev, stock_wicks = load_stored_prev_closes_and_wicks()
 
         sector_keys = _all_sector_keys()
         cache.sector_keys = sector_keys
@@ -854,6 +873,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
         }
 
         nifty_unknown = False
+        _nb = "unknown"
         if nifty_bar:
             _nb, _ = nifty_bias_from_bar_vs_prev_close(nifty_bar, nifty_prev, missing="unknown")
             nifty_unknown = _nb == "unknown"
@@ -862,12 +882,15 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
 
         sel = None
         if not nifty_unknown:
+            stocks_for_pick = filter_sector_members_by_wick(
+                stocks_by_sector, stock_wicks, long_side=(_nb == "positive")
+            )
             sel = select_breakfast_picks_prevclose(
                 session_date,
                 nifty_candles=cache.candles_1m.get(NIFTY50_KEY, []),
                 sector_candles=sector_candles_5m_compat,
                 stock_candles_by_key=stock_candles_by_key,
-                stocks_by_sector=stocks_by_sector,
+                stocks_by_sector=stocks_for_pick,
                 fut_by_und=fut_by_und,
                 eq_by_symbol=eq_by_symbol,
                 upstox=ux,
@@ -894,6 +917,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             data_source=data_source,
             tick_source_log=tick_source_log,
             nifty_prev_close=nifty_prev,
+            wick_by_symbol=stock_wicks,
         )
         if elapsed > MAX_TICK_SEC:
             payload["tick_slow"] = True

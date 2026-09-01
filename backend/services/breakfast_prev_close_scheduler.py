@@ -1,4 +1,4 @@
-"""APScheduler cron for Breakfast prev-close prefill (16:00, 16:30, 09:05 IST)."""
+"""APScheduler cron for Breakfast prev-close + wick prefill (16:00, 16:30, 09:05 IST)."""
 from __future__ import annotations
 
 import logging
@@ -44,7 +44,7 @@ def start_breakfast_prev_close_scheduler() -> None:
         )
     sch.start()
     _SCHEDULER = sch
-    logger.info("Breakfast prev-close scheduler started (16:00, 16:30, 09:05 IST weekdays)")
+    logger.info("Breakfast prev-close + wick scheduler started (16:00, 16:30, 09:05 IST weekdays)")
 
 
 def stop_breakfast_prev_close_scheduler() -> None:

@@ -410,7 +410,8 @@
             "<div class='bf-stock-row2'>LTP " + fmt(st.ltp, 2) + " · Risk ₹" + fmt(risk, 0) +
             (logged ? " · <span class='bf-logged-tag'>Logged</span>" : "") + "</div>" +
             "<div class='bf-stock-row3'>Vol " + fmt(st.volume, 0) +
-            " · <span class='bf-stock-move'>" + (move != null ? (move >= 0 ? "+" : "") + fmt(move, 2) + "%" : "—") + "</span></div>" +
+            " · <span class='bf-stock-move'>" + (move != null ? (move >= 0 ? "+" : "") + fmt(move, 2) + "%" : "—") + "</span>" +
+            (st.wick ? " · Wick " + st.wick : "") + "</div>" +
             "</article>";
     }
 

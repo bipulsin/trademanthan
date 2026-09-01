@@ -39,7 +39,12 @@ from backend.services.breakfast_strategy.universe import (
     resolve_stock_instrument,
     sector_index_key_for_label,
 )
-from backend.services.market_holiday import is_nse_holiday_ist
+from backend.services.breakfast_prev_close import (
+    WICK_NONE,
+    filter_live_stocks_by_wick,
+    filter_sector_members_by_wick,
+    load_stored_wicks,
+)
 from backend.services.sector_movers import _index_key_to_sector_label
 from backend.services.upstox_market_feed import (
     ensure_market_feed_running,
@@ -367,6 +372,7 @@ def _serialize_stock_pick(
     long_side: bool,
     upstox: UpstoxService,
     allow_rest_quote: bool = True,
+    wick: str = WICK_NONE,
 ) -> Dict[str, Any]:
     anchor = stk.anchor_bar
     _, _, _, anchor_px, _ = candle_ohlcv(anchor)
@@ -407,6 +413,7 @@ def _serialize_stock_pick(
         "risk_inr_1lot": risk_inr,
         "instrument_key": stk.row.instrument_key,
         "price_source": stk.row.price_source,
+        "wick": wick or WICK_NONE,
     }
 
 
@@ -691,6 +698,7 @@ def _build_live_state_payload(
     off_cycle: bool = False,
 ) -> Dict[str, Any]:
     stocks_by_sector = load_arbitrage_by_sector()
+    stock_wicks = load_stored_wicks()
     fut_by_und, eq_by_symbol = build_instrument_indexes()
     keys = collect_instrument_keys(
         [session_date],
@@ -803,7 +811,11 @@ def _build_live_state_payload(
         nifty_candles=nifty_candles,
         sector_candles=sector_candles,
         stock_candles_by_key=stock_candles_by_key,
-        stocks_by_sector=stocks_by_sector,
+        stocks_by_sector=filter_sector_members_by_wick(
+            stocks_by_sector,
+            stock_wicks,
+            long_side=(nifty_bias_from_bar(nifty_bar)[0] == "positive") if nifty_bar else True,
+        ),
         fut_by_und=fut_by_und,
         eq_by_symbol=eq_by_symbol,
         upstox=ux,
@@ -834,15 +846,20 @@ def _build_live_state_payload(
                     "move_pct": round(sp.sector_move_pct, 3),
                     "direction": "LONG" if long_side else "SHORT",
                     "volume": sp.sector_volume,
-                    "stocks": [
+                    "stocks": filter_live_stocks_by_wick(
+                        [
                         _serialize_stock_pick(
                             s,
                             long_side=long_side,
                             upstox=ux,
                             allow_rest_quote=allow_quote_proxy,
+                            wick=stock_wicks.get(str(s.row.stock or "").upper(), WICK_NONE),
                         )
                         for s in sp.stocks
-                    ],
+                        ],
+                        direction="LONG" if long_side else "SHORT",
+                        wick_by_symbol=stock_wicks,
+                    ),
                 }
             )
         _resort_sector_stocks(sectors_out, long_side=long_side)

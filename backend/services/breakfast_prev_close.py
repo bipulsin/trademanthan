@@ -17,20 +17,127 @@ logger = logging.getLogger(__name__)
 _THROTTLE_SEC = 0.12
 
 
-def parse_daily_bars(candles: List[dict]) -> List[Tuple[date, float]]:
-    out: List[Tuple[date, float]] = []
+WICK_NONE = "NONE"
+WICK_LONG_UP = "Long_Up_Wick"
+WICK_LONG_DOWN = "Long_Down_Wick"
+_WICK_TIE_REL = 0.05
+_WICK_VS_BODY = 0.30
+
+
+def classify_daily_wick(
+    open_px: float,
+    high_px: float,
+    low_px: float,
+    close_px: float,
+) -> str:
+    """Classify a completed daily bar. Zero body → NONE (no epsilon)."""
+    try:
+        o = float(open_px)
+        h = float(high_px)
+        lo = float(low_px)
+        c = float(close_px)
+    except (TypeError, ValueError):
+        return WICK_NONE
+    body = abs(c - o)
+    upper = h - max(o, c)
+    lower = min(o, c) - lo
+    if upper < 0:
+        upper = 0.0
+    if lower < 0:
+        lower = 0.0
+    wick_max = max(upper, lower)
+    if wick_max <= 0:
+        return WICK_NONE
+    if abs(upper - lower) / wick_max <= _WICK_TIE_REL:
+        return WICK_NONE
+    if body <= 0:
+        return WICK_NONE
+    if upper > lower and upper >= _WICK_VS_BODY * body:
+        return WICK_LONG_UP
+    if lower > upper and lower >= _WICK_VS_BODY * body:
+        return WICK_LONG_DOWN
+    return WICK_NONE
+
+
+def required_wick_for_live_direction(direction: str) -> Optional[str]:
+    d = str(direction or "").strip().upper()
+    if d == "SHORT":
+        return WICK_LONG_UP
+    if d == "LONG":
+        return WICK_LONG_DOWN
+    return None
+
+
+def filter_live_stocks_by_wick(
+    stocks: List[Dict[str, Any]],
+    *,
+    direction: str,
+    wick_by_symbol: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
+    """Keep only wick-confirmed stock rows; re-rank. Mismatch / unknown → drop."""
+    required = required_wick_for_live_direction(direction)
+    wicks = wick_by_symbol or {}
+    kept: List[Dict[str, Any]] = []
+    if not required:
+        return kept
+    for st in stocks or []:
+        row = dict(st)
+        sym = str(row.get("symbol") or "").strip().upper()
+        wick = str(row.get("wick") or wicks.get(sym) or WICK_NONE).strip()
+        row["wick"] = wick
+        if wick != required:
+            continue
+        kept.append(row)
+    for i, st in enumerate(kept, start=1):
+        st["stock_rank"] = i
+        st["rank_in_sector"] = i
+        labels = ["Pick 1", "Pick 2", "Watch 3rd"]
+        st["rank_label"] = labels[i - 1] if i <= len(labels) else f"#{i}"
+    return kept
+
+
+def filter_sector_members_by_wick(
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    wick_by_symbol: Dict[str, str],
+    *,
+    long_side: bool,
+) -> Dict[str, List[Dict[str, str]]]:
+    required = WICK_LONG_DOWN if long_side else WICK_LONG_UP
+    out: Dict[str, List[Dict[str, str]]] = {}
+    for skey, members in (stocks_by_sector or {}).items():
+        kept = []
+        for m in members or []:
+            sym = str(m.get("stock") or "").strip().upper()
+            if str(wick_by_symbol.get(sym) or WICK_NONE) == required:
+                kept.append(m)
+        out[skey] = kept
+    return out
+
+
+def parse_daily_ohlc(candles: List[dict]) -> List[Tuple[date, float, float, float, float]]:
+    out: List[Tuple[date, float, float, float, float]] = []
     for c in candles or []:
         ts = str(c.get("timestamp") or "")
-        cl = float(c.get("close") or 0)
+        try:
+            cl = float(c.get("close") or 0)
+            o = float(c.get("open") or 0)
+            h = float(c.get("high") or 0)
+            lo = float(c.get("low") or 0)
+        except (TypeError, ValueError):
+            continue
         if len(ts) < 10 or cl <= 0:
             continue
         try:
             d = datetime.strptime(ts[:10], "%Y-%m-%d").date()
         except ValueError:
             continue
-        out.append((d, cl))
+        out.append((d, o, h, lo, cl))
     out.sort(key=lambda x: x[0])
     return out
+
+
+def parse_daily_bars(candles: List[dict]) -> List[Tuple[date, float]]:
+    return [(d, cl) for d, _o, _h, _l, cl in parse_daily_ohlc(candles)]
 
 
 def daily_settled_for_ist(now_ist: datetime) -> bool:
@@ -42,22 +149,34 @@ def daily_settled_for_ist(now_ist: datetime) -> bool:
     return now_ist >= cutoff
 
 
+def latest_settled_daily_ohlc(
+    candles: List[dict],
+    *,
+    now_ist: datetime,
+) -> Optional[Tuple[date, float, float, float, float]]:
+    """Most recent completed session daily OHLC relative to now (IST)."""
+    bars = parse_daily_ohlc(candles)
+    if not bars:
+        return None
+    today = mh._normalize_ist(now_ist).date()
+    if daily_settled_for_ist(now_ist) and bars[-1][0] == today:
+        return bars[-1]
+    for row in reversed(bars):
+        if row[0] < today:
+            return row
+    return None
+
+
 def latest_settled_daily_close(
     candles: List[dict],
     *,
     now_ist: datetime,
 ) -> Tuple[Optional[date], Optional[float]]:
     """Most recent completed session daily close relative to now (IST)."""
-    bars = parse_daily_bars(candles)
-    if not bars:
+    row = latest_settled_daily_ohlc(candles, now_ist=now_ist)
+    if not row:
         return None, None
-    today = mh._normalize_ist(now_ist).date()
-    if daily_settled_for_ist(now_ist) and bars[-1][0] == today:
-        return bars[-1]
-    for d, cl in reversed(bars):
-        if d < today:
-            return d, cl
-    return None, None
+    return row[0], row[4]
 
 
 def _source_tag(trigger: str) -> str:
@@ -91,11 +210,17 @@ def _upsert_benchmark_prev_close(
     return int(n or 0) > 0
 
 
+def ensure_arbitrage_master_wick_column() -> None:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE arbitrage_master ADD COLUMN IF NOT EXISTS wick TEXT"))
+
+
 def _upsert_stock_prev_close(
     stock: str,
     close_date: date,
     close_px: float,
     source: str,
+    wick: str = WICK_NONE,
 ) -> bool:
     with engine.begin() as conn:
         n = conn.execute(
@@ -104,7 +229,8 @@ def _upsert_stock_prev_close(
                 UPDATE arbitrage_master
                 SET prev_session_close = :px,
                     prev_session_close_for_date = CAST(:for_date AS date),
-                    prev_session_close_source = :src
+                    prev_session_close_source = :src,
+                    wick = :wick
                 WHERE UPPER(TRIM(stock)) = UPPER(TRIM(:stock))
                   AND (
                       prev_session_close_for_date IS NULL
@@ -112,15 +238,33 @@ def _upsert_stock_prev_close(
                   )
                 """
             ),
-            {"stock": stock, "px": close_px, "for_date": close_date.isoformat(), "src": source},
+            {
+                "stock": stock,
+                "px": close_px,
+                "for_date": close_date.isoformat(),
+                "src": source,
+                "wick": wick or WICK_NONE,
+            },
         ).rowcount
     return int(n or 0) > 0
 
 
 def load_stored_prev_closes() -> Tuple[Dict[str, float], Dict[str, float]]:
     """instrument_key → prev close (Nifty + sectors) and stock symbol → prev close."""
+    bench, stocks, _wicks = load_stored_prev_closes_and_wicks()
+    return bench, stocks
+
+
+def load_stored_wicks() -> Dict[str, str]:
+    _b, _s, wicks = load_stored_prev_closes_and_wicks()
+    return wicks
+
+
+def load_stored_prev_closes_and_wicks() -> Tuple[Dict[str, float], Dict[str, float], Dict[str, str]]:
+    """instrument_key → prev close, stock → prev close, stock → wick."""
     bench: Dict[str, float] = {}
     stocks: Dict[str, float] = {}
+    wicks: Dict[str, str] = {}
     db = SessionLocal()
     try:
         for row in db.execute(
@@ -139,29 +283,37 @@ def load_stored_prev_closes() -> Tuple[Dict[str, float], Dict[str, float]]:
         for row in db.execute(
             text(
                 """
-                SELECT UPPER(TRIM(stock)) AS stock, prev_session_close
+                SELECT UPPER(TRIM(stock)) AS stock, prev_session_close, wick
                 FROM arbitrage_master
-                WHERE prev_session_close IS NOT NULL AND prev_session_close > 0
-                  AND stock IS NOT NULL
+                WHERE stock IS NOT NULL
                 """
             )
         ).mappings():
             sym = str(row.get("stock") or "").strip().upper()
+            if not sym:
+                continue
             px = float(row.get("prev_session_close") or 0)
-            if sym and px > 0:
+            if px > 0:
                 stocks[sym] = px
+            wick = str(row.get("wick") or "").strip()
+            wicks[sym] = wick if wick in (WICK_LONG_UP, WICK_LONG_DOWN, WICK_NONE) else WICK_NONE
     except Exception as e:
         logger.warning("load_stored_prev_closes failed: %s", e)
     finally:
         db.close()
-    return bench, stocks
+    return bench, stocks, wicks
 
 
 def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
-    """Idempotent UPSERT of prev_session_close on benchmarks + arbitrage_master FUT rows."""
+    """Idempotent UPSERT of prev_session_close + wick on benchmarks + arbitrage_master FUT rows."""
     now = mh._normalize_ist(None)
     if mh.should_skip_scheduled_market_jobs_ist(now) and trigger.startswith("scheduled"):
         return {"ok": True, "skipped": "holiday_or_weekend", "trigger": trigger}
+
+    try:
+        ensure_arbitrage_master_wick_column()
+    except Exception as e:
+        logger.warning("ensure wick column: %s", e)
 
     ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     ux.reload_token_from_storage()
@@ -220,11 +372,13 @@ def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
             candles = ux.get_historical_candles_by_instrument_key(
                 fut_key, interval="days/1", days_back=12, range_end_date=now.date()
             ) or []
-            d, px = latest_settled_daily_close(candles, now_ist=now)
-            if d is None or px is None:
+            ohlc = latest_settled_daily_ohlc(candles, now_ist=now)
+            if ohlc is None:
                 stock_skipped += 1
                 continue
-            if _upsert_stock_prev_close(sym, d, float(px), source):
+            d, o, h, lo, px = ohlc
+            wick = classify_daily_wick(o, h, lo, px)
+            if _upsert_stock_prev_close(sym, d, float(px), source, wick=wick):
                 stock_updated += 1
             else:
                 stock_skipped += 1
