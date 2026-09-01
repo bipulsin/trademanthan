@@ -1,7 +1,7 @@
-"""Experimental Breakfast path: Nifty/sector rank vs prev session close.
+"""Breakfast Nifty/sector rank vs prev session close.
 
-Do not import from live.py / live_tick.py. Live lock and Primary/History
-ranking stay on engine.nifty_bias_from_bar + universe.rank_sectors.
+Primary/History artifact JSON stays on engine.nifty_bias_from_bar +
+universe.rank_sectors. Live freeze/ticks use this module.
 """
 from __future__ import annotations
 
@@ -44,13 +44,19 @@ from backend.services.breakfast_strategy.universe import (
 def nifty_bias_from_bar_vs_prev_close(
     bar: Dict[str, Any],
     prev_close: Optional[float],
+    *,
+    missing: str = "positive",
 ) -> Tuple[str, float]:
     """NIFTY opening 5m close vs previous session close; flat (0%) → long branch."""
     if prev_close is None or prev_close <= 0:
+        if missing in ("unknown", "no_data"):
+            return "unknown", 0.0
         return "positive", 0.0
     _, _, _, cl, _ = candle_ohlcv(bar)
     pct = move_pct_vs_prev_close(float(cl), float(prev_close))
     if pct is None:
+        if missing in ("unknown", "no_data"):
+            return "unknown", 0.0
         return "positive", 0.0
     if pct < 0:
         return "negative", float(pct)
@@ -95,6 +101,12 @@ def select_breakfast_picks_prevclose(
     eq_by_symbol: Dict[str, Dict[str, Any]],
     upstox: Optional[Any] = None,
     nifty_bar: Optional[Dict[str, Any]] = None,
+    sector_bar_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    stock_signal_overrides: Optional[Dict[str, Tuple[Dict[str, Any], float]]] = None,
+    anchor_bar_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+    nifty_prev_close: Optional[float] = None,
+    sector_prev_closes: Optional[Dict[str, float]] = None,
+    stock_prev_closes: Optional[Dict[str, float]] = None,
     sectors_to_pick: int = PREVCLOSE_SECTORS_TO_PICK,
     stocks_per_sector: int = STOCKS_PER_SECTOR,
     spot_proxy_fallback: bool = False,
@@ -108,22 +120,28 @@ def select_breakfast_picks_prevclose(
     if not resolved_nifty:
         return None
 
-    nifty_prev = prev_session_close(nifty_candles, session_date)
+    nifty_prev = nifty_prev_close if nifty_prev_close and nifty_prev_close > 0 else prev_session_close(
+        nifty_candles, session_date
+    )
     bias, bias_pct = nifty_bias_from_bar_vs_prev_close(resolved_nifty, nifty_prev)
+    if bias == "unknown":
+        return None
     long_side = bias == "positive"
 
     eligible = fo_eligible_sector_keys(
         stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
     )
     sector_bars: Dict[str, Dict[str, Any]] = {}
-    sector_prev: Dict[str, float] = {}
+    sector_prev: Dict[str, float] = dict(sector_prev_closes or {})
+    overrides = sector_bar_overrides or {}
     for skey in eligible:
-        bar = first_5m_bar(sector_candles.get(skey, []), session_date)
+        bar = overrides.get(skey) or first_5m_bar(sector_candles.get(skey, []), session_date)
         if bar:
             sector_bars[skey] = bar
-        prev = prev_session_close(sector_candles.get(skey, []), session_date)
-        if prev is not None:
-            sector_prev[skey] = prev
+        if skey not in sector_prev:
+            prev = prev_session_close(sector_candles.get(skey, []), session_date)
+            if prev is not None:
+                sector_prev[skey] = prev
 
     ranked = rank_sectors_vs_prev_close(
         sector_bars, sector_prev, eligible_keys=eligible, descending=long_side
@@ -137,6 +155,10 @@ def select_breakfast_picks_prevclose(
     stock_move_pcts: Dict[str, float] = {}
     sym_to_candles: Dict[str, List[Dict[str, Any]]] = {}
     session_rows: Dict[str, StockRow] = {}
+
+    signal_overrides = stock_signal_overrides or {}
+    anchor_overrides = anchor_bar_overrides or {}
+    stock_prev_map = stock_prev_closes or {}
 
     picked_keys = {skey for skey, _p, _v in top_sectors}
     for skey in picked_keys:
@@ -157,12 +179,25 @@ def select_breakfast_picks_prevclose(
             candles, row_tpl = resolved
             sym_to_candles[sym] = candles
             session_rows[sym] = row_tpl
-            setup = setup_bar_vs_prev_close(candles, session_date)
-            if setup:
-                sig_bar, _prev, pct = setup
+            if sym in signal_overrides:
+                sig_bar, pct = signal_overrides[sym]
                 stock_bars[sym] = sig_bar
                 stock_move_pcts[sym] = pct
-            ab = anchor_bar(candles, session_date)
+            else:
+                setup = setup_bar_vs_prev_close(candles, session_date)
+                if setup:
+                    sig_bar, _prev, pct = setup
+                    stock_bars[sym] = sig_bar
+                    stock_move_pcts[sym] = pct
+                else:
+                    sig_bar = first_5m_bar(candles, session_date)
+                    prev = stock_prev_map.get(sym)
+                    if sig_bar and prev and prev > 0:
+                        pct = move_pct_vs_prev_close(float(sig_bar.get("close") or 0), float(prev))
+                        if pct is not None:
+                            stock_bars[sym] = sig_bar
+                            stock_move_pcts[sym] = pct
+            ab = anchor_overrides.get(sym) or anchor_bar(candles, session_date)
             if ab:
                 anchor_bars[sym] = ab
 

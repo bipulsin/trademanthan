@@ -23,7 +23,13 @@ from backend.services.breakfast_strategy.candles import (
     prev_session_close,
 )
 from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
-from backend.services.breakfast_strategy.engine import NIFTY50_KEY, nifty_bias_from_bar, select_breakfast_picks
+from backend.services.breakfast_prev_close import load_stored_prev_closes
+from backend.services.breakfast_strategy.engine import NIFTY50_KEY
+from backend.services.breakfast_strategy.engine_prevclose import (
+    nifty_bias_from_bar_vs_prev_close,
+    rank_sectors_vs_prev_close,
+    select_breakfast_picks_prevclose,
+)
 from backend.services.breakfast_strategy.live_persist import (
     fetch_session_lock,
     persist_live_signals,
@@ -34,7 +40,6 @@ from backend.services.breakfast_strategy.universe import (
     build_instrument_indexes,
     fo_eligible_sector_keys,
     load_arbitrage_by_sector,
-    rank_sectors,
     resolve_stock_instrument,
     sector_index_key_for_label,
 )
@@ -490,13 +495,18 @@ def _rank_picked_sectors(
     fut_by_und: Dict[str, List[Dict[str, Any]]],
     eq_by_symbol: Dict[str, Dict[str, Any]],
     upto_hhmm: Tuple[int, int],
+    nifty_prev_close: Optional[float] = None,
+    sector_prev_closes: Optional[Dict[str, float]] = None,
 ) -> Tuple[List[str], bool]:
     nifty_bar = forming_bar_from_1m_upto(candles_1m.get(NIFTY50_KEY, []), session_date, upto_hhmm)
     if not nifty_bar:
         nifty_bar = first_5m_bar(candles_1m.get(NIFTY50_KEY, []), session_date)
     if not nifty_bar:
         return [], True
-    bias, _ = nifty_bias_from_bar(nifty_bar, missing="unknown")
+    nifty_prev = nifty_prev_close if nifty_prev_close and nifty_prev_close > 0 else prev_session_close(
+        candles_1m.get(NIFTY50_KEY, []), session_date
+    )
+    bias, _ = nifty_bias_from_bar_vs_prev_close(nifty_bar, nifty_prev, missing="unknown")
     if bias == "unknown":
         return [], True
     long_side = bias == "positive"
@@ -504,13 +514,20 @@ def _rank_picked_sectors(
         stocks_by_sector, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol
     )
     sector_bars: Dict[str, Dict[str, Any]] = {}
+    sector_prev: Dict[str, float] = dict(sector_prev_closes or {})
     for skey in eligible:
         bar = forming_bar_from_1m_upto(candles_1m.get(skey, []), session_date, upto_hhmm)
         if not bar:
             bar = first_5m_bar(candles_1m.get(skey, []), session_date)
         if bar:
             sector_bars[skey] = bar
-    ranked = rank_sectors(sector_bars, eligible_keys=eligible, descending=long_side)
+        if skey not in sector_prev:
+            prev = prev_session_close(candles_1m.get(skey, []), session_date)
+            if prev is not None:
+                sector_prev[skey] = prev
+    ranked = rank_sectors_vs_prev_close(
+        sector_bars, sector_prev, eligible_keys=eligible, descending=long_side
+    )
     take = min(len(ranked), LIVE_SECTORS_TO_PICK)
     return [skey for skey, _, _ in ranked[:take]], long_side
 
@@ -523,9 +540,11 @@ def _build_stock_overrides_from_1m(
     fut_by_und: Dict[str, List[Dict[str, Any]]],
     eq_by_symbol: Dict[str, Dict[str, Any]],
     upto_hhmm: Tuple[int, int],
+    stock_prev_closes: Optional[Dict[str, float]] = None,
 ) -> Tuple[Dict[str, Tuple[Dict[str, Any], float]], Dict[str, Dict[str, Any]]]:
     signal_overrides: Dict[str, Tuple[Dict[str, Any], float]] = {}
     anchor_overrides: Dict[str, Dict[str, Any]] = {}
+    prev_map = stock_prev_closes or {}
     for sym in symbols:
         ref = resolve_stock_instrument(sym, session_date, fut_by_und=fut_by_und, eq_by_symbol=eq_by_symbol)
         if not ref or not ref.instrument_key:
@@ -533,8 +552,10 @@ def _build_stock_overrides_from_1m(
         candles = candles_1m_by_key.get(ref.instrument_key, [])
         partial = forming_bar_from_1m_upto(candles, session_date, upto_hhmm)
         if not partial:
+            partial = first_5m_bar(candles, session_date)
+        if not partial:
             continue
-        prev = prev_session_close(candles, session_date)
+        prev = prev_map.get(sym) or prev_session_close(candles, session_date)
         if prev is None:
             continue
         pct = move_pct_vs_prev_close(float(partial.get("close") or 0), prev)
@@ -598,15 +619,17 @@ def _build_payload_from_selection(
     capture_source: str = "live_scheduler",
     data_source: str = "ws_1m",
     tick_source_log: Optional[List[Dict[str, Any]]] = None,
+    nifty_prev_close: Optional[float] = None,
 ) -> Dict[str, Any]:
     long_side = True
     nifty_bias = "positive"
     nifty_pct = None
     if nifty_bar:
-        from backend.services.breakfast_strategy.candles import bar_move_pct
-
-        nifty_pct = bar_move_pct(nifty_bar)
-        nifty_bias, _bp = nifty_bias_from_bar(nifty_bar, missing="unknown")
+        cl = float(nifty_bar.get("close") or 0)
+        nifty_pct = move_pct_vs_prev_close(cl, float(nifty_prev_close)) if nifty_prev_close else None
+        nifty_bias, _bp = nifty_bias_from_bar_vs_prev_close(
+            nifty_bar, nifty_prev_close, missing="unknown"
+        )
     if sel:
         long_side = sel.long_side
         nifty_bias = sel.nifty_bias
@@ -693,6 +716,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
         cache_dir = default_cache_dir()
         stocks_by_sector = load_arbitrage_by_sector()
         fut_by_und, eq_by_symbol = build_instrument_indexes()
+        bench_prev, stock_prev = load_stored_prev_closes()
 
         sector_keys = _all_sector_keys()
         cache.sector_keys = sector_keys
@@ -732,6 +756,9 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
                 session_date=session_date,
             )
 
+        nifty_prev = bench_prev.get(NIFTY50_KEY) or prev_session_close(
+            cache.candles_1m.get(NIFTY50_KEY, []), session_date
+        )
         prev_picked = list(cache.picked_sector_keys)
         picked, _long = _rank_picked_sectors(
             session_date=session_date,
@@ -740,6 +767,8 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             fut_by_und=fut_by_und,
             eq_by_symbol=eq_by_symbol,
             upto_hhmm=upto_hhmm,
+            nifty_prev_close=nifty_prev,
+            sector_prev_closes=bench_prev,
         )
         cache.picked_sector_keys = picked
         sectors_changed = picked != prev_picked
@@ -770,15 +799,24 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             for ik in cache.instrument_keys
             if ik != NIFTY50_KEY and ik not in sector_keys
         ]
-        if stock_iks and not freeze_5m:
-            stock_candles, stock_source_log = _resolve_candles_ws_primary(
-                ux,
-                cache_dir,
-                stock_iks,
-                session_date=session_date,
-                upto_hhmm=upto_hhmm,
-                tick_minute=minute,
-            )
+        if stock_iks:
+            if freeze_5m:
+                stock_candles, stock_source_log = _resolve_candles_rest_5m(
+                    ux,
+                    cache_dir,
+                    stock_iks,
+                    session_date=session_date,
+                    tick_minute=minute,
+                )
+            else:
+                stock_candles, stock_source_log = _resolve_candles_ws_primary(
+                    ux,
+                    cache_dir,
+                    stock_iks,
+                    session_date=session_date,
+                    upto_hhmm=upto_hhmm,
+                    tick_minute=minute,
+                )
             cache.candles_1m.update(stock_candles)
             tick_source_log.extend(stock_source_log)
             data_source = _composite_data_source(tick_source_log)
@@ -805,6 +843,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             fut_by_und=fut_by_und,
             eq_by_symbol=eq_by_symbol,
             upto_hhmm=upto_hhmm,
+            stock_prev_closes=stock_prev,
         )
 
         sector_candles_5m_compat: Dict[str, List[Dict[str, Any]]] = {
@@ -816,14 +855,14 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
 
         nifty_unknown = False
         if nifty_bar:
-            _nb, _ = nifty_bias_from_bar(nifty_bar, missing="unknown")
+            _nb, _ = nifty_bias_from_bar_vs_prev_close(nifty_bar, nifty_prev, missing="unknown")
             nifty_unknown = _nb == "unknown"
         else:
             nifty_unknown = True
 
         sel = None
         if not nifty_unknown:
-            sel = select_breakfast_picks(
+            sel = select_breakfast_picks_prevclose(
                 session_date,
                 nifty_candles=cache.candles_1m.get(NIFTY50_KEY, []),
                 sector_candles=sector_candles_5m_compat,
@@ -836,6 +875,9 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
                 sector_bar_overrides=sector_overrides or None,
                 stock_signal_overrides=stock_signal_overrides or None,
                 anchor_bar_overrides=anchor_overrides or None,
+                nifty_prev_close=nifty_prev,
+                sector_prev_closes=bench_prev,
+                stock_prev_closes=stock_prev,
                 sectors_to_pick=LIVE_SECTORS_TO_PICK,
                 stocks_per_sector=LIVE_STOCKS_PER_SECTOR,
             )
@@ -851,6 +893,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             elapsed_sec=elapsed,
             data_source=data_source,
             tick_source_log=tick_source_log,
+            nifty_prev_close=nifty_prev,
         )
         if elapsed > MAX_TICK_SEC:
             payload["tick_slow"] = True

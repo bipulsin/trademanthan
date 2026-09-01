@@ -156,9 +156,11 @@ def test_ws_warmup_starts_feed(_trading, _keys, mock_ensure):
 @patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
-@patch("backend.services.breakfast_strategy.live_tick.select_breakfast_picks")
+@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes", return_value=({}, {}))
+@patch("backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose")
 def test_tick_re_picks_sectors_each_minute(
     mock_select,
+    _prev,
     mock_indexes,
     mock_load_sector,
     mock_resolve,
@@ -306,9 +308,11 @@ def test_resolve_candles_none_when_5m_empty(mock_fetch, mock_5m, caplog):
 @patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
 @patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
 @patch("backend.services.breakfast_strategy.live_tick._all_sector_keys", return_value=[])
+@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes", return_value=({}, {}))
 @patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
 def test_minute_20_tick_does_not_call_1m(
     _ux,
+    _prev,
     _sector_keys,
     mock_indexes,
     mock_load_sector,
@@ -335,7 +339,7 @@ def test_minute_20_tick_does_not_call_1m(
         "backend.services.breakfast_strategy.live_tick._build_stock_overrides_from_1m",
         return_value=({}, {}),
     ), patch(
-        "backend.services.breakfast_strategy.live_tick.select_breakfast_picks",
+        "backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose",
         return_value=None,
     ):
         out = run_breakfast_minute_tick(20)
@@ -355,3 +359,81 @@ def test_nifty_bias_unknown_not_long_when_missing_pct():
     unknown, pct = nifty_bias_from_bar(bar, missing="unknown")
     assert unknown == "unknown"
     assert pct == 0.0
+
+
+@patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
+@patch("backend.services.breakfast_strategy.live_tick._resolve_candles_ws_primary")
+@patch("backend.services.breakfast_strategy.live_tick.ensure_5m_cached")
+@patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
+@patch("backend.services.breakfast_strategy.live_tick.load_arbitrage_by_sector")
+@patch("backend.services.breakfast_strategy.live_tick.build_instrument_indexes")
+@patch("backend.services.breakfast_strategy.live_tick._all_sector_keys", return_value=["NSE_INDEX|Nifty Bank"])
+@patch("backend.services.breakfast_strategy.live_tick.load_stored_prev_closes", return_value=({}, {}))
+@patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
+def test_minute_20_fetches_selected_stocks_via_rest_5m(
+    _ux,
+    _prev,
+    _sector_keys,
+    mock_indexes,
+    mock_load_sector,
+    _trading,
+    mock_5m,
+    mock_ws_resolve,
+    mock_fetch,
+):
+    mock_load_sector.return_value = {"NSE_INDEX|Nifty Bank": [{"stock": "HDFCBANK"}]}
+    mock_indexes.return_value = ({}, {})
+    bar_5m = {
+        "timestamp": "2026-09-01T09:15:00+05:30",
+        "open": 100,
+        "high": 101,
+        "low": 99,
+        "close": 100.5,
+        "volume": 10,
+    }
+    mock_5m.return_value = [bar_5m]
+    with patch(
+        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
+        return_value=(["NSE_INDEX|Nifty Bank"], True),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._resolve_stock_keys",
+        return_value=({"NSE_INDEX|Nifty Bank": ["HDFCBANK"]}, ["NSE_FO|HDFCBANK"]),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._build_stock_overrides_from_1m",
+        return_value=({}, {}),
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose",
+        return_value=None,
+    ):
+        out = run_breakfast_minute_tick(20)
+    assert out["ok"]
+    mock_ws_resolve.assert_not_called()
+    mock_fetch.assert_not_called()
+    fetched = [c.args[2] for c in mock_5m.call_args_list]
+    assert "NSE_INDEX|Nifty 50" in fetched
+    assert "NSE_INDEX|Nifty Bank" in fetched
+    assert "NSE_FO|HDFCBANK" in fetched
+    assert out.get("data_source") == "rest_5m"
+
+
+def test_live_payload_nifty_pct_uses_prev_close_not_auction():
+    from datetime import datetime
+
+    from backend.services.breakfast_strategy.live_tick import _build_payload_from_selection
+
+    now = IST.localize(datetime(2026, 9, 1, 9, 20, 5))
+    bar = {"open": 100, "high": 102, "low": 99, "close": 101, "volume": 1}
+    payload = _build_payload_from_selection(
+        now=now,
+        session_date=date(2026, 9, 1),
+        phase="frozen",
+        sel=None,
+        nifty_bar=bar,
+        tick_minute=20,
+        elapsed_sec=1.0,
+        data_source="rest_5m",
+        nifty_prev_close=50.0,
+    )
+    assert payload["nifty"]["bias"] == "positive"
+    assert payload["nifty"]["bias_pct"] == round((101.0 - 50.0) / 50.0 * 100.0, 3)
+    assert payload["nifty"]["bias_pct"] != 1.0

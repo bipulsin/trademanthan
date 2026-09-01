@@ -117,6 +117,46 @@ def _upsert_stock_prev_close(
     return int(n or 0) > 0
 
 
+def load_stored_prev_closes() -> Tuple[Dict[str, float], Dict[str, float]]:
+    """instrument_key → prev close (Nifty + sectors) and stock symbol → prev close."""
+    bench: Dict[str, float] = {}
+    stocks: Dict[str, float] = {}
+    db = SessionLocal()
+    try:
+        for row in db.execute(
+            text(
+                """
+                SELECT instrument_key, prev_session_close
+                FROM nifty_benchmark_reference
+                WHERE prev_session_close IS NOT NULL AND prev_session_close > 0
+                """
+            )
+        ).mappings():
+            ik = str(row.get("instrument_key") or "").strip()
+            px = float(row.get("prev_session_close") or 0)
+            if ik and px > 0:
+                bench[ik] = px
+        for row in db.execute(
+            text(
+                """
+                SELECT UPPER(TRIM(stock)) AS stock, prev_session_close
+                FROM arbitrage_master
+                WHERE prev_session_close IS NOT NULL AND prev_session_close > 0
+                  AND stock IS NOT NULL
+                """
+            )
+        ).mappings():
+            sym = str(row.get("stock") or "").strip().upper()
+            px = float(row.get("prev_session_close") or 0)
+            if sym and px > 0:
+                stocks[sym] = px
+    except Exception as e:
+        logger.warning("load_stored_prev_closes failed: %s", e)
+    finally:
+        db.close()
+    return bench, stocks
+
+
 def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
     """Idempotent UPSERT of prev_session_close on benchmarks + arbitrage_master FUT rows."""
     now = mh._normalize_ist(None)
