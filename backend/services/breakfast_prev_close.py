@@ -68,6 +68,15 @@ def required_wick_for_live_direction(direction: str) -> Optional[str]:
     return None
 
 
+def _rerank_live_stock_rows(kept: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for i, st in enumerate(kept, start=1):
+        st["stock_rank"] = i
+        st["rank_in_sector"] = i
+        labels = ["Pick 1", "Pick 2", "Watch 3rd"]
+        st["rank_label"] = labels[i - 1] if i <= len(labels) else f"#{i}"
+    return kept
+
+
 def filter_live_stocks_by_wick(
     stocks: List[Dict[str, Any]],
     *,
@@ -88,12 +97,73 @@ def filter_live_stocks_by_wick(
         if wick != required:
             continue
         kept.append(row)
-    for i, st in enumerate(kept, start=1):
-        st["stock_rank"] = i
-        st["rank_in_sector"] = i
-        labels = ["Pick 1", "Pick 2", "Watch 3rd"]
-        st["rank_label"] = labels[i - 1] if i <= len(labels) else f"#{i}"
-    return kept
+    return _rerank_live_stock_rows(kept)
+
+
+def first_5m_color_matches_direction(open_px: Any, close_px: Any, direction: str) -> bool:
+    """LONG needs green (close > open); SHORT needs red (close < open). Doji fails both."""
+    try:
+        o = float(open_px)
+        c = float(close_px)
+    except (TypeError, ValueError):
+        return False
+    d = str(direction or "").strip().upper()
+    if d == "LONG":
+        return c > o
+    if d == "SHORT":
+        return c < o
+    return False
+
+
+def filter_live_stocks_by_first_5m_color(
+    stocks: List[Dict[str, Any]],
+    *,
+    direction: str,
+) -> List[Dict[str, Any]]:
+    """Keep stocks whose 9:15–9:20 5m bar color matches direction. Missing OHLC → drop."""
+    d = str(direction or "").strip().upper()
+    kept: List[Dict[str, Any]] = []
+    if d not in ("LONG", "SHORT"):
+        return kept
+    for st in stocks or []:
+        row = dict(st)
+        if not first_5m_color_matches_direction(row.get("signal_open"), row.get("signal_close"), d):
+            continue
+        kept.append(row)
+    return _rerank_live_stock_rows(kept)
+
+
+def filter_live_stocks_by_wick_and_color(
+    stocks: List[Dict[str, Any]],
+    *,
+    direction: str,
+    wick_by_symbol: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
+    """Wick AND first-5m color. Empty if none pass."""
+    return filter_live_stocks_by_first_5m_color(
+        filter_live_stocks_by_wick(stocks, direction=direction, wick_by_symbol=wick_by_symbol),
+        direction=direction,
+    )
+
+
+def filter_sector_members_by_first_5m_color(
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    bars_by_symbol: Dict[str, Dict[str, Any]],
+    *,
+    long_side: bool,
+) -> Dict[str, List[Dict[str, str]]]:
+    direction = "LONG" if long_side else "SHORT"
+    bars = bars_by_symbol or {}
+    out: Dict[str, List[Dict[str, str]]] = {}
+    for skey, members in (stocks_by_sector or {}).items():
+        kept = []
+        for m in members or []:
+            sym = str(m.get("stock") or "").strip().upper()
+            bar = bars.get(sym) or {}
+            if first_5m_color_matches_direction(bar.get("open"), bar.get("close"), direction):
+                kept.append(m)
+        out[skey] = kept
+    return out
 
 
 def filter_sector_members_by_wick(

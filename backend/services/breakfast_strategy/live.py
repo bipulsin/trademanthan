@@ -41,7 +41,8 @@ from backend.services.breakfast_strategy.universe import (
 )
 from backend.services.breakfast_prev_close import (
     WICK_NONE,
-    filter_live_stocks_by_wick,
+    filter_live_stocks_by_wick_and_color,
+    filter_sector_members_by_first_5m_color,
     filter_sector_members_by_wick,
     load_stored_wicks,
 )
@@ -389,7 +390,7 @@ def _serialize_stock_pick(
             ltp = q.get("last_price")
         except Exception:
             ltp = None
-    _, _, _, sig_cl, sig_vol = candle_ohlcv(stk.signal_bar)
+    sig_o, _, _, sig_cl, sig_vol = candle_ohlcv(stk.signal_bar)
     labels = ["Pick 1", "Pick 2", "Watch 3rd"]
     label = labels[stk.stock_rank - 1] if 1 <= stk.stock_rank <= len(labels) else f"#{stk.stock_rank}"
     return {
@@ -403,6 +404,7 @@ def _serialize_stock_pick(
         "direction": direction,
         "move_pct_at_entry": round(stk.move_pct, 3),
         "ltp": ltp,
+        "signal_open": sig_o,
         "signal_close": sig_cl,
         "volume": sig_vol,
         "lot_size": lot,
@@ -806,16 +808,26 @@ def _build_live_state_payload(
     if phase not in ("waiting", "off_session") and not wsq_n:
         stale = True
 
+    long_side_pick = (nifty_bias_from_bar(nifty_bar)[0] == "positive") if nifty_bar else True
+    stocks_for_pick = filter_sector_members_by_wick(
+        stocks_by_sector,
+        stock_wicks,
+        long_side=long_side_pick,
+    )
+    bar_map = {
+        str(sym).strip().upper(): ov[0]
+        for sym, ov in (stock_signal_overrides or {}).items()
+        if ov and ov[0]
+    }
+    stocks_for_pick = filter_sector_members_by_first_5m_color(
+        stocks_for_pick, bar_map, long_side=long_side_pick
+    )
     sel = select_breakfast_picks(
         session_date,
         nifty_candles=nifty_candles,
         sector_candles=sector_candles,
         stock_candles_by_key=stock_candles_by_key,
-        stocks_by_sector=filter_sector_members_by_wick(
-            stocks_by_sector,
-            stock_wicks,
-            long_side=(nifty_bias_from_bar(nifty_bar)[0] == "positive") if nifty_bar else True,
-        ),
+        stocks_by_sector=stocks_for_pick,
         fut_by_und=fut_by_und,
         eq_by_symbol=eq_by_symbol,
         upstox=ux,
@@ -846,7 +858,7 @@ def _build_live_state_payload(
                     "move_pct": round(sp.sector_move_pct, 3),
                     "direction": "LONG" if long_side else "SHORT",
                     "volume": sp.sector_volume,
-                    "stocks": filter_live_stocks_by_wick(
+                    "stocks": filter_live_stocks_by_wick_and_color(
                         [
                         _serialize_stock_pick(
                             s,

@@ -25,7 +25,8 @@ from backend.services.breakfast_strategy.candles import (
 from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
 from backend.services.breakfast_prev_close import (
     WICK_NONE,
-    filter_live_stocks_by_wick,
+    filter_live_stocks_by_wick_and_color,
+    filter_sector_members_by_first_5m_color,
     filter_sector_members_by_wick,
     load_stored_prev_closes_and_wicks,
 )
@@ -585,7 +586,7 @@ def _serialize_stock_pick(stk: Any, *, long_side: bool, wick: str = WICK_NONE) -
     sl_px = anchor_px * (1.0 - SL_PCT) if long_side else anchor_px * (1.0 + SL_PCT)
     tp_px = anchor_px * (1.0 + TP_PCT) if long_side else anchor_px * (1.0 - TP_PCT)
     risk_inr = round(abs(anchor_px - sl_px) * lot, 2) if lot > 0 else None
-    _, _, _, sig_cl, sig_vol = candle_ohlcv(stk.signal_bar)
+    sig_o, _, _, sig_cl, sig_vol = candle_ohlcv(stk.signal_bar)
     labels = ["Pick 1", "Pick 2", "Watch 3rd"]
     label = labels[stk.stock_rank - 1] if 1 <= stk.stock_rank <= len(labels) else f"#{stk.stock_rank}"
     return {
@@ -599,6 +600,7 @@ def _serialize_stock_pick(stk: Any, *, long_side: bool, wick: str = WICK_NONE) -
         "direction": direction,
         "move_pct_at_entry": round(stk.move_pct, 3),
         "ltp": sig_cl,
+        "signal_open": sig_o,
         "signal_close": sig_cl,
         "volume": sig_vol,
         "lot_size": lot,
@@ -661,7 +663,7 @@ def _build_payload_from_selection(
                 )
                 for s in sp.stocks
             ]
-            stocks = filter_live_stocks_by_wick(
+            stocks = filter_live_stocks_by_wick_and_color(
                 raw_stocks, direction=direction, wick_by_symbol=wicks
             )
             sectors_out.append(
@@ -882,8 +884,17 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
 
         sel = None
         if not nifty_unknown:
+            long_side_pick = _nb == "positive"
             stocks_for_pick = filter_sector_members_by_wick(
-                stocks_by_sector, stock_wicks, long_side=(_nb == "positive")
+                stocks_by_sector, stock_wicks, long_side=long_side_pick
+            )
+            bar_map = {
+                str(sym).strip().upper(): ov[0]
+                for sym, ov in (stock_signal_overrides or {}).items()
+                if ov and ov[0]
+            }
+            stocks_for_pick = filter_sector_members_by_first_5m_color(
+                stocks_for_pick, bar_map, long_side=long_side_pick
             )
             sel = select_breakfast_picks_prevclose(
                 session_date,
