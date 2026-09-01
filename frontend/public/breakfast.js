@@ -5,6 +5,7 @@
     const LIVE_API = "/api/breakfast-strategy/live";
     const LIVE_SIGNALS_API = "/api/breakfast-strategy/live/signals";
     const PREVCLOSE_API = "/api/breakfast-strategy/prevclose-backtest";
+    const TRAP_CE_API = "/api/breakfast-strategy/trap-ce";
     var livePollTimer = null;
     var liveSignalsCache = {};
     var liveSessionDate = "";
@@ -707,19 +708,114 @@
         }
     }
 
+    function renderTrapSummary(s) {
+        var box = $("bfTrapSummary");
+        if (!box) return;
+        s = s || {};
+        var win = s.win_pct != null ? fmt(s.win_pct, 1) + "%" : "—";
+        var cards = [
+            ["Trades", s.trade_count],
+            ["Skipped", s.skip_count],
+            ["Win %", win],
+            ["Avg R", fmt(s.avg_r, 2)],
+            ["Total P&L", "₹" + fmt(s.sum_pnl_inr, 0)],
+            ["CSV rows", s.csv_rows],
+        ];
+        box.innerHTML = cards.map(function (c) {
+            return '<div class="vmb-stat"><span class="vmb-stat-label">' + c[0] +
+                '</span><span class="vmb-stat-val">' + c[1] + "</span></div>";
+        }).join("");
+    }
+
+    function mixText(obj) {
+        if (!obj || typeof obj !== "object") return "—";
+        var keys = Object.keys(obj);
+        if (!keys.length) return "—";
+        return keys.map(function (k) { return k + " " + obj[k]; }).join(" · ");
+    }
+
+    function renderTrapRows(data) {
+        var rows = data.rows || [];
+        var taken = rows.filter(function (r) { return r.taken; });
+        var skipped = rows.filter(function (r) { return !r.taken; });
+        var tb = $("bfTrapTradesTable") && $("bfTrapTradesTable").querySelector("tbody");
+        if (tb) {
+            if (!taken.length) {
+                tb.innerHTML = "<tr><td colspan='9'>No trades taken</td></tr>";
+            } else {
+                tb.innerHTML = taken.map(function (t) {
+                    return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
+                        "<td>" + (t.symbol || "") + "</td>" +
+                        "<td>" + (t.trigger_time || "") + "</td>" +
+                        "<td>" + fmt(t.entry, 2) + "</td>" +
+                        "<td>" + fmt(t.sl_initial, 2) + "</td>" +
+                        "<td>" + fmt(t.exit, 2) + "</td>" +
+                        "<td>" + (t.exit_reason || "") + "</td>" +
+                        "<td>" + fmt(t.r_realized, 2) + "</td>" +
+                        "<td class='" + pnlClass(t.pnl_inr) + "'>₹" + fmt(t.pnl_inr, 0) + "</td></tr>";
+                }).join("");
+            }
+        }
+        var sb = $("bfTrapSkipTable") && $("bfTrapSkipTable").querySelector("tbody");
+        if (sb) {
+            if (!skipped.length) {
+                sb.innerHTML = "<tr><td colspan='5'>No skips</td></tr>";
+            } else {
+                sb.innerHTML = skipped.map(function (t) {
+                    return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
+                        "<td>" + (t.symbol || "") + "</td>" +
+                        "<td>" + (t.trigger_time || "") + "</td>" +
+                        "<td>" + (t.skip_reason || "") + "</td>" +
+                        "<td>" + (t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—") + "</td></tr>";
+                }).join("");
+            }
+        }
+        var notes = $("bfTrapNotes");
+        if (notes) {
+            var s = data.summary || {};
+            notes.textContent = "Exit mix: " + mixText(s.exit_reasons) +
+                ". Skip mix: " + mixText(s.skip_reasons) +
+                ". Risk-cap skips are 1R > ₹3,000 (no resize).";
+        }
+    }
+
+    async function loadTrapCe() {
+        setStatus("Loading Trap-CE backtest…", false, "bfTrapStatus");
+        try {
+            var res = await fetch(TRAP_CE_API, { cache: "no-store", credentials: "same-origin" });
+            var data = await parseJsonResponse(res);
+            if (!res.ok) throw new Error(data.detail || data.message || "Load failed");
+            renderTrapSummary(data.summary || {});
+            renderTrapRows(data);
+            var s = data.summary || {};
+            setStatus(
+                "Loaded " + (s.trade_count || 0) + " trades · " + (s.skip_count || 0) + " skipped",
+                false,
+                "bfTrapStatus"
+            );
+        } catch (e) {
+            setStatus(String(e), true, "bfTrapStatus");
+            renderTrapSummary({});
+            renderTrapRows({ rows: [], summary: {} });
+        }
+    }
+
     function switchTab(tab) {
         var primary = tab === "primary";
         var history = tab === "history";
         var live = tab === "live";
         var prevclose = tab === "prevclose";
+        var trapce = tab === "trapce";
         $("bfPanelPrimary").hidden = !primary;
         $("bfPanelHistory").hidden = !history;
         $("bfPanelLive").hidden = !live;
         if ($("bfPanelPrevclose")) $("bfPanelPrevclose").hidden = !prevclose;
+        if ($("bfPanelTrapCe")) $("bfPanelTrapCe").hidden = !trapce;
         $("bfTabPrimary").classList.toggle("active", primary);
         $("bfTabHistory").classList.toggle("active", history);
         $("bfTabLive").classList.toggle("active", live);
         if ($("bfTabPrevclose")) $("bfTabPrevclose").classList.toggle("active", prevclose);
+        if ($("bfTabTrapCe")) $("bfTabTrapCe").classList.toggle("active", trapce);
         document.querySelectorAll(".bf-primary-only").forEach(function (el) {
             el.style.display = primary ? "" : "none";
         });
@@ -727,6 +823,7 @@
         if (primary) loadPrimary(null);
         else if (history) loadHistory();
         else if (prevclose) loadPrevclose();
+        else if (trapce) loadTrapCe();
         else if (live) loadLive();
     }
 
@@ -736,6 +833,9 @@
         $("bfTabLive").addEventListener("click", function () { switchTab("live"); });
         if ($("bfTabPrevclose")) {
             $("bfTabPrevclose").addEventListener("click", function () { switchTab("prevclose"); });
+        }
+        if ($("bfTabTrapCe")) {
+            $("bfTabTrapCe").addEventListener("click", function () { switchTab("trapce"); });
         }
     }
 
@@ -754,6 +854,7 @@
             if (!$("bfPanelHistory").hidden) loadHistory();
             else if (!$("bfPanelLive").hidden) loadLive();
             else if ($("bfPanelPrevclose") && !$("bfPanelPrevclose").hidden) loadPrevclose();
+            else if ($("bfPanelTrapCe") && !$("bfPanelTrapCe").hidden) loadTrapCe();
             else loadPrimary(null);
         });
         switchTab("live");

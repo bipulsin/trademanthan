@@ -58,9 +58,13 @@ inbox/chartink_daily_futures/
 !backend/fno_sector_mapping.csv
 !backend/nse_holidays_2026.csv
 !scripts/ic_universe_sheet9.csv
+!data/trap_ce/*.csv
 *.xlsx
 data/*
 !data/nk_vm_bull_backtest_source.csv
+!data/trap_ce/
+!data/trap_ce/**
+
 
 # Local DB exports (keep exports/ via .gitkeep)
 exports/*.txt

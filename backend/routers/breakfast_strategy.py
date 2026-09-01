@@ -126,6 +126,33 @@ def run_forward_now() -> JSONResponse:
         return JSONResponse(status_code=500, content={"ok": False, "message": str(e)})
 
 
+def _find_trap_ce_artifact() -> Optional[Path]:
+    for p in (
+        Path("/home/ubuntu/trademanthan/data/trap_ce/backtest_result.json"),
+        Path(__file__).resolve().parents[2] / "data" / "trap_ce" / "backtest_result.json",
+        Path(__file__).resolve().parents[2] / "backend" / "data" / "trap_ce" / "backtest_result.json",
+    ):
+        if p.is_file():
+            return p
+    return None
+
+
+@router.get("/trap-ce")
+def get_trap_ce_backtest() -> Dict[str, Any]:
+    """Trap-CE 10m CE long backtest artifact. Independent of Live/Primary/Prev-Close."""
+    path = _find_trap_ce_artifact()
+    if not path:
+        raise HTTPException(
+            status_code=503,
+            detail="Trap-CE artifact not found. Run scripts/run_trap_ce_backtest.py",
+        )
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read Trap-CE artifact: {e}") from e
+    return doc
+
+
 @router.get("/prevclose-backtest")
 def get_prevclose_backtest() -> Dict[str, Any]:
     """Experimental parallel backtest. Reads dedicated artifact only — not breakfast_strategy_trades."""
