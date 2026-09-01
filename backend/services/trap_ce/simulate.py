@@ -71,6 +71,7 @@ def simulate_trap_ce_long(
         "session_date": session_date.isoformat(),
         "trigger_time": trigger_time.strftime("%H:%M"),
         "lot_size": lot_size,
+        "qty": lot_size,
         "taken": False,
     }
     if not bars:

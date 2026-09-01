@@ -199,21 +199,36 @@
 
                     <section class="bf-rules" aria-label="Trap-CE rules">
                         <div class="bf-rule"><h3>Entry</h3><ul><li>Trigger maps to the 10m bar that contains the signal time (9:15 / 9:25 / …).</li><li>Long only: buy open of the <strong>next</strong> 10m bar.</li><li>Initial SL = trigger 10m low.</li></ul></div>
-                        <div class="bf-rule"><h3>Risk</h3><ul><li>Skip if 1R × lot &gt; ₹3,000.</li><li>No position resize.</li><li>Shorts in CSV are skipped.</li></ul></div>
+                        <div class="bf-rule"><h3>Risk</h3><ul><li>Risk ₹ = (entry − SL) pts × 1 lot qty. Shown on taken trades and risk-cap skips.</li><li>Skip if Risk ₹ &gt; ₹3,000 (no resize).</li><li>Shorts in CSV are skipped.</li></ul></div>
                         <div class="bf-rule"><h3>Manage</h3><ul><li>BE at +1R (high touch).</li><li>Trail from +1.5R: exit on <strong>close</strong> below EMA10.</li><li>Force exit 15:15 IST.</li></ul></div>
-                        <div class="bf-rule"><h3>Data</h3><ul><li>Futures via nearest FUT key.</li><li>5m Upstox → session-aligned 10m.</li><li>P&amp;L = points × lot.</li></ul></div>
+                        <div class="bf-rule"><h3>Data</h3><ul><li>FUT: nearest listed key in instrument JSON (then front-month).</li><li>No FUT → cash NSE_EQ, qty = 1 share (Stock table).</li><li>5m Upstox → session-aligned 10m.</li></ul></div>
                     </section>
 
                     <section class="vmb-summary" id="bfTrapSummary"></section>
                     <p class="bf-hist-note" id="bfTrapNotes"></p>
 
-                    <h2 class="bf-section-title">Trades taken</h2>
+                    <h2 class="bf-section-title">Trades taken (FUT)</h2>
                     <div class="vmb-table-wrap">
                         <table class="vmb-table" id="bfTrapTradesTable">
                             <thead>
                                 <tr>
                                     <th>Date</th><th>Symbol</th><th>Trigger</th>
-                                    <th>Entry</th><th>SL</th><th>Exit</th>
+                                    <th>Entry</th><th>SL</th><th>Risk ₹</th><th>Exit</th>
+                                    <th>Reason</th><th>R</th><th>P&amp;L ₹</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <h2 class="bf-section-title">Stock</h2>
+                    <p class="bf-hist-note">Cash NSE_EQ when no FUT key in instrument JSON. Qty = 1 share. Same 10m entry / SL / BE / trail / EOD rules.</p>
+                    <div class="vmb-table-wrap">
+                        <table class="vmb-table" id="bfTrapStockTable">
+                            <thead>
+                                <tr>
+                                    <th>Date</th><th>Symbol</th><th>Trigger</th>
+                                    <th>Entry</th><th>SL</th><th>Risk ₹</th><th>Exit</th>
                                     <th>Reason</th><th>R</th><th>P&amp;L ₹</th>
                                 </tr>
                             </thead>

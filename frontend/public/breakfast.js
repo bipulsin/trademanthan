@@ -713,12 +713,16 @@
         if (!box) return;
         s = s || {};
         var win = s.win_pct != null ? fmt(s.win_pct, 1) + "%" : "—";
+        var stockWin = s.stock_win_pct != null ? fmt(s.stock_win_pct, 1) + "%" : "—";
         var cards = [
-            ["Trades", s.trade_count],
+            ["FUT trades", s.trade_count],
+            ["Stock trades", s.stock_trade_count],
             ["Skipped", s.skip_count],
-            ["Win %", win],
-            ["Avg R", fmt(s.avg_r, 2)],
-            ["Total P&L", "₹" + fmt(s.sum_pnl_inr, 0)],
+            ["FUT win %", win],
+            ["Stock win %", stockWin],
+            ["FUT avg R", fmt(s.avg_r, 2)],
+            ["FUT P&L", "₹" + fmt(s.sum_pnl_inr, 0)],
+            ["Stock P&L", "₹" + fmt(s.stock_sum_pnl_inr, 0)],
             ["CSV rows", s.csv_rows],
         ];
         box.innerHTML = cards.map(function (c) {
@@ -734,48 +738,71 @@
         return keys.map(function (k) { return k + " " + obj[k]; }).join(" · ");
     }
 
+    function trapBucket(r) {
+        var b = String(r && r.bucket || "").toLowerCase();
+        if (b === "stock" || b === "eq") return "stock";
+        var k = String(r && r.instrument_kind || "").toLowerCase();
+        if (k === "eq" || k === "stock") return "stock";
+        return "fut";
+    }
+
+    function trapTradeRowHtml(t) {
+        var risk = t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—";
+        return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
+            "<td>" + (t.symbol || "") + "</td>" +
+            "<td>" + (t.trigger_time || "") + "</td>" +
+            "<td>" + fmt(t.entry, 2) + "</td>" +
+            "<td>" + fmt(t.sl_initial, 2) + "</td>" +
+            "<td>" + risk + "</td>" +
+            "<td>" + fmt(t.exit, 2) + "</td>" +
+            "<td>" + (t.exit_reason || "") + "</td>" +
+            "<td>" + fmt(t.r_realized, 2) + "</td>" +
+            "<td class='" + pnlClass(t.pnl_inr) + "'>₹" + fmt(t.pnl_inr, 0) + "</td></tr>";
+    }
+
+    function fillTrapTable(tableId, rows, emptyMsg, cols) {
+        var tb = $(tableId) && $(tableId).querySelector("tbody");
+        if (!tb) return;
+        if (!rows.length) {
+            tb.innerHTML = "<tr><td colspan='" + cols + "'>" + emptyMsg + "</td></tr>";
+            return;
+        }
+        tb.innerHTML = rows.map(trapTradeRowHtml).join("");
+    }
+
     function renderTrapRows(data) {
         var rows = data.rows || [];
-        var taken = rows.filter(function (r) { return r.taken; });
+        var futTaken = rows.filter(function (r) { return r.taken && trapBucket(r) !== "stock"; });
+        var stockTaken = rows.filter(function (r) { return r.taken && trapBucket(r) === "stock"; });
         var skipped = rows.filter(function (r) { return !r.taken; });
-        var tb = $("bfTrapTradesTable") && $("bfTrapTradesTable").querySelector("tbody");
-        if (tb) {
-            if (!taken.length) {
-                tb.innerHTML = "<tr><td colspan='9'>No trades taken</td></tr>";
-            } else {
-                tb.innerHTML = taken.map(function (t) {
-                    return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
-                        "<td>" + (t.symbol || "") + "</td>" +
-                        "<td>" + (t.trigger_time || "") + "</td>" +
-                        "<td>" + fmt(t.entry, 2) + "</td>" +
-                        "<td>" + fmt(t.sl_initial, 2) + "</td>" +
-                        "<td>" + fmt(t.exit, 2) + "</td>" +
-                        "<td>" + (t.exit_reason || "") + "</td>" +
-                        "<td>" + fmt(t.r_realized, 2) + "</td>" +
-                        "<td class='" + pnlClass(t.pnl_inr) + "'>₹" + fmt(t.pnl_inr, 0) + "</td></tr>";
-                }).join("");
-            }
-        }
+        fillTrapTable("bfTrapTradesTable", futTaken, "No FUT trades taken", 10);
+        fillTrapTable("bfTrapStockTable", stockTaken, "No stock trades", 10);
         var sb = $("bfTrapSkipTable") && $("bfTrapSkipTable").querySelector("tbody");
         if (sb) {
             if (!skipped.length) {
                 sb.innerHTML = "<tr><td colspan='5'>No skips</td></tr>";
             } else {
                 sb.innerHTML = skipped.map(function (t) {
+                    var reason = t.skip_reason || "";
+                    var riskTxt = t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—";
+                    if (reason.indexOf("risk cap") >= 0 && t.risk_inr != null) {
+                        reason = reason + " (Risk " + riskTxt + ")";
+                    }
                     return "<tr><td>" + String(t.session_date || "").slice(0, 10) + "</td>" +
                         "<td>" + (t.symbol || "") + "</td>" +
                         "<td>" + (t.trigger_time || "") + "</td>" +
-                        "<td>" + (t.skip_reason || "") + "</td>" +
-                        "<td>" + (t.risk_inr != null ? "₹" + fmt(t.risk_inr, 0) : "—") + "</td></tr>";
+                        "<td>" + reason + "</td>" +
+                        "<td>" + riskTxt + "</td></tr>";
                 }).join("");
             }
         }
         var notes = $("bfTrapNotes");
         if (notes) {
             var s = data.summary || {};
-            notes.textContent = "Exit mix: " + mixText(s.exit_reasons) +
+            notes.textContent = "FUT exits: " + mixText(s.exit_reasons) +
+                ". Stock exits: " + mixText(s.stock_exit_reasons) +
                 ". Skip mix: " + mixText(s.skip_reasons) +
-                ". Risk-cap skips are 1R > ₹3,000 (no resize).";
+                ". Risk ₹ = pts × lot qty; risk-cap skips exceeded ₹3,000. Stock qty = 1 share.";
         }
     }
 

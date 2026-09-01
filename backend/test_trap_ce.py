@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from pathlib import Path
 
+import pytest
 import pytz
 
 from backend.services.trap_ce.candles import session_10m_from_5m
@@ -51,6 +52,7 @@ def test_entry_is_next_10m_open():
     assert t["taken"] is True
     assert t["entry"] == 100.8
     assert t["sl_initial"] == 99.0
+    assert t["risk_inr"] == pytest.approx(1.8)
 
 
 def test_risk_cap_skips_no_resize():
@@ -65,6 +67,7 @@ def test_risk_cap_skips_no_resize():
     )
     assert t["taken"] is False
     assert t["skip_reason"] == SKIP_RISK_CAP
+    assert t["risk_inr"] == 4000.0
 
 
 def test_be_when_high_touches_1r():
@@ -176,3 +179,78 @@ def test_csv_load_real_file():
     assert rows[0]["symbol"] == "ICICIPRULI"
     assert rows[0]["trigger_time"] == time(10, 15)
     assert all(r["direction"] == "LONG" for r in rows)
+
+
+def test_nearest_json_fut_when_front_month_missing(monkeypatch):
+    from datetime import datetime, timezone
+
+    from backend.services.trap_ce import universe as u
+
+    monkeypatch.setattr(u, "resolve_fut", lambda *a, **k: None)
+    exp_ms = int(datetime(2026, 9, 24, tzinfo=timezone.utc).timestamp() * 1000)
+    fut_by_und = {
+        "BEL": [
+            {
+                "trading_symbol": "BEL26SEPFUT",
+                "instrument_key": "NSE_FO|BELTEST",
+                "expiry": exp_ms,
+                "lot_size": 475,
+            }
+        ]
+    }
+    leg = u.resolve_leg("BEL", date(2026, 7, 31), fut_by_und=fut_by_und)
+    assert leg is not None
+    assert leg.kind == "fut"
+    assert leg.instrument_key == "NSE_FO|BELTEST"
+    assert leg.lot_size == 475
+
+
+def test_no_fut_uses_stock_key_and_qty_one(monkeypatch):
+    from backend.services.trap_ce import universe as u
+
+    monkeypatch.setattr(u, "resolve_fut", lambda *a, **k: None)
+    monkeypatch.setattr(u, "_resolve_nearest_listed_fut", lambda *a, **k: None)
+    eq = {"ICICIPRULI": {"trading_symbol": "ICICIPRULI", "instrument_key": "NSE_EQ|INEICICI"}}
+    leg = u.resolve_leg(
+        "ICICIPRULI",
+        date(2026, 7, 31),
+        fut_by_und={},
+        eq_by_symbol=eq,
+    )
+    assert leg is not None
+    assert leg.kind == "eq"
+    assert leg.instrument_key == "NSE_EQ|INEICICI"
+    assert leg.lot_size == 1
+
+
+def test_summarize_separates_stock_bucket():
+    from backend.services.trap_ce.backtest import summarize
+
+    s = summarize(
+        [
+            {
+                "taken": True,
+                "bucket": "fut",
+                "win": True,
+                "r_realized": 1.0,
+                "pnl_inr": 100,
+                "exit_reason": "sl",
+                "risk_inr": 500,
+            },
+            {
+                "taken": True,
+                "bucket": "stock",
+                "win": False,
+                "r_realized": -0.5,
+                "pnl_inr": -2,
+                "exit_reason": "eod_1515",
+                "risk_inr": 4,
+            },
+            {"taken": False, "skip_reason": SKIP_RISK_CAP, "risk_inr": 4000},
+        ]
+    )
+    assert s["trade_count"] == 1
+    assert s["stock_trade_count"] == 1
+    assert s["skip_count"] == 1
+    assert s["sum_pnl_inr"] == 100
+    assert s["stock_sum_pnl_inr"] == -2

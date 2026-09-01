@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import time
 
 RISK_CAP_INR = 3000.0
+# Cash/stock simulations use 1 share as lot qty for Risk ₹ (not FUT freeze lot).
+EQ_LOT_QTY = 1
 FORCE_EXIT_TIME = time(15, 15)
 MARKET_OPEN = time(9, 15)
 MARKET_CLOSE = time(15, 30)

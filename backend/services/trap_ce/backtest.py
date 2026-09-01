@@ -16,26 +16,47 @@ from backend.services.trap_ce.config import (
 )
 from backend.services.trap_ce.csv_signals import load_trap_ce_csv
 from backend.services.trap_ce.simulate import simulate_trap_ce_long
-from backend.services.trap_ce.universe import LotSizeLookup, resolve_fut
+from backend.services.trap_ce.universe import LotSizeLookup, resolve_leg
 
 logger = logging.getLogger(__name__)
 
 
+def _bucket(r: Dict[str, Any]) -> str:
+    b = str(r.get("bucket") or "").lower()
+    if b in ("stock", "eq"):
+        return "stock"
+    if b == "fut":
+        return "fut"
+    if str(r.get("instrument_kind") or "").lower() in ("eq", "stock"):
+        return "stock"
+    return "fut"
+
+
 def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     taken = [r for r in rows if r.get("taken")]
+    fut_taken = [r for r in taken if _bucket(r) != "stock"]
+    stock_taken = [r for r in taken if _bucket(r) == "stock"]
     skipped = [r for r in rows if not r.get("taken")]
-    wins = [r for r in taken if r.get("win")]
-    r_vals = [float(r.get("r_realized") or 0) for r in taken]
+    wins = [r for r in fut_taken if r.get("win")]
+    stock_wins = [r for r in stock_taken if r.get("win")]
+    r_vals = [float(r.get("r_realized") or 0) for r in fut_taken]
+    r_stock = [float(r.get("r_realized") or 0) for r in stock_taken]
     return {
         "csv_rows": len(rows),
-        "trade_count": len(taken),
+        "trade_count": len(fut_taken),
+        "stock_trade_count": len(stock_taken),
         "skip_count": len(skipped),
         "win_count": len(wins),
-        "win_pct": (100.0 * len(wins) / len(taken)) if taken else None,
+        "win_pct": (100.0 * len(wins) / len(fut_taken)) if fut_taken else None,
         "avg_r": (sum(r_vals) / len(r_vals)) if r_vals else None,
-        "sum_pnl_inr": sum(float(r.get("pnl_inr") or 0) for r in taken),
+        "sum_pnl_inr": sum(float(r.get("pnl_inr") or 0) for r in fut_taken),
+        "stock_win_count": len(stock_wins),
+        "stock_win_pct": (100.0 * len(stock_wins) / len(stock_taken)) if stock_taken else None,
+        "stock_avg_r": (sum(r_stock) / len(r_stock)) if r_stock else None,
+        "stock_sum_pnl_inr": sum(float(r.get("pnl_inr") or 0) for r in stock_taken),
         "skip_reasons": _count_field(skipped, "skip_reason"),
-        "exit_reasons": _count_field(taken, "exit_reason"),
+        "exit_reasons": _count_field(fut_taken, "exit_reason"),
+        "stock_exit_reasons": _count_field(stock_taken, "exit_reason"),
     }
 
 
@@ -69,8 +90,8 @@ def run_trap_ce_backtest(
             continue
         session_date: date = sig["session_date"]
         symbol = sig["symbol"]
-        fut = resolve_fut(symbol, session_date)
-        if not fut:
+        leg = resolve_leg(symbol, session_date, lots=lots)
+        if not leg:
             rows.append(
                 {
                     "symbol": symbol,
@@ -81,14 +102,14 @@ def run_trap_ce_backtest(
                 }
             )
             continue
-        fut_sym, ik = fut
-        lot = lots.get(ik)
+        lot = int(leg.lot_size or 0)
         if lot <= 0:
             rows.append(
                 {
                     "symbol": symbol,
-                    "instrument_key": ik,
-                    "future_symbol": fut_sym,
+                    "instrument_key": leg.instrument_key,
+                    "future_symbol": leg.trading_symbol if leg.kind == "fut" else "",
+                    "bucket": "stock" if leg.kind == "eq" else "fut",
                     "session_date": session_date.isoformat(),
                     "trigger_time": sig["trigger_time"].strftime("%H:%M"),
                     "taken": False,
@@ -96,12 +117,12 @@ def run_trap_ce_backtest(
                 }
             )
             continue
-        key = (ik, session_date)
+        key = (leg.instrument_key, session_date)
         if key not in bar_cache:
             try:
                 bar_cache[key] = fetch_session_10m(
                     upstox,
-                    ik,
+                    leg.instrument_key,
                     session_date,
                     cache_dir=cache_dir,
                     symbol_pause_sec=symbol_pause_sec,
@@ -115,9 +136,12 @@ def run_trap_ce_backtest(
             lot_size=lot,
             session_date=session_date,
             symbol=symbol,
-            instrument_key=ik,
-            future_symbol=fut_sym,
+            instrument_key=leg.instrument_key,
+            future_symbol=leg.trading_symbol if leg.kind == "fut" else "",
         )
+        trade["bucket"] = "stock" if leg.kind == "eq" else "fut"
+        trade["instrument_kind"] = leg.kind
+        trade["qty"] = lot
         rows.append(trade)
 
     summary = summarize(rows)
