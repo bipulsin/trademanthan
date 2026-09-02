@@ -226,7 +226,11 @@ def persist_live_signals(
     return {"inserted": inserted, "skipped": skipped}
 
 
-def live_state_from_persisted_rows(session_date: str, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+def live_state_from_persisted_rows(
+    session_date: str,
+    rows: List[Dict[str, Any]],
+    wick_by_symbol: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Reconstruct locked live-state dict from breakfast_live_signals rows."""
     sd = str(session_date or "")[:10]
     if not sd or not rows:
@@ -283,6 +287,7 @@ def live_state_from_persisted_rows(session_date: str, rows: List[Dict[str, Any]]
                 "risk_inr": risk_inr,
                 "risk_inr_1lot": risk_inr,
                 "instrument_key": r.get("instrument_key"),
+                "wick": r.get("wick"),
                 "first_5m_open": r.get("first_5m_open"),
                 "first_5m_high": r.get("first_5m_high"),
                 "first_5m_low": r.get("first_5m_low"),
@@ -294,6 +299,15 @@ def live_state_from_persisted_rows(session_date: str, rows: List[Dict[str, Any]]
         )
 
     sectors = compact_live_sector_cards(sorted(sectors_map.values(), key=lambda s: s["sector_rank"]))
+    from backend.services.breakfast_prev_close import ensure_live_stock_wicks, load_stored_wicks
+
+    wicks = wick_by_symbol
+    if wicks is None:
+        try:
+            wicks = load_stored_wicks()
+        except Exception:
+            wicks = {}
+    ensure_live_stock_wicks(sectors, wicks)
     assign_selected_sector_ranks(sectors)
     locked_at = rows[0].get("locked_at_timestamp")
     server_time = locked_at.isoformat() if hasattr(locked_at, "isoformat") else str(locked_at or "")

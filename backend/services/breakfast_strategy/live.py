@@ -51,6 +51,7 @@ from backend.services.breakfast_prev_close import (
     filter_sector_members_by_sign_gate,
     filter_sector_members_by_wick,
     first_5m_is_doji,
+    ensure_live_stock_wicks,
     load_stored_prev_closes_and_wicks,
     load_stored_wicks,
 )
@@ -1076,6 +1077,7 @@ def _build_live_state_payload(
             _resort_sector_stocks([sectors_out[-1]], long_side=sp_long)
 
     sectors_out = compact_live_sector_cards(sectors_out)
+    ensure_live_stock_wicks(sectors_out, stock_wicks)
     assign_selected_sector_ranks(sectors_out)
 
     refresh_allowed = now.time() < FREEZE_AFTER and phase != "frozen"

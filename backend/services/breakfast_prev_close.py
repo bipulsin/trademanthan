@@ -81,6 +81,22 @@ def _rerank_live_stock_rows(kept: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return kept
 
 
+def ensure_live_stock_wicks(
+    sectors: List[Dict[str, Any]],
+    wick_by_symbol: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
+    """Every live stock dict gets a wick label (NONE if unknown)."""
+    wicks = wick_by_symbol or {}
+    for sec in sectors or []:
+        for st in sec.get("stocks") or []:
+            if not isinstance(st, dict):
+                continue
+            sym = str(st.get("symbol") or "").strip().upper()
+            raw = str(st.get("wick") or "").strip()
+            st["wick"] = raw or str(wicks.get(sym) or WICK_NONE).strip() or WICK_NONE
+    return sectors
+
+
 def filter_live_stocks_by_wick(
     stocks: List[Dict[str, Any]],
     *,

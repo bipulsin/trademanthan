@@ -9,6 +9,7 @@ from backend.services.breakfast_prev_close import (
     WICK_LONG_UP,
     WICK_NONE,
     classify_daily_wick,
+    ensure_live_stock_wicks,
     filter_live_stocks_by_first_5m_color,
     filter_live_stocks_by_wick,
     filter_live_stocks_by_wick_and_color,
@@ -20,6 +21,23 @@ from backend.services.breakfast_prev_close import (
     required_wick_for_live_direction,
     sector_label_for_wicks,
 )
+
+
+def test_ensure_live_stock_wicks_fills_missing():
+    sectors = [
+        {
+            "stocks": [
+                {"symbol": "AAA"},
+                {"symbol": "BBB", "wick": WICK_LONG_UP},
+            ]
+        }
+    ]
+    ensure_live_stock_wicks(sectors, {"AAA": WICK_LONG_DOWN})
+    assert sectors[0]["stocks"][0]["wick"] == WICK_LONG_DOWN
+    assert sectors[0]["stocks"][1]["wick"] == WICK_LONG_UP
+    missing = [{"stocks": [{"symbol": "CCC"}]}]
+    ensure_live_stock_wicks(missing, {})
+    assert missing[0]["stocks"][0]["wick"] == WICK_NONE
 
 
 def test_wicks_within_5pct_are_none():

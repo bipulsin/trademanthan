@@ -496,10 +496,10 @@
             "<span class='bf-stock-name'>" + (st.display_symbol || st.symbol) + "</span>" +
             "</div>" +
             "<div class='bf-stock-row2'>LTP " + fmt(st.ltp, 2) + " · Risk ₹" + fmt(risk, 0) +
+            " · <span class='bf-stock-wick'>Wick " + (st.wick || "NONE") + "</span>" +
             (logged ? " · <span class='bf-logged-tag'>Logged</span>" : "") + "</div>" +
             "<div class='bf-stock-row3'>Vol " + fmt(st.volume, 0) +
-            " · <span class='bf-stock-move'>" + (move != null ? (move >= 0 ? "+" : "") + fmt(move, 2) + "%" : "—") + "</span>" +
-            (st.wick ? " · Wick " + st.wick : "") + "</div>" +
+            " · <span class='bf-stock-move'>" + (move != null ? (move >= 0 ? "+" : "") + fmt(move, 2) + "%" : "—") + "</span></div>" +
             "</article>";
     }
 

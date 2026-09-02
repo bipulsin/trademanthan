@@ -33,6 +33,7 @@ from backend.services.breakfast_prev_close import (
     filter_sector_members_by_sign_gate,
     filter_sector_members_by_wick,
     first_5m_is_doji,
+    ensure_live_stock_wicks,
     load_stored_prev_closes_and_wicks,
 )
 from backend.services.breakfast_strategy.engine import NIFTY50_KEY
@@ -771,6 +772,7 @@ def _build_payload_from_selection(
             )
 
     sectors_out = compact_live_sector_cards(sectors_out)
+    ensure_live_stock_wicks(sectors_out, wicks)
     assign_selected_sector_ranks(sectors_out)
 
     banner = "LIVE — FORMING, NOT FINAL" if phase == "forming" else "LOCKED — 9:20 CONFIRMED"

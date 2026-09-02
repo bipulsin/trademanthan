@@ -150,12 +150,15 @@ def test_rows_from_live_state_builds_row():
 
 def test_live_state_from_persisted_rows_roundtrip():
     db_rows = rows_from_live_state(SAMPLE_STATE, "matched")
-    state = live_state_from_persisted_rows("2026-08-28", db_rows)
+    state = live_state_from_persisted_rows(
+        "2026-08-28", db_rows, wick_by_symbol={"HDFCBANK": "Long_Down_Wick"}
+    )
     assert state["session_date"] == "2026-08-28"
     assert state["nifty"]["direction"] == "LONG"
     assert len(state["sectors"]) == 1
     assert state["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
     assert state["sectors"][0]["stocks"][0]["first_5m_close"] == 1650.5
+    assert state["sectors"][0]["stocks"][0]["wick"] == "Long_Down_Wick"
     assert state["sectors"][0]["selected_rank"] == 1
 
 
@@ -331,6 +334,7 @@ def test_build_live_state_frozen_loads_persisted(mock_load, _lock):
     mock_load.return_value = live_state_from_persisted_rows(
         "2026-08-31",
         rows_from_live_state(SAMPLE_STATE, "matched"),
+        wick_by_symbol={},
     )
     replay = IST.localize(datetime(2026, 8, 31, 10, 4))
     out = build_live_state(replay_at=replay)
