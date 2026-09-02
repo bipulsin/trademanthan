@@ -1013,10 +1013,13 @@
         }).join("");
     }
 
-    function wickTableHtml(title, rows) {
+    function wickTableHtml(title, rows, chipText) {
+        var chip = chipText
+            ? " <span class=\"bf-wick-chip\">" + escapeHtml(chipText) + "</span>"
+            : "";
         return "<div class=\"vmb-table-wrap\">" +
-            "<h2 class=\"bf-section-title\">" + escapeHtml(title) + "</h2>" +
-            "<table class=\"vmb-table\"><thead><tr><th>Stock</th><th>prev_session_close</th></tr></thead>" +
+            "<h2 class=\"bf-section-title\">" + escapeHtml(title) + chip + "</h2>" +
+            "<table class=\"vmb-table\"><thead><tr><th>Stock</th><th>Prev Day LTP</th></tr></thead>" +
             "<tbody>" + wickStockRowsHtml(rows) + "</tbody></table></div>";
     }
 
@@ -1037,8 +1040,8 @@
                     "<summary>" + name + "</summary>" +
                     "<div class=\"bf-wicks-sector-body\">" +
                     "<div class=\"bf-wicks-grid\">" +
-                    wickTableHtml("Long_Up_Wick", sec.long_up_wick || []) +
-                    wickTableHtml("Long_Down_Wick", sec.long_down_wick || []) +
+                    wickTableHtml("Long_Up_Wick", sec.long_up_wick || [], "Only of SHORT") +
+                    wickTableHtml("Long_Down_Wick", sec.long_down_wick || [], "Only for LONG") +
                     "</div>" +
                     "<p class=\"bf-wicks-none\">" + noneLine + "</p>" +
                     "</div></details>";
