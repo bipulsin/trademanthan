@@ -10,8 +10,10 @@ import pytest
 from backend.services.breakfast_upstox_gate import (
     PRIORITY_WINDOW_END,
     PRIORITY_WINDOW_START,
+    breakfast_exclusivity_active,
     breakfast_upstox_allowed,
     breakfast_upstox_priority_owner,
+    defer_job_for_breakfast_exclusivity,
     is_breakfast_priority_window,
     reset_blocked_log_cache,
 )
@@ -54,6 +56,59 @@ def test_priority_window_boundaries():
     assert not is_breakfast_priority_window(after)
 
 
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value=None)
+def test_exclusivity_from_910_until_lock(_lock):
+    at_910 = IST.localize(datetime(2026, 8, 31, 9, 10, 0))
+    at_909 = IST.localize(datetime(2026, 8, 31, 9, 9, 59))
+    at_921 = IST.localize(datetime(2026, 8, 31, 9, 21, 0))
+    assert breakfast_exclusivity_active(at_910)
+    assert not breakfast_exclusivity_active(at_909)
+    assert breakfast_exclusivity_active(at_921)
+    assert not is_breakfast_priority_window(at_921)
+
+
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value="locked")
+def test_exclusivity_ends_when_lock_locked(_lock):
+    at_921 = IST.localize(datetime(2026, 8, 31, 9, 21, 0))
+    assert not breakfast_exclusivity_active(at_921)
+
+
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value="failed")
+def test_exclusivity_ends_when_lock_failed(_lock):
+    at_925 = IST.localize(datetime(2026, 8, 31, 9, 25, 0))
+    assert not breakfast_exclusivity_active(at_925)
+
+
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value=None)
+def test_exclusivity_hard_ceiling_0925_without_lock(_lock):
+    at_924 = IST.localize(datetime(2026, 8, 31, 9, 24, 59))
+    at_925 = IST.localize(datetime(2026, 8, 31, 9, 25, 0))
+    assert breakfast_exclusivity_active(at_924)
+    assert not breakfast_exclusivity_active(at_925)
+
+
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value="locked")
+def test_exclusivity_ends_when_lock_locked_at_920(_lock):
+    at_920 = IST.localize(datetime(2026, 8, 31, 9, 20, 0))
+    assert not breakfast_exclusivity_active(at_920)
+
+
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value=None)
+def test_gate_blocks_during_exclusivity_before_915(_lock):
+    now = IST.localize(datetime(2026, 8, 31, 9, 12, 0))
+    with patch("backend.services.breakfast_upstox_gate._now_ist", return_value=now):
+        assert not breakfast_upstox_allowed(caller="kavach")
+        assert defer_job_for_breakfast_exclusivity("centralized_market_data_10m")
+
+
+@patch("backend.services.breakfast_upstox_gate._today_freeze_lock_status", return_value="locked")
+def test_gate_allows_after_lock_outside_priority_window(_lock):
+    now = IST.localize(datetime(2026, 8, 31, 9, 21, 0))
+    with patch("backend.services.breakfast_upstox_gate._now_ist", return_value=now):
+        assert breakfast_upstox_allowed(caller="kavach")
+        assert not defer_job_for_breakfast_exclusivity("centralized_market_data_10m")
+
+
 def test_gate_blocks_non_breakfast_owner():
     now = IST.localize(datetime(2026, 8, 31, 9, 17, 0))
     with patch("backend.services.breakfast_upstox_gate._now_ist", return_value=now):
@@ -65,6 +120,22 @@ def test_gate_allows_breakfast_owner():
     with patch("backend.services.breakfast_upstox_gate._now_ist", return_value=now):
         with breakfast_upstox_priority_owner():
             assert breakfast_upstox_allowed(caller="breakfast")
+
+
+def test_owner_contextvar_copied_to_thread_pool():
+    import contextvars
+    from concurrent.futures import ThreadPoolExecutor
+
+    from backend.services.breakfast_upstox_gate import breakfast_priority_owner_active
+
+    def _worker() -> bool:
+        return breakfast_priority_owner_active()
+
+    with breakfast_upstox_priority_owner():
+        ctx = contextvars.copy_context()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            assert pool.submit(ctx.run, _worker).result() is True
+    assert breakfast_priority_owner_active() is False
 
 
 def test_upto_hhmm_for_tick_minute_close():
@@ -150,6 +221,25 @@ def test_ws_warmup_starts_feed(_trading, _keys, mock_ensure):
     assert out["ok"]
     assert out["instrument_count"] == 2
     mock_ensure.assert_called_once_with(["k1", "k2"])
+
+
+@patch("backend.services.upstox_market_feed.feed_status", return_value={"universe_keys": 160})
+@patch("backend.services.upstox_market_feed.ensure_market_feed_running")
+@patch(
+    "backend.services.breakfast_strategy.live_tick.breakfast_index_instrument_keys",
+    return_value=["NSE_INDEX|Nifty 50"] + [f"NSE_INDEX|S{i}" for i in range(16)],
+)
+@patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
+def test_ws_resubscribe_915_unions_indexes(_trading, mock_keys, mock_ensure, _status):
+    from backend.services.breakfast_strategy.live_tick import run_breakfast_ws_resubscribe_915
+
+    out = run_breakfast_ws_resubscribe_915()
+    assert out["ok"]
+    assert out["index_keys_confirmed"] == 17
+    mock_ensure.assert_called_once()
+    args, kwargs = mock_ensure.call_args
+    assert kwargs.get("union") is True
+    assert len(args[0]) == 17
 
 
 @patch("backend.services.breakfast_strategy.live_tick._is_trading_day", return_value=True)
@@ -341,6 +431,9 @@ def test_minute_20_tick_does_not_call_1m(
     ), patch(
         "backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose",
         return_value=None,
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._now_ist",
+        return_value=IST.localize(datetime(2026, 9, 1, 9, 20, 5)),
     ):
         out = run_breakfast_minute_tick(20)
     assert out["ok"]
@@ -407,6 +500,9 @@ def test_minute_20_fetches_selected_stocks_via_rest_5m(
     ), patch(
         "backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose",
         return_value=None,
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._now_ist",
+        return_value=IST.localize(datetime(2026, 9, 1, 9, 20, 5)),
     ):
         out = run_breakfast_minute_tick(20)
     assert out["ok"]
@@ -594,6 +690,9 @@ def test_freeze_stock_rest_only_wick_filtered_gainer_loser(
     ), patch(
         "backend.services.breakfast_strategy.live_tick.select_breakfast_picks_prevclose",
         return_value=None,
+    ), patch(
+        "backend.services.breakfast_strategy.live_tick._now_ist",
+        return_value=IST.localize(datetime(2026, 9, 1, 9, 20, 5)),
     ):
         out = run_breakfast_minute_tick(20)
     assert out["ok"]

@@ -148,6 +148,14 @@ class IndexPriceScheduler:
             if not self.is_market_open(now):
                 logger.debug(f"⏰ Market closed (current time: {now.strftime('%H:%M:%S IST')}), skipping index price fetch")
                 return
+
+            try:
+                from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
+
+                if defer_job_for_breakfast_exclusivity("smart_future_index_price"):
+                    return
+            except Exception as e:
+                logger.exception("breakfast_exclusivity: check_failed error=%s", e)
             
             # Check if it's a trading day (not holiday)
             if not upstox_service.is_trading_day(now):

@@ -12,6 +12,7 @@ from backend.services.breakfast_strategy.live_tick import (
     SCHEDULER_TICK_MINUTES,
     run_breakfast_freeze_lock,
     run_breakfast_minute_tick,
+    run_breakfast_ws_resubscribe_915,
     run_breakfast_ws_warmup,
 )
 from backend.services.breakfast_upstox_gate import is_breakfast_priority_window
@@ -42,6 +43,16 @@ def _warmup_job() -> None:
         logger.info("breakfast WS warmup 9:10 -> %s", out)
     except Exception as e:
         logger.exception("breakfast WS warmup 9:10 failed: %s", e)
+
+
+def _resubscribe_915_job() -> None:
+    if should_skip_scheduled_market_jobs_ist():
+        return
+    try:
+        out = run_breakfast_ws_resubscribe_915()
+        logger.info("breakfast WS 9:15 resubscribe -> %s", out)
+    except Exception as e:
+        logger.exception("breakfast WS 9:15 resubscribe failed: %s", e)
 
 
 def _tick_job(minute: int) -> None:
@@ -83,6 +94,15 @@ class BreakfastLiveScheduler:
             coalesce=True,
             misfire_grace_time=300,
         )
+        self.scheduler.add_job(
+            _resubscribe_915_job,
+            CronTrigger(day_of_week="mon-fri", hour=9, minute=15, second=0, timezone=_IST),
+            id="breakfast_ws_resubscribe_915",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=30,
+        )
         for minute in SCHEDULER_TICK_MINUTES:
             self.scheduler.add_job(
                 _tick_job,
@@ -105,7 +125,10 @@ class BreakfastLiveScheduler:
         )
         self.scheduler.start()
         self._started = True
-        logger.info("Breakfast live scheduler started (9:10 WS warmup, 9:16–9:19 ticks, 9:20:05 freeze IST)")
+        logger.info(
+            "Breakfast live scheduler started "
+            "(9:10 WS warmup, 9:15 index union, 9:16–9:19 ticks, 9:20:05 freeze IST)"
+        )
 
     def stop(self) -> None:
         if not self._started:

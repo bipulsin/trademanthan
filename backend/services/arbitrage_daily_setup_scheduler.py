@@ -418,14 +418,14 @@ def run_arbitrage_daily_setup(execution: _Execution = None) -> Dict:
     execution: None = on-demand / script; no morning state side effects here (state is set by scheduler).
     """
     try:
-        from backend.services.breakfast_upstox_gate import is_breakfast_priority_window
+        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
 
-        if is_breakfast_priority_window():
-            logger.info("arbitrage daily setup skipped — breakfast Upstox priority window")
+        if defer_job_for_breakfast_exclusivity("arbitrage_dailySetup"):
+            logger.info("arbitrage daily setup skipped — breakfast exclusivity")
             return {
                 "success": False,
                 "skipped": True,
-                "reason": "breakfast_priority_window",
+                "reason": "breakfast_exclusivity",
                 "job_name": "arbitrage_dailySetup",
                 "execution": execution,
                 "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),
@@ -643,14 +643,14 @@ def _refresh_arbitrage_master_ltps(conn, upstox: UpstoxService) -> int:
 def run_arbitrage_ltp_refresh(execution: _Execution = "intraday_ltp") -> Dict:
     """Intraday: stock/next LTP via WS; morning paths may still warm curr-month candles."""
     try:
-        from backend.services.breakfast_upstox_gate import is_breakfast_priority_window
+        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
 
-        if is_breakfast_priority_window():
-            logger.info("arbitrage LTP refresh skipped — breakfast Upstox priority window")
+        if defer_job_for_breakfast_exclusivity("arbitrage_ltpRefresh"):
+            logger.info("arbitrage LTP refresh skipped — breakfast exclusivity")
             return {
                 "success": False,
                 "skipped": True,
-                "reason": "breakfast_priority_window",
+                "reason": "breakfast_exclusivity",
                 "job_name": "arbitrage_ltpRefresh",
                 "execution": execution,
                 "updated_at_ist": datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),

@@ -737,7 +737,10 @@ def _build_live_state_payload(
         eq_by_symbol,
         spot_proxy_fallback=False,
     )
-    ensure_market_feed_running(sorted(keys))
+    from backend.services.breakfast_upstox_gate import breakfast_upstox_priority_owner
+
+    with breakfast_upstox_priority_owner():
+        ensure_market_feed_running(sorted(keys))
 
     ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     ux.reload_token_from_storage()

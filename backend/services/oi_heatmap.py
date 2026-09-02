@@ -538,6 +538,14 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
     if not getattr(settings, "UPSTOX_OI_ENABLED", True):
         return {"success": False, "skipped": "UPSTOX_OI_ENABLED false"}
 
+    try:
+        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
+
+        if defer_job_for_breakfast_exclusivity("smart_future_oi_heatmap_live"):
+            return {"success": False, "skipped": "breakfast_exclusivity"}
+    except Exception as e:
+        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
+
     keys = ensure_daily_universe_cached()
     if not keys:
         _last_error = "empty_universe"

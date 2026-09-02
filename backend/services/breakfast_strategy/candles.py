@@ -1,6 +1,7 @@
 """5m candle fetch, disk cache, and session bar helpers."""
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import time
@@ -181,8 +182,19 @@ def fetch_1m_parallel(
 
     out: Dict[str, List[Dict[str, Any]]] = {}
     workers = max(1, min(int(max_workers), len(keys)))
+    try:
+        from backend.services.breakfast_upstox_gate import breakfast_priority_owner_active
+
+        if breakfast_priority_owner_active():
+            logger.info(
+                "breakfast_upstox_owner applied on pool workers batch_size=%s interval=1m",
+                len(keys),
+            )
+    except Exception as e:
+        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
+    ctx = contextvars.copy_context()
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_one, ik) for ik in keys]
+        futures = [pool.submit(ctx.run, _one, ik) for ik in keys]
         for fut in as_completed(futures):
             try:
                 ik, candles = fut.result()
@@ -221,8 +233,19 @@ def fetch_5m_parallel(
 
     out: Dict[str, List[Dict[str, Any]]] = {}
     workers = max(1, min(int(max_workers), len(keys)))
+    try:
+        from backend.services.breakfast_upstox_gate import breakfast_priority_owner_active
+
+        if breakfast_priority_owner_active():
+            logger.info(
+                "breakfast_upstox_owner applied on pool workers batch_size=%s interval=5m",
+                len(keys),
+            )
+    except Exception as e:
+        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
+    ctx = contextvars.copy_context()
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_one, ik) for ik in keys]
+        futures = [pool.submit(ctx.run, _one, ik) for ik in keys]
         for fut in as_completed(futures):
             try:
                 ik, candles = fut.result()

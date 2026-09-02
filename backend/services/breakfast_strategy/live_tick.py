@@ -434,15 +434,22 @@ def _warmup_instrument_keys(session_date: date) -> List[str]:
     )
 
 
+def breakfast_index_instrument_keys() -> List[str]:
+    """Nifty 50 + 16 sector indices (17 keys)."""
+    return list(dict.fromkeys([NIFTY50_KEY] + _all_sector_keys()))
+
+
 def run_breakfast_ws_warmup() -> Dict[str, Any]:
     """9:10 IST — ensure WS feed covers breakfast universe before 9:16 ticks."""
+    from backend.services.breakfast_upstox_gate import breakfast_upstox_priority_owner
     from backend.services.upstox_market_feed import ensure_market_feed_running
 
     now = _now_ist()
     if not _is_trading_day(now):
         return {"ok": False, "skipped": "not_trading_day"}
     keys = _warmup_instrument_keys(now.date())
-    ensure_market_feed_running(keys)
+    with breakfast_upstox_priority_owner():
+        ensure_market_feed_running(keys)
     logger.info("breakfast WS warmup: subscribed %s instruments", len(keys))
     out = {"ok": True, "instrument_count": len(keys), "session_date": now.date().isoformat()}
     global _LAST_WARMUP
@@ -452,6 +459,37 @@ def run_breakfast_ws_warmup() -> Dict[str, Any]:
         if sd not in _SESSION_MONITOR:
             _SESSION_MONITOR[sd] = {"tick_sources": [], "repicks": [], "warmup": None}
         _SESSION_MONITOR[sd]["warmup"] = dict(out)
+    return out
+
+
+def run_breakfast_ws_resubscribe_915() -> Dict[str, Any]:
+    """9:15 IST — union 17 index keys into the live WS set without dropping 9:10 stocks."""
+    from backend.services.breakfast_upstox_gate import breakfast_upstox_priority_owner
+    from backend.services.upstox_market_feed import ensure_market_feed_running, feed_status
+
+    now = _now_ist()
+    if not _is_trading_day(now):
+        out = {"ok": False, "skipped": "not_trading_day", "index_keys_confirmed": 0}
+        logger.info("breakfast_ws_resubscribe_915 -> %s", out)
+        return out
+    index_keys = breakfast_index_instrument_keys()
+    with breakfast_upstox_priority_owner():
+        ensure_market_feed_running(index_keys, union=True)
+    status: Dict[str, Any] = {}
+    try:
+        status = feed_status() or {}
+    except Exception:
+        status = {}
+    live_n = int(status.get("universe_keys") or 0)
+    confirmed = len(index_keys)
+    out = {
+        "ok": True,
+        "index_keys_confirmed": confirmed,
+        "index_key_count_expected": INDEX_UNIVERSE_N,
+        "universe_keys": live_n,
+        "session_date": now.date().isoformat(),
+    }
+    logger.info("breakfast_ws_resubscribe_915 -> %s", out)
     return out
 
 

@@ -751,10 +751,18 @@ def _thread_main(batches: List[List[str]]) -> None:
         logger.error("upstox_market_feed: thread fatal: %s", e, exc_info=True)
 
 
-def ensure_market_feed_running(instrument_keys: List[str]) -> None:
+def ensure_market_feed_running(
+    instrument_keys: List[str],
+    *,
+    union: bool = False,
+) -> None:
     """
     Start or restart background WebSocket if instrument universe changed.
     No-op when UPSTOX_MARKET_FEED_ENABLED is false or list empty.
+
+    union=True merges ``instrument_keys`` into the live subscribe set without dropping
+    existing keys (Breakfast 9:15 index confirm). Replace (union=False) is unchanged
+    for callers that pass a full universe.
     """
     global _FEED_THREAD, _LAST_KEYS_SIG, _STOP_EVENT
 
@@ -764,7 +772,29 @@ def ensure_market_feed_running(instrument_keys: List[str]) -> None:
     if not keys:
         return
 
-    sig = tuple(sorted(keys))
+    try:
+        from backend.services.breakfast_upstox_gate import (
+            breakfast_exclusivity_active,
+            breakfast_priority_owner_active,
+        )
+
+        if breakfast_exclusivity_active() and not breakfast_priority_owner_active():
+            logger.info(
+                "breakfast_exclusivity: skipped ensure_market_feed_running "
+                "union=%s incoming_keys=%s",
+                union,
+                len(keys),
+            )
+            return
+    except Exception as e:
+        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
+
+    if union and _LAST_KEYS_SIG:
+        keys = sorted(set(_LAST_KEYS_SIG) | set(keys))
+    else:
+        keys = sorted(set(keys))
+
+    sig = tuple(keys)
     if _FEED_THREAD is not None and _FEED_THREAD.is_alive() and sig == _LAST_KEYS_SIG:
         return
 
