@@ -423,8 +423,8 @@ def test_minute_20_tick_does_not_call_1m(
     }
     mock_5m.return_value = {"NSE_INDEX|Nifty 50": [bar_5m]}
     with patch(
-        "backend.services.breakfast_strategy.live_tick._gainer_loser_books",
-        return_value=[],
+        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
+        return_value=([], True),
     ), patch(
         "backend.services.breakfast_strategy.live_tick._build_stock_overrides_from_1m",
         return_value=({}, {}),
@@ -486,8 +486,8 @@ def test_minute_20_fetches_selected_stocks_via_rest_5m(
     }
     mock_5m.side_effect = lambda ux, cache_dir, keys, **kw: {k: [bar_5m] for k in keys}
     with patch(
-        "backend.services.breakfast_strategy.live_tick._gainer_loser_books",
-        return_value=[("NSE_INDEX|Nifty Bank", True)],
+        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
+        return_value=(["NSE_INDEX|Nifty Bank"], True),
     ), patch(
         "backend.services.breakfast_strategy.live_tick._members_for_books",
         return_value={"NSE_INDEX|Nifty Bank": [{"stock": "HDFCBANK"}]},
@@ -563,41 +563,6 @@ def test_live_payload_negative_nifty_pct_is_short_not_long():
     assert payload["nifty"]["direction"] == "SHORT"
 
 
-def test_gainer_loser_books_two_sectors():
-    from backend.services.breakfast_strategy.live_tick import _gainer_loser_books
-
-    bank = "NSE_INDEX|Nifty Pvt Bank"
-    it = "NSE_INDEX|Nifty IT"
-    session = date(2026, 9, 1)
-    candles = {
-        "NSE_INDEX|Nifty 50": [
-            {"timestamp": "2026-09-01T09:15:00+05:30", "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 1}
-        ],
-        bank: [
-            {"timestamp": "2026-09-01T09:15:00+05:30", "open": 100, "high": 104, "low": 99, "close": 103, "volume": 1}
-        ],
-        it: [
-            {"timestamp": "2026-09-01T09:15:00+05:30", "open": 100, "high": 101, "low": 96, "close": 97, "volume": 1}
-        ],
-    }
-    stocks = {bank: [{"stock": "AAA"}], it: [{"stock": "CCC"}]}
-    prev = {"NSE_INDEX|Nifty 50": 100.0, bank: 100.0, it: 100.0}
-    with patch(
-        "backend.services.breakfast_strategy.live_tick.fo_eligible_sector_keys",
-        return_value={bank, it},
-    ):
-        books = _gainer_loser_books(
-            session_date=session,
-            candles=candles,
-            stocks_by_sector=stocks,
-            fut_by_und={},
-            eq_by_symbol={},
-            sector_prev_closes=prev,
-            nifty_prev_close=100.0,
-        )
-    assert books == [(bank, True), (it, False)]
-
-
 def test_members_for_books_uses_db_wick_only():
     from backend.services.breakfast_prev_close import WICK_LONG_DOWN, WICK_LONG_UP
     from backend.services.breakfast_strategy.live_tick import _members_for_books
@@ -631,7 +596,7 @@ def test_members_for_books_uses_db_wick_only():
     return_value=["NSE_INDEX|Nifty Bank", "NSE_INDEX|Nifty IT"],
 )
 @patch("backend.services.breakfast_strategy.live_tick.UpstoxService")
-def test_freeze_stock_rest_only_wick_filtered_gainer_loser(
+def test_freeze_stock_rest_only_wick_filtered_same_side(
     _ux,
     _sector_keys,
     mock_indexes,
@@ -679,8 +644,8 @@ def test_freeze_stock_rest_only_wick_filtered_gainer_loser(
         "backend.services.breakfast_strategy.live_tick.load_stored_prev_closes_and_wicks",
         return_value=(prev, {"AAA": 100.0, "BBB": 100.0, "CCC": 100.0, "DDD": 100.0}, wicks),
     ), patch(
-        "backend.services.breakfast_strategy.live_tick._gainer_loser_books",
-        return_value=[(bank, True), (it, False)],
+        "backend.services.breakfast_strategy.live_tick._rank_picked_sectors",
+        return_value=([bank, it], True),
     ), patch(
         "backend.services.breakfast_strategy.live_tick._resolve_stock_keys",
         side_effect=_resolve,
@@ -701,7 +666,7 @@ def test_freeze_stock_rest_only_wick_filtered_gainer_loser(
     batches = [list(c.args[2]) for c in mock_5m.call_args_list]
     assert batches[0] == ["NSE_INDEX|Nifty 50", bank, it]
     stock_keys = batches[1] if len(batches) > 1 else []
-    assert stock_keys == ["NSE_FO|AAA", "NSE_FO|CCC"]
+    assert stock_keys == ["NSE_FO|AAA", "NSE_FO|DDD"]
     assert "NSE_FO|BBB" not in stock_keys
-    assert "NSE_FO|DDD" not in stock_keys
+    assert "NSE_FO|CCC" not in stock_keys
     assert out["rest_call_budget"] == {"indexes": 3, "stocks": 2}

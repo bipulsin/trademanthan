@@ -527,7 +527,19 @@
         return wrap;
     }
 
-    function renderLiveSector(i, sector, data) {
+    function selectedSectorRankMap(sectors) {
+        var filled = [];
+        (sectors || []).forEach(function (s, i) {
+            if (!sectorIsFilled(s) || s.move_pct == null) return;
+            filled.push({ i: i, pct: Math.abs(Number(s.move_pct) || 0) });
+        });
+        filled.sort(function (a, b) { return b.pct - a.pct; });
+        var ranks = {};
+        filled.forEach(function (x, idx) { ranks[x.i] = idx + 1; });
+        return ranks;
+    }
+
+    function renderLiveSector(i, sector, data, selectedRank) {
         ensureSectorColumns(i + 1);
         var col = $("bfLiveSectorCol" + i);
         if (!col) return;
@@ -545,7 +557,7 @@
             return;
         }
         var longSide = sector.direction === "LONG";
-        var secNum = sector.sector_rank || (i + 1);
+        var secNum = selectedRank || sector.selected_rank || (i + 1);
         var stocks = (sector.stocks || []).slice();
         while (stocks.length < 3) stocks.push({});
         var stockHtml = stocks.slice(0, 3).map(function (st, si) {
@@ -567,9 +579,10 @@
     function renderLiveSectors(sectors, data) {
         sectors = sectors || [];
         var n = Math.max(sectors.length, 2);
+        var ranks = selectedSectorRankMap(sectors);
         ensureSectorColumns(n);
         for (var i = 0; i < n; i++) {
-            renderLiveSector(i, sectors[i], data);
+            renderLiveSector(i, sectors[i], data, ranks[i]);
         }
     }
 

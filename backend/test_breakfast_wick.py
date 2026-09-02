@@ -160,10 +160,10 @@ def test_live_payload_includes_wick_and_drops_mismatch():
 def test_first_5m_color_matches_direction():
     assert first_5m_color_matches_direction(100, 101, "LONG") is True
     assert first_5m_color_matches_direction(100, 99, "LONG") is False
-    assert first_5m_color_matches_direction(100, 100, "LONG") is False
+    assert first_5m_color_matches_direction(100, 100, "LONG") is True
     assert first_5m_color_matches_direction(100, 99, "SHORT") is True
     assert first_5m_color_matches_direction(100, 101, "SHORT") is False
-    assert first_5m_color_matches_direction(100, 100, "SHORT") is False
+    assert first_5m_color_matches_direction(100, 100, "SHORT") is True
     assert first_5m_color_matches_direction(100, 101, "UNKNOWN") is False
 
 
@@ -175,8 +175,9 @@ def test_filter_live_stocks_by_first_5m_color_long_keeps_green_only():
         {"symbol": "MISS", "signal_close": 101},
     ]
     out = filter_live_stocks_by_first_5m_color(stocks, direction="LONG")
-    assert [s["symbol"] for s in out] == ["GRN"]
+    assert [s["symbol"] for s in out] == ["GRN", "DOJ"]
     assert out[0]["stock_rank"] == 1
+    assert out[1]["is_doji"] is True
 
 
 def test_filter_live_stocks_by_first_5m_color_short_keeps_red_only():
@@ -216,7 +217,8 @@ def test_filter_wick_and_color_together_long():
         },
     ]
     out = filter_live_stocks_by_wick_and_color(stocks, direction="LONG")
-    assert [s["symbol"] for s in out] == ["OK"]
+    assert [s["symbol"] for s in out] == ["OK", "DOJI"]
+    assert out[1]["is_doji"] is True
 
 
 def test_filter_wick_and_color_together_short():
@@ -253,9 +255,9 @@ def test_filter_sector_members_by_first_5m_color():
         "CCC": {"open": 100, "close": 100},
     }
     out = filter_sector_members_by_first_5m_color(members, bars, long_side=True)
-    assert [m["stock"] for m in out["sec"]] == ["AAA"]
+    assert [m["stock"] for m in out["sec"]] == ["AAA", "CCC"]
     out_short = filter_sector_members_by_first_5m_color(members, bars, long_side=False)
-    assert [m["stock"] for m in out_short["sec"]] == ["BBB"]
+    assert [m["stock"] for m in out_short["sec"]] == ["BBB", "CCC"]
 
 
 def test_live_payload_drops_wrong_5m_color_even_with_wick():

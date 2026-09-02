@@ -11,6 +11,7 @@ import pytest
 from backend.services.breakfast_strategy.candles import aggregate_1m_to_session_5m, bars_ohlc_close_match
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import (
+    assign_selected_sector_ranks,
     live_state_from_persisted_rows,
     persist_live_signals,
     rows_from_live_state,
@@ -42,6 +43,11 @@ SAMPLE_STATE = {
                     "sl_price": 1635.6,
                     "lot_size": 550,
                     "instrument_key": "NSE_FO|HDFCBANK",
+                    "first_5m_open": 1640.0,
+                    "first_5m_high": 1652.0,
+                    "first_5m_low": 1638.0,
+                    "first_5m_close": 1650.5,
+                    "first_5m_ts": "2026-08-28T09:15:00+05:30",
                 },
             ],
         },
@@ -134,6 +140,11 @@ def test_rows_from_live_state_builds_row():
     assert r["rank_at_lock"] == 1
     assert r["websocket_rest_cross_check_status"] == "matched"
     assert r["stock_move_pct_at_lock"] == 1.2
+    assert r["first_5m_open"] == 1640.0
+    assert r["first_5m_high"] == 1652.0
+    assert r["first_5m_low"] == 1638.0
+    assert r["first_5m_close"] == 1650.5
+    assert r["first_5m_ts"].startswith("2026-08-28T09:15")
 
 
 def test_live_state_from_persisted_rows_roundtrip():
@@ -143,6 +154,18 @@ def test_live_state_from_persisted_rows_roundtrip():
     assert state["nifty"]["direction"] == "LONG"
     assert len(state["sectors"]) == 1
     assert state["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
+    assert state["sectors"][0]["stocks"][0]["first_5m_close"] == 1650.5
+    assert state["sectors"][0]["selected_rank"] == 1
+
+
+def test_assign_selected_sector_ranks_by_abs_pct():
+    secs = [
+        {"sector_label": "IT", "move_pct": -0.9},
+        {"sector_label": "Bank", "move_pct": 0.4},
+    ]
+    assign_selected_sector_ranks(secs)
+    assert secs[0]["selected_rank"] == 1
+    assert secs[1]["selected_rank"] == 2
 
 
 @patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)

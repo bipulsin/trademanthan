@@ -19,6 +19,7 @@ IST = pytz.timezone("Asia/Kolkata")
 
 _MIGRATION = Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_live_signals.sql"
 _SESSION_LOCK_MIGRATION = Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_session_lock.sql"
+_FIRST_5M_MIGRATION = Path(__file__).resolve().parents[2] / "migrations" / "add_breakfast_live_first_5m_ohlc.sql"
 _ENSURED = False
 
 _MANUAL_FIELDS = frozenset(
@@ -36,7 +37,7 @@ def ensure_breakfast_live_signals_table() -> None:
     global _ENSURED
     if _ENSURED:
         return
-    for mig in (_MIGRATION, _SESSION_LOCK_MIGRATION):
+    for mig in (_MIGRATION, _SESSION_LOCK_MIGRATION, _FIRST_5M_MIGRATION):
         if not mig.is_file():
             logger.warning("breakfast live migration missing: %s", mig)
             continue
@@ -57,6 +58,15 @@ def _parse_ts(raw: Optional[str]) -> Optional[datetime]:
         return dt.astimezone(IST)
     except (TypeError, ValueError):
         return None
+
+
+def assign_selected_sector_ranks(sectors: List[Dict[str, Any]]) -> None:
+    """Rank selected sector cards 1..n by |move_pct| at this tick/freeze."""
+    filled = [s for s in sectors if s.get("move_pct") is not None]
+    ordered = sorted(filled, key=lambda s: abs(float(s.get("move_pct") or 0)), reverse=True)
+    for i, sec in enumerate(ordered, start=1):
+        sec["selected_rank"] = i
+
 
 
 def rows_from_live_state(
@@ -98,6 +108,7 @@ def rows_from_live_state(
             stk_dir = str(stk.get("direction") or direction).strip().upper()
             if stk_dir not in ("LONG", "SHORT"):
                 stk_dir = direction
+            first_ts = _parse_ts(stk.get("first_5m_ts"))
             rows.append(
                 {
                     "session_date": session_date,
@@ -118,6 +129,11 @@ def rows_from_live_state(
                     "websocket_rest_cross_check_status": cross_check_status,
                     "instrument_key": stk.get("instrument_key"),
                     "capture_source": cap_src,
+                    "first_5m_open": stk.get("first_5m_open"),
+                    "first_5m_high": stk.get("first_5m_high"),
+                    "first_5m_low": stk.get("first_5m_low"),
+                    "first_5m_close": stk.get("first_5m_close"),
+                    "first_5m_ts": first_ts.isoformat() if first_ts else None,
                 }
             )
     return rows
@@ -144,13 +160,16 @@ def _insert_signal(db: Session, row: Dict[str, Any]) -> bool:
                 session_date, symbol, direction, sector, sector_rank, rank_at_lock,
                 nifty_bias_pct, sector_move_pct, stock_move_pct_at_lock, ltp_at_lock,
                 anchor_price, tp_price, sl_price, lot_size, locked_at_timestamp,
-                websocket_rest_cross_check_status, instrument_key, capture_source
+                websocket_rest_cross_check_status, instrument_key, capture_source,
+                first_5m_open, first_5m_high, first_5m_low, first_5m_close, first_5m_ts
             ) VALUES (
                 CAST(:session_date AS date), :symbol, :direction, :sector, :sector_rank, :rank_at_lock,
                 :nifty_bias_pct, :sector_move_pct, :stock_move_pct_at_lock, :ltp_at_lock,
                 :anchor_price, :tp_price, :sl_price, :lot_size,
                 CAST(:locked_at_timestamp AS timestamptz),
-                :websocket_rest_cross_check_status, :instrument_key, :capture_source
+                :websocket_rest_cross_check_status, :instrument_key, :capture_source,
+                :first_5m_open, :first_5m_high, :first_5m_low, :first_5m_close,
+                CAST(:first_5m_ts AS timestamptz)
             )
             """
         ),
@@ -246,10 +265,18 @@ def live_state_from_persisted_rows(session_date: str, rows: List[Dict[str, Any]]
                 "risk_inr": risk_inr,
                 "risk_inr_1lot": risk_inr,
                 "instrument_key": r.get("instrument_key"),
+                "first_5m_open": r.get("first_5m_open"),
+                "first_5m_high": r.get("first_5m_high"),
+                "first_5m_low": r.get("first_5m_low"),
+                "first_5m_close": r.get("first_5m_close"),
+                "first_5m_ts": r.get("first_5m_ts").isoformat()
+                if hasattr(r.get("first_5m_ts"), "isoformat")
+                else r.get("first_5m_ts"),
             }
         )
 
     sectors = sorted(sectors_map.values(), key=lambda s: s["sector_rank"])
+    assign_selected_sector_ranks(sectors)
     locked_at = rows[0].get("locked_at_timestamp")
     server_time = locked_at.isoformat() if hasattr(locked_at, "isoformat") else str(locked_at or "")
     if not server_time:

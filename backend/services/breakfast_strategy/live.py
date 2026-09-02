@@ -21,6 +21,7 @@ from backend.services.breakfast_strategy.candles import (
     ensure_5m_cached,
     first_5m_bar,
     first_5m_bar_from_quote,
+    first_5m_ohlc_payload,
     ist_ts,
     load_cached_5m,
     move_pct_vs_prev_close,
@@ -28,7 +29,7 @@ from backend.services.breakfast_strategy.candles import (
     signal_bar,
     session_has_stock_bars,
 )
-from backend.services.breakfast_strategy.config import SL_PCT, TP_PCT
+from backend.services.breakfast_strategy.config import SL_PCT, STOCK_MOVE_CAP_PCT, TP_PCT
 from backend.services.breakfast_strategy.engine import NIFTY50_KEY, nifty_bias_from_bar, select_breakfast_picks
 from backend.services.breakfast_strategy.engine_prevclose import (
     nifty_bias_from_bar_vs_prev_close,
@@ -47,7 +48,9 @@ from backend.services.breakfast_prev_close import (
     WICK_NONE,
     filter_live_stocks_by_wick_and_color,
     filter_sector_members_by_first_5m_color,
+    filter_sector_members_by_sign_gate,
     filter_sector_members_by_wick,
+    first_5m_is_doji,
     load_stored_prev_closes_and_wicks,
     load_stored_wicks,
 )
@@ -61,6 +64,7 @@ from backend.services.upstox_market_feed import (
     get_ws_quote_for_instrument,
 )
 from backend.services.breakfast_strategy.live_persist import (
+    assign_selected_sector_ranks,
     fetch_live_signals,
     fetch_session_lock,
     live_state_from_persisted_rows,
@@ -419,7 +423,7 @@ def _serialize_stock_pick(
     sig_o, _, _, sig_cl, sig_vol = candle_ohlcv(stk.signal_bar)
     labels = ["Pick 1", "Pick 2", "Watch 3rd"]
     label = labels[stk.stock_rank - 1] if 1 <= stk.stock_rank <= len(labels) else f"#{stk.stock_rank}"
-    return {
+    out = {
         "rank_label": label,
         "stock_rank": stk.stock_rank,
         "rank_in_sector": stk.stock_rank,
@@ -432,6 +436,7 @@ def _serialize_stock_pick(
         "ltp": ltp,
         "signal_open": sig_o,
         "signal_close": sig_cl,
+        "is_doji": first_5m_is_doji(sig_o, sig_cl),
         "volume": sig_vol,
         "lot_size": lot,
         "anchor_price": round(anchor_px, 4),
@@ -443,6 +448,8 @@ def _serialize_stock_pick(
         "price_source": stk.row.price_source,
         "wick": wick or WICK_NONE,
     }
+    out.update(first_5m_ohlc_payload(stk.signal_bar))
+    return out
 
 
 def _candidate_sector_keys_for_live(
@@ -796,7 +803,12 @@ def _build_live_state_payload(
     sector_books: List[Tuple[str, bool]] = []
     wick_members: Dict[str, List[Dict[str, str]]] = {}
     if off_cycle:
-        from backend.services.breakfast_strategy.live_tick import _gainer_loser_books, _members_for_books
+        from backend.services.breakfast_strategy.live_tick import (
+            LIVE_SECTORS_TO_PICK as _LIVE_N,
+            _books_same_side,
+            _members_for_books,
+            _rank_picked_sectors,
+        )
 
         candles_for_rank: Dict[str, List[Dict[str, Any]]] = {
             ik: list(bars) for ik, bars in sector_candles.items()
@@ -804,15 +816,18 @@ def _build_live_state_payload(
         candles_for_rank[NIFTY50_KEY] = nifty_candles
         for ik, bar in sector_overrides.items():
             candles_for_rank[ik] = [bar] + list(candles_for_rank.get(ik) or [])
-        sector_books = _gainer_loser_books(
+        ranked_keys, long_side_off = _rank_picked_sectors(
             session_date=session_date,
-            candles=candles_for_rank,
+            candles_1m=candles_for_rank,
             stocks_by_sector=stocks_by_sector,
             fut_by_und=fut_by_und,
             eq_by_symbol=eq_by_symbol,
-            sector_prev_closes=bench_prev,
+            upto_hhmm=(9, 20),
             nifty_prev_close=nifty_prev,
+            sector_prev_closes=bench_prev,
         )
+        picked_off = ranked_keys[:_LIVE_N]
+        sector_books = _books_same_side(picked_off, long_side_off)
         wick_members = _members_for_books(stocks_by_sector, stock_wicks, sector_books)
         candidate_sectors = [skey for skey, _ls in sector_books]
         if nifty_bar and candidate_sectors:
@@ -870,6 +885,14 @@ def _build_live_state_payload(
         for skey, book_long in sector_books:
             members = wick_members.get(skey, []) if wick_members else stocks_by_sector.get(skey, [])
             if bar_map:
+                move_pcts = {
+                    str(sym).strip().upper(): float(ov[1])
+                    for sym, ov in (stock_signal_overrides or {}).items()
+                    if ov and ov[1] is not None
+                }
+                members = filter_sector_members_by_sign_gate(
+                    {skey: members}, move_pcts, long_side=book_long, move_cap=STOCK_MOVE_CAP_PCT
+                ).get(skey, [])
                 members = filter_sector_members_by_first_5m_color(
                     {skey: members}, bar_map, long_side=book_long
                 ).get(skey, [])
@@ -902,6 +925,14 @@ def _build_live_state_payload(
             long_side=long_side_pick,
         )
         if bar_map:
+            move_pcts = {
+                str(sym).strip().upper(): float(ov[1])
+                for sym, ov in (stock_signal_overrides or {}).items()
+                if ov and ov[1] is not None
+            }
+            stocks_for_pick = filter_sector_members_by_sign_gate(
+                stocks_for_pick, move_pcts, long_side=long_side_pick, move_cap=STOCK_MOVE_CAP_PCT
+            )
             stocks_for_pick = filter_sector_members_by_first_5m_color(
                 stocks_for_pick, bar_map, long_side=long_side_pick
             )
@@ -964,6 +995,8 @@ def _build_live_state_payload(
                 }
             )
             _resort_sector_stocks([sectors_out[-1]], long_side=sp_long)
+
+    assign_selected_sector_ranks(sectors_out)
 
     refresh_allowed = now.time() < FREEZE_AFTER and phase != "frozen"
 

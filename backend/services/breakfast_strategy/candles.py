@@ -690,6 +690,23 @@ def candle_ohlcv(c: Dict[str, Any]) -> Tuple[float, float, float, float, float]:
     return _ohlcv(c)
 
 
+def first_5m_ohlc_payload(bar: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """OHLC + bar open timestamp for persist/UI. Empty dict if bar is missing."""
+    if not bar:
+        return {}
+    o, h, l, c, _ = _ohlcv(bar)
+    ts = bar.get("timestamp")
+    if hasattr(ts, "isoformat"):
+        ts = ts.isoformat()
+    return {
+        "first_5m_open": o,
+        "first_5m_high": h,
+        "first_5m_low": l,
+        "first_5m_close": c,
+        "first_5m_ts": ts,
+    }
+
+
 def prev_session_close(
     candles: List[Dict[str, Any]],
     session_date: date,

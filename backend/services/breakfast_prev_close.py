@@ -104,19 +104,28 @@ def filter_live_stocks_by_wick(
     return _rerank_live_stock_rows(kept)
 
 
+def first_5m_is_doji(open_px: Any, close_px: Any) -> bool:
+    try:
+        return float(open_px) == float(close_px)
+    except (TypeError, ValueError):
+        return False
+
+
 def first_5m_color_matches_direction(open_px: Any, close_px: Any, direction: str) -> bool:
-    """LONG needs green (close > open); SHORT needs red (close < open). Doji fails both."""
+    """LONG close>open, SHORT close<open. close==open doji passes both sides."""
     try:
         o = float(open_px)
         c = float(close_px)
     except (TypeError, ValueError):
         return False
     d = str(direction or "").strip().upper()
+    if d not in ("LONG", "SHORT"):
+        return False
+    if c == o:
+        return True
     if d == "LONG":
         return c > o
-    if d == "SHORT":
-        return c < o
-    return False
+    return c < o
 
 
 def filter_live_stocks_by_first_5m_color(
@@ -131,8 +140,10 @@ def filter_live_stocks_by_first_5m_color(
         return kept
     for st in stocks or []:
         row = dict(st)
-        if not first_5m_color_matches_direction(row.get("signal_open"), row.get("signal_close"), d):
+        o, c = row.get("signal_open"), row.get("signal_close")
+        if not first_5m_color_matches_direction(o, c, d):
             continue
+        row["is_doji"] = first_5m_is_doji(o, c)
         kept.append(row)
     return _rerank_live_stock_rows(kept)
 
@@ -148,6 +159,33 @@ def filter_live_stocks_by_wick_and_color(
         filter_live_stocks_by_wick(stocks, direction=direction, wick_by_symbol=wick_by_symbol),
         direction=direction,
     )
+
+
+def filter_sector_members_by_sign_gate(
+    stocks_by_sector: Dict[str, List[Dict[str, str]]],
+    move_pcts: Dict[str, float],
+    *,
+    long_side: bool,
+    move_cap: float = 4.0,
+) -> Dict[str, List[Dict[str, str]]]:
+    """KEEP: 0<pct<cap LONG, -cap<pct<0 SHORT. Missing pct → drop."""
+    pcts = move_pcts or {}
+    out: Dict[str, List[Dict[str, str]]] = {}
+    for skey, members in (stocks_by_sector or {}).items():
+        kept = []
+        for m in members or []:
+            sym = str(m.get("stock") or "").strip().upper()
+            pct = pcts.get(sym)
+            if pct is None:
+                continue
+            if long_side:
+                if not (0.0 < float(pct) < float(move_cap)):
+                    continue
+            elif not (-float(move_cap) < float(pct) < 0.0):
+                continue
+            kept.append(m)
+        out[skey] = kept
+    return out
 
 
 def filter_sector_members_by_first_5m_color(
