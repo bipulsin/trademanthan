@@ -1013,9 +1013,10 @@
         }).join("");
     }
 
-    function wickTableHtml(title, rows, chipText) {
+    function wickTableHtml(title, rows, chipText, chipClass) {
+        var chipCls = "bf-wick-chip" + (chipClass ? " " + chipClass : "");
         var chip = chipText
-            ? " <span class=\"bf-wick-chip\">" + escapeHtml(chipText) + "</span>"
+            ? " <span class=\"" + chipCls + "\">" + escapeHtml(chipText) + "</span>"
             : "";
         return "<div class=\"vmb-table-wrap\">" +
             "<h2 class=\"bf-section-title\">" + escapeHtml(title) + chip + "</h2>" +
@@ -1040,8 +1041,8 @@
                     "<summary>" + name + "</summary>" +
                     "<div class=\"bf-wicks-sector-body\">" +
                     "<div class=\"bf-wicks-grid\">" +
-                    wickTableHtml("Long_Up_Wick", sec.long_up_wick || [], "Only of SHORT") +
-                    wickTableHtml("Long_Down_Wick", sec.long_down_wick || [], "Only for LONG") +
+                    wickTableHtml("Long_Up_Wick", sec.long_up_wick || [], "Only of SHORT", "bf-wick-chip-short") +
+                    wickTableHtml("Long_Down_Wick", sec.long_down_wick || [], "Only for LONG", "bf-wick-chip-long") +
                     "</div>" +
                     "<p class=\"bf-wicks-none\">" + noneLine + "</p>" +
                     "</div></details>";

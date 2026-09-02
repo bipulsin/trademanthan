@@ -459,6 +459,13 @@
     font-weight: 700;
     vertical-align: middle;
 }
+.bf-wick-chip-short {
+    background: #dc2626;
+    color: #fff;
+}
+.bf-wick-chip-long {
+    color: #000080;
+}
 .bf-wicks-none {
     margin: 0.65rem 0 0;
     font-size: 0.85rem;
