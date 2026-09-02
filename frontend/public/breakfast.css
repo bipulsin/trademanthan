@@ -305,9 +305,10 @@
     opacity: 0.95;
 }
 .bf-stock-row3 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    margin-top: 0.35rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    margin-top: 0.28rem;
+    opacity: 0.88;
 }
 .bf-stock-box.bf-has-log {
     outline: 2px solid #fde047;

@@ -655,15 +655,10 @@
         if (!wrap) return;
         Array.prototype.forEach.call(wrap.querySelectorAll("[data-bf-log-open]"), function (btn) {
             btn.addEventListener("click", function (e) {
+                e.preventDefault();
                 e.stopPropagation();
                 var box = btn.closest(".bf-stock-box");
                 if (!box) return;
-                openLogModal(box.getAttribute("data-symbol"), box.getAttribute("data-direction"));
-            });
-        });
-        Array.prototype.forEach.call(wrap.querySelectorAll(".bf-stock-box[data-symbol]"), function (box) {
-            box.addEventListener("click", function (e) {
-                if (e.target.closest("[data-bf-log-open]")) return;
                 openLogModal(box.getAttribute("data-symbol"), box.getAttribute("data-direction"));
             });
         });
