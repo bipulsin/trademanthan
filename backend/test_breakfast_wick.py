@@ -15,6 +15,7 @@ from backend.services.breakfast_prev_close import (
     filter_sector_members_by_first_5m_color,
     filter_sector_members_by_wick,
     first_5m_color_matches_direction,
+    partition_filled_wicks,
     required_wick_for_live_direction,
 )
 
@@ -366,3 +367,19 @@ def test_pick_stocks_ranks_short_by_lowest_prev_close_pct():
         session_rows=rows,
     )
     assert [r.stock for r in out] == ["DEEP", "MILD"]
+
+
+def test_partition_filled_wicks_excludes_none_and_sorts_futures():
+    rows = [
+        {"future_symbol": "ZEE25", "stock": "ZEE", "wick": WICK_LONG_DOWN},
+        {"future_symbol": "AAA25", "stock": "AAA", "wick": WICK_LONG_UP},
+        {"future_symbol": "BBB25", "stock": "BBB", "wick": WICK_NONE},
+        {"future_symbol": "", "stock": "CCC", "wick": WICK_LONG_DOWN},
+        {"future_symbol": "MMM25", "stock": "MMM", "wick": WICK_LONG_UP},
+        {"stock": "SKIP", "wick": "garbage"},
+    ]
+    out = partition_filled_wicks(rows)
+    assert [r["future_symbol"] for r in out["long_down_wick"]] == ["CCC", "ZEE25"]
+    assert [r["wick"] for r in out["long_down_wick"]] == [WICK_LONG_DOWN, WICK_LONG_DOWN]
+    assert [r["future_symbol"] for r in out["long_up_wick"]] == ["AAA25", "MMM25"]
+    assert all(r["wick"] != WICK_NONE for r in out["long_down_wick"] + out["long_up_wick"])

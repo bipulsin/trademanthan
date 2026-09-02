@@ -7,6 +7,7 @@
     const PREVCLOSE_API = "/api/breakfast-strategy/prevclose-backtest";
     const TRAP_CE_API = "/api/breakfast-strategy/trap-ce";
     const TRAP_CE_LIVE_API = "/api/breakfast-strategy/trap-ce-live";
+    const WICKS_API = "/api/breakfast-strategy/wicks";
     var livePollTimer = null;
     var liveWindowTimer = null;
     var liveLoadInFlight = false;
@@ -1001,22 +1002,61 @@
         }
     }
 
+    function wickRowsHtml(rows) {
+        if (!rows || !rows.length) {
+            return "<tr><td colspan=\"2\">None</td></tr>";
+        }
+        return rows.map(function (r) {
+            var fut = escapeHtml(r.future_symbol || "");
+            var wick = escapeHtml(r.wick || "");
+            return "<tr><td>" + fut + "</td><td>" + wick + "</td></tr>";
+        }).join("");
+    }
+
+    function renderWicks(data) {
+        var down = (data && data.long_down_wick) || [];
+        var up = (data && data.long_up_wick) || [];
+        var downBody = $("bfWicksDownTable") && $("bfWicksDownTable").querySelector("tbody");
+        var upBody = $("bfWicksUpTable") && $("bfWicksUpTable").querySelector("tbody");
+        if (downBody) downBody.innerHTML = wickRowsHtml(down);
+        if (upBody) upBody.innerHTML = wickRowsHtml(up);
+        var meta = $("bfWicksMeta");
+        if (meta) {
+            meta.textContent = "Long_Down_Wick " + down.length + " · Long_Up_Wick " + up.length;
+        }
+    }
+
+    async function loadWicks() {
+        try {
+            var res = await fetchWithTimeout(WICKS_API, null, 20000);
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            renderWicks(await res.json());
+        } catch (e) {
+            renderWicks({ long_down_wick: [], long_up_wick: [] });
+            var meta = $("bfWicksMeta");
+            if (meta) meta.textContent = String(e);
+        }
+    }
+
     function switchTab(tab) {
         var primary = tab === "primary";
         var history = tab === "history";
         var live = tab === "live";
+        var wicks = tab === "wicks";
         var prevclose = tab === "prevclose";
         var trapce = tab === "trapce";
         var trapcelive = tab === "trapcelive";
         $("bfPanelPrimary").hidden = !primary;
         $("bfPanelHistory").hidden = !history;
         $("bfPanelLive").hidden = !live;
+        if ($("bfPanelWicks")) $("bfPanelWicks").hidden = !wicks;
         if ($("bfPanelPrevclose")) $("bfPanelPrevclose").hidden = !prevclose;
         if ($("bfPanelTrapCe")) $("bfPanelTrapCe").hidden = !trapce;
         if ($("bfPanelTrapCeLive")) $("bfPanelTrapCeLive").hidden = !trapcelive;
         $("bfTabPrimary").classList.toggle("active", primary);
         $("bfTabHistory").classList.toggle("active", history);
         $("bfTabLive").classList.toggle("active", live);
+        if ($("bfTabWicks")) $("bfTabWicks").classList.toggle("active", wicks);
         if ($("bfTabPrevclose")) $("bfTabPrevclose").classList.toggle("active", prevclose);
         if ($("bfTabTrapCe")) $("bfTabTrapCe").classList.toggle("active", trapce);
         if ($("bfTabTrapCeLive")) $("bfTabTrapCeLive").classList.toggle("active", trapcelive);
@@ -1030,6 +1070,7 @@
         else if (prevclose) loadPrevclose();
         else if (trapce) loadTrapCe();
         else if (trapcelive) loadTrapCeLive();
+        else if (wicks) loadWicks();
         else if (live) {
             loadLive();
             scheduleLiveWindowWatch();
@@ -1040,6 +1081,9 @@
         $("bfTabPrimary").addEventListener("click", function () { switchTab("primary"); });
         $("bfTabHistory").addEventListener("click", function () { switchTab("history"); });
         $("bfTabLive").addEventListener("click", function () { switchTab("live"); });
+        if ($("bfTabWicks")) {
+            $("bfTabWicks").addEventListener("click", function () { switchTab("wicks"); });
+        }
         if ($("bfTabPrevclose")) {
             $("bfTabPrevclose").addEventListener("click", function () { switchTab("prevclose"); });
         }
@@ -1069,6 +1113,7 @@
         if (reload) reload.addEventListener("click", function () {
             if (!$("bfPanelHistory").hidden) loadHistory();
             else if (!$("bfPanelLive").hidden) loadLive();
+            else if ($("bfPanelWicks") && !$("bfPanelWicks").hidden) loadWicks();
             else if ($("bfPanelPrevclose") && !$("bfPanelPrevclose").hidden) loadPrevclose();
             else if ($("bfPanelTrapCe") && !$("bfPanelTrapCe").hidden) loadTrapCe();
             else if ($("bfPanelTrapCeLive") && !$("bfPanelTrapCeLive").hidden) loadTrapCeLive();

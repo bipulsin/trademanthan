@@ -422,8 +422,17 @@
     color: #86efac;
 }
 
+.bf-wicks-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    align-items: start;
+}
+.bf-wicks-grid .bf-section-title { margin-top: 0; }
+
 @media (max-width: 1000px) {
     .bf-live-grid { grid-template-columns: 1fr; }
+    .bf-wicks-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
     .bf-live-sectors { grid-template-columns: 1fr; }

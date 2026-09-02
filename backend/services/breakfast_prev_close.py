@@ -330,6 +330,64 @@ def load_stored_wicks() -> Dict[str, str]:
     return wicks
 
 
+def _filled_wick_row(row: Any) -> Optional[Dict[str, str]]:
+    if not hasattr(row, "get"):
+        return None
+    wick = str(row.get("wick") or "").strip()
+    if wick not in (WICK_LONG_UP, WICK_LONG_DOWN):
+        return None
+    future = str(row.get("future_symbol") or row.get("currmth_future_symbol") or "").strip()
+    stock = str(row.get("stock") or "").strip()
+    symbol = future or stock
+    if not symbol:
+        return None
+    return {"future_symbol": symbol, "wick": wick}
+
+
+def partition_filled_wicks(rows: List[Any]) -> Dict[str, List[Dict[str, str]]]:
+    """Split filled wick rows; exclude NONE. Sort A–Z by future symbol."""
+    down: List[Dict[str, str]] = []
+    up: List[Dict[str, str]] = []
+    for raw in rows or []:
+        item = _filled_wick_row(raw)
+        if not item:
+            continue
+        if item["wick"] == WICK_LONG_DOWN:
+            down.append(item)
+        else:
+            up.append(item)
+    key = lambda r: r["future_symbol"].upper()
+    down.sort(key=key)
+    up.sort(key=key)
+    return {"long_down_wick": down, "long_up_wick": up}
+
+
+def load_filled_wicks() -> Dict[str, List[Dict[str, str]]]:
+    """Read-only: current-month FUT symbols with Long_*_Wick on arbitrage_master."""
+    rows: List[Any] = []
+    db = SessionLocal()
+    try:
+        rows = list(
+            db.execute(
+                text(
+                    """
+                    SELECT TRIM(currmth_future_symbol) AS future_symbol,
+                           UPPER(TRIM(stock)) AS stock,
+                           TRIM(wick) AS wick
+                    FROM arbitrage_master
+                    WHERE wick IN (:down, :up)
+                    """
+                ),
+                {"down": WICK_LONG_DOWN, "up": WICK_LONG_UP},
+            ).mappings()
+        )
+    except Exception as e:
+        logger.warning("load_filled_wicks failed: %s", e)
+    finally:
+        db.close()
+    return partition_filled_wicks(rows)
+
+
 def load_stored_prev_closes_and_wicks() -> Tuple[Dict[str, float], Dict[str, float], Dict[str, str]]:
     """instrument_key → prev close, stock → prev close, stock → wick."""
     bench: Dict[str, float] = {}

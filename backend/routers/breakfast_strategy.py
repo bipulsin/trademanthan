@@ -24,6 +24,7 @@ from backend.services.breakfast_strategy.config import (
     PREVCLOSE_ARTIFACT_NAME,
 )
 from backend.services.breakfast_strategy.history import load_history
+from backend.services.breakfast_prev_close import load_filled_wicks
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import fetch_live_signals, fetch_session_lock, update_manual_capture
 from backend.services.breakfast_strategy.persist import fetch_trades
@@ -213,6 +214,20 @@ def get_history_month_trades(period_label: str) -> Dict[str, Any]:
                 "summary": m.get("summary") or {},
             }
     raise HTTPException(status_code=404, detail=f"Period {period_label} not found in history")
+
+
+@router.get("/wicks")
+def get_breakfast_wicks() -> Dict[str, Any]:
+    """Read-only filled wicks from arbitrage_master (no ranking / freeze / trade logic)."""
+    tables = load_filled_wicks()
+    down = tables.get("long_down_wick") or []
+    up = tables.get("long_up_wick") or []
+    return {
+        "ok": True,
+        "long_down_wick": down,
+        "long_up_wick": up,
+        "counts": {"long_down_wick": len(down), "long_up_wick": len(up)},
+    }
 
 
 @router.get("/live")
