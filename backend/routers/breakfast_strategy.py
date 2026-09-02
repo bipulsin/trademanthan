@@ -24,7 +24,7 @@ from backend.services.breakfast_strategy.config import (
     PREVCLOSE_ARTIFACT_NAME,
 )
 from backend.services.breakfast_strategy.history import load_history
-from backend.services.breakfast_prev_close import load_filled_wicks
+from backend.services.breakfast_prev_close import load_filled_wicks, load_wicks_grouped_by_sector
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import fetch_live_signals, fetch_session_lock, update_manual_capture
 from backend.services.breakfast_strategy.persist import fetch_trades
@@ -222,11 +222,13 @@ def get_breakfast_wicks() -> Dict[str, Any]:
     tables = load_filled_wicks()
     down = tables.get("long_down_wick") or []
     up = tables.get("long_up_wick") or []
+    sectors = load_wicks_grouped_by_sector()
     return {
         "ok": True,
         "long_down_wick": down,
         "long_up_wick": up,
         "counts": {"long_down_wick": len(down), "long_up_wick": len(up)},
+        "sectors": sectors,
     }
 
 

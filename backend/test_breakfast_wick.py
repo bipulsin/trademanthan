@@ -15,8 +15,10 @@ from backend.services.breakfast_prev_close import (
     filter_sector_members_by_first_5m_color,
     filter_sector_members_by_wick,
     first_5m_color_matches_direction,
+    group_wicks_by_sector,
     partition_filled_wicks,
     required_wick_for_live_direction,
+    sector_label_for_wicks,
 )
 
 
@@ -383,3 +385,56 @@ def test_partition_filled_wicks_excludes_none_and_sorts_futures():
     assert [r["wick"] for r in out["long_down_wick"]] == [WICK_LONG_DOWN, WICK_LONG_DOWN]
     assert [r["future_symbol"] for r in out["long_up_wick"]] == ["AAA25", "MMM25"]
     assert all(r["wick"] != WICK_NONE for r in out["long_down_wick"] + out["long_up_wick"])
+
+
+def test_sector_label_for_wicks_maps_upstox_key():
+    assert sector_label_for_wicks("NSE_INDEX|Nifty Auto") == "Nifty Auto"
+    assert sector_label_for_wicks("NSE_INDEX|Nifty Pvt Bank") == "Nifty Private Bank"
+    assert sector_label_for_wicks("") == "Unmapped"
+
+
+def test_group_wicks_by_sector_splits_none_and_sides():
+    rows = [
+        {
+            "stock": "tatamotors",
+            "sector_index": "NSE_INDEX|Nifty Auto",
+            "wick": WICK_LONG_UP,
+            "prev_session_close": 900.5,
+        },
+        {
+            "stock": "M&M",
+            "sector_index": "NSE_INDEX|Nifty Auto",
+            "wick": WICK_LONG_DOWN,
+            "prev_session_close": 2800,
+        },
+        {
+            "stock": "BAJAJ-AUTO",
+            "sector_index": "NSE_INDEX|Nifty Auto",
+            "wick": None,
+            "prev_session_close": 8500,
+        },
+        {
+            "stock": "INFY",
+            "sector_index": "NSE_INDEX|Nifty IT",
+            "wick": WICK_NONE,
+            "prev_session_close": 1500,
+        },
+        {
+            "stock": "TCS",
+            "sector_index": "NSE_INDEX|Nifty IT",
+            "wick": "garbage",
+            "prev_session_close": None,
+        },
+    ]
+    out = group_wicks_by_sector(rows)
+    assert [s["sector"] for s in out] == ["Nifty Auto", "Nifty IT"]
+    auto = out[0]
+    assert [r["stock"] for r in auto["long_up_wick"]] == ["TATAMOTORS"]
+    assert auto["long_up_wick"][0]["prev_session_close"] == "900.50"
+    assert [r["stock"] for r in auto["long_down_wick"]] == ["M&M"]
+    assert auto["none"] == ["BAJAJ-AUTO"]
+    it = out[1]
+    assert it["long_up_wick"] == []
+    assert it["long_down_wick"] == []
+    assert it["none"] == ["INFY", "TCS"]
+    assert it["none"]  # TCS null wick treated as NONE

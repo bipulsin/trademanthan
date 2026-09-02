@@ -1002,27 +1002,54 @@
         }
     }
 
-    function wickRowsHtml(rows) {
+    function wickStockRowsHtml(rows) {
         if (!rows || !rows.length) {
-            return "<tr><td colspan=\"2\">None</td></tr>";
+            return "<tr><td colspan=\"2\">—</td></tr>";
         }
         return rows.map(function (r) {
-            var fut = escapeHtml(r.future_symbol || "");
-            var wick = escapeHtml(r.wick || "");
-            return "<tr><td>" + fut + "</td><td>" + wick + "</td></tr>";
+            var name = escapeHtml(r.stock || r.future_symbol || "");
+            var prev = escapeHtml(r.prev_session_close != null ? String(r.prev_session_close) : "");
+            return "<tr><td>" + name + "</td><td>" + prev + "</td></tr>";
         }).join("");
     }
 
+    function wickTableHtml(title, rows) {
+        return "<div class=\"vmb-table-wrap\">" +
+            "<h2 class=\"bf-section-title\">" + escapeHtml(title) + "</h2>" +
+            "<table class=\"vmb-table\"><thead><tr><th>Stock</th><th>prev_session_close</th></tr></thead>" +
+            "<tbody>" + wickStockRowsHtml(rows) + "</tbody></table></div>";
+    }
+
     function renderWicks(data) {
+        var wrap = $("bfWicksSectors");
+        var sectors = (data && data.sectors) || [];
         var down = (data && data.long_down_wick) || [];
         var up = (data && data.long_up_wick) || [];
-        var downBody = $("bfWicksDownTable") && $("bfWicksDownTable").querySelector("tbody");
-        var upBody = $("bfWicksUpTable") && $("bfWicksUpTable").querySelector("tbody");
-        if (downBody) downBody.innerHTML = wickRowsHtml(down);
-        if (upBody) upBody.innerHTML = wickRowsHtml(up);
+        var html = "";
+        if (sectors.length) {
+            html = sectors.map(function (sec) {
+                var name = escapeHtml(sec.sector || "Unmapped");
+                var noneList = sec.none || [];
+                var noneLine = noneList.length
+                    ? "NONE: " + noneList.map(function (s) { return escapeHtml(s); }).join(", ")
+                    : "NONE: —";
+                return "<details class=\"bf-wicks-sector\">" +
+                    "<summary>" + name + "</summary>" +
+                    "<div class=\"bf-wicks-sector-body\">" +
+                    "<div class=\"bf-wicks-grid\">" +
+                    wickTableHtml("Long_Up_Wick", sec.long_up_wick || []) +
+                    wickTableHtml("Long_Down_Wick", sec.long_down_wick || []) +
+                    "</div>" +
+                    "<p class=\"bf-wicks-none\">" + noneLine + "</p>" +
+                    "</div></details>";
+            }).join("");
+        }
+        if (wrap) wrap.innerHTML = html;
         var meta = $("bfWicksMeta");
         if (meta) {
-            meta.textContent = "Long_Down_Wick " + down.length + " · Long_Up_Wick " + up.length;
+            meta.textContent = sectors.length
+                ? sectors.length + " sectors · Long_Down_Wick " + down.length + " · Long_Up_Wick " + up.length
+                : "Long_Down_Wick " + down.length + " · Long_Up_Wick " + up.length;
         }
     }
 

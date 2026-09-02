@@ -11,6 +11,10 @@ from sqlalchemy import text
 from backend.config import settings
 from backend.database import SessionLocal, engine
 from backend.services import market_holiday as mh
+from backend.services.sector_movers import (
+    _index_key_to_sector_label,
+    normalize_sector_instrument_key,
+)
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -386,6 +390,109 @@ def load_filled_wicks() -> Dict[str, List[Dict[str, str]]]:
     finally:
         db.close()
     return partition_filled_wicks(rows)
+
+
+def sector_label_for_wicks(raw_sector_index: Any) -> str:
+    """Display label from arbitrage_master.sector_index (Upstox key or alias)."""
+    raw = str(raw_sector_index or "").strip()
+    if not raw:
+        return "Unmapped"
+    key = normalize_sector_instrument_key(raw) or raw
+    labels = _index_key_to_sector_label()
+    label = labels.get(key) or labels.get(raw)
+    if label:
+        return label
+    if "|" in key:
+        tail = key.split("|", 1)[1].strip()
+        if tail:
+            return tail
+    return key
+
+
+def _fmt_prev_session_close(px: Any) -> str:
+    try:
+        f = float(px)
+    except (TypeError, ValueError):
+        return ""
+    if f <= 0:
+        return ""
+    return f"{f:.2f}"
+
+
+def _norm_wick_or_none(wick: Any) -> str:
+    s = str(wick or "").strip()
+    if s in (WICK_LONG_UP, WICK_LONG_DOWN, WICK_NONE):
+        return s
+    return WICK_NONE
+
+
+def group_wicks_by_sector(rows: List[Any]) -> List[Dict[str, Any]]:
+    """Group FUT rows by sector display label. Null/unknown wick → NONE."""
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for raw in rows or []:
+        if not hasattr(raw, "get"):
+            continue
+        stock = str(raw.get("stock") or "").strip().upper()
+        if not stock:
+            continue
+        sector = sector_label_for_wicks(raw.get("sector_index"))
+        wick = _norm_wick_or_none(raw.get("wick"))
+        item = {
+            "stock": stock,
+            "prev_session_close": _fmt_prev_session_close(raw.get("prev_session_close")),
+        }
+        b = buckets.setdefault(
+            sector,
+            {
+                "sector": sector,
+                "long_up_wick": [],
+                "long_down_wick": [],
+                "none": [],
+            },
+        )
+        if wick == WICK_LONG_UP:
+            b["long_up_wick"].append(item)
+        elif wick == WICK_LONG_DOWN:
+            b["long_down_wick"].append(item)
+        else:
+            b["none"].append(stock)
+    out: List[Dict[str, Any]] = []
+    for name in sorted(buckets.keys(), key=str.upper):
+        b = buckets[name]
+        b["long_up_wick"].sort(key=lambda r: r["stock"])
+        b["long_down_wick"].sort(key=lambda r: r["stock"])
+        b["none"].sort()
+        out.append(b)
+    return out
+
+
+def load_wicks_grouped_by_sector() -> List[Dict[str, Any]]:
+    """All current-month FUT rows on arbitrage_master, grouped by sector_index."""
+    rows: List[Any] = []
+    db = SessionLocal()
+    try:
+        rows = list(
+            db.execute(
+                text(
+                    """
+                    SELECT UPPER(TRIM(stock)) AS stock,
+                           TRIM(sector_index) AS sector_index,
+                           TRIM(wick) AS wick,
+                           prev_session_close
+                    FROM arbitrage_master
+                    WHERE stock IS NOT NULL
+                      AND TRIM(stock) <> ''
+                      AND currmth_future_symbol IS NOT NULL
+                      AND TRIM(currmth_future_symbol) <> ''
+                    """
+                )
+            ).mappings()
+        )
+    except Exception as e:
+        logger.warning("load_wicks_grouped_by_sector failed: %s", e)
+    finally:
+        db.close()
+    return group_wicks_by_sector(rows)
 
 
 def load_stored_prev_closes_and_wicks() -> Tuple[Dict[str, float], Dict[str, float], Dict[str, str]]:
