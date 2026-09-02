@@ -261,6 +261,67 @@ def daily_settled_for_ist(now_ist: datetime) -> bool:
     return now_ist >= cutoff
 
 
+def session_ohlc_from_intrabars(
+    candles: List[dict],
+    session_d: date,
+) -> Optional[Tuple[date, float, float, float, float]]:
+    """Aggregate same-calendar-day bars into one OHLC (open first, close last)."""
+    rows: List[Tuple[str, float, float, float, float]] = []
+    want = session_d.isoformat()
+    for c in candles or []:
+        ts = str(c.get("timestamp") or "")
+        if len(ts) < 10 or ts[:10] != want:
+            continue
+        try:
+            o = float(c.get("open") or 0)
+            h = float(c.get("high") or 0)
+            lo = float(c.get("low") or 0)
+            cl = float(c.get("close") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cl <= 0:
+            continue
+        rows.append((ts, o, h, lo, cl))
+    if not rows:
+        return None
+    rows.sort(key=lambda x: x[0])
+    return (
+        session_d,
+        rows[0][1],
+        max(r[2] for r in rows),
+        min(r[3] for r in rows),
+        rows[-1][4],
+    )
+
+
+def merge_settled_today_from_intrabars(
+    daily_candles: List[dict],
+    intra_candles: List[dict],
+    *,
+    now_ist: datetime,
+) -> List[dict]:
+    """If the session is settled but days/1 lacks today, append OHLC from hourly/intraday."""
+    now = mh._normalize_ist(now_ist)
+    today = now.date()
+    if not daily_settled_for_ist(now):
+        return list(daily_candles or [])
+    bars = parse_daily_ohlc(daily_candles)
+    if bars and bars[-1][0] == today:
+        return list(daily_candles or [])
+    ohlc = session_ohlc_from_intrabars(intra_candles, today)
+    if ohlc is None:
+        return list(daily_candles or [])
+    d, o, h, lo, cl = ohlc
+    extra = {
+        "timestamp": f"{d.isoformat()}T00:00:00+05:30",
+        "open": o,
+        "high": h,
+        "low": lo,
+        "close": cl,
+    }
+    return list(daily_candles or []) + [extra]
+
+
 def latest_settled_daily_ohlc(
     candles: List[dict],
     *,
@@ -577,6 +638,22 @@ def load_stored_prev_closes_and_wicks() -> Tuple[Dict[str, float], Dict[str, flo
     return bench, stocks, wicks
 
 
+def _daily_candles_with_settled_today(ux: UpstoxService, instrument_key: str, now: datetime) -> List[dict]:
+    """days/1 plus today's session OHLC from hours/1 when historical daily lags after close."""
+    candles = ux.get_historical_candles_by_instrument_key(
+        instrument_key, interval="days/1", days_back=12, range_end_date=now.date()
+    ) or []
+    if not daily_settled_for_ist(now):
+        return candles
+    bars = parse_daily_ohlc(candles)
+    if bars and bars[-1][0] == now.date():
+        return candles
+    hours = ux.get_historical_candles_by_instrument_key(
+        instrument_key, interval="hours/1", days_back=2, range_end_date=now.date()
+    ) or []
+    return merge_settled_today_from_intrabars(candles, hours, now_ist=now)
+
+
 def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
     """Idempotent UPSERT of prev_session_close + wick on benchmarks + arbitrage_master FUT rows."""
     now = mh._normalize_ist(None)
@@ -613,18 +690,18 @@ def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
         db.close()
 
     bench_updated = bench_skipped = 0
+    settled_for_date: Optional[str] = None
     for ik in benchmarks:
         key = str(ik or "").strip()
         if not key:
             continue
         try:
-            candles = ux.get_historical_candles_by_instrument_key(
-                key, interval="days/1", days_back=12, range_end_date=now.date()
-            ) or []
+            candles = _daily_candles_with_settled_today(ux, key, now)
             d, px = latest_settled_daily_close(candles, now_ist=now)
             if d is None or px is None:
                 bench_skipped += 1
                 continue
+            settled_for_date = d.isoformat()
             if _upsert_benchmark_prev_close(key, d, float(px), source):
                 bench_updated += 1
             else:
@@ -642,15 +719,14 @@ def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
             stock_skipped += 1
             continue
         try:
-            candles = ux.get_historical_candles_by_instrument_key(
-                fut_key, interval="days/1", days_back=12, range_end_date=now.date()
-            ) or []
+            candles = _daily_candles_with_settled_today(ux, fut_key, now)
             ohlc = latest_settled_daily_ohlc(candles, now_ist=now)
             if ohlc is None:
                 stock_skipped += 1
                 continue
             d, o, h, lo, px = ohlc
             wick = classify_daily_wick(o, h, lo, px)
+            settled_for_date = d.isoformat()
             if _upsert_stock_prev_close(sym, d, float(px), source, wick=wick):
                 stock_updated += 1
             else:
@@ -666,6 +742,7 @@ def run_breakfast_prev_close_job(*, trigger: str = "manual") -> Dict[str, Any]:
         "source": source,
         "benchmarks": {"updated": bench_updated, "skipped": bench_skipped, "total": len(benchmarks)},
         "stocks": {"updated": stock_updated, "skipped": stock_skipped, "total": len(stocks)},
+        "settled_for_date": settled_for_date,
     }
     logger.info("breakfast_prev_close_job: %s", out)
     return out
