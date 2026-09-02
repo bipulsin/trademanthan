@@ -170,6 +170,21 @@ def test_cascade_one_swap_only():
     assert both_empty == ["A", "B"]
 
 
+def test_off_cycle_cascade_swaps_empty_realty_for_auto():
+    """02-Sep freeze: IT+Realty top-2, Realty empty after color → Auto."""
+    it = sector_index_key_for_label("Nifty IT")
+    realty = sector_index_key_for_label("Nifty Realty")
+    auto = sector_index_key_for_label("Nifty Auto")
+    ranked = [it, realty, auto]
+    picked = ranked[:2]
+    after = {it: [{"stock": "HCLTECH"}], realty: [], auto: [{"stock": "M&M"}]}
+    new, frm, to, swapped = try_one_sector_cascade(picked, ranked, after)
+    assert swapped is True
+    assert frm == realty
+    assert to == auto
+    assert new == [it, auto]
+
+
 def test_lock_reason_wick_vs_color_vs_cascade():
     assert (
         live_lock_failure_reason(

@@ -12,6 +12,7 @@ from backend.services.breakfast_strategy.candles import aggregate_1m_to_session_
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import (
     assign_selected_sector_ranks,
+    compact_live_sector_cards,
     live_state_from_persisted_rows,
     persist_live_signals,
     rows_from_live_state,
@@ -166,6 +167,38 @@ def test_assign_selected_sector_ranks_by_abs_pct():
     assign_selected_sector_ranks(secs)
     assert secs[0]["selected_rank"] == 1
     assert secs[1]["selected_rank"] == 2
+
+
+def test_compact_and_rank_selected_after_cascade():
+    secs = [
+        {"sector_label": "IT", "move_pct": -2.47, "stocks": [{"symbol": "HCLTECH"}]},
+        {"sector_label": "Realty", "move_pct": -1.85, "stocks": []},
+        {"sector_label": "Auto", "move_pct": -1.76, "stocks": [{"symbol": "M&M"}]},
+    ]
+    out = compact_live_sector_cards(secs)
+    assert [s["sector_label"] for s in out] == ["IT", "Auto"]
+    assign_selected_sector_ranks(out)
+    assert out[0]["selected_rank"] == 1
+    assert out[1]["selected_rank"] == 2
+
+
+def test_lock_failed_banner_no_data_with_off_cycle_picks():
+    from backend.services.breakfast_strategy.live import _lock_failed_preview_banner
+
+    banner = _lock_failed_preview_banner(
+        "no_data",
+        {
+            "banner": "Off cycle data as of 02-Sep-2026 21:17",
+            "nifty": {"direction": "SHORT", "bias_pct": -0.96},
+            "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "HCLTECH"}]}],
+        },
+    )
+    assert "no_data at 9:20" in banner
+    assert "off-cycle" in banner.lower()
+    assert "Off cycle data" in banner
+    empty = _lock_failed_preview_banner("no_data", {"banner": "Off cycle", "nifty": {}, "sectors": []})
+    assert empty.startswith("LOCK FAILED — no_data")
+    assert "at 9:20" not in empty
 
 
 @patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)

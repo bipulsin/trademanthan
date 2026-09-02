@@ -43,6 +43,7 @@ from backend.services.breakfast_strategy.engine_prevclose import (
 )
 from backend.services.breakfast_strategy.live_persist import (
     assign_selected_sector_ranks,
+    compact_live_sector_cards,
     fetch_session_lock,
     persist_live_signals,
     persist_session_lock,
@@ -769,6 +770,7 @@ def _build_payload_from_selection(
                 }
             )
 
+    sectors_out = compact_live_sector_cards(sectors_out)
     assign_selected_sector_ranks(sectors_out)
 
     banner = "LIVE — FORMING, NOT FINAL" if phase == "forming" else "LOCKED — 9:20 CONFIRMED"

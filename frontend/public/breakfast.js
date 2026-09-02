@@ -531,6 +531,8 @@
         var filled = [];
         (sectors || []).forEach(function (s, i) {
             if (!sectorIsFilled(s) || s.move_pct == null) return;
+            var hasStock = (s.stocks || []).some(stockIsFilled);
+            if (!hasStock) return;
             filled.push({ i: i, pct: Math.abs(Number(s.move_pct) || 0) });
         });
         filled.sort(function (a, b) { return b.pct - a.pct; });
@@ -578,6 +580,10 @@
 
     function renderLiveSectors(sectors, data) {
         sectors = sectors || [];
+        var withStocks = sectors.filter(function (s) {
+            return sectorIsFilled(s) && (s.stocks || []).some(stockIsFilled);
+        });
+        if (withStocks.length) sectors = withStocks;
         var n = Math.max(sectors.length, 2);
         var ranks = selectedSectorRankMap(sectors);
         ensureSectorColumns(n);

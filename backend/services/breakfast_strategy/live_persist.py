@@ -60,9 +60,27 @@ def _parse_ts(raw: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def compact_live_sector_cards(sectors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop empty selected cards when another selected sector has stocks (cascade fill)."""
+    if not sectors:
+        return sectors
+    with_stocks = [s for s in sectors if s.get("stocks")]
+    empty = [s for s in sectors if "stocks" in s and not s.get("stocks")]
+    if with_stocks and empty:
+        return with_stocks
+    return list(sectors)
+
+
 def assign_selected_sector_ranks(sectors: List[Dict[str, Any]]) -> None:
-    """Rank selected sector cards 1..n by |move_pct| at this tick/freeze."""
-    filled = [s for s in sectors if s.get("move_pct") is not None]
+    """Rank 1..n among selected cards that have stocks, by |move_pct|."""
+    has_stock_lists = any("stocks" in s for s in sectors)
+    filled = []
+    for s in sectors:
+        if s.get("move_pct") is None:
+            continue
+        if has_stock_lists and not (s.get("stocks") or []):
+            continue
+        filled.append(s)
     ordered = sorted(filled, key=lambda s: abs(float(s.get("move_pct") or 0)), reverse=True)
     for i, sec in enumerate(ordered, start=1):
         sec["selected_rank"] = i
@@ -275,7 +293,7 @@ def live_state_from_persisted_rows(session_date: str, rows: List[Dict[str, Any]]
             }
         )
 
-    sectors = sorted(sectors_map.values(), key=lambda s: s["sector_rank"])
+    sectors = compact_live_sector_cards(sorted(sectors_map.values(), key=lambda s: s["sector_rank"]))
     assign_selected_sector_ranks(sectors)
     locked_at = rows[0].get("locked_at_timestamp")
     server_time = locked_at.isoformat() if hasattr(locked_at, "isoformat") else str(locked_at or "")

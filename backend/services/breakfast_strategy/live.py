@@ -65,6 +65,7 @@ from backend.services.upstox_market_feed import (
 )
 from backend.services.breakfast_strategy.live_persist import (
     assign_selected_sector_ranks,
+    compact_live_sector_cards,
     fetch_live_signals,
     fetch_session_lock,
     live_state_from_persisted_rows,
@@ -161,6 +162,21 @@ def _is_pre_live_window(now: datetime) -> bool:
 
 def _off_cycle_banner(now: datetime) -> str:
     return f"Off cycle data as of {now.strftime('%d-%b-%Y %H:%M')}"
+
+
+def _lock_failed_preview_banner(reason: str, off: Dict[str, Any]) -> str:
+    """Keep 9:20 lock failure distinct from a successful off-cycle preview."""
+    oc = str(off.get("banner") or "").strip()
+    r = str(reason or "see logs")
+    nifty = off.get("nifty") or {}
+    has_preview = bool(nifty.get("direction") and nifty.get("direction") != "UNKNOWN") and bool(
+        off.get("sectors")
+    )
+    if r == "no_data" and has_preview:
+        head = "LOCK FAILED — no_data at 9:20 · showing off-cycle picks"
+    else:
+        head = f"LOCK FAILED — {r}"
+    return f"{head} · {oc}" if oc else head
 
 
 def _blank_live_payload(
@@ -599,7 +615,7 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
                 off["lock_failed"] = True
                 off["failure_reason"] = reason
                 off["state"] = "lock_failed"
-                off["banner"] = f"LOCK FAILED — {reason} · {off.get('banner', '')}"
+                off["banner"] = _lock_failed_preview_banner(reason, off)
                 off["server_time"] = now.isoformat()
                 off["refresh_allowed"] = False
                 off["poll_interval_sec"] = 0
@@ -779,6 +795,7 @@ def _build_live_state_payload(
     allow_proxy = phase in ("forming", "opening", "bar_closing", "waiting")
     # During 9:16–9:20 forming, rely on WS + disk cache only — no per-instrument REST quotes.
     allow_quote_proxy = phase in ("opening", "waiting") or off_cycle
+    need_stock_overrides = allow_proxy or off_cycle
     nifty_bar, nifty_src = _resolve_session_bar(
         NIFTY50_KEY, session_date, nifty_candles, ux, phase=phase, allow_quote_proxy=allow_quote_proxy
     )
@@ -802,12 +819,16 @@ def _build_live_state_payload(
     nifty_prev = bench_prev.get(NIFTY50_KEY) or prev_session_close(nifty_candles, session_date)
     sector_books: List[Tuple[str, bool]] = []
     wick_members: Dict[str, List[Dict[str, str]]] = {}
+    ranked_keys: List[str] = []
+    long_side_off = False
+    picked_off: List[str] = []
     if off_cycle:
         from backend.services.breakfast_strategy.live_tick import (
             LIVE_SECTORS_TO_PICK as _LIVE_N,
             _books_same_side,
             _members_for_books,
             _rank_picked_sectors,
+            try_one_sector_cascade,
         )
 
         candles_for_rank: Dict[str, List[Dict[str, Any]]] = {
@@ -850,7 +871,7 @@ def _build_live_state_payload(
 
     stock_signal_overrides: Dict[str, Tuple[Dict[str, Any], float]] = {}
     anchor_overrides: Dict[str, Dict[str, Any]] = {}
-    if allow_proxy and nifty_bar:
+    if need_stock_overrides and nifty_bar:
         candidate_sectors = [skey for skey, _ls in sector_books] if sector_books else _candidate_sector_keys_for_live(
             stocks_by_sector=stocks_by_sector,
             session_date=session_date,
@@ -897,6 +918,64 @@ def _build_live_state_payload(
                     {skey: members}, bar_map, long_side=book_long
                 ).get(skey, [])
             stocks_for_pick[skey] = members
+        if off_cycle and picked_off and ranked_keys:
+            new_picked, cascade_from, cascade_to, swapped = try_one_sector_cascade(
+                picked_off, ranked_keys, stocks_for_pick
+            )
+            if swapped and cascade_to:
+                extra_books = _books_same_side([cascade_to], long_side_off)
+                extra_wick = _members_for_books(stocks_by_sector, stock_wicks, extra_books)
+                wick_members[cascade_to] = extra_wick.get(cascade_to, [])
+                _warm_off_cycle_stock_candles(
+                    stocks_by_sector=wick_members,
+                    candidate_sector_keys=[cascade_to],
+                    session_date=session_date,
+                    stock_candles_by_key=stock_candles_by_key,
+                    fut_by_und=fut_by_und,
+                    eq_by_symbol=eq_by_symbol,
+                    upstox=ux,
+                    cache_dir=cache_dir,
+                )
+                extra_sig, extra_anc = _build_ws_stock_overrides(
+                    stocks_by_sector=wick_members,
+                    candidate_sector_keys=[cascade_to],
+                    session_date=session_date,
+                    stock_candles_by_key=stock_candles_by_key,
+                    fut_by_und=fut_by_und,
+                    eq_by_symbol=eq_by_symbol,
+                )
+                stock_signal_overrides.update(extra_sig)
+                anchor_overrides.update(extra_anc)
+                bar_map.update(
+                    {str(sym).strip().upper(): ov[0] for sym, ov in extra_sig.items() if ov and ov[0]}
+                )
+                extra_members = extra_wick.get(cascade_to, [])
+                if bar_map:
+                    extra_move = {
+                        str(sym).strip().upper(): float(ov[1])
+                        for sym, ov in (stock_signal_overrides or {}).items()
+                        if ov and ov[1] is not None
+                    }
+                    extra_members = filter_sector_members_by_sign_gate(
+                        {cascade_to: extra_members},
+                        extra_move,
+                        long_side=long_side_off,
+                        move_cap=STOCK_MOVE_CAP_PCT,
+                    ).get(cascade_to, [])
+                    extra_members = filter_sector_members_by_first_5m_color(
+                        {cascade_to: extra_members}, bar_map, long_side=long_side_off
+                    ).get(cascade_to, [])
+                stocks_for_pick[cascade_to] = extra_members
+                if cascade_from:
+                    stocks_for_pick.pop(cascade_from, None)
+                    wick_members.pop(cascade_from, None)
+                picked_off = new_picked
+                sector_books = _books_same_side(picked_off, long_side_off)
+                bar = sector_overrides.get(cascade_to) or first_5m_bar(
+                    sector_candles.get(cascade_to, []), session_date
+                )
+                if bar:
+                    sector_overrides[cascade_to] = bar
         sel = select_breakfast_picks_prevclose(
             session_date,
             nifty_candles=nifty_candles,
@@ -996,6 +1075,7 @@ def _build_live_state_payload(
             )
             _resort_sector_stocks([sectors_out[-1]], long_side=sp_long)
 
+    sectors_out = compact_live_sector_cards(sectors_out)
     assign_selected_sector_ranks(sectors_out)
 
     refresh_allowed = now.time() < FREEZE_AFTER and phase != "frozen"
