@@ -126,14 +126,11 @@ def _live_phase(now: datetime) -> str:
 def ingest_frozen_snapshot(payload: Dict[str, Any]) -> None:
     """Called by live_tick freeze job to sync in-memory frozen state.
 
-    Successful locks are sticky. Failed freezes must not be cached here or
-    ``build_live_state`` would skip off-cycle 5m preview / later backfill.
+    The 9:20 snapshot (success or lock_failed) is sticky for the session day.
+    Live must not rebuild picks from later off-cycle REST refreshes.
     """
     cache_key = str(payload.get("session_date") or "")[:10]
     if not cache_key:
-        return
-    if payload.get("lock_failed") or str(payload.get("state") or "") == "lock_failed":
-        logger.info("breakfast skip sticky _FROZEN_STATE for failed freeze session=%s", cache_key)
         return
     with _LOCK:
         _FROZEN_STATE[cache_key] = dict(payload)
@@ -166,18 +163,20 @@ def _off_cycle_banner(now: datetime) -> str:
 
 
 def _lock_failed_preview_banner(reason: str, off: Dict[str, Any]) -> str:
-    """Keep 9:20 lock failure distinct from a successful off-cycle preview."""
-    oc = str(off.get("banner") or "").strip()
+    """Banner for a persisted 9:20 lock failure (no off-cycle refresh)."""
     r = str(reason or "see logs")
-    nifty = off.get("nifty") or {}
-    has_preview = bool(nifty.get("direction") and nifty.get("direction") != "UNKNOWN") and bool(
-        off.get("sectors")
-    )
-    if r == "no_data" and has_preview:
-        head = "LOCK FAILED — no_data at 9:20 · showing off-cycle picks"
-    else:
-        head = f"LOCK FAILED — {r}"
-    return f"{head} · {oc}" if oc else head
+    as_of = str((off or {}).get("server_time") or (off or {}).get("locked_at") or "").strip()
+    head = f"LOCK FAILED — {r}"
+    if as_of:
+        # Keep a short as-of when payload carries the freeze clock.
+        try:
+            from datetime import datetime as _dt
+
+            ts = _dt.fromisoformat(as_of.replace("Z", "+00:00")).astimezone(IST)
+            return f"{head} · frozen as of {ts.strftime('%d-%b-%Y %H:%M')}"
+        except Exception:
+            pass
+    return head
 
 
 def _blank_live_payload(
@@ -264,13 +263,9 @@ def _last_session_snapshot(now: datetime, *, banner: str) -> Dict[str, Any]:
     session_key = now.date().isoformat()
     with _LOCK:
         snap = dict(_LAST_SESSION_STATE) if _LAST_SESSION_STATE else None
-        if snap and (snap.get("lock_failed") or str(snap.get("state") or "") == "lock_failed"):
-            snap = None
         if not snap and _FROZEN_STATE:
             latest_key = max(_FROZEN_STATE.keys())
             snap = dict(_FROZEN_STATE[latest_key])
-            if snap.get("lock_failed") or str(snap.get("state") or "") == "lock_failed":
-                snap = None
     if not snap:
         persisted = _load_persisted_live_state(session_key)
         if persisted:
@@ -282,17 +277,7 @@ def _last_session_snapshot(now: datetime, *, banner: str) -> Dict[str, Any]:
             out["refresh_allowed"] = False
             out["poll_interval_sec"] = 0
             return out
-        if _is_trading_day_ist(now) and now.time() >= FREEZE_AFTER:
-            try:
-                return build_off_cycle_preview_state(now)
-            except Exception as e:
-                logger.warning("breakfast off-cycle preview failed in last_session: %s", e)
-                return _blank_live_payload(
-                    now,
-                    banner=_off_cycle_banner(now),
-                    state="off_session",
-                    phase="frozen",
-                )
+        # Never rebuild Live picks off-cycle after the 9:20 freeze window.
         return _blank_live_payload(
             now,
             banner=banner,
@@ -586,66 +571,44 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
     cache_key = session_date.isoformat()
 
     if phase == "frozen" or now.time() >= FREEZE_AFTER:
+        # After 9:20, only serve the frozen 9:15–9:20 snapshot. Never rebuild off-cycle.
         with _LOCK:
             cached = _FROZEN_STATE.get(cache_key)
-        if cached and not (cached.get("lock_failed") or str(cached.get("state") or "") == "lock_failed"):
+        if cached:
             return _frozen_client_payload(cached, now)
 
         lock_row = fetch_session_lock(cache_key)
         lock_status = str((lock_row or {}).get("lock_status") or "").lower()
+
+        from_lock = _payload_from_lock_row(lock_row)
+        if from_lock:
+            if lock_status == "failed" or from_lock.get("lock_failed"):
+                reason = (lock_row or {}).get("failure_reason") or from_lock.get("failure_reason") or "see logs"
+                from_lock["lock_failed"] = True
+                from_lock["failure_reason"] = reason
+                from_lock["state"] = "lock_failed"
+                from_lock["phase"] = "frozen"
+                from_lock["banner"] = _lock_failed_preview_banner(reason, from_lock)
+                from_lock["refresh_allowed"] = False
+                from_lock["poll_interval_sec"] = 0
+            ingest_frozen_snapshot(from_lock)
+            return _frozen_client_payload(from_lock, now)
 
         if lock_status == "locked":
             persisted = _load_persisted_live_state(cache_key)
             if persisted:
                 ingest_frozen_snapshot(persisted)
                 return _frozen_client_payload(persisted, now)
-            from_lock = _payload_from_lock_row(lock_row)
-            if from_lock:
-                ingest_frozen_snapshot(from_lock)
-                return _frozen_client_payload(from_lock, now)
 
-        if lock_status == "failed":
-            logger.warning(
-                "breakfast frozen branch taking off-cycle path session=%s lock_status=%s",
-                cache_key,
-                lock_status,
-            )
-            try:
-                off = build_off_cycle_preview_state(now)
-                reason = lock_row.get("failure_reason") or "see logs"
-                off["lock_failed"] = True
-                off["failure_reason"] = reason
-                off["state"] = "lock_failed"
-                off["banner"] = _lock_failed_preview_banner(reason, off)
-                off["server_time"] = now.isoformat()
-                off["refresh_allowed"] = False
-                off["poll_interval_sec"] = 0
-                return off
-            except Exception as e:
-                logger.warning("breakfast lock_failed off-cycle preview failed: %s", e)
-                out = _blank_live_payload(
-                    now,
-                    banner=f"LOCK FAILED — {lock_row.get('failure_reason') or 'see logs'}",
-                    state="lock_failed",
-                    phase="frozen",
-                )
-                out["lock_failed"] = True
-                out["failure_reason"] = lock_row.get("failure_reason")
-                return out
+        tick = _tick_snapshot_for_session(cache_key)
+        if tick:
+            ingest_frozen_snapshot(tick)
+            return _frozen_client_payload(tick, now)
 
         persisted = _load_persisted_live_state(cache_key)
         if persisted:
             ingest_frozen_snapshot(persisted)
             return _frozen_client_payload(persisted, now)
-
-        tick = _tick_snapshot_for_session(cache_key)
-        if tick:
-            if lock_status == "locked":
-                ingest_frozen_snapshot(tick)
-                return _frozen_client_payload(tick, now)
-            out = dict(tick)
-            out["server_time"] = now.isoformat()
-            return out
 
         if lock_status == "locked":
             return _blank_live_payload(
@@ -655,19 +618,26 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
                 phase="frozen",
             )
 
-        if _is_trading_day_ist(now):
-            logger.warning(
-                "breakfast frozen branch taking off-cycle path session=%s lock_status=%s",
-                cache_key,
-                lock_status or "missing",
+        if lock_status == "failed":
+            reason = (lock_row or {}).get("failure_reason") or "see logs"
+            out = _blank_live_payload(
+                now,
+                banner=f"LOCK FAILED — {reason}",
+                state="lock_failed",
+                phase="frozen",
             )
-            try:
-                return _get_off_cycle_preview_cached(now)
-            except Exception as e:
-                logger.warning("breakfast off-cycle preview failed: %s", e)
-        return _last_session_snapshot(
+            out["lock_failed"] = True
+            out["failure_reason"] = reason
+            out["refresh_allowed"] = False
+            out["poll_interval_sec"] = 0
+            return out
+
+        # Trading day after freeze with no stored 9:20 snapshot — do not invent off-cycle picks.
+        return _blank_live_payload(
             now,
-            banner="Session locked — picks from 9:20 IST",
+            banner="FROZEN — waiting for 9:20 lock snapshot",
+            state="frozen",
+            phase="frozen",
         )
 
     # During scheduler-driven forming window, serve tick snapshot (no heavy rebuild on poll).
