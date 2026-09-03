@@ -342,8 +342,14 @@ def ensure_5m_cached(
     if range_start is not None:
         days_back = max(days_back, (range_end - range_start).days + 10)
     tsec = FETCH_THROTTLE_SEC if throttle_sec is None else float(throttle_sec)
+    existing = load_cached_5m(cache_dir, ik)
     fresh = fetch_5m_range(upstox, ik, range_end=range_end, days_back=days_back, throttle_sec=tsec)
-    merged = _merge_candles(load_cached_5m(cache_dir, ik) if not force else [], fresh)
+    # Always merge with disk — force=True must refresh, not discard a warm 9:15 bar when REST flakes.
+    merged = _merge_candles(existing, fresh)
+    if check_dates and not covers_session_dates(merged, check_dates) and covers_session_dates(existing, check_dates):
+        return existing
+    if not check_dates and force and first_5m_bar(merged, range_end) is None and first_5m_bar(existing, range_end) is not None:
+        return existing
     if merged:
         save_cached_5m(cache_dir, ik, merged)
     return merged

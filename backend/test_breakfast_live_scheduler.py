@@ -337,7 +337,9 @@ def test_freeze_failure_ui_when_no_sectors(_trading, _lock, mock_persist_lock, m
         out = run_breakfast_freeze_lock()
     assert out["lock_status"] == "failed"
     mock_persist_lock.assert_called()
-    assert "2026-08-31" not in live_mod._FROZEN_STATE
+    # Failed 9:20 snapshot is sticky for the trading day (no off-cycle refresh).
+    assert "2026-08-31" in live_mod._FROZEN_STATE
+    assert live_mod._FROZEN_STATE["2026-08-31"].get("lock_failed")
 
 
 @patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
@@ -389,6 +391,38 @@ def test_resolve_candles_none_when_5m_empty(mock_fetch, mock_5m, caplog):
     mock_fetch.assert_not_called()
     assert log[0]["source"] == "none"
     assert any("source=none" in r.message for r in caplog.records)
+
+
+@patch("backend.services.breakfast_strategy.live_tick.load_cached_5m")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")
+@patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")
+def test_resolve_candles_falls_back_to_disk_cache(mock_fetch, mock_5m, mock_disk, caplog):
+    from pathlib import Path
+
+    from backend.services.breakfast_strategy.live_tick import FREEZE_SOURCE_VALUES
+
+    session = date(2026, 9, 1)
+    bar_5m = {
+        "timestamp": "2026-09-01T09:15:00+05:30",
+        "open": 100,
+        "high": 101,
+        "low": 99,
+        "close": 100.5,
+        "volume": 10,
+    }
+    mock_5m.return_value = {"NSE_INDEX|Nifty 50": []}
+    mock_disk.return_value = [bar_5m]
+    with caplog.at_level("INFO"):
+        candles, log = _resolve_candles_rest_5m(
+            MagicMock(),
+            Path("/tmp"),
+            ["NSE_INDEX|Nifty 50"],
+            session_date=session,
+            tick_minute=20,
+        )
+    assert candles["NSE_INDEX|Nifty 50"] == [bar_5m]
+    assert log[0]["source"] == "rest_5m_cache"
+    assert log[0]["source"] in FREEZE_SOURCE_VALUES
 
 
 @patch("backend.services.breakfast_strategy.live_tick.fetch_1m_parallel")

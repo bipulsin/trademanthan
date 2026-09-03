@@ -19,6 +19,7 @@ from backend.services.breakfast_strategy.candles import (
     fetch_1m_parallel,
     fetch_5m_parallel,
     first_5m_bar,
+    load_cached_5m,
     first_5m_ohlc_payload,
     forming_bar_from_1m_upto,
     load_cached_1m,
@@ -72,7 +73,7 @@ SCHEDULER_TICK_MINUTES = (16, 17, 18, 19)
 PRE_FREEZE_WARN_MINUTE = 18
 INDEX_UNIVERSE_N = 17  # Nifty 50 + 16 sector indices
 FREEZE_AT = dt_time(9, 20, 5)
-FREEZE_SOURCE_VALUES = ("ws_1m", "rest_1m", "rest_5m", "none")
+FREEZE_SOURCE_VALUES = ("ws_1m", "rest_1m", "rest_5m", "rest_5m_cache", "none")
 MAX_TICK_SEC = 20.0
 # Per-instrument WS freshness for 9:16–9:20 forming ticks (seconds since last WS tick).
 # 90s: liquid names tick every few seconds at the open; brief hiccups tolerated but we
@@ -256,7 +257,7 @@ def _composite_data_source(tick_source_log: List[Dict[str, Any]]) -> str:
     srcs.discard("")
     if not srcs or srcs <= {"ws_1m"}:
         return "ws_1m"
-    parts = [s for s in ("ws_1m", "rest_1m", "rest_5m", "none") if s in srcs]
+    parts = [s for s in ("ws_1m", "rest_1m", "rest_5m", "rest_5m_cache", "none") if s in srcs]
     return "+".join(parts) if parts else "ws_1m"
 
 
@@ -399,10 +400,21 @@ def _resolve_candles_rest_5m(
     for ik in keys:
         candles_5m = fetched.get(ik) or []
         bar_5m = first_5m_bar(candles_5m, session_date)
+        source = "rest_5m"
+        reason = None
+        if not bar_5m:
+            # Freeze must keep the warm 9:15–9:20 bar if the force REST call returned empty.
+            disk = load_cached_5m(cache_dir, ik)
+            disk_bar = first_5m_bar(disk, session_date)
+            if disk_bar:
+                candles_5m = disk
+                bar_5m = disk_bar
+                source = "rest_5m_cache"
+                reason = "rest_empty_used_cache"
         candles_out[ik] = candles_5m
         if bar_5m:
             source_log.append(
-                {"minute": tick_minute, "instrument_key": ik, "source": "rest_5m", "reason": None}
+                {"minute": tick_minute, "instrument_key": ik, "source": source, "reason": reason}
             )
         else:
             source_log.append(
@@ -1152,7 +1164,7 @@ def run_breakfast_minute_tick(minute: int) -> Dict[str, Any]:
             "rest_call_budget": payload.get("rest_call_budget"),
             "ws_count": sum(1 for r in tick_source_log if r.get("source") == "ws_1m"),
             "rest_fallback_count": sum(
-                1 for r in tick_source_log if r.get("source") in ("rest_1m", "rest_5m", "none")
+                1 for r in tick_source_log if r.get("source") in ("rest_1m", "rest_5m", "rest_5m_cache", "none")
             ),
         }
 

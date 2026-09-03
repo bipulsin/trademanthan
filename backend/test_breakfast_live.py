@@ -185,23 +185,22 @@ def test_compact_and_rank_selected_after_cascade():
     assert out[1]["selected_rank"] == 2
 
 
-def test_lock_failed_banner_no_data_with_off_cycle_picks():
+def test_lock_failed_banner_uses_frozen_as_of():
     from backend.services.breakfast_strategy.live import _lock_failed_preview_banner
 
     banner = _lock_failed_preview_banner(
-        "no_data",
+        "no_filtered_stocks:color",
         {
-            "banner": "Off cycle data as of 02-Sep-2026 21:17",
-            "nifty": {"direction": "SHORT", "bias_pct": -0.96},
-            "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "HCLTECH"}]}],
+            "server_time": "2026-09-03T09:20:05+05:30",
+            "nifty": {"direction": "LONG", "bias_pct": 0.2},
+            "sectors": [],
         },
     )
-    assert "no_data at 9:20" in banner
-    assert "off-cycle" in banner.lower()
-    assert "Off cycle data" in banner
-    empty = _lock_failed_preview_banner("no_data", {"banner": "Off cycle", "nifty": {}, "sectors": []})
-    assert empty.startswith("LOCK FAILED — no_data")
-    assert "at 9:20" not in empty
+    assert banner.startswith("LOCK FAILED — no_filtered_stocks:color")
+    assert "frozen as of" in banner
+    assert "Off cycle" not in banner
+    empty = _lock_failed_preview_banner("no_data", {"nifty": {}, "sectors": []})
+    assert empty == "LOCK FAILED — no_data"
 
 
 @patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)
@@ -209,32 +208,20 @@ def test_lock_failed_banner_no_data_with_off_cycle_picks():
 @patch("backend.services.breakfast_strategy.live._load_persisted_live_state")
 @patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
 def test_build_live_state_frozen_missing_data(mock_off_cycle, mock_load, _lock, _tick, caplog):
+    """After 9:20 with no lock row, do not invent off-cycle picks."""
     from backend.services.breakfast_strategy import live as live_mod
 
     live_mod._FROZEN_STATE.clear()
     live_mod._LAST_SESSION_STATE = None
     live_mod._OFF_CYCLE_SNAPSHOT = None
     mock_load.return_value = None
-    mock_off_cycle.return_value = {
-        "ok": True,
-        "state": "off_cycle",
-        "phase": "frozen",
-        "off_cycle": True,
-        "banner": "Off cycle data as of 31-Aug-2026 10:04",
-        "session_date": "2026-08-31",
-        "nifty": {"direction": "LONG", "bias_pct": 0.1},
-        "sectors": [{"sector_label": "Bank", "stocks": [{"symbol": "HDFCBANK"}]}],
-    }
     replay = IST.localize(datetime(2026, 8, 31, 10, 4))
-    with caplog.at_level("WARNING"):
-        out = build_live_state(replay_at=replay)
-    assert out["state"] == "off_cycle"
-    assert out.get("off_cycle")
-    assert "Off cycle data" in (out.get("banner") or "")
-    assert out["nifty"]["direction"] == "LONG"
-    assert len(out["sectors"]) == 1
-    mock_off_cycle.assert_called_once()
-    assert any("taking off-cycle path" in r.message for r in caplog.records)
+    out = build_live_state(replay_at=replay)
+    mock_off_cycle.assert_not_called()
+    assert not out.get("off_cycle")
+    assert out.get("phase") == "frozen"
+    assert out.get("sectors") == []
+    assert "9:20" in (out.get("banner") or "")
 
 
 LOCKED_PAYLOAD = {
@@ -348,11 +335,24 @@ def test_build_live_state_frozen_loads_persisted(mock_load, _lock):
 @patch("backend.services.breakfast_strategy.live.build_off_cycle_preview_state")
 @patch(
     "backend.services.breakfast_strategy.live.fetch_session_lock",
-    return_value={"lock_status": "failed", "failure_reason": "no_sectors_at_freeze"},
+    return_value={
+        "lock_status": "failed",
+        "failure_reason": "no_filtered_stocks:color",
+        "payload_json": {
+            "session_date": "2026-08-31",
+            "state": "lock_failed",
+            "lock_failed": True,
+            "failure_reason": "no_filtered_stocks:color",
+            "server_time": "2026-08-31T09:20:05+05:30",
+            "nifty": {"direction": "LONG", "open": 25000.0, "close": 25010.0, "bias": "positive"},
+            "sectors": [],
+        },
+    },
 )
-def test_failed_freeze_does_not_block_5m_preview(mock_lock, mock_off_cycle, _persist, _tick):
-    """Failed freeze must not stick in _FROZEN_STATE; /live still builds 5m off-cycle preview."""
+def test_failed_freeze_serves_stored_920_snapshot(mock_lock, mock_off_cycle, _persist, _tick):
+    """Failed freeze stays sticky — serve 9:20 payload_json, never off-cycle refresh."""
     from backend.services.breakfast_strategy.live import ingest_frozen_snapshot
+    from backend.services.breakfast_strategy import live as live_mod
 
     _clear_frozen_live()
     ingest_frozen_snapshot(
@@ -360,33 +360,26 @@ def test_failed_freeze_does_not_block_5m_preview(mock_lock, mock_off_cycle, _per
             "session_date": "2026-08-31",
             "state": "lock_failed",
             "lock_failed": True,
+            "failure_reason": "no_filtered_stocks:color",
+            "nifty": {"direction": "LONG", "open": 25000.0, "close": 25010.0},
             "sectors": [],
-            "nifty": {"direction": "UNKNOWN", "bias": "unknown"},
+            "server_time": "2026-08-31T09:20:05+05:30",
         }
     )
-    from backend.services.breakfast_strategy import live as live_mod
-
-    assert "2026-08-31" not in live_mod._FROZEN_STATE
-    mock_off_cycle.return_value = {
-        "ok": True,
-        "state": "off_cycle",
-        "phase": "frozen",
-        "off_cycle": True,
-        "banner": "Off cycle data as of 31-Aug-2026 10:04",
-        "session_date": "2026-08-31",
-        "nifty": {"direction": "SHORT", "bias_pct": -0.2},
-        "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "TCS"}]}],
-    }
+    assert "2026-08-31" in live_mod._FROZEN_STATE
     replay = IST.localize(datetime(2026, 8, 31, 10, 4))
     out = build_live_state(replay_at=replay)
-    mock_off_cycle.assert_called_once()
+    mock_off_cycle.assert_not_called()
     assert out.get("lock_failed")
-    assert out["nifty"]["direction"] == "SHORT"
-    assert out["sectors"][0]["stocks"][0]["symbol"] == "TCS"
+    assert out["nifty"]["direction"] == "LONG"
+    assert out["nifty"]["open"] == 25000.0
+    assert out.get("sectors") == []
+    assert not out.get("off_cycle")
+    assert out.get("refresh_allowed") is False
 
 
-def test_leftover_failed_frozen_cache_still_allows_preview():
-    """Guard: even a leftover failed cache entry must not skip off-cycle preview."""
+def test_leftover_failed_frozen_cache_is_sticky():
+    """A failed 9:20 cache entry is the day's Live view — no off-cycle rebuild."""
     from backend.services.breakfast_strategy import live as live_mod
 
     _clear_frozen_live()
@@ -394,7 +387,10 @@ def test_leftover_failed_frozen_cache_still_allows_preview():
         "session_date": "2026-08-31",
         "state": "lock_failed",
         "lock_failed": True,
+        "failure_reason": "no_data",
+        "nifty": {"direction": "UNKNOWN"},
         "sectors": [],
+        "banner": "LOCK FAILED — no_data",
     }
     with patch(
         "backend.services.breakfast_strategy.live.fetch_session_lock",
@@ -407,18 +403,12 @@ def test_leftover_failed_frozen_cache_still_allows_preview():
         return_value=None,
     ), patch(
         "backend.services.breakfast_strategy.live.build_off_cycle_preview_state",
-        return_value={
-            "ok": True,
-            "state": "off_cycle",
-            "off_cycle": True,
-            "banner": "Off cycle",
-            "nifty": {"direction": "LONG"},
-            "sectors": [{"stocks": [{"symbol": "HDFCBANK"}]}],
-        },
     ) as mock_off:
         out = build_live_state(replay_at=IST.localize(datetime(2026, 8, 31, 10, 4)))
-    mock_off.assert_called_once()
-    assert out["sectors"][0]["stocks"][0]["symbol"] == "HDFCBANK"
+    mock_off.assert_not_called()
+    assert out.get("lock_failed")
+    assert out.get("nifty", {}).get("direction") == "UNKNOWN"
+    assert out.get("sectors") == []
 
 
 @patch("backend.services.breakfast_strategy.live_persist._insert_signal")
@@ -475,3 +465,40 @@ def test_validate_ws_vs_rest_smoke():
     assert "match" in out
     assert isinstance(out["match"], bool)
     # Off-hours / no live WS: ws_bar is often None and match is False — not a failure.
+
+
+def test_ensure_5m_cached_force_keeps_disk_on_empty_fetch(tmp_path):
+    """force=True must not wipe a warm 9:15 bar when Upstox returns empty."""
+    from backend.services.breakfast_strategy.candles import (
+        ensure_5m_cached,
+        first_5m_bar,
+        save_cached_5m,
+    )
+
+    ik = "NSE_INDEX|Nifty Auto"
+    sd = date(2026, 9, 3)
+    bar = {
+        "timestamp": "2026-09-03T09:15:00+05:30",
+        "open": 1,
+        "high": 2,
+        "low": 1,
+        "close": 1.5,
+        "volume": 0,
+    }
+    save_cached_5m(tmp_path, ik, [bar])
+
+    class UX:
+        def get_historical_candles_by_instrument_key(self, *a, **k):
+            return []
+
+    out = ensure_5m_cached(
+        UX(),
+        tmp_path,
+        ik,
+        range_end=sd,
+        session_dates=[sd],
+        force=True,
+        throttle_sec=0.0,
+    )
+    assert first_5m_bar(out, sd) is not None
+    assert float(first_5m_bar(out, sd)["close"]) == 1.5
