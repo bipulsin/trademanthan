@@ -109,8 +109,9 @@ def test_build_ws_stock_overrides_ws_only_no_rest():
         mock_resolve.assert_not_called()
 
 
+@patch("backend.services.breakfast_strategy.live._load_persisted_live_state", return_value=None)
 @patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)
-def test_build_live_state_pre_live_window_fast(_lock):
+def test_build_live_state_pre_live_window_fast(_lock, _persist):
     """Before 9:00 IST on a weekday — must not hit Upstox/WS (fast off-session)."""
     from backend.services.breakfast_strategy import live as live_mod
 

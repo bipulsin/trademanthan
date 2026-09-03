@@ -282,7 +282,6 @@ def _last_session_snapshot(now: datetime, *, banner: str) -> Dict[str, Any]:
             now,
             banner=banner,
             state="off_session",
-            phase="frozen",
         )
     out = dict(snap)
     out["state"] = "off_session"
