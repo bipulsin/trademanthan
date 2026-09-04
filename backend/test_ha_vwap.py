@@ -176,6 +176,41 @@ def test_no_entry_before_945():
     assert trades == []
 
 
+def test_skip_entry_when_lot_missing():
+    a = [
+        _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, hist=1),
+        _bar("15:15", 100, 100.2, 99.5, 100, v=1, ha=101, vwap=100, ema=100, hist=1),
+    ]
+    trades = simulate_session(
+        {"AAA": a},
+        lots={},
+        instruments={"AAA": "cash"},
+        keys={"AAA": "NSE_EQ|AAA"},
+        session_date=SESSION,
+    )
+    assert trades == []
+
+
+def test_cash_qty_uses_fut_lot():
+    a = [
+        _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, hist=1),
+        _bar("09:55", 100.1, 101.0, 100.0, 100.5, v=10, ha=101, vwap=100, ema=100, hist=1),
+        _bar("15:15", 100.5, 100.5, 100.5, 100.5, v=1, ha=101, vwap=100, ema=100, hist=1),
+    ]
+    trades = simulate_session(
+        {"RELIANCE": a},
+        lots={"RELIANCE": 250},
+        instruments={"RELIANCE": "cash"},
+        keys={"RELIANCE": "NSE_EQ|RELIANCE"},
+        session_date=SESSION,
+    )
+    assert trades[0]["qty"] == 250
+    entry = 100 * 1.0003
+    assert trades[0]["pnl"] == pytest.approx((entry * 1.008 - entry) * 250, abs=0.02)
+
+
 def test_macd_hist_series_length():
     closes = [float(i) for i in range(1, 120)]
     h = macd_hist_series(closes, 104, 48, 36)

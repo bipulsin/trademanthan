@@ -28,6 +28,5 @@ MACD_SIGNAL = 36
 CANDLE_DAYS_BACK = 15
 HISTORY_SESSIONS = 8
 
-EQ_LOT_QTY = 1
 ARTIFACT_COMBINED = "ha_vwap_combined.json"
 PUBLIC_ARTIFACT = "ha_vwap_data.json"

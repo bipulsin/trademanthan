@@ -298,7 +298,7 @@ def run_ha_vwap_backtest(
                 "vwap": "session VWAP from raw 10m typical price × volume from 09:15",
                 "ha": "standard HA recursion on session-aligned 10m OHLC",
                 "filters": "HA crossed above VWAP, HA close > EMA20, MACD hist(104,48,36) > 0, 09:45–12:45",
-                "size": "1 FUT lot (futures) or 1 share (cash)",
+                "size": "1 FUT lot (futures) or cash shares = that symbol's FUT lot size",
             },
             "months_status": months_status,
             "summary": summarize(all_trades),

@@ -40,7 +40,7 @@
         if (!doc) {
             err.hidden = false;
             err.textContent = 'No backtest artifact yet. Run python3 scripts/run_ha_vwap_backtest.py';
-            $('hvBody').innerHTML = '<tr><td colspan="12" class="vmb-empty">No trades</td></tr>';
+            $('hvBody').innerHTML = '<tr><td colspan="13" class="vmb-empty">No trades</td></tr>';
             $('hvMonthBody').innerHTML = '<tr><td colspan="5" class="vmb-empty">In progress</td></tr>';
             return;
         }
@@ -67,10 +67,11 @@
                 return '<tr><td>' + (t.date || '') + '</td><td>' + (t.symbol || '') + '</td><td>' + (t.instrument || '') +
                     '</td><td>' + (t.entry_time || '') + '</td><td class="num">' + fmt(t.entry, 2) + '</td><td class="num">' +
                     fmt(t.tp, 2) + '</td><td>' + (t.exit_time || '') + '</td><td class="num">' + fmt(t.exit, 2) +
-                    '</td><td>' + (t.reason || '') + '</td><td class="num">' + fmt(t.volume, 0) + '</td><td class="num ' +
+                    '</td><td>' + (t.reason || '') + '</td><td class="num">' + fmt(t.volume, 0) +
+                    '</td><td class="num">' + fmt(t.qty, 0) + '</td><td class="num ' +
                     pnlClass(t.pnl) + '">' + fmt(t.pnl, 0) + '</td><td class="num">' + fmt(t.R, 2) + '</td></tr>';
             });
-        $('hvBody').innerHTML = tbody.length ? tbody.join('') : '<tr><td colspan="12" class="vmb-empty">No trades</td></tr>';
+        $('hvBody').innerHTML = tbody.length ? tbody.join('') : '<tr><td colspan="13" class="vmb-empty">No trades</td></tr>';
         $('hvFooter').textContent = (s.entry_fill || '') + ' · ' + (s.bars || '');
         if (doc.detail) {
             err.hidden = false;

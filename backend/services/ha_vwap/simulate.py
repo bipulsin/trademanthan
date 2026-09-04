@@ -1,6 +1,7 @@
 """One-session HA-VWAP simulation: max 2 concurrent, top-2 volume entries."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, time
 from typing import Any, Dict, List
@@ -18,6 +19,7 @@ from backend.services.ha_vwap.config import (
 )
 from backend.services.ha_vwap.indicators import crossed_above
 
+logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 
@@ -170,7 +172,10 @@ def simulate_session(
                 if raw_close <= 0:
                     continue
                 entry = raw_close * (1.0 + SLIPPAGE)
-                qty = int(lots.get(pick["symbol"]) or 1)
+                qty = int(lots.get(pick["symbol"]) or 0)
+                if qty <= 0:
+                    logger.warning("ha_vwap skip entry %s: missing lot size (not using qty=1)", pick["symbol"])
+                    continue
                 ts = bar["bar_start"].strftime("%H:%M") if hasattr(bar.get("bar_start"), "strftime") else str(tm)[:5]
                 open_pos[pick["symbol"]] = OpenPos(
                     symbol=pick["symbol"],
