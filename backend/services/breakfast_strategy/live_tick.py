@@ -660,6 +660,9 @@ def format_lock_failure_banner(
     empty_cards = [n for n in empty_cards if n]
     cascade_from = meta.get("cascade_from")
     from_lab = _sector_label(str(cascade_from)) if cascade_from else ""
+    picked_labs = [_sector_label(str(k)) for k in (meta.get("picked") or []) if k]
+    filled_set = set(filled)
+    empty_from_picked = [lab for lab in picked_labs if lab and lab not in filled_set]
     top2_names = _join_sector_names(meta.get("top2") or [])
 
     if r == "no_data":
@@ -675,7 +678,9 @@ def format_lock_failure_banner(
         extra = f" in {top2_names}" if top2_names else " in top sectors"
         return f"Lock failed: no stocks passed the candle-color filter{extra}"
     if r == "no_filtered_stocks:cascade_exhausted":
-        empty_lab = from_lab or (empty_cards[0] if empty_cards else "")
+        empty_lab = (empty_from_picked[0] if empty_from_picked else "") or from_lab or (
+            empty_cards[0] if empty_cards else ""
+        )
         n = len(filled)
         filled_txt = ", ".join(filled)
         if n == 1 and filled_txt and empty_lab:

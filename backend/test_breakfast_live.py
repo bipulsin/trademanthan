@@ -212,7 +212,11 @@ def test_format_lock_failure_banner_reasons():
         "no_filtered_stocks:cascade_exhausted",
         {
             "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "INFY"}]}],
-            "selection_meta": {"swapped": True, "cascade_from": "Realty"},
+            "selection_meta": {
+                "swapped": True,
+                "cascade_from": "Realty",
+                "picked": ["IT", "Realty"],
+            },
         },
     )
     assert cascade == (
