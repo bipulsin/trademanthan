@@ -64,6 +64,8 @@ data/*
 !data/nk_vm_bull_backtest_source.csv
 !data/trap_ce/
 !data/trap_ce/**
+data/ha_vwap/cache/
+data/ha_vwap/cache/**
 
 
 # Local DB exports (keep exports/ via .gitkeep)

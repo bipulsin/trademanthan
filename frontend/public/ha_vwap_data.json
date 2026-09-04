@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "summary": {
+    "trades": 0,
+    "wins": 0,
+    "win_pct": 0,
+    "pnl": 0,
+    "by_month": {},
+    "by_reason": {},
+    "entry_fill": "raw 10m close × 1.0003 (market fill, not HA close)"
+  },
+  "trades": [],
+  "months_status": {},
+  "detail": "Futures/cash backtest not loaded yet."
+}
