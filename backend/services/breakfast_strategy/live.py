@@ -162,17 +162,30 @@ def _off_cycle_banner(now: datetime) -> str:
     return f"Off cycle data as of {now.strftime('%d-%b-%Y %H:%M')}"
 
 
-def _lock_failed_preview_banner(reason: str, off: Dict[str, Any]) -> str:
-    """Banner for a persisted 9:20 lock failure (no off-cycle refresh)."""
-    r = str(reason or "see logs")
-    as_of = str((off or {}).get("server_time") or (off or {}).get("locked_at") or "").strip()
-    head = f"LOCK FAILED — {r}"
-    if as_of:
-        # Keep a short as-of when payload carries the freeze clock.
-        try:
-            from datetime import datetime as _dt
+def _lock_failed_preview_banner(
+    reason: str,
+    off: Dict[str, Any],
+    freeze_payload: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Human-readable 9:20 lock failure; keep off-cycle suffix or freeze as-of."""
+    from backend.services.breakfast_strategy.live_tick import format_lock_failure_banner
 
-            ts = _dt.fromisoformat(as_of.replace("Z", "+00:00")).astimezone(IST)
+    src = freeze_payload if freeze_payload is not None else (off or {})
+    r = str(reason or "see logs")
+    head = format_lock_failure_banner(r, src)
+    oc = str((off or {}).get("banner") or "").strip()
+    nifty = (off or {}).get("nifty") or {}
+    has_preview = bool(nifty.get("direction") and nifty.get("direction") != "UNKNOWN") and bool(
+        (off or {}).get("sectors")
+    )
+    if r == "no_data" and has_preview and "off cycle" in oc.lower():
+        head = f"{head} · showing off-cycle picks"
+    if oc.lower().startswith("off cycle"):
+        return f"{head} · {oc}"
+    as_of = str((src or {}).get("server_time") or (src or {}).get("locked_at") or "").strip()
+    if as_of:
+        try:
+            ts = datetime.fromisoformat(as_of.replace("Z", "+00:00")).astimezone(IST)
             return f"{head} · frozen as of {ts.strftime('%d-%b-%Y %H:%M')}"
         except Exception:
             pass
@@ -619,10 +632,12 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
             )
 
         if lock_status == "failed":
+            from backend.services.breakfast_strategy.live_tick import format_lock_failure_banner
+
             reason = (lock_row or {}).get("failure_reason") or "see logs"
             out = _blank_live_payload(
                 now,
-                banner=f"LOCK FAILED — {reason}",
+                banner=format_lock_failure_banner(reason, _payload_from_lock_row(lock_row)),
                 state="lock_failed",
                 phase="frozen",
             )

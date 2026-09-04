@@ -626,6 +626,78 @@ def live_lock_failure_reason(
     return "no_filtered_stocks:cascade_exhausted"
 
 
+def _join_sector_names(keys: Any) -> str:
+    names: List[str] = []
+    seen = set()
+    for k in keys or []:
+        lab = _sector_label(str(k)) if k else ""
+        if lab and lab not in seen:
+            seen.add(lab)
+            names.append(lab)
+    return ", ".join(names)
+
+
+def format_lock_failure_banner(
+    reason: Optional[str],
+    payload: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Human-readable freeze banner from failure_reason + selection_meta/sectors."""
+    r = str(reason or "").strip()
+    payload = payload or {}
+    meta = payload.get("selection_meta") if isinstance(payload.get("selection_meta"), dict) else {}
+    sectors = payload.get("sectors") or []
+    filled = [
+        str(s.get("sector_label") or _sector_label(s.get("sector_key") or "")).strip()
+        for s in sectors
+        if s.get("stocks")
+    ]
+    filled = [n for n in filled if n]
+    empty_cards = [
+        str(s.get("sector_label") or _sector_label(s.get("sector_key") or "")).strip()
+        for s in sectors
+        if not s.get("stocks")
+    ]
+    empty_cards = [n for n in empty_cards if n]
+    cascade_from = meta.get("cascade_from")
+    from_lab = _sector_label(str(cascade_from)) if cascade_from else ""
+    top2_names = _join_sector_names(meta.get("top2") or [])
+
+    if r == "no_data":
+        return "Lock failed: Nifty or session data missing at 9:20"
+    if r == "no_sectors_at_freeze":
+        return "Lock failed: no sectors available at freeze"
+    if r == "max_retries_exceeded":
+        return "Lock failed: freeze retries exhausted"
+    if r == "no_filtered_stocks:wick":
+        extra = f" in {top2_names}" if top2_names else " in top sectors"
+        return f"Lock failed: no stocks passed the wick filter{extra}"
+    if r == "no_filtered_stocks:color":
+        extra = f" in {top2_names}" if top2_names else " in top sectors"
+        return f"Lock failed: no stocks passed the candle-color filter{extra}"
+    if r == "no_filtered_stocks:cascade_exhausted":
+        empty_lab = from_lab or (empty_cards[0] if empty_cards else "")
+        n = len(filled)
+        filled_txt = ", ".join(filled)
+        if n == 1 and filled_txt and empty_lab:
+            return (
+                f"Lock incomplete — only 1 sector after cascade ({filled_txt}); "
+                f"{empty_lab} had no qualifying stocks"
+            )
+        if n == 1 and filled_txt:
+            return (
+                f"Lock incomplete — only 1 sector after cascade ({filled_txt}); "
+                "one sector swap used, still fewer than 2 filled sectors"
+            )
+        return (
+            "Lock failed: cascade exhausted (one sector swap used, still fewer than 2 filled sectors)"
+        )
+    if r.startswith("no_filtered_stocks:"):
+        return f"Lock failed: no qualifying stocks ({r.split(':', 1)[-1]})"
+    if r:
+        return f"Lock failed: {r}"
+    return "Lock failed: unknown reason"
+
+
 def _members_for_books(
     stocks_by_sector: Dict[str, List[Dict[str, str]]],
     wick_by_symbol: Dict[str, str],
@@ -1294,7 +1366,7 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
         lock_status = "failed"
         payload["state"] = "lock_failed"
         payload["phase"] = "frozen"
-        payload["banner"] = "LOCK FAILED — no picks at 9:20; capture manually"
+        payload["banner"] = format_lock_failure_banner(failure_reason, payload)
         payload["lock_failed"] = True
         payload["failure_reason"] = failure_reason
 
@@ -1315,7 +1387,7 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
         failure_reason = str(e)
         payload["state"] = "lock_failed"
         payload["phase"] = "frozen"
-        payload["banner"] = f"LOCK FAILED — {failure_reason}"
+        payload["banner"] = format_lock_failure_banner(failure_reason, payload)
         payload["lock_failed"] = True
         try:
             persist_session_lock(
@@ -1355,7 +1427,7 @@ def _failed_freeze_payload(session_date: str, reason: str) -> Dict[str, Any]:
         "state": "lock_failed",
         "phase": "frozen",
         "session_date": session_date,
-        "banner": f"LOCK FAILED — {reason}",
+        "banner": format_lock_failure_banner(reason),
         "refresh_allowed": False,
         "poll_interval_sec": 0,
         "lock_failed": True,

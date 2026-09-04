@@ -197,11 +197,41 @@ def test_lock_failed_banner_uses_frozen_as_of():
             "sectors": [],
         },
     )
-    assert banner.startswith("LOCK FAILED — no_filtered_stocks:color")
+    assert "candle-color" in banner
     assert "frozen as of" in banner
     assert "Off cycle" not in banner
     empty = _lock_failed_preview_banner("no_data", {"nifty": {}, "sectors": []})
-    assert empty == "LOCK FAILED — no_data"
+    assert empty.startswith("Lock failed: Nifty or session data missing at 9:20")
+
+
+def test_format_lock_failure_banner_reasons():
+    from backend.services.breakfast_strategy.live import _lock_failed_preview_banner
+    from backend.services.breakfast_strategy.live_tick import format_lock_failure_banner
+
+    cascade = format_lock_failure_banner(
+        "no_filtered_stocks:cascade_exhausted",
+        {
+            "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "INFY"}]}],
+            "selection_meta": {"swapped": True, "cascade_from": "Realty"},
+        },
+    )
+    assert cascade == (
+        "Lock incomplete — only 1 sector after cascade (IT); Realty had no qualifying stocks"
+    )
+    assert "cascade exhausted" in format_lock_failure_banner("no_filtered_stocks:cascade_exhausted")
+    assert "wick filter" in format_lock_failure_banner("no_filtered_stocks:wick")
+    assert "candle-color" in format_lock_failure_banner("no_filtered_stocks:color")
+    assert "no sectors available" in format_lock_failure_banner("no_sectors_at_freeze")
+    overlay = _lock_failed_preview_banner(
+        "no_filtered_stocks:cascade_exhausted",
+        {"banner": "Off cycle data as of 04-Sep-2026 10:00"},
+        {
+            "sectors": [{"sector_label": "IT", "stocks": [{"symbol": "INFY"}]}],
+            "selection_meta": {"cascade_from": "Realty"},
+        },
+    )
+    assert "only 1 sector after cascade (IT)" in overlay
+    assert "Off cycle data" in overlay
 
 
 @patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)

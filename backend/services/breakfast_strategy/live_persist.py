@@ -367,6 +367,38 @@ def fetch_session_lock(session_date: str) -> Optional[Dict[str, Any]]:
         db.close()
 
 
+def patch_session_lock_payload_banner(session_date: str, banner: str) -> Optional[Dict[str, Any]]:
+    """Rewrite payload_json.banner only — does not change lock_status or signals."""
+    ensure_breakfast_live_signals_table()
+    sd = str(session_date or "")[:10]
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                UPDATE breakfast_session_lock
+                SET payload_json = jsonb_set(
+                    COALESCE(payload_json, '{}'::jsonb),
+                    '{banner}',
+                    to_jsonb(CAST(:banner AS text)),
+                    true
+                ),
+                updated_at = NOW()
+                WHERE session_date = CAST(:sd AS date)
+                RETURNING *
+                """
+            ),
+            {"sd": sd, "banner": banner},
+        ).mappings().first()
+        db.commit()
+        return dict(row) if row else None
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def is_session_locked(session_date: str) -> bool:
     row = fetch_session_lock(session_date)
     return bool(row and str(row.get("lock_status") or "").lower() == "locked")
