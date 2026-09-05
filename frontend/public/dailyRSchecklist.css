@@ -1294,11 +1294,11 @@ body[data-theme="dark"] .dc-go-board-card {
 .dc-ready-symbol { font-size: 18px; font-weight: 800; letter-spacing: 0.02em; }
 .dc-vol-grade {
     flex: 0 0 auto;
-    font-size: 10px;
+    font-size: 15px;
     font-weight: 700;
     letter-spacing: 0.02em;
-    line-height: 1.2;
-    padding: 2px 7px;
+    line-height: 1.3;
+    padding: 3px 8px;
     border-radius: 999px;
     white-space: nowrap;
 }

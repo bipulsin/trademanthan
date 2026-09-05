@@ -478,17 +478,17 @@
 .vol-grade-badge {
     display: inline-block;
     font-family: inherit;
-    font-size: 0.62em;
+    font-size: 0.85rem;
     font-weight: 700;
     letter-spacing: 0.02em;
-    line-height: 1.2;
-    padding: 0.15em 0.5em;
+    line-height: 1.25;
+    padding: 0.12rem 0.45rem;
     border-radius: 999px;
     white-space: nowrap;
     vertical-align: middle;
     margin-left: 0.4rem;
 }
-.bf-stock-row1 .vol-grade-badge { font-size: 0.55em; }
+.bf-stock-row1 .vol-grade-badge { font-size: 1.1rem; padding: 0.1rem 0.5rem; }
 .vol-grade-low { color: #166534; background: rgba(22, 163, 74, 0.2); }
 .vol-grade-mod { color: #92400e; background: rgba(245, 158, 11, 0.24); }
 .vol-grade-high { color: #991b1b; background: rgba(239, 68, 68, 0.2); }
