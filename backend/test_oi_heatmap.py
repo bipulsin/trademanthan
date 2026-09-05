@@ -12,6 +12,7 @@ from backend.services.oi_heatmap import (
     in_oi_heatmap_fetch_window,
     is_oi_heatmap_overnight_freeze,
     ist_use_today_only_db_snapshot,
+    sort_rows_for_oi_tab,
 )
 from backend.services.oi_integration import interpret_oi_signal
 
@@ -46,6 +47,16 @@ def test_bucket_aliases_and_group():
     assert [r["underlying_symbol"] for r in grouped["LONG_UNWINDING"]] == ["BBB"]
     assert grouped["SHORT_BUILDUP"] == []
     assert grouped["SHORT_COVERING"] == []
+
+
+def test_tab_sort_uses_global_rank_then_score():
+    rows = [
+        {"underlying_symbol": "LOW", "rank": 9, "score": 90, "oi_chg": 1, "oi_chg_pct": 9, "chg_pct": 9},
+        {"underlying_symbol": "HIGH", "rank": 2, "score": 10, "oi_chg": 1, "oi_chg_pct": 1, "chg_pct": 1},
+        {"underlying_symbol": "TIE_SCORE", "rank": 2, "score": 40, "oi_chg": 5, "oi_chg_pct": 1, "chg_pct": 1},
+    ]
+    ordered = sort_rows_for_oi_tab(rows)
+    assert [r["underlying_symbol"] for r in ordered] == ["TIE_SCORE", "HIGH", "LOW"]
 
 
 def test_universe_only_currmth_future_keys():

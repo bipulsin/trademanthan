@@ -168,12 +168,50 @@ def bucket_key_for_oi_signal(sig: str) -> Optional[str]:
     return None
 
 
+def tab_rank_sort_key(row: Dict[str, Any]) -> Tuple[int, float, int, float, float]:
+    """
+    Per-tab ranking (dashboard Top-10):
+    1. Global heatmap ``rank`` (assigned by |oi_chg| desc in finalize_heatmap_rows_for_store)
+    2. ``score`` descending (abs(oi_chg) + |chg_pct|*0.01, then 0–100 median-50)
+    3. abs(oi_chg) descending
+    4. abs(oi_chg_pct) descending
+    5. abs(chg_pct) descending
+    """
+    try:
+        rank = int(row.get("rank")) if row.get("rank") is not None else 10**9
+    except (TypeError, ValueError):
+        rank = 10**9
+    try:
+        score = -float(row.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    try:
+        oi_chg = -abs(int(row.get("oi_chg") or 0))
+    except (TypeError, ValueError):
+        oi_chg = 0
+    try:
+        oi_pct = -abs(float(row.get("oi_chg_pct") or 0))
+    except (TypeError, ValueError):
+        oi_pct = 0.0
+    try:
+        chg = -abs(float(row.get("chg_pct") or 0))
+    except (TypeError, ValueError):
+        chg = 0.0
+    return (rank, score, oi_chg, oi_pct, chg)
+
+
+def sort_rows_for_oi_tab(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(list(rows or []), key=tab_rank_sort_key)
+
+
 def group_rows_by_oi_signal(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     out: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _SIGNAL_BUCKETS}
     for r in rows or []:
         key = bucket_key_for_oi_signal(r.get("oi_signal"))
         if key:
             out[key].append(r)
+    for k in _SIGNAL_BUCKETS:
+        out[k] = sort_rows_for_oi_tab(out[k])
     return out
 
 
@@ -608,15 +646,19 @@ def _load_ws_session_volumes(keys: List[str]) -> Dict[str, int]:
         db.close()
 
 
-def refresh_oi_heatmap_live() -> Dict[str, Any]:
+def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
     """
     Fetch batch quotes for universe keys, sort by |oi_change|, update memory cache + DB.
+
+    Scheduler / GET paths keep overnight freeze. ``force_off_cycle=True`` still fetches
+    latest available Upstox quotes (weekend / after 16:00) but still respects Breakfast
+    exclusivity and does not start a WebSocket.
     """
     global _rows_cache, _cache_updated_at_mono, _cache_updated_at_iso, _last_error, _underlying_rank, _cache_source
 
     if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
         return {"success": False, "skipped": "OI_HEATMAP_LIVE_ENABLED false"}
-    if is_oi_heatmap_overnight_freeze():
+    if not force_off_cycle and is_oi_heatmap_overnight_freeze():
         return {"success": False, "skipped": "overnight_freeze"}
 
     try:
@@ -1109,3 +1151,17 @@ def premkt_rank_for_stock(stock: str, session_d: date) -> Optional[int]:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+if __name__ == "__main__":
+    import argparse
+    import json as _json
+
+    parser = argparse.ArgumentParser(description="One-shot OI heatmap Upstox refresh")
+    parser.add_argument(
+        "--force-off-cycle",
+        action="store_true",
+        help="Bypass overnight/weekend freeze (still Breakfast-gated)",
+    )
+    args = parser.parse_args()
+    print(_json.dumps(refresh_oi_heatmap_live(force_off_cycle=args.force_off_cycle), default=str))

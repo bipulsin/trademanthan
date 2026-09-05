@@ -6458,7 +6458,12 @@ def smart_futures_run_picker_now(
 
 
 @router.post("/oi-heatmap/refresh")
-async def oi_heatmap_refresh_now():
+async def oi_heatmap_refresh_now(
+    force_off_cycle: bool = Query(
+        False,
+        description="Bypass overnight/weekend freeze; still respects Breakfast exclusivity.",
+    ),
+):
     """
     On-demand live OI heatmap refresh from Upstox (same as the 15-min scheduler job).
     Persists to oi_heatmap_latest and clears the dashboard Top-10 response cache (~150s).
@@ -6467,7 +6472,7 @@ async def oi_heatmap_refresh_now():
     try:
         from backend.services.oi_heatmap import refresh_oi_heatmap_live
 
-        result = refresh_oi_heatmap_live()
+        result = refresh_oi_heatmap_live(force_off_cycle=force_off_cycle)
         try:
             invalidate_oi_heatmap_dashboard_cache()
         except Exception as inv_err:

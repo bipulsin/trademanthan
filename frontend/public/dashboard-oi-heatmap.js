@@ -7,6 +7,8 @@
     const POLL_MS = 60 * 1000;
     const LIVE_FRESH_WINDOW_MS = 30 * 60 * 1000;
     const TAB_KEYS = ["LONG_BUILDUP", "SHORT_COVERING", "SHORT_BUILDUP", "LONG_UNWINDING"];
+    /** Main screen: Top-10 per tab. Rank: global rank (|oi_chg| desc), then score desc, then |oi_chg|, |oi_chg_pct|, |chg_pct|. Modal keeps the full snapshot. */
+    const TAB_TOP_N = 10;
     let timer = null;
     let firstLoad = true;
     let fullRowsCache = [];
@@ -124,6 +126,30 @@
         return (fullRowsCache || []).filter(function (r) {
             return bucketKey(r && r.oi_signal) === key;
         });
+    }
+
+    function sortRowsForTab(rows) {
+        return (rows || []).slice().sort(function (a, b) {
+            var ra = a && a.rank != null && a.rank !== "" ? Number(a.rank) : 1e9;
+            var rb = b && b.rank != null && b.rank !== "" ? Number(b.rank) : 1e9;
+            if (ra !== rb) return ra - rb;
+            var sa = Number(a && a.score) || 0;
+            var sb = Number(b && b.score) || 0;
+            if (sa !== sb) return sb - sa;
+            var oa = Math.abs(Number(a && a.oi_chg) || 0);
+            var ob = Math.abs(Number(b && b.oi_chg) || 0);
+            if (oa !== ob) return ob - oa;
+            var pa = Math.abs(Number(a && a.oi_chg_pct) || 0);
+            var pb = Math.abs(Number(b && b.oi_chg_pct) || 0);
+            if (pa !== pb) return pb - pa;
+            var ca = Math.abs(Number(a && a.chg_pct) || 0);
+            var cb = Math.abs(Number(b && b.chg_pct) || 0);
+            return cb - ca;
+        });
+    }
+
+    function mainTabRows(tab) {
+        return sortRowsForTab(rowsForTab(tab)).slice(0, TAB_TOP_N);
     }
 
     function updateTabCounts() {
@@ -378,7 +404,7 @@
             const allRows = data.rows || [];
             fullRowsCache = allRows.slice();
             bySignalCache = data.by_signal || {};
-            const inner = renderTable(rowsForTab(activeTab));
+            const inner = renderTable(mainTabRows(activeTab));
             host.innerHTML = inner;
             updateOiHeatmapHeader(data);
             updateTabCounts();
@@ -450,7 +476,7 @@
             tabBtn.addEventListener("click", function () {
                 activeTab = String(tabBtn.getAttribute("data-oi-tab") || "LONG_BUILDUP");
                 const host = document.getElementById("oiHeatmapHost");
-                if (host) host.innerHTML = renderTable(rowsForTab(activeTab));
+                if (host) host.innerHTML = renderTable(mainTabRows(activeTab));
                 updateTabCounts();
             });
         });
