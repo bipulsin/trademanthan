@@ -33,10 +33,11 @@ def default_cache_dir() -> Path:
 
 
 def default_out_dir() -> Path:
-    if Path("/home/ubuntu/trademanthan/data").is_dir():
-        p = Path("/home/ubuntu/trademanthan/data/ha_vwap")
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+    for base in (Path("/home/ubuntu/twcto"), Path("/home/ubuntu/trademanthan")):
+        if base.is_dir():
+            p = base / "data" / "ha_vwap"
+            p.mkdir(parents=True, exist_ok=True)
+            return p
     root = Path(__file__).resolve().parents[3]
     p = root / "data" / "ha_vwap"
     p.mkdir(parents=True, exist_ok=True)

@@ -66,6 +66,8 @@ data/*
 !data/trap_ce/**
 data/ha_vwap/cache/
 data/ha_vwap/cache/**
+!data/ha_vwap/
+!data/ha_vwap/signals.csv
 
 
 # Local DB exports (keep exports/ via .gitkeep)

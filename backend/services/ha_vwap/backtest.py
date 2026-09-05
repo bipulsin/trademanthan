@@ -1,4 +1,4 @@
-"""Month-loop HA-VWAP backtest with resume/append JSON."""
+"""Month-loop HA-VWAP backtest from CSV times, current-month stock futures."""
 from __future__ import annotations
 
 import json
@@ -14,18 +14,14 @@ from backend.services.ha_vwap.candles import default_cache_dir, default_out_dir,
 from backend.services.ha_vwap.config import (
     ARTIFACT_COMBINED,
     CANDLE_DAYS_BACK,
-    CASH_FROM,
-    CASH_TO,
     EMA_PERIOD,
-    FUTURES_FROM,
-    FUTURES_TO,
     HISTORY_SESSIONS,
-    MACD_FAST,
-    MACD_SIGNAL,
-    MACD_SLOW,
     PUBLIC_ARTIFACT,
+    ST_MULTIPLIER,
+    ST_PERIOD,
 )
-from backend.services.ha_vwap.indicators import ema_series, heikin_ashi, macd_hist_series, session_vwap
+from backend.services.ha_vwap.indicators import ema_series, heikin_ashi, session_vwap, supertrend_series
+from backend.services.ha_vwap.signals import CsvSignal, date_span, default_signals_path, load_csv_signals, signals_by_session
 from backend.services.ha_vwap.simulate import annotate_bars, simulate_session
 from backend.services.ha_vwap.universe import HaVwapName, load_universe
 from backend.services.market_holiday import refresh_holiday_dates_from_db
@@ -33,6 +29,16 @@ from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
+
+NOTES = {
+    "entry": "CSV Date/Time → session-aligned 10m bar_start (floor from 09:15). Fill = raw 10m close × 1.0003. Exits start on the next bar.",
+    "instrument": "Current-month stock FUT from arbitrage_master.currmth_future_instrument_key. Qty = 1 FUT lot.",
+    "vwap": "session VWAP from raw 10m typical price × volume from 09:15",
+    "ha": "standard HA recursion on session-aligned 10m OHLC",
+    "st": "SuperTrend(10, 3) on RAW 10m OHLC; SL if raw close < ST",
+    "exits": "first hit after entry bar: TP 0.8% (10m high), HA close < VWAP AND EMA20 (reason=vwap_ema), raw close < ST (reason=supertrend), else 15:15 (reason=time)",
+    "filters": "none — entries are CSV-driven, not HA-cross / MACD / top-2 volume",
+}
 
 
 def _iter_trading_days(d0: date, d1: date, holidays: set) -> List[date]:
@@ -46,7 +52,6 @@ def _iter_trading_days(d0: date, d1: date, holidays: set) -> List[date]:
 
 
 def _month_chunks_backward(d0: date, d1: date) -> List[Tuple[int, int, date, date]]:
-    """[(year, month, from, to), ...] newest month first."""
     chunks = []
     y, m = d1.year, d1.month
     while date(y, m, 1) >= date(d0.year, d0.month, 1):
@@ -73,13 +78,6 @@ def _prior_sessions(session: date, holidays: set, n: int) -> List[date]:
     return out
 
 
-def _flatten_history(hist: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    bars: List[Dict[str, Any]] = []
-    for day in hist:
-        bars.extend(day)
-    return bars
-
-
 def _annotate_full(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not bars:
         return []
@@ -95,8 +93,8 @@ def _annotate_full(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     _, _, _, ha_c = heikin_ashi(o, h, l, c)
     vwap = session_vwap(h, l, c, v, sids)
     ema20 = ema_series(ha_c, EMA_PERIOD)
-    macd_h = macd_hist_series(ha_c, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
-    return annotate_bars(bars, ha_c, vwap, ema20, macd_h)
+    st = supertrend_series(h, l, c, ST_PERIOD, ST_MULTIPLIER)
+    return annotate_bars(bars, ha_c, vwap, ema20, st)
 
 
 def _filter_session(annotated: List[Dict[str, Any]], session_date: date) -> List[Dict[str, Any]]:
@@ -133,11 +131,11 @@ def summarize(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "pnl": round(pnl, 2),
         "by_month": by_month,
         "by_reason": by_reason,
-        "entry_fill": "raw 10m close × 1.0003 (market fill, not HA close)",
+        "entry_fill": "CSV time → 10m bar start (floor from 09:15); raw close × 1.0003",
         "bars": "session-aligned 10m from Upstox minutes/5 paired (09:15–09:25…)",
-        "tp": "entry × 1.008, fill if raw 10m high ≥ TP",
-        "exit": "HA close < VWAP AND HA close < EMA20; else 15:15 close (reason=time)",
-        "no_sl": True,
+        "tp": "entry × 1.008, fill if raw 10m high ≥ TP (after entry bar)",
+        "exit": "HA close < VWAP AND EMA20 (vwap_ema); else raw close < SuperTrend(10,3) (supertrend); else 15:15 (time)",
+        "no_sl": False,
     }
 
 
@@ -171,6 +169,19 @@ def _copy_public(combined: Dict[str, Any], repo_root: Path) -> None:
     _write_json(pub, slim)
 
 
+def drop_json_artifacts(out_dir: Path, repo_root: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for p in list(out_dir.glob("futures_*.json")) + list(out_dir.glob("cash_*.json")):
+        p.unlink(missing_ok=True)
+    comb = out_dir / ARTIFACT_COMBINED
+    if comb.is_file():
+        comb.unlink()
+    pub = repo_root / "frontend" / "public" / PUBLIC_ARTIFACT
+    if pub.is_file():
+        pub.unlink()
+    logger.info("ha_vwap dropped existing JSON under %s", out_dir)
+
+
 def run_ha_vwap_backtest(
     upstox: UpstoxService,
     *,
@@ -183,24 +194,35 @@ def run_ha_vwap_backtest(
     symbol_pause_sec: float = 0.12,
     limit_symbols: Optional[int] = None,
     copy_public: bool = True,
+    csv_path: Optional[Path] = None,
+    drop_json: bool = False,
 ) -> Dict[str, Any]:
     mode = (mode or "futures").strip().lower()
-    if mode == "cash":
-        date_from = date_from or CASH_FROM
-        date_to = date_to or CASH_TO
-    else:
-        date_from = date_from or FUTURES_FROM
-        date_to = date_to or FUTURES_TO
-        mode = "futures"
+    if mode != "futures":
+        raise ValueError("CSV HA-VWAP rebuild is current-month FUT only (mode=futures)")
+
+    csv_rows = load_csv_signals(Path(csv_path) if csv_path else default_signals_path())
+    by_day = signals_by_session(csv_rows)
+    span0, span1 = date_span(csv_rows)
+    if span0 is None:
+        raise ValueError("No CSV signals")
+    date_from = date_from or span0.date()
+    date_to = date_to or span1.date()
 
     out_dir = out_dir or default_out_dir()
     cache_dir = cache_dir or default_cache_dir()
-    holidays = refresh_holiday_dates_from_db() or set()
-    names = load_universe(mode)
-    if limit_symbols:
-        names = names[: int(limit_symbols)]
-    chunks = _month_chunks_backward(date_from, date_to)
     repo_root = Path(__file__).resolve().parents[3]
+    if drop_json or not resume:
+        drop_json_artifacts(out_dir, repo_root)
+        resume = False
+
+    holidays = refresh_holiday_dates_from_db() or set()
+    universe = {nm.symbol: nm for nm in load_universe("futures")}
+    if limit_symbols:
+        keep = sorted(universe.keys())[: int(limit_symbols)]
+        universe = {k: universe[k] for k in keep}
+
+    chunks = _month_chunks_backward(date_from, date_to)
     months_status: Dict[str, str] = {}
     all_trades: List[Dict[str, Any]] = []
 
@@ -214,10 +236,9 @@ def run_ha_vwap_backtest(
         key = f"{mode}_{year:04d}-{month:02d}"
         mpath = _month_path(out_dir, year, month, mode)
         if resume and months_status.get(key) == "complete" and mpath.is_file():
-            doc = _load_json(mpath)
             logger.info("ha_vwap skip complete month %s", key)
             continue
-        days = _iter_trading_days(a, b, holidays)
+        days = [d for d in _iter_trading_days(a, b, holidays) if d.isoformat() in by_day]
         days.sort(reverse=True)
         month_trades: List[Dict[str, Any]] = list((_load_json(mpath).get("trades") or []) if resume else [])
         month_done = {str(t.get("date")) for t in month_trades}
@@ -225,16 +246,22 @@ def run_ha_vwap_backtest(
         for session in days:
             if session.isoformat() in month_done:
                 continue
-            logger.info("ha_vwap %s %s symbols=%d", mode, session, len(names))
+            day_sigs: List[CsvSignal] = by_day.get(session.isoformat()) or []
+            symbols = sorted({s.symbol for s in day_sigs})
+            logger.info("ha_vwap %s %s csv_rows=%d symbols=%d", mode, session, len(day_sigs), len(symbols))
             by_symbol: Dict[str, List[Dict[str, Any]]] = {}
             lots: Dict[str, int] = {}
             instruments: Dict[str, str] = {}
             keys: Dict[str, str] = {}
+            csv_entries = []
             priors = _prior_sessions(session, holidays, HISTORY_SESSIONS)
-            for nm in names:
-                hist_days = [session] + list(priors)
+            for sym in symbols:
+                nm: Optional[HaVwapName] = universe.get(sym)
+                if nm is None:
+                    logger.warning("ha_vwap skip %s %s: no current-month FUT in universe", sym, session)
+                    continue
                 hist_bars: List[Dict[str, Any]] = []
-                for d in hist_days:
+                for d in [session] + list(priors):
                     try:
                         hist_bars.extend(
                             fetch_session_10m(
@@ -251,14 +278,22 @@ def run_ha_vwap_backtest(
                 hist_bars.sort(key=lambda b: b.get("bar_start") or b.get("timestamp"))
                 annotated = _annotate_full(hist_bars)
                 today = _filter_session(annotated, session)
-                if len(today) < 4:
+                if not today:
+                    logger.warning("ha_vwap skip %s %s: no 10m candles", sym, session)
                     continue
                 by_symbol[nm.symbol] = today
                 lots[nm.symbol] = nm.lot_size
                 instruments[nm.symbol] = nm.instrument
                 keys[nm.symbol] = nm.instrument_key
+            for sig in day_sigs:
+                csv_entries.append((sig.symbol, sig.bar_start))
             day_trades = simulate_session(
-                by_symbol, lots=lots, instruments=instruments, keys=keys, session_date=session
+                by_symbol,
+                lots=lots,
+                instruments=instruments,
+                keys=keys,
+                session_date=session,
+                csv_entries=csv_entries,
             )
             month_trades.extend(day_trades)
             month_doc = {
@@ -286,20 +321,21 @@ def run_ha_vwap_backtest(
             "trades": month_trades,
         }
         _write_json(mpath, month_doc)
-        # replace this month's trades in combined
-        keep = [t for t in all_trades if not (str(t.get("date") or "").startswith(f"{year:04d}-{month:02d}") and str(t.get("instrument") or "") == ("cash" if mode == "cash" else "fut"))]
+        keep = [
+            t
+            for t in all_trades
+            if not (
+                str(t.get("date") or "").startswith(f"{year:04d}-{month:02d}")
+                and str(t.get("instrument") or "") == "fut"
+            )
+        ]
         all_trades = keep + month_trades
 
         combined = {
             "ok": True,
             "generated_at": datetime.now(IST).isoformat(),
-            "notes": {
-                "entry": "raw 10m close × 1.0003 slippage (not HA close)",
-                "vwap": "session VWAP from raw 10m typical price × volume from 09:15",
-                "ha": "standard HA recursion on session-aligned 10m OHLC",
-                "filters": "HA crossed above VWAP, HA close > EMA20, MACD hist(104,48,36) > 0, 09:45–12:45",
-                "size": "1 FUT lot (futures) or cash shares = that symbol's FUT lot size",
-            },
+            "notes": NOTES,
+            "csv_rows": len(csv_rows),
             "months_status": months_status,
             "summary": summarize(all_trades),
             "trades": all_trades,
@@ -312,6 +348,8 @@ def run_ha_vwap_backtest(
     combined["summary"] = summarize(all_trades)
     combined["trades"] = all_trades
     combined["months_status"] = months_status
+    combined["notes"] = NOTES
+    combined["csv_rows"] = len(csv_rows)
     _write_json(combined_path, combined)
     if copy_public:
         _copy_public(combined, repo_root)

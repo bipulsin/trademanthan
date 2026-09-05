@@ -1,7 +1,7 @@
 """Heikin Ashi, session VWAP (raw), EMA20, MACD hist on HA close."""
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 
 def heikin_ashi(opens: Sequence[float], highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]) -> Tuple[List[float], List[float], List[float], List[float]]:
@@ -78,3 +78,65 @@ def macd_hist_series(closes: Sequence[float], fast: int, slow: int, signal: int)
 def crossed_above(prev_close: float, prev_level: float, close: float, level: float) -> bool:
     """Prior close ≤ prior level and this close > this level."""
     return float(prev_close) <= float(prev_level) and float(close) > float(level)
+
+
+def wilder_atr_series(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 10,
+) -> List[Optional[float]]:
+    n = len(closes)
+    out: List[Optional[float]] = [None] * n
+    p = max(1, int(period))
+    if n < p + 1:
+        return out
+    trs = [0.0] * n
+    for i in range(1, n):
+        h, l_, pc = float(highs[i]), float(lows[i]), float(closes[i - 1])
+        trs[i] = max(h - l_, abs(h - pc), abs(l_ - pc))
+    atr = sum(trs[1 : p + 1]) / float(p)
+    out[p] = atr
+    for i in range(p + 1, n):
+        atr = (atr * (p - 1) + trs[i]) / float(p)
+        out[i] = atr
+    return out
+
+
+def supertrend_series(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 10,
+    multiplier: float = 3.0,
+) -> List[Optional[float]]:
+    """SuperTrend on RAW OHLC (not HA). None until ATR is ready."""
+    n = len(closes)
+    atrs = wilder_atr_series(highs, lows, closes, period)
+    st: List[Optional[float]] = [None] * n
+    fub = 0.0
+    flb = 0.0
+    started = False
+    for i in range(n):
+        atr = atrs[i]
+        if atr is None:
+            continue
+        hl2 = (float(highs[i]) + float(lows[i])) / 2.0
+        bub = hl2 + float(multiplier) * float(atr)
+        blb = hl2 - float(multiplier) * float(atr)
+        if not started:
+            fub, flb = bub, blb
+            st[i] = blb
+            started = True
+            continue
+        fub = bub if (bub < fub or float(closes[i - 1]) > fub) else fub
+        flb = blb if (blb > flb or float(closes[i - 1]) < flb) else flb
+        prev = st[i - 1]
+        if prev is None:
+            prev = flb
+        if abs(float(prev) - fub) < 1e-12 or float(prev) == fub:
+            cur = fub if float(closes[i]) <= fub else flb
+        else:
+            cur = flb if float(closes[i]) >= flb else fub
+        st[i] = cur
+    return st

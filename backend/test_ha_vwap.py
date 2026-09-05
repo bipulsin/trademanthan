@@ -1,24 +1,20 @@
-"""HA, VWAP cross, top-2 volume, TP, dual exit, 09:45–12:45 window."""
+"""HA, CSV bar mapping, TP, VWAP+EMA exit, SuperTrend(10,3) exit."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 import pytest
 import pytz
 
-from backend.services.ha_vwap.indicators import crossed_above, heikin_ashi, macd_hist_series, session_vwap
-from backend.services.ha_vwap.simulate import (
-    in_signal_window,
-    is_signal,
-    select_top_volume,
-    simulate_session,
-)
+from backend.services.ha_vwap.indicators import heikin_ashi, session_vwap, supertrend_series
+from backend.services.ha_vwap.signals import bar_start_containing, parse_csv_datetime
+from backend.services.ha_vwap.simulate import simulate_session
 
 IST = pytz.timezone("Asia/Kolkata")
 SESSION = date(2026, 8, 3)
 
 
-def _bar(hm: str, o, h, l, c, v=1000, ha=None, vwap=None, ema=None, hist=1.0):
+def _bar(hm: str, o, h, l, c, v=1000, ha=None, vwap=None, ema=None, st=None):
     hour, minute = map(int, hm.split(":"))
     ts = IST.localize(datetime(SESSION.year, SESSION.month, SESSION.day, hour, minute))
     ha_c = ha if ha is not None else c
@@ -33,7 +29,7 @@ def _bar(hm: str, o, h, l, c, v=1000, ha=None, vwap=None, ema=None, hist=1.0):
         "ha_close": ha_c,
         "vwap": vwap if vwap is not None else (o + h + l + c) / 4,
         "ema20": ema if ema is not None else ha_c - 1,
-        "macd_hist": hist,
+        "st": st if st is not None else 0.0,
     }
 
 
@@ -44,12 +40,6 @@ def test_heikin_ashi_recursion():
     assert ho[0] == pytest.approx((10 + 11) / 2)
     assert ho[1] == pytest.approx((ho[0] + hc[0]) / 2)
     assert hc[1] == pytest.approx((12 + 14 + 11 + 13) / 4)
-
-
-def test_crossed_above_not_merely_above():
-    assert crossed_above(100, 101, 102, 101) is True
-    assert crossed_above(102, 101, 103, 101) is False  # already above
-    assert crossed_above(100, 101, 100.5, 101) is False
 
 
 def test_session_vwap_resets():
@@ -63,42 +53,20 @@ def test_session_vwap_resets():
     assert vw[2] == pytest.approx((4 + 3 + 3.5) / 3)
 
 
-def test_signal_window_945_to_1245():
-    assert in_signal_window(_bar("09:35", 1, 1, 1, 1)) is False
-    assert in_signal_window(_bar("09:45", 1, 1, 1, 1)) is True
-    assert in_signal_window(_bar("12:45", 1, 1, 1, 1)) is True
-    assert in_signal_window(_bar("12:55", 1, 1, 1, 1)) is False
+def test_csv_time_maps_to_session_10m_bar_start():
+    assert bar_start_containing(parse_csv_datetime("15-07-2026 9:45 am")) == time(9, 45)
+    assert bar_start_containing(parse_csv_datetime("15-07-2026 11:35 am")) == time(11, 35)
+    assert bar_start_containing(datetime(2026, 7, 15, 9, 48)) == time(9, 45)
+    assert bar_start_containing(datetime(2026, 7, 15, 9, 54)) == time(9, 45)
+    assert bar_start_containing(datetime(2026, 7, 15, 9, 55)) == time(9, 55)
+    assert bar_start_containing(datetime(2026, 7, 15, 9, 15)) == time(9, 15)
 
 
-def test_is_signal_requires_cross_ema_macd():
-    prev = _bar("09:35", 100, 101, 99, 100, ha=100, vwap=101, ema=99, hist=1)
-    cur = _bar("09:45", 100, 103, 100, 102, ha=102, vwap=101, ema=101, hist=0.5)
-    assert is_signal(prev, cur) is True
-    cur2 = dict(cur)
-    cur2["macd_hist"] = 0
-    assert is_signal(prev, cur2) is False
-    cur3 = dict(cur)
-    cur3["ha_close"] = 100.5
-    cur3["ema20"] = 101
-    assert is_signal(prev, cur3) is False
-
-
-def test_top_2_by_volume():
-    sigs = [
-        {"symbol": "A", "volume": 10},
-        {"symbol": "B", "volume": 50},
-        {"symbol": "C", "volume": 30},
-    ]
-    top = select_top_volume(sigs, 2)
-    assert [x["symbol"] for x in top] == ["B", "C"]
-
-
-def test_tp_on_high_touch():
+def test_tp_on_high_touch_after_csv_entry():
     a = [
-        _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
-        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, hist=1),
-        _bar("09:55", 100.1, 101.0, 100.0, 100.5, v=10, ha=101, vwap=100, ema=100, hist=1),
-        _bar("15:15", 100.5, 100.5, 100.5, 100.5, v=1, ha=101, vwap=100, ema=100, hist=1),
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, st=90),
+        _bar("09:55", 100.1, 101.0, 100.0, 100.5, v=10, ha=101, vwap=100, ema=100, st=90),
+        _bar("15:15", 100.5, 100.5, 100.5, 100.5, v=1, ha=101, vwap=100, ema=100, st=90),
     ]
     trades = simulate_session(
         {"AAA": a},
@@ -106,6 +74,7 @@ def test_tp_on_high_touch():
         instruments={"AAA": "fut"},
         keys={"AAA": "NSE_FO|AAA"},
         session_date=SESSION,
+        csv_entries=[("AAA", time(9, 45))],
     )
     assert len(trades) == 1
     assert trades[0]["reason"] == "tp"
@@ -116,10 +85,9 @@ def test_tp_on_high_touch():
 
 def test_dual_exit_ha_below_vwap_and_ema():
     a = [
-        _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
-        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, hist=1),
-        _bar("09:55", 100, 100.2, 99.0, 99.5, v=10, ha=99, vwap=100, ema=100, hist=1),
-        _bar("15:15", 99.5, 99.5, 99.5, 99.5, v=1, ha=99, vwap=100, ema=100, hist=1),
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, st=90),
+        _bar("09:55", 100, 100.2, 99.0, 99.5, v=10, ha=99, vwap=100, ema=100, st=90),
+        _bar("15:15", 99.5, 99.5, 99.5, 99.5, v=1, ha=99, vwap=100, ema=100, st=90),
     ]
     trades = simulate_session(
         {"AAA": a},
@@ -127,44 +95,19 @@ def test_dual_exit_ha_below_vwap_and_ema():
         instruments={"AAA": "fut"},
         keys={"AAA": "k"},
         session_date=SESSION,
+        csv_entries=[("AAA", time(9, 45))],
     )
-    assert trades[0]["reason"] == "vwap_ema_exit"
+    assert trades[0]["reason"] == "vwap_ema"
     assert trades[0]["exit"] == pytest.approx(99.5)
     assert trades[0]["qty"] == 50
     assert trades[0]["pnl"] == pytest.approx((99.5 - 100 * 1.0003) * 50)
 
 
-def test_max_two_concurrent_top_volume():
-    def series(vol, high_later=100.2):
-        return [
-            _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
-            _bar("09:45", 100, 100.1, 99.9, 100, v=vol, ha=101, vwap=100, ema=100, hist=1),
-            _bar("15:15", 100, high_later, 99.5, 100, v=1, ha=101, vwap=100, ema=100, hist=1),
-        ]
-
-    by = {
-        "LOW": series(10),
-        "MID": series(100),
-        "HIGH": series(999),
-    }
-    trades = simulate_session(
-        by,
-        lots={k: 1 for k in by},
-        instruments={k: "fut" for k in by},
-        keys={k: k for k in by},
-        session_date=SESSION,
-    )
-    syms = {t["symbol"] for t in trades}
-    assert "HIGH" in syms and "MID" in syms
-    assert "LOW" not in syms
-    assert len(trades) == 2
-
-
-def test_no_entry_before_945():
+def test_supertrend_exit_uses_raw_close():
     a = [
-        _bar("09:15", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
-        _bar("09:25", 100, 100, 100, 100, v=9000, ha=101, vwap=100, ema=100, hist=1),
-        _bar("15:15", 100, 100, 100, 100, v=1, ha=101, vwap=100, ema=100, hist=1),
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=90, ema=90, st=90),
+        _bar("09:55", 100, 100.2, 99.0, 99.4, v=10, ha=101, vwap=90, ema=90, st=99.5),
+        _bar("15:15", 99.4, 99.4, 99.4, 99.4, v=1, ha=101, vwap=90, ema=90, st=99.5),
     ]
     trades = simulate_session(
         {"AAA": a},
@@ -172,46 +115,69 @@ def test_no_entry_before_945():
         instruments={"AAA": "fut"},
         keys={"AAA": "k"},
         session_date=SESSION,
+        csv_entries=[("AAA", time(9, 45))],
+    )
+    assert trades[0]["reason"] == "supertrend"
+    assert trades[0]["exit"] == pytest.approx(99.4)
+
+
+def test_supertrend_series_length_and_below():
+    n = 30
+    highs = [10.0 + i * 0.1 for i in range(n)]
+    lows = [9.0 + i * 0.1 for i in range(n)]
+    closes = [9.5 + i * 0.1 for i in range(n)]
+    # last bars dump so close falls through ST
+    highs[-1], lows[-1], closes[-1] = 8.0, 5.0, 6.0
+    st = supertrend_series(highs, lows, closes, 10, 3.0)
+    assert len(st) == n
+    assert st[-1] is not None
+    assert closes[-1] < st[-1]
+
+
+def test_no_scan_without_csv():
+    a = [
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, st=90),
+        _bar("15:15", 100, 100.2, 99.5, 100, v=1, ha=101, vwap=100, ema=100, st=90),
+    ]
+    trades = simulate_session(
+        {"AAA": a},
+        lots={"AAA": 1},
+        instruments={"AAA": "fut"},
+        keys={"AAA": "k"},
+        session_date=SESSION,
+        csv_entries=[],
     )
     assert trades == []
 
 
-def test_skip_entry_when_lot_missing():
+def test_skip_when_lot_missing():
     a = [
-        _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
-        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, hist=1),
-        _bar("15:15", 100, 100.2, 99.5, 100, v=1, ha=101, vwap=100, ema=100, hist=1),
+        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, st=90),
+        _bar("15:15", 100, 100.2, 99.5, 100, v=1, ha=101, vwap=100, ema=100, st=90),
     ]
     trades = simulate_session(
         {"AAA": a},
         lots={},
-        instruments={"AAA": "cash"},
-        keys={"AAA": "NSE_EQ|AAA"},
+        instruments={"AAA": "fut"},
+        keys={"AAA": "k"},
         session_date=SESSION,
+        csv_entries=[("AAA", time(9, 45))],
     )
     assert trades == []
 
 
-def test_cash_qty_uses_fut_lot():
+def test_time_exit_1515():
     a = [
-        _bar("09:35", 100, 100, 100, 100, v=1, ha=99, vwap=100, ema=98, hist=1),
-        _bar("09:45", 100, 100.2, 99.9, 100, v=5000, ha=101, vwap=100, ema=100, hist=1),
-        _bar("09:55", 100.1, 101.0, 100.0, 100.5, v=10, ha=101, vwap=100, ema=100, hist=1),
-        _bar("15:15", 100.5, 100.5, 100.5, 100.5, v=1, ha=101, vwap=100, ema=100, hist=1),
+        _bar("09:45", 100, 100.1, 99.9, 100, v=10, ha=101, vwap=90, ema=90, st=50),
+        _bar("15:15", 100.1, 100.2, 100.0, 100.1, v=1, ha=101, vwap=90, ema=90, st=50),
     ]
     trades = simulate_session(
-        {"RELIANCE": a},
-        lots={"RELIANCE": 250},
-        instruments={"RELIANCE": "cash"},
-        keys={"RELIANCE": "NSE_EQ|RELIANCE"},
+        {"AAA": a},
+        lots={"AAA": 1},
+        instruments={"AAA": "fut"},
+        keys={"AAA": "k"},
         session_date=SESSION,
+        csv_entries=[("AAA", time(9, 45))],
     )
-    assert trades[0]["qty"] == 250
-    entry = 100 * 1.0003
-    assert trades[0]["pnl"] == pytest.approx((entry * 1.008 - entry) * 250, abs=0.02)
-
-
-def test_macd_hist_series_length():
-    closes = [float(i) for i in range(1, 120)]
-    h = macd_hist_series(closes, 104, 48, 36)
-    assert len(h) == len(closes)
+    assert trades[0]["reason"] == "time"
+    assert trades[0]["exit"] == pytest.approx(100.1)
