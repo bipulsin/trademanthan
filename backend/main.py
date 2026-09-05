@@ -86,6 +86,10 @@ from backend.services.atr_daily_precompute_scheduler import (
     start_atr_daily_precompute_scheduler,
     stop_atr_daily_precompute_scheduler,
 )
+from backend.services.arbitrage_volatility_grade_scheduler import (
+    start_arbitrage_volatility_grade_scheduler,
+    stop_arbitrage_volatility_grade_scheduler,
+)
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -234,6 +238,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ ATR daily precompute scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without ATR daily precompute scheduler")
 
+        try:
+            logger.info("Starting arbitrage volatility grade scheduler (Friday 17:00 IST)...")
+            start_arbitrage_volatility_grade_scheduler()
+            logger.info("✅ Arbitrage volatility grade scheduler: STARTED (Friday 17:00 IST)")
+        except Exception as e:
+            logger.error(f"❌ Arbitrage volatility grade scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without arbitrage volatility grade scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -339,6 +351,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ ATR daily precompute scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping ATR daily precompute scheduler: {e}", exc_info=True)
+
+    try:
+        stop_arbitrage_volatility_grade_scheduler()
+        logger.info("✅ Arbitrage volatility grade scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping arbitrage volatility grade scheduler: {e}", exc_info=True)
 
     logger.info("✅ Shutdown complete")
 
