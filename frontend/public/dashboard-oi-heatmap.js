@@ -1,17 +1,17 @@
 /**
- * Dashboard: Live OI heatmap — API returns ~200 NSE stock futures; UI shows top N only.
+ * Dashboard: OI Buildup Heatmap — four signal tabs (arbitrage_master currmth FUT).
  */
 (function () {
     const API_PATH = "/scan/dashboard/oi-heatmap";
     const FETCH_MS = 35000;
     const POLL_MS = 60 * 1000;
-    /** Rows returned by API are sorted; only this many are rendered in the table. */
-    const DISPLAY_TOP_N = 10;
-    /** Show "(live)" only if scan is same IST calendar day as now and ≤30 minutes old. */
     const LIVE_FRESH_WINDOW_MS = 30 * 60 * 1000;
+    const TAB_KEYS = ["LONG_BUILDUP", "SHORT_COVERING", "SHORT_BUILDUP", "LONG_UNWINDING"];
     let timer = null;
     let firstLoad = true;
     let fullRowsCache = [];
+    let bySignalCache = {};
+    let activeTab = "LONG_BUILDUP";
     let modalSortKey = "symbol";
     let modalSortDir = "asc";
 
@@ -109,6 +109,40 @@
         if (sepEl) sepEl.style.display = "none";
     }
 
+    function bucketKey(sig) {
+        const s = String(sig || "").toUpperCase();
+        if (s === "LONG_UNWIND" || s === "LONG_UNWINDING") return "LONG_UNWINDING";
+        if (s === "SHORT_COVER" || s === "SHORT_COVERING") return "SHORT_COVERING";
+        if (s === "LONG_BUILDUP" || s === "SHORT_BUILDUP") return s;
+        return "";
+    }
+
+    function rowsForTab(tab) {
+        const key = String(tab || activeTab);
+        const fromApi = bySignalCache && bySignalCache[key];
+        if (fromApi && fromApi.length) return fromApi;
+        return (fullRowsCache || []).filter(function (r) {
+            return bucketKey(r && r.oi_signal) === key;
+        });
+    }
+
+    function updateTabCounts() {
+        TAB_KEYS.forEach(function (k) {
+            const btn = document.querySelector('.oi-heatmap-tab[data-oi-tab="' + k + '"]');
+            if (!btn) return;
+            const n = rowsForTab(k).length;
+            const labels = {
+                LONG_BUILDUP: "Long Buildup",
+                SHORT_COVERING: "Short Covering",
+                SHORT_BUILDUP: "Short Buildup",
+                LONG_UNWINDING: "Long Unwinding",
+            };
+            btn.textContent = labels[k] + " (" + n + ")";
+            btn.classList.toggle("is-active", k === activeTab);
+            btn.setAttribute("aria-selected", k === activeTab ? "true" : "false");
+        });
+    }
+
     function signalLabel(sig) {
         const s = String(sig || "").toUpperCase();
         const map = {
@@ -162,7 +196,7 @@
 
     function renderRowsTable(rows) {
         if (!rows || rows.length === 0) {
-            return '<p class="oi-heatmap-empty">No heatmap data yet (scheduler or instruments file).</p>';
+            return '<p class="oi-heatmap-empty">No names in this OI bucket for the latest snapshot.</p>';
         }
         const head =
             "<thead><tr>" +
@@ -343,10 +377,11 @@
             }
             const allRows = data.rows || [];
             fullRowsCache = allRows.slice();
-            const displayRows = allRows.slice(0, DISPLAY_TOP_N);
-            const inner = renderTable(displayRows);
+            bySignalCache = data.by_signal || {};
+            const inner = renderTable(rowsForTab(activeTab));
             host.innerHTML = inner;
             updateOiHeatmapHeader(data);
+            updateTabCounts();
             if (msg) {
                 const err = data.error ? String(data.error) : "";
                 if (allRows.length > 0) {
@@ -411,6 +446,14 @@
             btn.addEventListener("click", function () {
                 load();
             });
+        document.querySelectorAll(".oi-heatmap-tab").forEach(function (tabBtn) {
+            tabBtn.addEventListener("click", function () {
+                activeTab = String(tabBtn.getAttribute("data-oi-tab") || "LONG_BUILDUP");
+                const host = document.getElementById("oiHeatmapHost");
+                if (host) host.innerHTML = renderTable(rowsForTab(activeTab));
+                updateTabCounts();
+            });
+        });
         const moreBtn = document.getElementById("oiHeatmapMoreBtn");
         if (moreBtn)
             moreBtn.addEventListener("click", function () {

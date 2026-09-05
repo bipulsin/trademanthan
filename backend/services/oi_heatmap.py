@@ -1,11 +1,11 @@
 """
-Live OI heatmap (Top ~200 NSE stock futures) — Upstox only.
+Live OI heatmap — current-month stock futures from ``arbitrage_master`` only.
 
-1) Instruments: same official daily file as ``InstrumentsDownloader``
-   (https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz).
-2) Filter: NSE_FO + instrument_type FUT + equity underlyings (exclude index / commodity FO).
-3) Liquidity: one near-month future per underlying, then batch market quotes → top N by volume.
-4) Refresh: in-memory cache + optional DB table ``oi_heatmap_latest``; persist only rows with non-zero raw heat score; stored ``score`` is normalized to 0–100 (batch median → 50); scheduler interval from config.
+Refresh: Upstox REST batch quotes every 30 minutes 09:00–16:00 IST on NSE sessions.
+The 16:00 snapshot stays frozen until the next trading day 09:00.
+OI change: quote ``change_in_oi`` if non-zero, else delta vs previous heatmap snapshot
+in the same IST session, else vs prior completed daily candle OI.
+Signal: ``interpret_oi_signal`` (price change vs OI change). Does not start a WebSocket.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import json
 import logging
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -119,6 +119,84 @@ def _effective_oi_change(
     return 0
 
 
+_OI_FETCH_START = dt_time(9, 0)
+_OI_FETCH_END = dt_time(16, 0)
+_SIGNAL_BUCKETS = (
+    "LONG_BUILDUP",
+    "SHORT_COVERING",
+    "SHORT_BUILDUP",
+    "LONG_UNWINDING",
+)
+
+
+def _as_ist(now: Optional[datetime] = None) -> datetime:
+    if now is None:
+        return datetime.now(IST)
+    if now.tzinfo is None:
+        return IST.localize(now)
+    return now.astimezone(IST)
+
+
+def in_oi_heatmap_fetch_window(now: Optional[datetime] = None) -> bool:
+    """True on NSE trading days from 09:00 through 16:00 IST (inclusive)."""
+    n = _as_ist(now)
+    if n.weekday() >= 5:
+        return False
+    if should_skip_scheduled_market_jobs_ist(n):
+        return False
+    t = n.time().replace(second=0, microsecond=0)
+    return _OI_FETCH_START <= t <= _OI_FETCH_END
+
+
+def is_oi_heatmap_overnight_freeze(now: Optional[datetime] = None) -> bool:
+    """
+    True when scans must not run and the UI should keep the last 16:00 (or last session) snapshot.
+
+    Trading days: after 16:00 until next 09:00. Weekends and NSE holidays: always frozen.
+    """
+    return not in_oi_heatmap_fetch_window(now)
+
+
+def bucket_key_for_oi_signal(sig: str) -> Optional[str]:
+    s = str(sig or "").strip().upper()
+    if s in ("LONG_UNWIND", "LONG_UNWINDING"):
+        return "LONG_UNWINDING"
+    if s in ("SHORT_COVER", "SHORT_COVERING"):
+        return "SHORT_COVERING"
+    if s in ("LONG_BUILDUP", "SHORT_BUILDUP"):
+        return s
+    return None
+
+
+def group_rows_by_oi_signal(rows: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    out: Dict[str, List[Dict[str, Any]]] = {k: [] for k in _SIGNAL_BUCKETS}
+    for r in rows or []:
+        key = bucket_key_for_oi_signal(r.get("oi_signal"))
+        if key:
+            out[key].append(r)
+    return out
+
+
+def currmth_future_keys_from_arbitrage_rows(rows: List[Any]) -> List[str]:
+    """Keep only non-empty ``currmth_future_instrument_key`` values (current-month FUT)."""
+    out: List[str] = []
+    seen = set()
+    for row in rows or []:
+        if isinstance(row, dict):
+            ik = row.get("currmth_future_instrument_key") or row.get("instrument_key")
+        elif hasattr(row, "_mapping"):
+            m = row._mapping
+            ik = m.get("currmth_future_instrument_key") or m.get("instrument_key")
+        else:
+            ik = row[1] if len(row) > 1 else row[0]
+        key = str(ik or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
 def ist_use_today_only_db_snapshot(now: Optional[datetime] = None) -> bool:
     """
     Weekday trading sessions from 09:00 IST: do not read oi_heatmap_latest from a prior calendar day.
@@ -187,8 +265,17 @@ def maybe_sync_refresh_heatmap_after_open(reason: str = "get_live") -> None:
         return
     if should_skip_scheduled_market_jobs_ist(now):
         return
-    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+    if is_oi_heatmap_overnight_freeze(now):
         return
+    if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
+        return
+    try:
+        from backend.services.breakfast_upstox_gate import breakfast_exclusivity_active
+
+        if breakfast_exclusivity_active(now):
+            return
+    except Exception:
+        pass
     global _last_api_refresh_attempt_mono
     with _api_refresh_lock:
         tmono = time.monotonic()
@@ -307,7 +394,6 @@ def build_universe_instrument_keys_from_arbitrage_master() -> List[str]:
     """
     db = None
     out: List[str] = []
-    seen = set()
     try:
         db = SessionLocal()
         rows = db.execute(
@@ -321,12 +407,7 @@ def build_universe_instrument_keys_from_arbitrage_master() -> List[str]:
                 """
             )
         ).fetchall()
-        for _, ik in rows:
-            key = str(ik or "").strip()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            out.append(key)
+        out = currmth_future_keys_from_arbitrage_rows(rows)
     except Exception as e:
         logger.warning("oi_heatmap: arbitrage_master universe load failed: %s", e)
     finally:
@@ -344,11 +425,9 @@ def ensure_daily_universe_cached() -> List[str]:
             return _universe_keys
         _universe_keys = build_universe_instrument_keys_from_arbitrage_master()
         if not _universe_keys:
-            n = int(getattr(settings, "OI_HEATMAP_TOP_N", 200))
-            _universe_keys = build_liquidity_universe_instrument_keys(n)
-            logger.info("oi_heatmap: universe fallback to liquidity top_n=%s size=%s", n, len(_universe_keys))
+            logger.warning("oi_heatmap: empty arbitrage_master currmth universe (no liquidity fallback)")
         else:
-            logger.info("oi_heatmap: universe source=arbitrage_master size=%s", len(_universe_keys))
+            logger.info("oi_heatmap: universe source=arbitrage_master_currmth size=%s", len(_universe_keys))
         _universe_date = day
         return _universe_keys
 
@@ -535,8 +614,10 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
     """
     global _rows_cache, _cache_updated_at_mono, _cache_updated_at_iso, _last_error, _underlying_rank, _cache_source
 
-    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
-        return {"success": False, "skipped": "UPSTOX_OI_ENABLED false"}
+    if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
+        return {"success": False, "skipped": "OI_HEATMAP_LIVE_ENABLED false"}
+    if is_oi_heatmap_overnight_freeze():
+        return {"success": False, "skipped": "overnight_freeze"}
 
     try:
         from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
@@ -560,27 +641,26 @@ def refresh_oi_heatmap_live() -> Dict[str, Any]:
         logger.error("oi_heatmap: Upstox: %s", e)
         return {"success": False, "error": _last_error}
 
-    chunk = max(10, min(int(getattr(settings, "OI_BATCH_CHUNK_SIZE", 100)), 500))
+    chunk = max(10, min(int(getattr(settings, "OI_BATCH_CHUNK_SIZE", 50)), 80))
+    pause_s = float(getattr(settings, "OI_BATCH_PAUSE_SEC", 0.35))
     merged: Dict[str, Dict[str, Any]] = {}
     for i in range(0, len(keys), chunk):
+        if i > 0 and pause_s > 0:
+            time.sleep(pause_s)
         batch = keys[i : i + chunk]
         part = ux.get_market_quote_snapshots_batch(batch, max_per_request=len(batch))
         merged.update(part)
 
     _reset_oi_delta_caches_if_new_ist_day()
 
+    # Read the global streamer if it is already up; never start a second WS.
     _feed_get_ws = None
-    if getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
-        try:
-            from backend.services.upstox_market_feed import (
-                ensure_market_feed_running,
-                get_ws_quote_for_instrument,
-            )
+    try:
+        from backend.services.upstox_market_feed import get_ws_quote_for_instrument
 
-            ensure_market_feed_running(keys)
-            _feed_get_ws = get_ws_quote_for_instrument
-        except Exception as e:
-            logger.warning("oi_heatmap: market feed start skipped: %s", e)
+        _feed_get_ws = get_ws_quote_for_instrument
+    except Exception as e:
+        logger.debug("oi_heatmap: WS quote helper unavailable: %s", e)
 
     # Reload instrument meta for underlying / symbol labels
     raw = load_nse_instruments_json()
@@ -849,8 +929,17 @@ def maybe_trigger_refresh_if_empty() -> None:
     dashboard load after deploy can populate without waiting for the interval job.
     """
     global _last_api_refresh_attempt_mono
-    if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+    if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
         return
+    if is_oi_heatmap_overnight_freeze():
+        return
+    try:
+        from backend.services.breakfast_upstox_gate import breakfast_exclusivity_active
+
+        if breakfast_exclusivity_active():
+            return
+    except Exception:
+        pass
     with _api_refresh_lock:
         now = time.monotonic()
         if now - _last_api_refresh_attempt_mono < 120.0:
@@ -909,15 +998,19 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
     if rows and origin == "snapshot":
         snapshot_note = (
             "Showing last saved snapshot from the database until live data is fetched "
-            "(scheduler: every 15 min, 9:15–15:15 IST on trading days)."
+            "(scheduler: every 30 min, 09:00–16:00 IST on trading days; overnight freeze after 16:00)."
         )
+    attached = _attach_prev_signal_for_api(rows, ts or None)
+    frozen = is_oi_heatmap_overnight_freeze()
     return {
         "success": True,
         "source": "upstox",
         "data_origin": origin if rows else "none",
         "updated_at": ts or None,
         "error": err,
-        "rows": _attach_prev_signal_for_api(rows, ts or None),
+        "rows": attached,
+        "by_signal": group_rows_by_oi_signal(attached),
+        "frozen": frozen,
         "message": None if rows else empty_help,
         "snapshot_note": snapshot_note,
     }

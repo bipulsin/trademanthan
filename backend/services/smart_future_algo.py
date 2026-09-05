@@ -11,7 +11,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays every 15 min 9:30–15:00 IST): arbitrage_master current-month futures → smart_futures_daily
 - Pre-market F&O watchlist (weekdays 9:10 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
-- Live OI heatmap (weekdays, every 15 min 9:15–15:15 IST): Upstox REST batch quotes + optional v3 WebSocket ``full`` feed for live OI → oi_heatmap cache + DB; API falls back to DB snapshot when live is empty
+- Live OI heatmap (weekdays, every 30 min 09:00–16:00 IST): arbitrage_master current-month FUT, Upstox REST only (no extra WS); Breakfast exclusivity defers overlap; 16:00 snapshot frozen overnight
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -28,7 +28,7 @@ import threading
 import time
 import requests
 from pathlib import Path
-from datetime import datetime, time as dt_time
+from datetime import datetime, time as dt_time, timedelta
 from typing import List, Tuple
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1097,26 +1097,48 @@ class SmartFutureAlgoScheduler:
             else:
                 logger.info("⏭️ Pre-market watchlist not scheduled (PREMKET_ENABLED=false)")
 
-            # Live OI heatmap (Top ~200 stock FUT) — Upstox batch quotes every 15 min, 9:15–15:15 IST Mon–Fri
+            # Live OI heatmap — arbitrage_master currmth FUT, 30 min 09:00–16:00 IST Mon–Fri
+            def _schedule_oi_heatmap_breakfast_retry():
+                ist = pytz.timezone("Asia/Kolkata")
+                run_at = datetime.now(ist) + timedelta(seconds=45)
+                if run_at.hour > 9 or (run_at.hour == 9 and run_at.minute > 26):
+                    return
+                try:
+                    self.scheduler.add_job(
+                        run_oi_heatmap_tick,
+                        trigger="date",
+                        run_date=run_at,
+                        id="smart_future_oi_heatmap_live_deferred",
+                        name="OI heatmap deferred after Breakfast exclusivity",
+                        replace_existing=True,
+                        max_instances=1,
+                        misfire_grace_time=120,
+                    )
+                    logger.info("OI heatmap: scheduled Breakfast-gate retry at %s", run_at.isoformat())
+                except Exception as e:
+                    logger.warning("OI heatmap: could not schedule Breakfast retry: %s", e)
+
             def run_oi_heatmap_tick():
-                if not getattr(settings, "UPSTOX_OI_ENABLED", True):
+                if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
                     return
                 ist = pytz.timezone("Asia/Kolkata")
                 now = datetime.now(ist)
                 if _skip_ist_non_trading_job("OI heatmap live", now):
                     return
-                h, m = now.hour, now.minute
-                # Cron fires at :00,:15,:30,:45 for hours 9–15; restrict to 9:15–15:15 only
-                if h < 9 or (h == 9 and m < 15):
-                    return
-                if h > 15 or (h == 15 and m > 15):
-                    return
-                if h == 9 and m == 0:
-                    return  # skip 9:00 — first run is 9:15
-                try:
-                    from backend.services.oi_heatmap import refresh_oi_heatmap_live
+                from backend.services.oi_heatmap import (
+                    in_oi_heatmap_fetch_window,
+                    refresh_oi_heatmap_live,
+                )
 
-                    refresh_oi_heatmap_live()
+                if not in_oi_heatmap_fetch_window(now):
+                    return
+                h, m = now.hour, now.minute
+                if h == 16 and m > 0:
+                    return
+                try:
+                    result = refresh_oi_heatmap_live()
+                    if isinstance(result, dict) and result.get("skipped") == "breakfast_exclusivity":
+                        _schedule_oi_heatmap_breakfast_retry()
                 except Exception as e:
                     logger.error("❌ OI heatmap refresh failed: %s", e, exc_info=True)
 
@@ -1124,20 +1146,20 @@ class SmartFutureAlgoScheduler:
                 run_oi_heatmap_tick,
                 trigger=CronTrigger(
                     day_of_week="mon-fri",
-                    hour="9-15",
-                    minute="0,15,30,45",
+                    hour="9-16",
+                    minute="0,30",
                     timezone="Asia/Kolkata",
                 ),
                 id="smart_future_oi_heatmap_live",
-                name="OI heatmap live (Upstox, 15 min 9:15–15:15 IST)",
+                name="OI heatmap live (Upstox REST, 30 min 09:00–16:00 IST)",
                 replace_existing=True,
                 max_instances=1,
                 misfire_grace_time=300,
                 coalesce=True,
             )
             logger.info(
-                "✅ Scheduled: OI heatmap tick every 15 min (live fetch gated by "
-                "UPSTOX_OI_ENABLED; default false in Phase 1)"
+                "✅ Scheduled: OI heatmap every 30 min 09:00–16:00 IST "
+                "(Breakfast exclusivity defers 09:30 until lock or 09:25)"
             )
 
             # Phase 1: Smart Futures + Vajra jobs removed (candle-budget consolidation).

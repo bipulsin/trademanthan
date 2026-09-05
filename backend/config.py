@@ -104,13 +104,17 @@ class Settings(BaseSettings):
     # OpenAI (fin sentiment reason text from filings)
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 
-    # Live OI heatmap (Upstox-only: instruments JSON + batch market quotes)
-    # Phase 1 consolidation: OI Heatmap live fetching paused (code retained; set true to re-enable).
+    # Live OI heatmap (arbitrage_master current-month FUT; 30 min 09:00–16:00 IST)
+    OI_HEATMAP_LIVE_ENABLED: bool = os.getenv("OI_HEATMAP_LIVE_ENABLED", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     UPSTOX_OI_ENABLED: bool = os.getenv("UPSTOX_OI_ENABLED", "false").lower() in ("1", "true", "yes")
-    # Legacy name: live OI heatmap refresh cadence is now fixed in smart_future_algo (every 15 min, 9:15–15:15 IST).
     OI_REFRESH_INTERVAL: int = int(os.getenv("OI_REFRESH_INTERVAL", "60"))
     OI_HEATMAP_TOP_N: int = int(os.getenv("OI_HEATMAP_TOP_N", "200"))
-    OI_BATCH_CHUNK_SIZE: int = int(os.getenv("OI_BATCH_CHUNK_SIZE", "100"))
+    OI_BATCH_CHUNK_SIZE: int = int(os.getenv("OI_BATCH_CHUNK_SIZE", "50"))
+    OI_BATCH_PAUSE_SEC: float = float(os.getenv("OI_BATCH_PAUSE_SEC", "0.35"))
     # Upstox v3 market-data WebSocket (protobuf) for live OI when REST quotes return oi=0
     UPSTOX_MARKET_FEED_ENABLED: bool = os.getenv("UPSTOX_MARKET_FEED_ENABLED", "true").lower() in (
         "1",

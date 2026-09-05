@@ -6523,8 +6523,10 @@ async def dashboard_oi_heatmap_live(
     ),
 ):
     """
-    Live Top ~200 NSE stock futures (Upstox batch quotes): OI, OI change, signal, volume.
-    Refreshed on a 15-minute schedule (9:15–15:15 IST); falls back to last DB snapshot when live is unavailable.
+    Live current-month stock futures from ``arbitrage_master`` (Upstox REST).
+    Refreshed every 30 minutes 09:00–16:00 IST on NSE sessions; after 16:00 the last
+    snapshot stays frozen until the next trading day 09:00. Breakfast exclusivity
+    (09:10–lock or 09:25) defers overlapping fetches.
     """
     no_cache = {
         "Cache-Control": "no-store, no-cache, must-revalidate, private",

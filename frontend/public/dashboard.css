@@ -2294,6 +2294,43 @@ body[data-theme="dark"] .oi-heatmap-hint {
     color: #64748b;
     margin: 0 0 8px 0;
 }
+.oi-heatmap-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 10px 0;
+}
+.oi-heatmap-tab {
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--theme-border, #e2e8f0);
+    background: #f8fafc;
+    color: #475569;
+    border-radius: 999px;
+    padding: 5px 12px;
+    cursor: pointer;
+}
+.oi-heatmap-tab:hover {
+    background: #f1f5f9;
+}
+.oi-heatmap-tab.is-active {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: #0f172a;
+}
+body[data-theme="dark"] .oi-heatmap-tab {
+    background: #1e293b;
+    color: #cbd5e1;
+    border-color: #334155;
+}
+body[data-theme="dark"] .oi-heatmap-tab.is-active {
+    background: #e2e8f0;
+    color: #0f172a;
+    border-color: #e2e8f0;
+}
+
 .oi-heatmap-table-wrap {
     overflow-x: auto;
 }
