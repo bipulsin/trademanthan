@@ -4,6 +4,7 @@ from backend.services.arbitrage_volatility_grade import (
     GRADE_LOW,
     GRADE_MOD,
     grade_from_score,
+    ltp_from_upstox_quote_data,
     margin_rupees_from_item,
     margins_from_charges_response,
     volatility_score,
@@ -58,6 +59,23 @@ def test_margins_from_batch_response():
     }
     out = margins_from_charges_response(resp, 2)
     assert out == [111.0, 222.0]
+
+
+def test_ltp_maps_trading_symbol_key():
+    raw = {
+        "NSE_FO:HDFCBANK26SEPFUT": {
+            "instrument_token": "NSE_FO|68534",
+            "last_price": 1654.2,
+        }
+    }
+    assert ltp_from_upstox_quote_data(raw, "NSE_FO|68534", "HDFCBANK26SEPFUT") == 1654.2
+    assert ltp_from_upstox_quote_data(raw, "NSE_FO|99999", "HDFCBANK26SEPFUT") == 1654.2
+    assert ltp_from_upstox_quote_data(raw, "NSE_FO|99999", "RELIANCE") is None
+
+
+def test_ltp_missing_returns_none():
+    assert ltp_from_upstox_quote_data({}, "NSE_FO|1", "FOO") is None
+    assert ltp_from_upstox_quote_data(None, "NSE_FO|1", "FOO") is None
 
 
 def test_margins_single_top_level_when_no_list():

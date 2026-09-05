@@ -39,7 +39,7 @@ ALTER TABLE arbitrage_master
 
 _LOAD_SQL = text(
     """
-    SELECT stock, currmth_future_instrument_key
+    SELECT stock, currmth_future_instrument_key, currmth_future_symbol, currmth_future_ltp
     FROM arbitrage_master
     WHERE currmth_future_instrument_key IS NOT NULL
       AND TRIM(currmth_future_instrument_key) <> ''
@@ -153,34 +153,93 @@ def scheduled_tick_should_run() -> bool:
     return not should_skip_scheduled_market_jobs_ist()
 
 
-def _load_universe(db) -> List[Tuple[str, str]]:
+def _norm_key(k: str) -> str:
+    return str(k or "").replace(":", "|").replace(" ", "").upper()
+
+
+def _symbol_token(sym: str) -> str:
+    return str(sym or "").replace(" ", "").replace("-", "").upper()
+
+
+def ltp_from_upstox_quote_data(
+    raw: Optional[Dict[str, Any]],
+    instrument_key: str,
+    future_symbol: str = "",
+) -> Optional[float]:
+    """Map one instrument to LTP from GET /v2/market-quote/quotes ``data``.
+
+    Upstox often keys the payload by trading symbol (``NSE_FO:HDFCBANK26SEPFUT``)
+    rather than the numeric instrument key we requested.
+    """
+    if not isinstance(raw, dict) or not instrument_key:
+        return None
+    ik_n = _norm_key(instrument_key)
+    sym_n = _symbol_token(future_symbol)
+    for resp_key, qd in raw.items():
+        if not isinstance(qd, dict):
+            continue
+        tok = qd.get("instrument_token") or qd.get("instrument_key") or ""
+        if ik_n and _norm_key(str(tok)) == ik_n:
+            px = _float_pos(qd.get("last_price"))
+            if px is None:
+                ohlc = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                px = _float_pos(ohlc.get("close")) or _float_pos(ohlc.get("last_price"))
+            if px is not None:
+                return px
+        rk = _norm_key(str(resp_key))
+        if ik_n and rk == ik_n:
+            px = _float_pos(qd.get("last_price"))
+            if px is not None:
+                return px
+        if sym_n and sym_n in _symbol_token(str(resp_key)):
+            px = _float_pos(qd.get("last_price"))
+            if px is None:
+                ohlc = qd.get("ohlc") if isinstance(qd.get("ohlc"), dict) else {}
+                px = _float_pos(ohlc.get("close")) or _float_pos(ohlc.get("last_price"))
+            if px is not None:
+                return px
+    return None
+
+
+def _load_universe(db) -> List[Tuple[str, str, str, Optional[float]]]:
     rows = db.execute(_LOAD_SQL).fetchall()
-    out: List[Tuple[str, str]] = []
-    seen_keys = set()
+    out: List[Tuple[str, str, str, Optional[float]]] = []
     for r in rows:
         stock = str(r[0] or "").strip()
         ik = str(r[1] or "").strip()
+        sym = str(r[2] or "").strip()
+        stored = _float_pos(r[3])
         if not stock or not ik:
             continue
-        out.append((stock, ik))
-        seen_keys.add(ik)
+        out.append((stock, ik, sym, stored))
     return out
 
 
-def _fetch_ltps(upstox, keys: Sequence[str]) -> Dict[str, float]:
+def _fetch_ltps(
+    upstox,
+    rows: Sequence[Tuple[str, str, str, Optional[float]]],
+) -> Dict[str, float]:
+    from urllib.parse import quote
+
     ltp_map: Dict[str, float] = {}
-    uniq = list(dict.fromkeys(k for k in keys if k))
-    for i in range(0, len(uniq), _QUOTE_CHUNK):
-        batch = uniq[i : i + _QUOTE_CHUNK]
-        snaps = upstox.get_market_quote_snapshots_batch(
-            list(batch), max_per_request=len(batch)
-        ) or {}
+    uniq_keys = list(dict.fromkeys(ik for _s, ik, _sym, _st in rows if ik))
+    meta = {ik: (sym, stored) for _s, ik, sym, stored in rows}
+    for i in range(0, len(uniq_keys), _QUOTE_CHUNK):
+        batch = uniq_keys[i : i + _QUOTE_CHUNK]
+        keys_param = ",".join(batch)
+        url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={quote(keys_param, safe=',')}"
+        data = upstox.make_api_request(url, method="GET", timeout=20, max_retries=2)
+        raw = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(raw, dict):
+            raw = {}
         for ik in batch:
-            sn = upstox.snapshot_for_requested_key(snaps, ik)
-            px = upstox.ltp_from_quote_snapshot(sn)
-            if px is not None and float(px) > 0:
-                ltp_map[ik] = float(px)
-        if i + _QUOTE_CHUNK < len(uniq):
+            sym, stored = meta.get(ik, ("", None))
+            px = ltp_from_upstox_quote_data(raw, ik, sym)
+            if px is not None:
+                ltp_map[ik] = px
+            elif stored is not None:
+                ltp_map[ik] = float(stored)
+        if i + _QUOTE_CHUNK < len(uniq_keys):
             time.sleep(_SLEEP_QUOTE_S)
     return ltp_map
 
@@ -272,12 +331,11 @@ def run_volatility_grade_job(
 
         lots = LotSizeLookup()
         upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        keys = [ik for _, ik in universe]
-        ltp_map = _fetch_ltps(upstox, keys)
+        ltp_map = _fetch_ltps(upstox, universe)
 
         margin_inputs: List[Tuple[str, int]] = []
         qty_by_key: Dict[str, int] = {}
-        for _stock, ik in universe:
+        for _stock, ik, _sym, _stored in universe:
             if ik in qty_by_key:
                 continue
             q = lots.get(ik)
@@ -289,7 +347,7 @@ def run_volatility_grade_job(
 
         margin_map = _fetch_margins(upstox, margin_inputs)
 
-        for stock, ik in universe:
+        for stock, ik, _sym, _stored in universe:
             ltp = ltp_map.get(ik)
             qty = qty_by_key.get(ik)
             margin = margin_map.get(ik)
