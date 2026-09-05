@@ -615,24 +615,39 @@ def _load_prev_signal_maps_from_db(current_updated_at_iso: Optional[str]) -> Tup
 
 
 def _load_last_non_neutral_signal_maps() -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Latest non-NEUTRAL ``oi_signal`` per instrument (skips weekend Neutral wipes)."""
+    """
+    Signals from the most recent snapshot that still has at least one non-NEUTRAL grade.
+
+    Uses that whole batch (not per-instrument DISTINCT ON) so a weekend Neutral wipe
+    restores the last live session instead of mixing older dates.
+    """
     db = None
     by_i: Dict[str, str] = {}
     by_u: Dict[str, str] = {}
     try:
         db = SessionLocal()
-        prev_rows = db.execute(
+        prev_ts = db.execute(
             text(
                 """
-                SELECT DISTINCT ON (instrument_key)
-                    instrument_key, underlying_symbol, oi_signal
+                SELECT MAX(updated_at) AS prev_ts
                 FROM oi_heatmap_latest
                 WHERE oi_signal IS NOT NULL
                   AND BTRIM(oi_signal) <> ''
                   AND UPPER(BTRIM(oi_signal)) <> 'NEUTRAL'
-                ORDER BY instrument_key, updated_at DESC
                 """
             )
+        ).scalar()
+        if prev_ts is None:
+            return {}, {}
+        prev_rows = db.execute(
+            text(
+                """
+                SELECT instrument_key, underlying_symbol, oi_signal
+                FROM oi_heatmap_latest
+                WHERE updated_at = :prev_ts
+                """
+            ),
+            {"prev_ts": prev_ts},
         ).fetchall()
         for ik, und, sig in prev_rows:
             s = str(sig or "").strip()
