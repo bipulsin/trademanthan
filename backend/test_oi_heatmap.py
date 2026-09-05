@@ -98,3 +98,43 @@ def test_fetch_window_and_overnight_freeze(monkeypatch):
     assert ist_use_today_only_db_snapshot(friday_pre) is False
     assert ist_use_today_only_db_snapshot(friday_open) is True
     assert ist_use_today_only_db_snapshot(saturday) is False
+
+
+def test_closed_market_neutral_uses_previous_signal(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.oi_heatmap.should_skip_scheduled_market_jobs_ist",
+        lambda now=None: False,
+    )
+    from backend.services.oi_heatmap import apply_previous_oi_signal_when_closed
+
+    rows = [
+        {"instrument_key": "NSE_FO|1", "underlying_symbol": "AAA", "oi_signal": "NEUTRAL"},
+        {"instrument_key": "NSE_FO|2", "underlying_symbol": "BBB", "oi_signal": "NEUTRAL"},
+        {"instrument_key": "NSE_FO|3", "underlying_symbol": "CCC", "oi_signal": "NEUTRAL"},
+    ]
+    prev_i = {"NSE_FO|1": "LONG_BUILDUP", "NSE_FO|2": "SHORT_COVER"}
+    saturday = _ist(2026, 9, 5, 15, 51)
+    out = apply_previous_oi_signal_when_closed(
+        rows, now=saturday, by_instrument=prev_i, by_underlying={}
+    )
+    assert out[0]["oi_signal"] == "LONG_BUILDUP"
+    assert out[1]["oi_signal"] == "SHORT_COVER"
+    assert out[2]["oi_signal"] == "NEUTRAL"
+
+
+def test_live_session_neutral_does_not_use_previous(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.oi_heatmap.should_skip_scheduled_market_jobs_ist",
+        lambda now=None: False,
+    )
+    from backend.services.oi_heatmap import apply_previous_oi_signal_when_closed
+
+    friday_930 = _ist(2026, 9, 4, 9, 30)
+    friday_1600 = _ist(2026, 9, 4, 16, 0)
+    rows = [{"instrument_key": "NSE_FO|1", "underlying_symbol": "AAA", "oi_signal": "NEUTRAL"}]
+    prev_i = {"NSE_FO|1": "SHORT_BUILDUP"}
+    for now in (friday_930, friday_1600):
+        out = apply_previous_oi_signal_when_closed(
+            rows, now=now, by_instrument=prev_i, by_underlying={}
+        )
+        assert out[0]["oi_signal"] == "NEUTRAL"

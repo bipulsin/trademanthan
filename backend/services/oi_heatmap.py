@@ -6,6 +6,9 @@ The 16:00 snapshot stays frozen until the next trading day 09:00.
 OI change: quote ``change_in_oi`` if non-zero, else delta vs previous heatmap snapshot
 in the same IST session, else vs prior completed daily candle OI.
 Signal: ``interpret_oi_signal`` (price change vs OI change). Does not start a WebSocket.
+When the market is closed (overnight freeze / weekend / holiday / before 09:00) and a
+row is NEUTRAL from stale zero OI/price change, the last non-neutral session signal is
+copied for dashboard display and persist. Live-session NEUTRAL is left unchanged.
 """
 from __future__ import annotations
 
@@ -155,6 +158,11 @@ def is_oi_heatmap_overnight_freeze(now: Optional[datetime] = None) -> bool:
     Trading days: after 16:00 until next 09:00. Weekends and NSE holidays: always frozen.
     """
     return not in_oi_heatmap_fetch_window(now)
+
+
+def _signal_is_neutral(sig: Any) -> bool:
+    s = str(sig or "").strip().upper()
+    return s in ("", "NEUTRAL")
 
 
 def bucket_key_for_oi_signal(sig: str) -> Optional[str]:
@@ -606,6 +614,83 @@ def _load_prev_signal_maps_from_db(current_updated_at_iso: Optional[str]) -> Tup
     return by_i, by_u
 
 
+def _load_last_non_neutral_signal_maps() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Latest non-NEUTRAL ``oi_signal`` per instrument (skips weekend Neutral wipes)."""
+    db = None
+    by_i: Dict[str, str] = {}
+    by_u: Dict[str, str] = {}
+    try:
+        db = SessionLocal()
+        prev_rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT ON (instrument_key)
+                    instrument_key, underlying_symbol, oi_signal
+                FROM oi_heatmap_latest
+                WHERE oi_signal IS NOT NULL
+                  AND BTRIM(oi_signal) <> ''
+                  AND UPPER(BTRIM(oi_signal)) <> 'NEUTRAL'
+                ORDER BY instrument_key, updated_at DESC
+                """
+            )
+        ).fetchall()
+        for ik, und, sig in prev_rows:
+            s = str(sig or "").strip()
+            if _signal_is_neutral(s):
+                continue
+            iks = str(ik or "").strip()
+            uds = str(und or "").strip().upper()
+            if iks:
+                by_i[iks] = s
+            if uds:
+                by_u[uds] = s
+    except Exception as e:
+        logger.debug("oi_heatmap: last non-neutral signals unavailable: %s", e)
+    finally:
+        if db is not None:
+            db.close()
+    return by_i, by_u
+
+
+def apply_previous_oi_signal_when_closed(
+    rows: List[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+    by_instrument: Optional[Dict[str, str]] = None,
+    by_underlying: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Closed market only: if the live quote classified NEUTRAL, copy the last non-neutral
+    grade. Does not invent a signal when none exists. Live session (09:00–16:00 IST
+    trading days) leaves genuine NEUTRAL unchanged, including Friday 16:00.
+    """
+    out = [dict(r) for r in (rows or [])]
+    if not is_oi_heatmap_overnight_freeze(now):
+        return out
+    by_i = by_instrument
+    by_u = by_underlying
+    if by_i is None or by_u is None:
+        loaded_i, loaded_u = _load_last_non_neutral_signal_maps()
+        if by_i is None:
+            by_i = loaded_i
+        if by_u is None:
+            by_u = loaded_u
+    by_i = by_i or {}
+    by_u = by_u or {}
+    if not by_i and not by_u:
+        return out
+    restored: List[Dict[str, Any]] = []
+    for d in out:
+        if _signal_is_neutral(d.get("oi_signal")):
+            ik = str(d.get("instrument_key") or "").strip()
+            und = str(d.get("underlying_symbol") or "").strip().upper()
+            prev = by_i.get(ik) or by_u.get(und)
+            if prev and not _signal_is_neutral(prev):
+                d["oi_signal"] = prev
+        restored.append(d)
+    return restored
+
+
 def _attach_prev_signal_for_api(rows: List[Dict[str, Any]], current_updated_at_iso: Optional[str]) -> List[Dict[str, Any]]:
     """Return API rows with ``prev_oi_signal`` derived from immediately previous DB snapshot."""
     by_i, by_u = _load_prev_signal_maps_from_db(current_updated_at_iso)
@@ -764,6 +849,8 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
                 "score": round(_score_row(oi_chg, chg_pct), 4),
             }
         )
+
+    rows = apply_previous_oi_signal_when_closed(rows)
 
     for _ik in keys:
         _s = merged.get(_ik) or {}
@@ -1042,8 +1129,10 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
             "Showing last saved snapshot from the database until live data is fetched "
             "(scheduler: every 30 min, 09:00–16:00 IST on trading days; overnight freeze after 16:00)."
         )
-    attached = _attach_prev_signal_for_api(rows, ts or None)
     frozen = is_oi_heatmap_overnight_freeze()
+    if frozen:
+        rows = apply_previous_oi_signal_when_closed(rows)
+    attached = _attach_prev_signal_for_api(rows, ts or None)
     return {
         "success": True,
         "source": "upstox",
