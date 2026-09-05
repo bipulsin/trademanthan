@@ -24,6 +24,10 @@ from backend.services.breakfast_strategy.config import (
     PREVCLOSE_ARTIFACT_NAME,
 )
 from backend.services.breakfast_strategy.history import load_history
+from backend.services.arbitrage_volatility_grade import (
+    attach_volatility_grades,
+    attach_volatility_grades_to_live_state,
+)
 from backend.services.breakfast_prev_close import load_filled_wicks, load_wicks_grouped_by_sector
 from backend.services.breakfast_strategy.live import build_live_state, validate_ws_vs_rest
 from backend.services.breakfast_strategy.live_persist import fetch_live_signals, fetch_session_lock, update_manual_capture
@@ -223,6 +227,17 @@ def get_breakfast_wicks() -> Dict[str, Any]:
     down = tables.get("long_down_wick") or []
     up = tables.get("long_up_wick") or []
     sectors = load_wicks_grouped_by_sector()
+    try:
+        attach_volatility_grades(down)
+        attach_volatility_grades(up)
+        for sec in sectors:
+            if not isinstance(sec, dict):
+                continue
+            attach_volatility_grades(sec.get("long_up_wick") or [])
+            attach_volatility_grades(sec.get("long_down_wick") or [])
+            attach_volatility_grades(sec.get("none") or [])
+    except Exception:
+        logger.debug("breakfast wicks volatility_grade attach skipped", exc_info=True)
     return {
         "ok": True,
         "long_down_wick": down,
@@ -245,7 +260,12 @@ def get_breakfast_live(
             replay_dt = datetime.fromisoformat(replay_at.replace("Z", "+00:00"))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid replay_at: {e}") from e
-    return build_live_state(replay_at=replay_dt)
+    state = build_live_state(replay_at=replay_dt)
+    try:
+        attach_volatility_grades_to_live_state(state)
+    except Exception:
+        logger.debug("breakfast live volatility_grade attach skipped", exc_info=True)
+    return state
 
 
 @router.get("/live/validate")
@@ -272,6 +292,10 @@ def get_live_signals(
 ) -> Dict[str, Any]:
     sd = session_date or date.today()
     rows = fetch_live_signals(sd.isoformat())
+    try:
+        attach_volatility_grades(rows)
+    except Exception:
+        logger.debug("breakfast signals volatility_grade attach skipped", exc_info=True)
     return {"ok": True, "session_date": sd.isoformat(), "count": len(rows), "signals": rows}
 
 

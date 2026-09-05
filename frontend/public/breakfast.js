@@ -494,6 +494,7 @@
             "<div class='bf-stock-num'>" + rankInSector + "</div>" +
             "<div class='bf-stock-row1'>" +
             "<span class='bf-stock-name'>" + (st.display_symbol || st.symbol) + "</span>" +
+            volGradeBadgeHtml(st.volatility_grade) +
             "</div>" +
             "<div class='bf-stock-row2'>LTP " + fmt(st.ltp, 2) + " · Risk ₹" + fmt(risk, 0) +
             " · <span class='bf-stock-wick'>Wick " + (st.wick || "NONE") + "</span>" +
@@ -940,6 +941,15 @@
             .replace(/"/g, "&quot;");
     }
 
+    function volGradeBadgeHtml(grade) {
+        var g = String(grade || "").trim();
+        if (!g) return "";
+        var cls = "vol-grade-mod";
+        if (g === "Low Risk") cls = "vol-grade-low";
+        else if (g === "High Risk") cls = "vol-grade-high";
+        return "<span class=\"vol-grade-badge " + cls + "\">" + escapeHtml(g) + "</span>";
+    }
+
     function fillTrapLiveDateSelect(days, selected) {
         var sel = $("bfTrapLiveDate");
         if (!sel) return;
@@ -1023,7 +1033,7 @@
         return rows.map(function (r) {
             var name = escapeHtml(r.stock || r.future_symbol || "");
             var prev = escapeHtml(r.prev_session_close != null ? String(r.prev_session_close) : "");
-            return "<tr><td>" + name + "</td><td>" + prev + "</td></tr>";
+            return "<tr><td>" + name + volGradeBadgeHtml(r.volatility_grade) + "</td><td>" + prev + "</td></tr>";
         }).join("");
     }
 
@@ -1049,7 +1059,11 @@
                 var name = escapeHtml(sec.sector || "Unmapped");
                 var noneList = sec.none || [];
                 var noneLine = noneList.length
-                    ? "NONE: " + noneList.map(function (s) { return escapeHtml(s); }).join(", ")
+                    ? "NONE: " + noneList.map(function (s) {
+                        var name = (s && typeof s === "object") ? (s.stock || "") : s;
+                        var grade = (s && typeof s === "object") ? s.volatility_grade : "";
+                        return escapeHtml(name) + volGradeBadgeHtml(grade);
+                    }).join(", ")
                     : "NONE: —";
                 return "<details class=\"bf-wicks-sector\">" +
                     "<summary>" + name + "</summary>" +

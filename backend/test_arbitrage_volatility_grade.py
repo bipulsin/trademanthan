@@ -3,7 +3,10 @@ from backend.services.arbitrage_volatility_grade import (
     GRADE_HIGH,
     GRADE_LOW,
     GRADE_MOD,
+    attach_volatility_grades,
+    attach_volatility_grades_to_live_state,
     grade_from_score,
+    lookup_volatility_grade,
     ltp_from_upstox_quote_data,
     margin_rupees_from_item,
     margins_from_charges_response,
@@ -83,3 +86,31 @@ def test_margins_single_top_level_when_no_list():
     assert margins_from_charges_response(resp, 1) == [5000.0]
     # Batch of 2 without per-leg rows must not assign the summed total to both.
     assert margins_from_charges_response(resp, 2) == [None, None]
+
+
+def test_lookup_joins_stock_and_fut():
+    lookup = {"RELIANCE": GRADE_LOW, "RELIANCE26SEPFUT": GRADE_LOW, "INFY": GRADE_HIGH}
+    assert lookup_volatility_grade(lookup, "reliance") == GRADE_LOW
+    assert lookup_volatility_grade(lookup, "OTHER", "RELIANCE26SEPFUT") == GRADE_LOW
+    assert lookup_volatility_grade(lookup, "infy") == GRADE_HIGH
+    assert lookup_volatility_grade(lookup, "UNKNOWN") is None
+
+
+def test_attach_volatility_grades_does_not_reorder():
+    lookup = {"AAA": GRADE_MOD, "BBB26SEPFUT": GRADE_HIGH}
+    items = [{"symbol": "BBB", "display_symbol": "BBB26SEPFUT"}, {"stock": "AAA"}]
+    attach_volatility_grades(items, lookup=lookup)
+    assert [i["symbol"] if "symbol" in i else i["stock"] for i in items] == ["BBB", "AAA"]
+    assert items[0]["volatility_grade"] == GRADE_HIGH
+    assert items[1]["volatility_grade"] == GRADE_MOD
+
+
+def test_attach_to_live_state_stocks_only():
+    state = {
+        "sectors": [
+            {"stocks": [{"symbol": "INFY"}, {"symbol": "TCS"}]},
+        ]
+    }
+    attach_volatility_grades_to_live_state(state, lookup={"INFY": GRADE_LOW})
+    assert state["sectors"][0]["stocks"][0]["volatility_grade"] == GRADE_LOW
+    assert state["sectors"][0]["stocks"][1]["volatility_grade"] is None

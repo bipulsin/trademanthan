@@ -1019,6 +1019,16 @@ def get_state(session_date: Optional[str] = None) -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("checklist FO display enrichment failed: %s", exc)
 
+    try:
+        from backend.services.arbitrage_volatility_grade import attach_volatility_grades
+
+        grade_items: List[Dict[str, Any]] = []
+        for lst in (today_stocks, carryover_stocks, preview_stocks, display_stocks):
+            grade_items.extend(lst or [])
+        attach_volatility_grades(grade_items)
+    except Exception as exc:
+        logger.debug("checklist volatility_grade enrichment failed: %s", exc)
+
     return {
         "session_date": sd,
         "locked": locked,

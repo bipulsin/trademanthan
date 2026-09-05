@@ -460,7 +460,8 @@ def _filled_wick_row(row: Any) -> Optional[Dict[str, str]]:
     symbol = future or stock
     if not symbol:
         return None
-    return {"future_symbol": symbol, "wick": wick}
+    grade = str(row.get("volatility_grade") or "").strip() or None
+    return {"future_symbol": symbol, "wick": wick, "stock": stock or None, "volatility_grade": grade}
 
 
 def partition_filled_wicks(rows: List[Any]) -> Dict[str, List[Dict[str, str]]]:
@@ -492,7 +493,8 @@ def load_filled_wicks() -> Dict[str, List[Dict[str, str]]]:
                     """
                     SELECT TRIM(currmth_future_symbol) AS future_symbol,
                            UPPER(TRIM(stock)) AS stock,
-                           TRIM(wick) AS wick
+                           TRIM(wick) AS wick,
+                           TRIM(volatility_grade) AS volatility_grade
                     FROM arbitrage_master
                     WHERE wick IN (:down, :up)
                     """
@@ -552,9 +554,11 @@ def group_wicks_by_sector(rows: List[Any]) -> List[Dict[str, Any]]:
             continue
         sector = sector_label_for_wicks(raw.get("sector_index"))
         wick = _norm_wick_or_none(raw.get("wick"))
+        grade = str(raw.get("volatility_grade") or "").strip() or None
         item = {
             "stock": stock,
             "prev_session_close": _fmt_prev_session_close(raw.get("prev_session_close")),
+            "volatility_grade": grade,
         }
         b = buckets.setdefault(
             sector,
@@ -570,13 +574,13 @@ def group_wicks_by_sector(rows: List[Any]) -> List[Dict[str, Any]]:
         elif wick == WICK_LONG_DOWN:
             b["long_down_wick"].append(item)
         else:
-            b["none"].append(stock)
+            b["none"].append({"stock": stock, "volatility_grade": grade})
     out: List[Dict[str, Any]] = []
     for name in sorted(buckets.keys(), key=str.upper):
         b = buckets[name]
         b["long_up_wick"].sort(key=lambda r: r["stock"])
         b["long_down_wick"].sort(key=lambda r: r["stock"])
-        b["none"].sort()
+        b["none"].sort(key=lambda r: r["stock"] if isinstance(r, dict) else str(r))
         out.append(b)
     return out
 
@@ -593,7 +597,8 @@ def load_wicks_grouped_by_sector() -> List[Dict[str, Any]]:
                     SELECT UPPER(TRIM(stock)) AS stock,
                            TRIM(sector_index) AS sector_index,
                            TRIM(wick) AS wick,
-                           prev_session_close
+                           prev_session_close,
+                           TRIM(volatility_grade) AS volatility_grade
                     FROM arbitrage_master
                     WHERE stock IS NOT NULL
                       AND TRIM(stock) <> ''

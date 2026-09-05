@@ -1738,6 +1738,23 @@
             }
         }
         card.querySelector(".dc-ready-symbol").textContent = displaySym(stock);
+        var volEl = card.querySelector(".dc-vol-grade");
+        if (volEl) {
+            var vg = String(stock.volatility_grade || "").trim();
+            if (vg) {
+                volEl.hidden = false;
+                volEl.textContent = vg;
+                var vcls = "dc-vol-grade";
+                if (vg === "Low Risk") vcls += " dc-vol-grade--low";
+                else if (vg === "High Risk") vcls += " dc-vol-grade--high";
+                else vcls += " dc-vol-grade--mod";
+                volEl.className = vcls;
+            } else {
+                volEl.hidden = true;
+                volEl.textContent = "";
+                volEl.className = "dc-vol-grade";
+            }
+        }
         var dir = (stock.direction || "LONG").toUpperCase();
         var dirEl = card.querySelector(".dc-ready-dir");
         dirEl.textContent = dir === "SHORT" ? "SHORT" : "LONG";

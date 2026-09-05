@@ -58,11 +58,100 @@ _UPDATE_SQL = text(
 )
 
 
+_LOOKUP_TTL_S = 120.0
+_lookup_cache: Dict[str, Any] = {"at": 0.0, "map": {}}
+
+
 def ensure_volatility_grade_columns() -> None:
     if engine is None:
         return
     with engine.begin() as conn:
         conn.execute(text(_ENSURE_SQL))
+
+
+def lookup_volatility_grade(lookup: Dict[str, str], *keys: Any) -> Optional[str]:
+    """Resolve Low Risk | Moderate | High Risk from stock or FUT symbol keys."""
+    m = lookup or {}
+    for k in keys:
+        s = str(k or "").strip().upper()
+        if s and s in m:
+            return m[s]
+    return None
+
+
+def load_volatility_grade_lookup(*, force: bool = False) -> Dict[str, str]:
+    """stock + currmth_future_symbol (upper) → volatility_grade. Cached ~2 min."""
+    now = time.time()
+    cached = _lookup_cache.get("map") or {}
+    if not force and cached and (now - float(_lookup_cache.get("at") or 0)) < _LOOKUP_TTL_S:
+        return cached
+    out: Dict[str, str] = {}
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT UPPER(TRIM(stock)) AS stock,
+                       UPPER(TRIM(currmth_future_symbol)) AS fut,
+                       TRIM(volatility_grade) AS volatility_grade
+                FROM arbitrage_master
+                WHERE volatility_grade IS NOT NULL
+                  AND TRIM(volatility_grade) <> ''
+                """
+            )
+        ).mappings()
+        for r in rows:
+            grade = str(r.get("volatility_grade") or "").strip()
+            if not grade:
+                continue
+            stock = str(r.get("stock") or "").strip()
+            fut = str(r.get("fut") or "").strip()
+            if stock:
+                out[stock] = grade
+            if fut:
+                out[fut] = grade
+        _lookup_cache["at"] = now
+        _lookup_cache["map"] = out
+        return out
+    except Exception as e:
+        logger.debug("volatility_grade lookup failed: %s", e)
+        return cached
+    finally:
+        db.close()
+
+
+def attach_volatility_grades(
+    items: Optional[List[Any]],
+    lookup: Optional[Dict[str, str]] = None,
+) -> None:
+    """Set volatility_grade on dict rows (join on symbol / stock / FUT). No ranking changes."""
+    if not items:
+        return
+    m = lookup if lookup is not None else load_volatility_grade_lookup()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        it["volatility_grade"] = lookup_volatility_grade(
+            m,
+            it.get("symbol"),
+            it.get("stock"),
+            it.get("display_symbol"),
+            it.get("future_symbol"),
+            it.get("currmth_future_symbol"),
+        )
+
+
+def attach_volatility_grades_to_live_state(
+    state: Optional[Dict[str, Any]],
+    lookup: Optional[Dict[str, str]] = None,
+) -> None:
+    if not isinstance(state, dict):
+        return
+    stocks: List[Any] = []
+    for sec in state.get("sectors") or []:
+        if isinstance(sec, dict):
+            stocks.extend(sec.get("stocks") or [])
+    attach_volatility_grades(stocks, lookup=lookup)
 
 
 def volatility_score(ltp: float, qty: float, margin: float) -> Optional[float]:

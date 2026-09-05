@@ -452,9 +452,9 @@ def test_group_wicks_by_sector_splits_none_and_sides():
     assert [r["stock"] for r in auto["long_up_wick"]] == ["TATAMOTORS"]
     assert auto["long_up_wick"][0]["prev_session_close"] == "900.50"
     assert [r["stock"] for r in auto["long_down_wick"]] == ["M&M"]
-    assert auto["none"] == ["BAJAJ-AUTO"]
+    assert [n["stock"] for n in auto["none"]] == ["BAJAJ-AUTO"]
     it = out[1]
     assert it["long_up_wick"] == []
     assert it["long_down_wick"] == []
-    assert it["none"] == ["INFY", "TCS"]
+    assert [n["stock"] for n in it["none"]] == ["INFY", "TCS"]
     assert it["none"]  # TCS null wick treated as NONE
