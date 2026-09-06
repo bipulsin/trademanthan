@@ -21,12 +21,29 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--symbols", default="", help="Comma-separated subset")
+    parser.add_argument(
+        "--weekly",
+        action="store_true",
+        help="Force weekly candle/trend/RSI refresh (default: Friday only)",
+    )
+    parser.add_argument(
+        "--daily-only",
+        action="store_true",
+        help="Skip weekly Upstox fetch; keep stored weekly_*",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from backend.services.analysis_page.job import run_analysis_snapshot_job
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()] or None
-    out = run_analysis_snapshot_job(trigger="cli", symbols=symbols, force=args.force)
+    refresh_weekly = None
+    if args.weekly:
+        refresh_weekly = True
+    elif args.daily_only:
+        refresh_weekly = False
+    out = run_analysis_snapshot_job(
+        trigger="cli", symbols=symbols, force=args.force, refresh_weekly=refresh_weekly
+    )
     print(json.dumps(out, default=str))
     return 0 if out.get("ok") else 1
 

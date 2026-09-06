@@ -190,3 +190,66 @@ def test_action_ifs_order_buy_before_watch():
         )
         == ACTION_BUY
     )
+
+
+def test_should_refresh_weekly_friday_only():
+    from datetime import datetime
+
+    from backend.services.analysis_page.job import should_refresh_weekly
+    from backend.services.market_holiday import IST
+
+    fri = IST.localize(datetime(2026, 9, 4, 17, 0))
+    mon = IST.localize(datetime(2026, 9, 7, 17, 0))
+    thu = IST.localize(datetime(2026, 9, 3, 17, 0))
+    assert should_refresh_weekly(now=fri) is True
+    assert should_refresh_weekly(now=mon) is False
+    assert should_refresh_weekly(now=thu) is False
+
+
+def test_compute_row_weekday_skips_weekly_recompute():
+    from backend.services.analysis_page.job import compute_row
+
+    daily = [_c(f"2026-01-{d:02d}", 100, 101, 99, 100.5) for d in range(1, 6)] + [
+        _c(f"2026-01-{d:02d}", 102, 108, 101.5, 107) for d in range(6, 11)
+    ]
+    weekly_would_be_bear = [_c(f"2025-01-{d:02d}", 100, 110, 95, 105) for d in range(1, 6)] + [
+        _c(f"2025-02-{d:02d}", 90, 92, 80, 85) for d in range(1, 6)
+    ]
+    meta = {"symbol": "ABC", "sector": "IT", "sector_index": "NIFTY IT"}
+    prior = {"weekly_trend": "Bullish", "weekly_rsi": 55.0, "weekly_rsi_zone": "Mid"}
+    row = compute_row(
+        meta=meta,
+        daily=daily,
+        weekly=weekly_would_be_bear,
+        index_daily=[],
+        refresh_weekly=False,
+        prior_weekly=prior,
+    )
+    assert row["weekly_trend"] == "Bullish"
+    assert row["weekly_rsi"] == 55.0
+    assert row["weekly_rsi_zone"] == "Mid"
+    assert row["daily_trend"] == "Bullish"
+
+
+def test_compute_row_friday_recomputes_weekly():
+    from backend.services.analysis_page.job import compute_row
+
+    daily = [_c(f"2026-01-{d:02d}", 100, 101, 99, 100.5) for d in range(1, 6)] + [
+        _c(f"2026-01-{d:02d}", 102, 108, 101.5, 107) for d in range(6, 11)
+    ]
+    weekly_bear = [_c(f"2025-01-{d:02d}", 100, 110, 95, 105) for d in range(1, 6)] + [
+        _c(f"2025-02-{d:02d}", 90, 92, 80, 85) for d in range(1, 6)
+    ]
+    meta = {"symbol": "ABC"}
+    prior = {"weekly_trend": "Bullish", "weekly_rsi": 55.0, "weekly_rsi_zone": "Mid"}
+    row = compute_row(
+        meta=meta,
+        daily=daily,
+        weekly=weekly_bear,
+        index_daily=[],
+        refresh_weekly=True,
+        prior_weekly=prior,
+    )
+    assert row["weekly_trend"] == "Bearish"
+    assert row["daily_trend"] == "Bullish"
+

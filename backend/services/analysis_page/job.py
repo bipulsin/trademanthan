@@ -49,8 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_analysis_symbol_snapshot_sector
     ON analysis_symbol_snapshot (sector);
 """
 
-_UPSERT = text(
-    """
+_INSERT_COLS = """
     INSERT INTO analysis_symbol_snapshot (
         symbol, sector, sector_index,
         weekly_trend, daily_trend, weekly_rsi, weekly_rsi_zone,
@@ -60,6 +59,11 @@ _UPSERT = text(
         :weekly_trend, :daily_trend, :weekly_rsi, :weekly_rsi_zone,
         :rs_ratio, :rs_sma50, :rs_ma50, CAST(:patterns AS JSONB), :fail_reason, NOW()
     )
+"""
+
+_UPSERT_FULL = text(
+    _INSERT_COLS
+    + """
     ON CONFLICT (symbol) DO UPDATE SET
         sector = EXCLUDED.sector,
         sector_index = EXCLUDED.sector_index,
@@ -67,6 +71,23 @@ _UPSERT = text(
         daily_trend = EXCLUDED.daily_trend,
         weekly_rsi = EXCLUDED.weekly_rsi,
         weekly_rsi_zone = EXCLUDED.weekly_rsi_zone,
+        rs_ratio = EXCLUDED.rs_ratio,
+        rs_sma50 = EXCLUDED.rs_sma50,
+        rs_ma50 = EXCLUDED.rs_ma50,
+        patterns = EXCLUDED.patterns,
+        fail_reason = EXCLUDED.fail_reason,
+        updated_at = NOW()
+    """
+)
+
+# Weekday daily-only: insert may bootstrap weekly_*; existing rows keep last Friday weekly_*.
+_UPSERT_DAILY = text(
+    _INSERT_COLS
+    + """
+    ON CONFLICT (symbol) DO UPDATE SET
+        sector = EXCLUDED.sector,
+        sector_index = EXCLUDED.sector_index,
+        daily_trend = EXCLUDED.daily_trend,
         rs_ratio = EXCLUDED.rs_ratio,
         rs_sma50 = EXCLUDED.rs_sma50,
         rs_ma50 = EXCLUDED.rs_ma50,
@@ -136,16 +157,35 @@ def _fetch_candles(upstox: Any, ikey: str, interval: str, days_back: int) -> Lis
     return list(raw or [])
 
 
+def should_refresh_weekly(*, now: Optional[datetime] = None) -> bool:
+    """Friday IST: recompute weekly_* (candles, trend, RSI). Other weekdays keep last Friday values."""
+    if now is None:
+        now_ist = datetime.now(IST)
+    elif now.tzinfo is None:
+        now_ist = IST.localize(now)
+    else:
+        now_ist = now.astimezone(IST)
+    return now_ist.weekday() == 4
+
+
+def _prior_has_weekly(prior: Optional[Dict[str, Any]]) -> bool:
+    if not prior:
+        return False
+    return any(
+        prior.get(k) is not None
+        for k in ("weekly_trend", "weekly_rsi", "weekly_rsi_zone")
+    )
+
+
 def compute_row(
     *,
     meta: Dict[str, str],
     daily: List[Dict[str, Any]],
     weekly: List[Dict[str, Any]],
     index_daily: List[Dict[str, Any]],
+    refresh_weekly: bool = True,
+    prior_weekly: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    if not weekly and daily:
-        weekly = daily_to_weekly(daily)
-    w_rsi, w_zone = weekly_rsi_zone(weekly)
     ratio, sma, rs_lab = rs_vs_ma50(daily, index_daily)
     patterns = detect_patterns(daily)
     fail_parts = []
@@ -153,13 +193,25 @@ def compute_row(
         fail_parts.append("no_daily")
     if classify_trend(daily) is None and daily:
         fail_parts.append("daily_trend_short")
-    if classify_trend(weekly) is None:
-        fail_parts.append("weekly_trend_short")
+
+    use_prior = (not refresh_weekly) and _prior_has_weekly(prior_weekly)
+    if use_prior and prior_weekly is not None:
+        w_trend = prior_weekly.get("weekly_trend")
+        w_rsi = prior_weekly.get("weekly_rsi")
+        w_zone = prior_weekly.get("weekly_rsi_zone")
+    else:
+        if not weekly and daily:
+            weekly = daily_to_weekly(daily)
+        w_rsi, w_zone = weekly_rsi_zone(weekly)
+        w_trend = classify_trend(weekly)
+        if w_trend is None:
+            fail_parts.append("weekly_trend_short")
+
     return {
         "symbol": meta["symbol"],
         "sector": meta.get("sector") or None,
         "sector_index": meta.get("sector_index") or None,
-        "weekly_trend": classify_trend(weekly),
+        "weekly_trend": w_trend,
         "daily_trend": classify_trend(daily),
         "weekly_rsi": w_rsi,
         "weekly_rsi_zone": w_zone,
@@ -171,11 +223,33 @@ def compute_row(
     }
 
 
+def _load_prior_weekly(db, symbols: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+    want = {s.upper() for s in symbols}
+    rows = db.execute(
+        text(
+            """
+            SELECT symbol, weekly_trend, weekly_rsi, weekly_rsi_zone
+            FROM analysis_symbol_snapshot
+            """
+        )
+    ).fetchall()
+    return {
+        r.symbol: {
+            "weekly_trend": r.weekly_trend,
+            "weekly_rsi": r.weekly_rsi,
+            "weekly_rsi_zone": r.weekly_rsi_zone,
+        }
+        for r in rows
+        if (r.symbol or "").upper() in want
+    }
+
+
 def run_analysis_snapshot_job(
     *,
     trigger: str = "scheduled",
     symbols: Optional[Sequence[str]] = None,
     force: bool = False,
+    refresh_weekly: Optional[bool] = None,
 ) -> Dict[str, Any]:
     from backend.services.breakfast_upstox_gate import (
         breakfast_exclusivity_active,
@@ -185,6 +259,9 @@ def run_analysis_snapshot_job(
     if not force and breakfast_exclusivity_active():
         defer_job_for_breakfast_exclusivity("analysis_symbol_snapshot")
         return {"ok": False, "skipped": "breakfast_exclusivity", "trigger": trigger}
+
+    if refresh_weekly is None:
+        refresh_weekly = should_refresh_weekly()
 
     ensure_analysis_snapshot_table()
     started = datetime.now(IST)
@@ -221,6 +298,10 @@ def run_analysis_snapshot_job(
         return {"ok": False, "error": "no SessionLocal", "trigger": trigger}
     db = SessionLocal()
     try:
+        prior_map: Dict[str, Dict[str, Any]] = {}
+        if not refresh_weekly:
+            prior_map = _load_prior_weekly(db, [u["symbol"] for u in universe])
+        upsert = _UPSERT_FULL if refresh_weekly else _UPSERT_DAILY
         for n, meta in enumerate(universe):
             if not force and breakfast_exclusivity_active():
                 defer_job_for_breakfast_exclusivity("analysis_symbol_snapshot")
@@ -236,15 +317,24 @@ def run_analysis_snapshot_job(
             try:
                 daily = _fetch_candles(upstox, ik, "days/1", _DAILY_DAYS_BACK) if ik else []
                 time.sleep(_SLEEP_SEC)
-                weekly = _fetch_candles(upstox, ik, "weeks/1", _WEEKLY_DAYS_BACK) if ik else []
-                time.sleep(_SLEEP_SEC)
+                weekly: List[Dict[str, Any]] = []
+                if refresh_weekly:
+                    weekly = _fetch_candles(upstox, ik, "weeks/1", _WEEKLY_DAYS_BACK) if ik else []
+                    time.sleep(_SLEEP_SEC)
             except Exception as exc:
                 logger.warning("analysis_snapshot: fetch %s: %s", meta["symbol"], exc)
                 daily, weekly = [], []
             idx_bars = index_cache.get(meta.get("sector_ikey") or "", [])
-            row = compute_row(meta=meta, daily=daily, weekly=weekly, index_daily=idx_bars)
+            row = compute_row(
+                meta=meta,
+                daily=daily,
+                weekly=weekly,
+                index_daily=idx_bars,
+                refresh_weekly=refresh_weekly,
+                prior_weekly=prior_map.get(meta["symbol"]),
+            )
             db.execute(
-                _UPSERT,
+                upsert,
                 {
                     **row,
                     "patterns": json.dumps(row["patterns"]),
@@ -272,6 +362,7 @@ def run_analysis_snapshot_job(
         "failed": len(failed),
         "failed_symbols": failed[:50],
         "index_keys": len(unique_idx),
+        "refresh_weekly": refresh_weekly,
         "elapsed_sec": round((datetime.now(IST) - started).total_seconds(), 1),
     }
     logger.info("analysis_snapshot: %s", summary)

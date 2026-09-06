@@ -252,9 +252,9 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Continuing without arbitrage volatility grade scheduler")
 
         try:
-            logger.info("Starting Analysis snapshot scheduler (16:15 IST weekdays)...")
+            logger.info("Starting Analysis snapshot scheduler (17:00 IST weekdays)...")
             start_analysis_snapshot_scheduler()
-            logger.info("✅ Analysis snapshot scheduler: STARTED (16:15 IST weekdays)")
+            logger.info("✅ Analysis snapshot scheduler: STARTED (17:00 IST weekdays)")
         except Exception as e:
             logger.error(f"❌ Analysis snapshot scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Analysis snapshot scheduler")
