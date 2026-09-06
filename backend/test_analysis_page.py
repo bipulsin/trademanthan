@@ -46,6 +46,19 @@ def test_trend_sideways_approx_equal():
     assert classify_trend(bars) == "Sideways"
 
 
+def test_trend_0p1pct_band_treats_0p38pct_as_lower_high():
+    """SONACOMS-style: 821.50 vs 824.60 is ~0.38% — not equal at 0.1% band."""
+    prior = [_c(f"2026-01-{d:02d}", 820, 824.60, 810, 822) for d in range(1, 6)]
+    recent = [_c(f"2026-01-{d:02d}", 818, 821.50, 800, 805) for d in range(6, 11)]
+    assert classify_trend(prior + recent) == "Bearish"
+
+
+def test_trend_within_0p1pct_still_approx_equal():
+    prior = [_c(f"2026-01-{d:02d}", 100, 100.00, 99.00, 100) for d in range(1, 6)]
+    recent = [_c(f"2026-01-{d:02d}", 100, 100.05, 99.05, 100) for d in range(6, 11)]
+    assert classify_trend(prior + recent) == "Sideways"
+
+
 def test_rsi_zones():
     assert rsi_zone(66) == "OverBought"
     assert rsi_zone(34) == "OverSold"

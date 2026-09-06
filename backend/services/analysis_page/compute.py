@@ -3,7 +3,7 @@
 Trend (10 bars)
 ---------------
 Split the last 10 candles into prior 5 (older) vs recent 5 (newer).
-Compare max(high) and min(low) of each half with a 0.5% equality band
+Compare max(high) and min(low) of each half with a 0.1% equality band
 (relative to the prior-half level).
 
 - Bullish: recent high is higher AND recent low is higher (HH and HL).
@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-EQUAL_TOL = 0.005  # 0.5%
+EQUAL_TOL = 0.001  # 0.1%
 RS_ON_MA_EPS = 0.001  # 0.1%
 RSI_PERIOD = 14
 RS_MA_PERIOD = 50
