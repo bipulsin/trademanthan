@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="theme.css?v=1.3">
     <link rel="stylesheet" href="left-menu.css?v=3.28">
     <link rel="stylesheet" href="volume-mismatch-backtest.css?v=2">
-    <link rel="stylesheet" href="analysis.css?v=2">
+    <link rel="stylesheet" href="analysis.css?v=3">
 </head>
 <body class="theme-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -25,15 +25,18 @@
         <main class="right-panel main-content-area">
             <div class="vmb-wrap">
                 <header class="vmb-header">
-                    <h1><i class="fas fa-table" style="color:#60a5fa;"></i> Analysis</h1>
+                    <div></div>
                     <div class="vmb-header-actions">
-                        <button type="button" class="vmb-theme-btn an-info-btn" id="anInfoBtn" aria-label="About this page">
-                            <i class="fas fa-info" aria-hidden="true"></i>
-                            <span class="an-info-tip" role="tooltip">NSE cash (equity) OHLC for every arbitrage_master name. Weekly/daily trend from last 10 bars (prior 5 vs recent 5 highs/lows, 0.5% band). Weekly RSI(14): &gt;65 OverBought, &lt;35 OverSold, else Mid. RS = stock close / sector-index close vs SMA 50.</span>
-                        </button>
                         <button type="button" class="vmb-theme-btn" id="anReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
                     </div>
                 </header>
+                <div class="an-page-title-row">
+                    <h1 class="an-page-title">Analysis</h1>
+                    <button type="button" class="vmb-theme-btn an-info-btn" id="anInfoBtn" aria-label="About this page">
+                        <i class="fas fa-info" aria-hidden="true"></i>
+                        <span class="an-info-tip" role="tooltip">NSE cash (equity) OHLC for every arbitrage_master name. Weekly/daily trend from last 10 bars (prior 5 vs recent 5 highs/lows, 0.5% band). Weekly RSI(14): &gt;65 OverBought, &lt;35 OverSold, else Mid. RS = stock close / sector-index close vs SMA 50.</span>
+                    </button>
+                </div>
                 <div class="vmb-summary">
                     <div class="vmb-stat"><span class="vmb-stat-label">Rows</span><span class="vmb-stat-val" id="anCount">—</span></div>
                     <div class="vmb-stat"><span class="vmb-stat-label">Updated</span><span class="vmb-stat-val vmb-stat-small" id="anUpdated">—</span></div>
@@ -41,6 +44,7 @@
                 </div>
                 <div class="an-filters" id="anFilters">
                     <label>Sector <select id="anSector"><option value="">All</option></select></label>
+                    <label>Action <select id="anAction"><option value="">All</option><option value="BUY">BUY</option><option value="SELL">SELL</option><option value="SELL (Exhaustion)">SELL (Exhaustion)</option><option value="WATCH">WATCH</option><option value="--">--</option></select></label>
                     <label>Weekly <select id="anWTrend"><option value="">All</option><option>Bullish</option><option>Bearish</option><option>Sideways</option></select></label>
                     <label>Daily <select id="anDTrend"><option value="">All</option><option>Bullish</option><option>Bearish</option><option>Sideways</option></select></label>
                     <label>RSI <select id="anRsi"><option value="">All</option><option>OverBought</option><option>OverSold</option><option>Mid</option></select></label>
@@ -54,6 +58,7 @@
                             <tr>
                                 <th data-k="symbol">Symbol</th>
                                 <th data-k="sector">Sector</th>
+                                <th data-k="action">Action</th>
                                 <th data-k="weekly_trend">Weekly</th>
                                 <th data-k="daily_trend">Daily</th>
                                 <th data-k="weekly_rsi_zone">W RSI</th>
@@ -61,7 +66,7 @@
                                 <th data-k="patterns">Patterns</th>
                             </tr>
                         </thead>
-                        <tbody id="anBody"><tr><td colspan="7" class="vmb-empty">Loading…</td></tr></tbody>
+                        <tbody id="anBody"><tr><td colspan="8" class="vmb-empty">Loading…</td></tr></tbody>
                     </table>
                 </div>
                 <p class="vmb-footer" id="anFooter"></p>
@@ -69,6 +74,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.30"></script>
-    <script src="analysis.js?v=2"></script>
+    <script src="analysis.js?v=3"></script>
 </body>
 </html>

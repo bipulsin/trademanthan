@@ -12,6 +12,7 @@ from sqlalchemy import text
 from backend.config import settings
 from backend.database import SessionLocal, engine
 from backend.services.analysis_page.compute import (
+    classify_action,
     classify_trend,
     daily_to_weekly,
     detect_patterns,
@@ -309,6 +310,7 @@ def list_analysis_rows() -> Tuple[List[Dict[str, Any]], Optional[str]]:
             ua_s = ua.isoformat() if hasattr(ua, "isoformat") else (str(ua) if ua else None)
             if ua_s and (latest is None or ua_s > latest):
                 latest = ua_s
+            pats_list = list(pats)
             out.append(
                 {
                     "symbol": r.symbol,
@@ -317,7 +319,14 @@ def list_analysis_rows() -> Tuple[List[Dict[str, Any]], Optional[str]]:
                     "daily_trend": r.daily_trend,
                     "weekly_rsi_zone": r.weekly_rsi_zone,
                     "rs_ma50": r.rs_ma50,
-                    "patterns": list(pats),
+                    "patterns": pats_list,
+                    "action": classify_action(
+                        r.weekly_trend,
+                        r.daily_trend,
+                        r.weekly_rsi_zone,
+                        r.rs_ma50,
+                        pats_list,
+                    ),
                     "updated_at": ua_s,
                 }
             )

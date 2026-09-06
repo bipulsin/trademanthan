@@ -1,5 +1,19 @@
 """Tests for Analysis page trend, RSI, RS, and patterns."""
 from backend.services.analysis_page.compute import (
+    ACTION_BUY,
+    ACTION_NO_TRADE,
+    ACTION_SELL,
+    ACTION_SELL_EXHAUSTION,
+    ACTION_WATCH,
+    PATTERN_BEARISH_ENGULFING,
+    PATTERN_BEARISH_HARAMI,
+    PATTERN_BULLISH_ENGULFING,
+    PATTERN_BULLISH_HARAMI,
+    PATTERN_DARK_CLOUD,
+    PATTERN_HAMMER,
+    PATTERN_PIERCING,
+    PATTERN_SHOOTING_STAR,
+    classify_action,
     classify_trend,
     detect_bullish_engulfing,
     detect_hammer,
@@ -91,3 +105,88 @@ def test_piercing():
     prev = _c("2026-01-01", 110, 111, 100, 101)
     curr = _c("2026-01-02", 99, 108, 98, 107)
     assert detect_piercing(prev, curr) is True
+
+
+def _act(**kwargs):
+    defaults = dict(
+        weekly_trend="Bullish",
+        daily_trend="Bullish",
+        weekly_rsi_zone="Mid",
+        rs_ma50="Above",
+        patterns=[PATTERN_BULLISH_ENGULFING],
+    )
+    defaults.update(kwargs)
+    return classify_action(**defaults)
+
+
+def test_action_no_pattern_always_no_trade():
+    assert _act(patterns=[]) == ACTION_NO_TRADE
+    assert _act(patterns=["—"]) == ACTION_NO_TRADE
+    assert _act(weekly_trend="Bullish", rs_ma50="Below", patterns=[]) == ACTION_NO_TRADE
+
+
+def test_action_buy():
+    assert _act(patterns=[PATTERN_HAMMER]) == ACTION_BUY
+    assert _act(patterns=[PATTERN_PIERCING]) == ACTION_BUY
+    assert _act(patterns=[PATTERN_BULLISH_ENGULFING, PATTERN_DARK_CLOUD]) == ACTION_BUY
+
+
+def test_action_sell():
+    assert (
+        _act(
+            weekly_trend="Bearish",
+            daily_trend="Bearish",
+            rs_ma50="Below",
+            patterns=[PATTERN_SHOOTING_STAR],
+        )
+        == ACTION_SELL
+    )
+
+
+def test_action_sell_exhaustion():
+    assert (
+        _act(
+            weekly_trend="Bullish",
+            weekly_rsi_zone="OverBought",
+            rs_ma50="Above",
+            patterns=[PATTERN_BEARISH_ENGULFING],
+        )
+        == ACTION_SELL_EXHAUSTION
+    )
+
+
+def test_action_watch_harami_and_bull_rs_down():
+    assert _act(patterns=[PATTERN_BULLISH_HARAMI], rs_ma50="Mid") == ACTION_WATCH
+    assert _act(patterns=[PATTERN_BEARISH_HARAMI], rs_ma50="Above") == ACTION_WATCH
+    assert (
+        _act(
+            weekly_trend="Bullish",
+            rs_ma50="Below",
+            weekly_rsi_zone="Mid",
+            patterns=[PATTERN_DARK_CLOUD],
+        )
+        == ACTION_WATCH
+    )
+
+
+def test_action_else_no_trade():
+    assert (
+        _act(
+            weekly_trend="Sideways",
+            daily_trend="Bullish",
+            rs_ma50="Mid",
+            patterns=[PATTERN_DARK_CLOUD],
+        )
+        == ACTION_NO_TRADE
+    )
+
+
+def test_action_ifs_order_buy_before_watch():
+    assert (
+        _act(
+            weekly_trend="Bullish",
+            rs_ma50="Above",
+            patterns=[PATTERN_HAMMER, PATTERN_BULLISH_HARAMI],
+        )
+        == ACTION_BUY
+    )

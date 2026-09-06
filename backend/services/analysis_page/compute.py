@@ -37,6 +37,20 @@ PATTERN_PIERCING = "Piercing"
 PATTERN_DARK_CLOUD = "Dark Cloud Cover"
 PATTERN_HAMMER = "Hammer"
 PATTERN_SHOOTING_STAR = "Shooting Star"
+PATTERN_INVERTED_HAMMER = "Inverted Hammer"
+PATTERN_DOJI = "Doji"
+
+ACTION_NO_TRADE = "--"
+ACTION_BUY = "BUY"
+ACTION_SELL = "SELL"
+ACTION_SELL_EXHAUSTION = "SELL (Exhaustion)"
+ACTION_WATCH = "WATCH"
+
+_BUY_PATTERNS = frozenset({PATTERN_BULLISH_ENGULFING, PATTERN_PIERCING, PATTERN_HAMMER})
+_SELL_PATTERNS = frozenset({PATTERN_BEARISH_ENGULFING, PATTERN_SHOOTING_STAR})
+_WATCH_PATTERNS = frozenset(
+    {PATTERN_BULLISH_HARAMI, PATTERN_BEARISH_HARAMI, PATTERN_INVERTED_HAMMER, PATTERN_DOJI}
+)
 
 
 def _f(v: Any) -> Optional[float]:
@@ -370,6 +384,62 @@ def detect_patterns(daily: Sequence[Dict[str, Any]]) -> List[str]:
             if fn(prev, curr):
                 found.append(name)
     return found
+
+
+def _search(haystack: Optional[str], needle: str) -> bool:
+    if haystack is None:
+        return False
+    return needle.upper() in str(haystack).upper()
+
+
+def _rs_dir(rs_ma50: Optional[str]) -> Optional[str]:
+    if rs_ma50 == "Above":
+        return "UP"
+    if rs_ma50 == "Below":
+        return "DOWN"
+    return None
+
+
+def _pattern_names(patterns: Optional[Sequence[str]]) -> List[str]:
+    out: List[str] = []
+    for p in patterns or []:
+        s = str(p).strip() if p is not None else ""
+        if not s or s in ("—", "-", "--", "none", "None"):
+            continue
+        out.append(s)
+    return out
+
+
+def _any_pattern(names: Sequence[str], wanted: frozenset) -> bool:
+    return any(n in wanted for n in names)
+
+
+def classify_action(
+    weekly_trend: Optional[str] = None,
+    daily_trend: Optional[str] = None,
+    weekly_rsi_zone: Optional[str] = None,
+    rs_ma50: Optional[str] = None,
+    patterns: Optional[Sequence[str]] = None,
+) -> str:
+    """Spreadsheet IFS: first match wins. No pattern → always --."""
+    names = _pattern_names(patterns)
+    if not names:
+        return ACTION_NO_TRADE
+    rs = _rs_dir(rs_ma50)
+    w_bull = _search(weekly_trend, "BULL")
+    w_bear = _search(weekly_trend, "BEAR")
+    d_bear = _search(daily_trend, "BEAR")
+    # Spreadsheet SEARCH("OveBo") is a typo for OverBought; match both.
+    rsi_ob = _search(weekly_rsi_zone, "OveBo") or _search(weekly_rsi_zone, "OverBo")
+    if w_bull and rs == "UP" and _any_pattern(names, _BUY_PATTERNS):
+        return ACTION_BUY
+    if w_bear and d_bear and rs == "DOWN" and _any_pattern(names, _SELL_PATTERNS):
+        return ACTION_SELL
+    if w_bull and rsi_ob and _any_pattern(names, _SELL_PATTERNS):
+        return ACTION_SELL_EXHAUSTION
+    if _any_pattern(names, _WATCH_PATTERNS) or (w_bull and rs == "DOWN"):
+        return ACTION_WATCH
+    return ACTION_NO_TRADE
 
 
 def daily_to_weekly(daily: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:

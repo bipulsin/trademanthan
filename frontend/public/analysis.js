@@ -20,6 +20,14 @@
         }
         return esc(v || "—");
     }
+    function actionHtml(v) {
+        const a = v || "--";
+        if (a === "BUY") return `<span class="an-chip an-act an-act-buy">BUY</span>`;
+        if (a === "SELL") return `<span class="an-chip an-act an-act-sell">SELL</span>`;
+        if (a === "SELL (Exhaustion)") return `<span class="an-chip an-act an-act-sell">SELL (Exhaustion)</span>`;
+        if (a === "WATCH") return `<span class="an-chip an-act an-act-watch">WATCH</span>`;
+        return `<span class="an-act-none">--</span>`;
+    }
     function rsClass(v) {
         if (v === "Above") return "an-above";
         if (v === "Below") return "an-below";
@@ -53,6 +61,7 @@
 
     function filtered() {
         const sec = el("anSector").value;
+        const act = el("anAction").value;
         const wt = el("anWTrend").value;
         const dt = el("anDTrend").value;
         const rsi = el("anRsi").value;
@@ -61,6 +70,7 @@
         const q = (el("anSearch").value || "").trim().toUpperCase();
         return rows.filter((r) => {
             if (sec && r.sector !== sec) return false;
+            if (act && (r.action || "--") !== act) return false;
             if (wt && r.weekly_trend !== wt) return false;
             if (dt && r.daily_trend !== dt) return false;
             if (rsi && r.weekly_rsi_zone !== rsi) return false;
@@ -87,7 +97,7 @@
         el("anVisible").textContent = String(data.length);
         const body = el("anBody");
         if (!data.length) {
-            body.innerHTML = '<tr><td colspan="7" class="vmb-empty">No rows match filters.</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="vmb-empty">No rows match filters.</td></tr>';
             return;
         }
         body.innerHTML = data.map((r) => {
@@ -95,6 +105,7 @@
             return `<tr>
                 <td>${esc(r.symbol)}</td>
                 <td>${esc(r.sector || "")}</td>
+                <td>${actionHtml(r.action)}</td>
                 <td>${chipHtml(r.weekly_trend)}</td>
                 <td>${chipHtml(r.daily_trend)}</td>
                 <td>${chipHtml(r.weekly_rsi_zone)}</td>
@@ -105,7 +116,7 @@
     }
 
     async function load() {
-        el("anBody").innerHTML = '<tr><td colspan="7" class="vmb-empty">Loading…</td></tr>';
+        el("anBody").innerHTML = '<tr><td colspan="8" class="vmb-empty">Loading…</td></tr>';
         try {
             let res = await fetch(apiBase + "/api/analysis/symbols", { cache: "no-store" });
             if (!res.ok) res = await fetch(apiBase + "/scan/analysis", { cache: "no-store" });
@@ -120,7 +131,7 @@
             fillSelect(el("anPat"), [...pats].sort());
             render();
         } catch (e) {
-            el("anBody").innerHTML = '<tr><td colspan="7" class="vmb-empty">Failed to load analysis.</td></tr>';
+            el("anBody").innerHTML = '<tr><td colspan="8" class="vmb-empty">Failed to load analysis.</td></tr>';
             el("anFooter").textContent = String(e);
         }
     }
@@ -135,7 +146,7 @@
             render();
         });
     });
-    ["anSector", "anWTrend", "anDTrend", "anRsi", "anRs", "anPat"].forEach((id) => {
+    ["anSector", "anAction", "anWTrend", "anDTrend", "anRsi", "anRs", "anPat"].forEach((id) => {
         el(id).addEventListener("change", render);
     });
     el("anSearch").addEventListener("input", render);
