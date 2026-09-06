@@ -11,15 +11,14 @@
 
     const el = (id) => document.getElementById(id);
 
-    function trendClass(v) {
-        if (v === "Bullish") return "an-bull";
-        if (v === "Bearish") return "an-bear";
-        return "an-side";
-    }
-    function rsiClass(v) {
-        if (v === "OverBought") return "an-ob";
-        if (v === "OverSold") return "an-os";
-        return "";
+    function chipHtml(v) {
+        if (v === "Bullish" || v === "OverSold") {
+            return `<span class="an-chip an-chip-blue">${esc(v)}</span>`;
+        }
+        if (v === "Bearish" || v === "OverBought") {
+            return `<span class="an-chip an-chip-red">${esc(v)}</span>`;
+        }
+        return esc(v || "—");
     }
     function rsClass(v) {
         if (v === "Above") return "an-above";
@@ -96,9 +95,9 @@
             return `<tr>
                 <td>${esc(r.symbol)}</td>
                 <td>${esc(r.sector || "")}</td>
-                <td class="${trendClass(r.weekly_trend)}">${esc(r.weekly_trend || "—")}</td>
-                <td class="${trendClass(r.daily_trend)}">${esc(r.daily_trend || "—")}</td>
-                <td class="${rsiClass(r.weekly_rsi_zone)}">${esc(r.weekly_rsi_zone || "—")}</td>
+                <td>${chipHtml(r.weekly_trend)}</td>
+                <td>${chipHtml(r.daily_trend)}</td>
+                <td>${chipHtml(r.weekly_rsi_zone)}</td>
                 <td class="${rsClass(r.rs_ma50)}">${esc(r.rs_ma50 || "—")}</td>
                 <td class="an-pats">${esc(pats)}</td>
             </tr>`;
