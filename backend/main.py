@@ -49,6 +49,7 @@ import backend.routers.ready_shadow_review as ready_shadow_review
 import backend.routers.top10_vs_ready_now as top10_vs_ready_now
 import backend.routers.trade_log as trade_log_journal
 import backend.routers.kavach_bt_checkpoint as kavach_bt_checkpoint
+import backend.routers.analysis as analysis_page_router
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
 # from backend.services.master_stock_scheduler import start_scheduler, stop_scheduler
 # from backend.services.instruments_downloader import start_instruments_scheduler, stop_instruments_scheduler
@@ -89,6 +90,10 @@ from backend.services.atr_daily_precompute_scheduler import (
 from backend.services.arbitrage_volatility_grade_scheduler import (
     start_arbitrage_volatility_grade_scheduler,
     stop_arbitrage_volatility_grade_scheduler,
+)
+from backend.services.analysis_page.scheduler import (
+    start_analysis_snapshot_scheduler,
+    stop_analysis_snapshot_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -246,6 +251,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Arbitrage volatility grade scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without arbitrage volatility grade scheduler")
 
+        try:
+            logger.info("Starting Analysis snapshot scheduler (16:15 IST weekdays)...")
+            start_analysis_snapshot_scheduler()
+            logger.info("✅ Analysis snapshot scheduler: STARTED (16:15 IST weekdays)")
+        except Exception as e:
+            logger.error(f"❌ Analysis snapshot scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Analysis snapshot scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -264,6 +277,15 @@ async def lifespan(app: FastAPI):
             logger.info("✅ rs_universe_score_snapshot ready")
         except Exception as e:
             logger.warning("⚠️ rs_universe_score_snapshot ensure skipped: %s", e)
+
+        try:
+            from backend.services.analysis_page.job import ensure_analysis_snapshot_table
+
+            logger.info("Ensuring analysis_symbol_snapshot DDL (once per worker)...")
+            await asyncio.to_thread(ensure_analysis_snapshot_table)
+            logger.info("✅ analysis_symbol_snapshot ready")
+        except Exception as e:
+            logger.warning("⚠️ analysis_symbol_snapshot ensure skipped: %s", e)
 
         logger.info("=" * 60)
         logger.info("✅ STARTUP COMPLETE - All Services Active")
@@ -358,6 +380,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping arbitrage volatility grade scheduler: {e}", exc_info=True)
 
+    try:
+        stop_analysis_snapshot_scheduler()
+        logger.info("✅ Analysis snapshot scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Analysis snapshot scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -449,6 +477,7 @@ app.include_router(ready_shadow_review.router)
 app.include_router(top10_vs_ready_now.router)
 app.include_router(trade_log_journal.router)
 app.include_router(kavach_bt_checkpoint.router)
+app.include_router(analysis_page_router.router)
 
 # Create/migrate tables in a daemon thread so import + uvicorn bind is not blocked by long DB locks
 # (idle-in-transaction + migrations used to delay port 8000 for minutes → nginx 502).

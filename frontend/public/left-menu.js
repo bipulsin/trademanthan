@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.29';
+const MENU_HTML_PATH = 'left-menu.html?v=3.30';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|analysis/.test(path);
     }
 
     getCurrentPage() {
@@ -61,6 +61,7 @@ class LeftMenu {
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         if (path.includes('breakfast')) return 'breakfast';
+        if (path.includes('analysis')) return 'analysis';
         return 'dashboard';
     }
 
@@ -286,6 +287,8 @@ class LeftMenu {
                 <li class="nav-item nav-item-admin" data-page="kavach-bt-checkpoint.html" style="display: none;" title="Administrator only"><i class="fas fa-flask"></i><span>Kavach BT Checkpoint</span></li>
                 <li class="nav-item" data-page="future_screener.html"><i class="fas fa-filter"></i><span>Future Screener</span></li>
                 <li class="nav-item" data-page="breakfast.html"><i class="fas fa-mug-hot" style="color:#f59e0b;"></i><span>Breakfast Strategy</span></li>
+                <li class="nav-item" data-page="havwap.html"><i class="fas fa-chart-area" style="color:#34d399;"></i><span>HA-VWAP Backtest</span></li>
+                <li class="nav-item" data-page="analysis.html"><i class="fas fa-table" style="color:#60a5fa;"></i><span>Analysis</span></li>
                 <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
                 <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
                 <li class="nav-item nav-item-admin" data-page="kavachIgnitionDiag.html" style="display: none;" title="Administrator only"><i class="fas fa-bolt"></i><span>Ignition Diag</span></li>
@@ -796,6 +799,7 @@ class LeftMenu {
             case 'admin': return 'admintwc.html';
             case 'future_screener': return 'future_screener.html';
             case 'breakfast': return 'breakfast.html';
+            case 'analysis': return 'analysis.html';
             case 'kavachIgnitionDiag': return 'kavachIgnitionDiag.html';
             case 'rs-journey': return 'rs-journey.html';
             default: return 'dashboard.html';
