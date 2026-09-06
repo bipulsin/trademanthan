@@ -1,6 +1,7 @@
 body.theme-page {
     font-family: Inter, system-ui, -apple-system, sans-serif;
 }
+.vmb-wrap { padding-top: 0; }
 .an-filters {
     display: flex;
     flex-wrap: wrap;
@@ -28,19 +29,6 @@ body.theme-page {
 .an-filters input[type="search"] {
     min-width: 8rem;
 }
-.vmb-header { margin-bottom: 8px; }
-.an-page-title-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 0 0 18px;
-}
-.an-page-title {
-    margin: 0;
-    font-size: 1.35rem;
-    font-weight: 700;
-    color: var(--theme-text, #f1f5f9);
-}
 .an-info-btn {
     position: relative;
     font-size: 0.95rem;
@@ -50,8 +38,8 @@ body.theme-page {
     display: none;
     position: absolute;
     top: calc(100% + 8px);
-    left: 0;
-    right: auto;
+    left: auto;
+    right: 0;
     width: min(28rem, calc(100vw - 2.5rem));
     padding: 0.7rem 0.85rem;
     border-radius: 8px;
