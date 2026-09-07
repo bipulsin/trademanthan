@@ -637,6 +637,34 @@ def _join_sector_names(keys: Any) -> str:
     return ", ".join(names)
 
 
+def is_resolved_empty_lock(
+    reason: Optional[str],
+    payload: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """True when freeze correctly decided not to lock any stocks (empty book)."""
+    r = str(reason or "").strip()
+    if r == "no_filtered_stocks:color":
+        return True
+    if r != "no_filtered_stocks:cascade_exhausted":
+        return False
+    sectors = (payload or {}).get("sectors") or []
+    return sum(1 for s in sectors if s.get("stocks")) == 0
+
+
+def annotate_lock_failure(payload: Dict[str, Any], failure_reason: str) -> None:
+    """Set banner/phase for a freeze outcome. Color-empty is not lock_failed."""
+    payload["failure_reason"] = failure_reason
+    payload["banner"] = format_lock_failure_banner(failure_reason, payload)
+    if is_resolved_empty_lock(failure_reason, payload):
+        payload["state"] = "resolved_no_stocks"
+        payload["phase"] = "locked_empty"
+        payload["lock_failed"] = False
+        return
+    payload["state"] = "lock_failed"
+    payload["phase"] = "frozen"
+    payload["lock_failed"] = True
+
+
 def format_lock_failure_banner(
     reason: Optional[str],
     payload: Optional[Dict[str, Any]] = None,
@@ -676,13 +704,23 @@ def format_lock_failure_banner(
         return f"Lock failed: no stocks passed the wick filter{extra}"
     if r == "no_filtered_stocks:color":
         extra = f" in {top2_names}" if top2_names else " in top sectors"
-        return f"Lock failed: no stocks passed the candle-color filter{extra}"
+        return f"Resolved: no stocks passed the candle-color filter{extra}"
     if r == "no_filtered_stocks:cascade_exhausted":
         empty_lab = (empty_from_picked[0] if empty_from_picked else "") or from_lab or (
             empty_cards[0] if empty_cards else ""
         )
         n = len(filled)
         filled_txt = ", ".join(filled)
+        if n == 0:
+            extra = f" in {top2_names}" if top2_names else ""
+            after_color = list(meta.get("top2_after_color") or [])
+            wick_counts = list(meta.get("top2_wick_counts") or [])
+            if after_color and all(c == 0 for c in after_color) and (
+                not wick_counts or any(c > 0 for c in wick_counts)
+            ):
+                loc = extra or " in top sectors"
+                return f"Resolved: no stocks passed the candle-color filter{loc}"
+            return f"Resolved: no stocks to lock after cascade{extra}"
         if n == 1 and filled_txt and empty_lab:
             return (
                 f"Lock incomplete — only 1 sector after cascade ({filled_txt}); "
@@ -1369,11 +1407,7 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
     lock_status = "locked"
     if failure_reason:
         lock_status = "failed"
-        payload["state"] = "lock_failed"
-        payload["phase"] = "frozen"
-        payload["banner"] = format_lock_failure_banner(failure_reason, payload)
-        payload["lock_failed"] = True
-        payload["failure_reason"] = failure_reason
+        annotate_lock_failure(payload, failure_reason)
 
     try:
         signal_stats = {"inserted": 0, "skipped": 0}
@@ -1390,10 +1424,7 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
         logger.exception("breakfast freeze persist failed: %s", e)
         lock_status = "failed"
         failure_reason = str(e)
-        payload["state"] = "lock_failed"
-        payload["phase"] = "frozen"
-        payload["banner"] = format_lock_failure_banner(failure_reason, payload)
-        payload["lock_failed"] = True
+        annotate_lock_failure(payload, failure_reason)
         try:
             persist_session_lock(
                 payload,
@@ -1427,19 +1458,16 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
 
 
 def _failed_freeze_payload(session_date: str, reason: str) -> Dict[str, Any]:
-    return {
+    out: Dict[str, Any] = {
         "ok": False,
-        "state": "lock_failed",
-        "phase": "frozen",
         "session_date": session_date,
-        "banner": format_lock_failure_banner(reason),
         "refresh_allowed": False,
         "poll_interval_sec": 0,
-        "lock_failed": True,
-        "failure_reason": reason,
         "sectors": [],
         "nifty": {},
     }
+    annotate_lock_failure(out, reason)
+    return out
 
 
 def reset_session_cache_for_tests() -> None:

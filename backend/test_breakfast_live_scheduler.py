@@ -337,9 +337,11 @@ def test_freeze_failure_ui_when_no_sectors(_trading, _lock, mock_persist_lock, m
         out = run_breakfast_freeze_lock()
     assert out["lock_status"] == "failed"
     mock_persist_lock.assert_called()
-    # Failed 9:20 snapshot is sticky for the trading day (no off-cycle refresh).
-    assert "2026-08-31" in live_mod._FROZEN_STATE
-    assert live_mod._FROZEN_STATE["2026-08-31"].get("lock_failed")
+    # Empty 9:20 snapshot is sticky; color-empty is resolved (not Lock Failed).
+    frozen = live_mod._FROZEN_STATE["2026-08-31"]
+    assert frozen.get("lock_failed") is False
+    assert frozen.get("phase") == "locked_empty"
+    assert frozen.get("state") == "resolved_no_stocks"
 
 
 @patch("backend.services.breakfast_strategy.live_tick.fetch_5m_parallel")

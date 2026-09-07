@@ -358,6 +358,22 @@
         }
     }
 
+    function isResolvedEmptyLock(data) {
+        data = data || {};
+        var r = String(data.failure_reason || "");
+        if (data.phase === "locked_empty" || data.state === "resolved_no_stocks") return true;
+        if (r === "no_filtered_stocks:color") return true;
+        if (r === "no_filtered_stocks:cascade_exhausted") {
+            var secs = data.sectors || [];
+            var n = 0;
+            for (var i = 0; i < secs.length; i++) {
+                if (secs[i] && secs[i].stocks && secs[i].stocks.length) n++;
+            }
+            return n === 0;
+        }
+        return false;
+    }
+
     function renderLiveBanner(data) {
         var el = $("bfLiveBanner");
         if (!el) return;
@@ -366,10 +382,11 @@
         el.hidden = false;
         el.textContent = banner;
         el.className = "vmb-callout bf-live-banner";
-        if (data.lock_failed) el.classList.add("bf-banner-alert");
+        if (isResolvedEmptyLock(data)) el.classList.add("bf-banner-locked");
+        else if (data.lock_failed) el.classList.add("bf-banner-alert");
         else if (data.state === "mismatch" || data.state === "stale") el.classList.add("bf-banner-alert");
         else if (data.off_cycle) el.classList.add("bf-banner-offcycle");
-        else if (data.phase === "locked" || data.phase === "frozen" || data.state === "locked") el.classList.add("bf-banner-locked");
+        else if (data.phase === "locked" || data.phase === "frozen" || data.phase === "locked_empty" || data.state === "locked") el.classList.add("bf-banner-locked");
         else el.classList.add("bf-banner-forming");
     }
 
@@ -378,7 +395,7 @@
         if (data.loading) return "Loading…";
         var phase = data.phase || "";
         var state = data.state || "";
-        if (phase === "frozen" || phase === "locked" || state === "off_session" || state === "locked") {
+        if (phase === "frozen" || phase === "locked" || phase === "locked_empty" || state === "off_session" || state === "locked" || state === "resolved_no_stocks") {
             return "—";
         }
         if (phase === "forming" || phase === "opening" || phase === "bar_closing") {

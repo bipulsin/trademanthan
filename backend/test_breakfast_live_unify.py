@@ -243,6 +243,38 @@ def test_lock_reason_wick_vs_color_vs_cascade():
     )
 
 
+def test_resolved_empty_lock_color_and_cascade():
+    from backend.services.breakfast_strategy.live_tick import (
+        annotate_lock_failure,
+        format_lock_failure_banner,
+        is_resolved_empty_lock,
+    )
+
+    assert is_resolved_empty_lock("no_filtered_stocks:color")
+    assert is_resolved_empty_lock(
+        "no_filtered_stocks:cascade_exhausted",
+        {"sectors": [{"sector_label": "IT", "stocks": []}]},
+    )
+    assert not is_resolved_empty_lock(
+        "no_filtered_stocks:cascade_exhausted",
+        {"sectors": [{"sector_label": "IT", "stocks": [{"symbol": "INFY"}]}]},
+    )
+    assert not is_resolved_empty_lock("no_filtered_stocks:wick")
+    assert not is_resolved_empty_lock("no_data")
+    color_payload = {
+        "sectors": [],
+        "selection_meta": {"top2": ["NSE_INDEX|Nifty IT", "NSE_INDEX|Nifty Realty"]},
+    }
+    color_banner = format_lock_failure_banner("no_filtered_stocks:color", color_payload)
+    assert color_banner.startswith("Resolved: no stocks passed the candle-color filter")
+    assert "Lock failed" not in color_banner
+    p = {}
+    annotate_lock_failure(p, "no_filtered_stocks:color")
+    assert p["phase"] == "locked_empty"
+    assert p["state"] == "resolved_no_stocks"
+    assert p["lock_failed"] is False
+
+
 def test_payload_keeps_doji_with_flag():
     from datetime import datetime
 

@@ -233,6 +233,14 @@ def _load_persisted_live_state(session_date: str) -> Optional[Dict[str, Any]]:
 
 def _frozen_client_payload(payload: Dict[str, Any], now: datetime) -> Dict[str, Any]:
     out = dict(payload)
+    reason = str(out.get("failure_reason") or "").strip()
+    if reason:
+        from backend.services.breakfast_strategy.live_tick import annotate_lock_failure
+
+        annotate_lock_failure(out, reason)
+        as_of_banner = _lock_failed_preview_banner(reason, out, freeze_payload=payload)
+        if as_of_banner:
+            out["banner"] = as_of_banner
     out["server_time"] = now.isoformat()
     out["refresh_allowed"] = False
     out["poll_interval_sec"] = 0
@@ -595,12 +603,13 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
 
         from_lock = _payload_from_lock_row(lock_row)
         if from_lock:
-            if lock_status == "failed" or from_lock.get("lock_failed"):
+            if lock_status == "failed" or from_lock.get("lock_failed") or from_lock.get(
+                "state"
+            ) == "resolved_no_stocks":
                 reason = (lock_row or {}).get("failure_reason") or from_lock.get("failure_reason") or "see logs"
-                from_lock["lock_failed"] = True
-                from_lock["failure_reason"] = reason
-                from_lock["state"] = "lock_failed"
-                from_lock["phase"] = "frozen"
+                from backend.services.breakfast_strategy.live_tick import annotate_lock_failure
+
+                annotate_lock_failure(from_lock, reason)
                 from_lock["banner"] = _lock_failed_preview_banner(reason, from_lock)
                 from_lock["refresh_allowed"] = False
                 from_lock["poll_interval_sec"] = 0
@@ -632,17 +641,20 @@ def build_live_state(*, replay_at: Optional[datetime] = None) -> Dict[str, Any]:
             )
 
         if lock_status == "failed":
-            from backend.services.breakfast_strategy.live_tick import format_lock_failure_banner
+            from backend.services.breakfast_strategy.live_tick import annotate_lock_failure
 
             reason = (lock_row or {}).get("failure_reason") or "see logs"
             out = _blank_live_payload(
                 now,
-                banner=format_lock_failure_banner(reason, _payload_from_lock_row(lock_row)),
+                banner="",
                 state="lock_failed",
                 phase="frozen",
             )
-            out["lock_failed"] = True
-            out["failure_reason"] = reason
+            src = _payload_from_lock_row(lock_row) or {}
+            if src:
+                out.update({k: v for k, v in src.items() if k not in ("refresh_allowed", "poll_interval_sec")})
+            annotate_lock_failure(out, reason)
+            out["banner"] = _lock_failed_preview_banner(reason, out)
             out["refresh_allowed"] = False
             out["poll_interval_sec"] = 0
             return out

@@ -197,6 +197,8 @@ def test_lock_failed_banner_uses_frozen_as_of():
             "sectors": [],
         },
     )
+    assert banner.startswith("Resolved: no stocks passed the candle-color filter")
+    assert "Lock failed" not in banner
     assert "candle-color" in banner
     assert "frozen as of" in banner
     assert "Off cycle" not in banner
@@ -222,9 +224,14 @@ def test_format_lock_failure_banner_reasons():
     assert cascade == (
         "Lock incomplete — only 1 sector after cascade (IT); Realty had no qualifying stocks"
     )
-    assert "cascade exhausted" in format_lock_failure_banner("no_filtered_stocks:cascade_exhausted")
+    assert format_lock_failure_banner("no_filtered_stocks:cascade_exhausted") == (
+        "Resolved: no stocks to lock after cascade"
+    )
     assert "wick filter" in format_lock_failure_banner("no_filtered_stocks:wick")
-    assert "candle-color" in format_lock_failure_banner("no_filtered_stocks:color")
+    assert format_lock_failure_banner("no_filtered_stocks:color") == (
+        "Resolved: no stocks passed the candle-color filter in top sectors"
+    )
+    assert "Lock failed" not in format_lock_failure_banner("no_filtered_stocks:color")
     assert "no sectors available" in format_lock_failure_banner("no_sectors_at_freeze")
     overlay = _lock_failed_preview_banner(
         "no_filtered_stocks:cascade_exhausted",
@@ -405,7 +412,11 @@ def test_failed_freeze_serves_stored_920_snapshot(mock_lock, mock_off_cycle, _pe
     replay = IST.localize(datetime(2026, 8, 31, 10, 4))
     out = build_live_state(replay_at=replay)
     mock_off_cycle.assert_not_called()
-    assert out.get("lock_failed")
+    assert not out.get("lock_failed")
+    assert out.get("phase") == "locked_empty"
+    assert out.get("state") == "resolved_no_stocks"
+    assert "Resolved: no stocks passed the candle-color filter" in (out.get("banner") or "")
+    assert "Lock failed" not in (out.get("banner") or "")
     assert out["nifty"]["direction"] == "LONG"
     assert out["nifty"]["open"] == 25000.0
     assert out.get("sectors") == []
