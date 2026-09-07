@@ -6,15 +6,16 @@
     const FETCH_MS = 35000;
     const POLL_MS = 60 * 1000;
     const LIVE_FRESH_WINDOW_MS = 30 * 60 * 1000;
-    const TAB_KEYS = ["LONG_BUILDUP", "SHORT_COVERING", "SHORT_BUILDUP", "LONG_UNWINDING"];
-    /** Main screen: Top-10 per tab. Rank: global rank (|oi_chg| desc), then score desc, then |oi_chg|, |oi_chg_pct|, |chg_pct|. Modal keeps the full snapshot. */
+    /** Left-to-right: Long Buildup, Short Buildup, Long Unwinding, Short Covering. */
+    const TAB_KEYS = ["LONG_BUILDUP", "SHORT_BUILDUP", "LONG_UNWINDING", "SHORT_COVERING"];
+    /** Main: top 10 after tab ranking. Modal: same order, full bucket. */
     const TAB_TOP_N = 10;
     let timer = null;
     let firstLoad = true;
     let fullRowsCache = [];
     let bySignalCache = {};
     let activeTab = "LONG_BUILDUP";
-    let modalSortKey = "symbol";
+    let modalSortKey = "ranking";
     let modalSortDir = "asc";
 
     function apiUrl() {
@@ -128,44 +129,67 @@
         });
     }
 
-    function sortRowsForTab(rows) {
+    function sortCmpScoreThenChg(a, b) {
+        var sa = Number(a && a.score) || 0;
+        var sb = Number(b && b.score) || 0;
+        if (sa !== sb) return sb - sa;
+        var oa = Math.abs(Number(a && a.oi_chg) || 0);
+        var ob = Math.abs(Number(b && b.oi_chg) || 0);
+        if (oa !== ob) return ob - oa;
+        var pa = Math.abs(Number(a && a.oi_chg_pct) || 0);
+        var pb = Math.abs(Number(b && b.oi_chg_pct) || 0);
+        if (pa !== pb) return pb - pa;
+        var ca = Math.abs(Number(a && a.chg_pct) || 0);
+        var cb = Math.abs(Number(b && b.chg_pct) || 0);
+        return cb - ca;
+    }
+
+    /** LB: HTF LB + Previous LU first, then LB in all three, then score. SB: HTF SB + Previous SC first, then SB in all three. LU/SC: score only. */
+    function tabRankTier(tab, r) {
+        var key = String(tab || "");
+        var htf = bucketKey(r && r.htf_oi_signal);
+        var prev = bucketKey(r && r.prev_oi_signal);
+        if (key === "LONG_BUILDUP") {
+            if (htf === "LONG_BUILDUP" && prev === "LONG_UNWINDING") return 0;
+            if (htf === "LONG_BUILDUP" && prev === "LONG_BUILDUP") return 1;
+            return 2;
+        }
+        if (key === "SHORT_BUILDUP") {
+            if (htf === "SHORT_BUILDUP" && prev === "SHORT_COVERING") return 0;
+            if (htf === "SHORT_BUILDUP" && prev === "SHORT_BUILDUP") return 1;
+            return 2;
+        }
+        return 0;
+    }
+
+    function sortRowsForTab(rows, tab) {
+        var key = String(tab || activeTab);
         return (rows || []).slice().sort(function (a, b) {
-            var ra = a && a.rank != null && a.rank !== "" ? Number(a.rank) : 1e9;
-            var rb = b && b.rank != null && b.rank !== "" ? Number(b.rank) : 1e9;
-            if (ra !== rb) return ra - rb;
-            var sa = Number(a && a.score) || 0;
-            var sb = Number(b && b.score) || 0;
-            if (sa !== sb) return sb - sa;
-            var oa = Math.abs(Number(a && a.oi_chg) || 0);
-            var ob = Math.abs(Number(b && b.oi_chg) || 0);
-            if (oa !== ob) return ob - oa;
-            var pa = Math.abs(Number(a && a.oi_chg_pct) || 0);
-            var pb = Math.abs(Number(b && b.oi_chg_pct) || 0);
-            if (pa !== pb) return pb - pa;
-            var ca = Math.abs(Number(a && a.chg_pct) || 0);
-            var cb = Math.abs(Number(b && b.chg_pct) || 0);
-            return cb - ca;
+            var ta = tabRankTier(key, a);
+            var tb = tabRankTier(key, b);
+            if (ta !== tb) return ta - tb;
+            return sortCmpScoreThenChg(a, b);
         });
     }
 
     function mainTabRows(tab) {
-        return sortRowsForTab(rowsForTab(tab)).slice(0, TAB_TOP_N);
+        return sortRowsForTab(rowsForTab(tab), tab).slice(0, TAB_TOP_N);
     }
 
     function updateTabCounts() {
         TAB_KEYS.forEach(function (k) {
-            const btn = document.querySelector('.oi-heatmap-tab[data-oi-tab="' + k + '"]');
-            if (!btn) return;
-            const n = rowsForTab(k).length;
-            const labels = {
-                LONG_BUILDUP: "Long Buildup",
-                SHORT_COVERING: "Short Covering",
-                SHORT_BUILDUP: "Short Buildup",
-                LONG_UNWINDING: "Long Unwinding",
-            };
-            btn.textContent = labels[k] + " (" + n + ")";
-            btn.classList.toggle("is-active", k === activeTab);
-            btn.setAttribute("aria-selected", k === activeTab ? "true" : "false");
+            document.querySelectorAll('.oi-heatmap-tab[data-oi-tab="' + k + '"]').forEach(function (btn) {
+                const n = rowsForTab(k).length;
+                const labels = {
+                    LONG_BUILDUP: "Long Buildup",
+                    SHORT_COVERING: "Short Covering",
+                    SHORT_BUILDUP: "Short Buildup",
+                    LONG_UNWINDING: "Long Unwinding",
+                };
+                btn.textContent = labels[k] + " (" + n + ")";
+                btn.classList.toggle("is-active", k === activeTab);
+                btn.setAttribute("aria-selected", k === activeTab ? "true" : "false");
+            });
         });
     }
 
@@ -227,7 +251,7 @@
         const head =
             "<thead><tr>" +
             "<th>#</th><th>Symbol</th><th>LTP</th><th>Chg%</th><th>OI</th><th>OI Chg</th>" +
-            "<th>OI Signal</th><th>Prev OI Signal</th><th>HTF-OI</th><th>Volume</th><th>Score</th>" +
+            "<th>OI Signal</th><th>Previous OI</th><th>HTF-OI</th><th>Volume</th><th>Score</th>" +
             "</tr></thead>";
         const body = rows
             .map(function (r) {
@@ -316,7 +340,8 @@
     }
 
     function sortedModalRows() {
-        var out = (fullRowsCache || []).slice();
+        var out = sortRowsForTab(rowsForTab(activeTab), activeTab);
+        if (modalSortKey === "ranking") return out;
         var dir = modalSortDir === "desc" ? -1 : 1;
         out.sort(function (a, b) {
             if (modalSortKey === "score") {
@@ -329,6 +354,13 @@
                 var bs = String(signalLabel(b && b.oi_signal) || "").toUpperCase();
                 if (as < bs) return -1 * dir;
                 if (as > bs) return 1 * dir;
+                return 0;
+            }
+            if (modalSortKey === "prev_oi_signal") {
+                var ps = String(signalLabel(a && a.prev_oi_signal) || "").toUpperCase();
+                var psb = String(signalLabel(b && b.prev_oi_signal) || "").toUpperCase();
+                if (ps < psb) return -1 * dir;
+                if (ps > psb) return 1 * dir;
                 return 0;
             }
             if (modalSortKey === "htf_oi_signal") {
@@ -500,6 +532,8 @@
                 const host = document.getElementById("oiHeatmapHost");
                 if (host) host.innerHTML = renderTable(mainTabRows(activeTab));
                 updateTabCounts();
+                var modal = document.getElementById("oiHeatmapModal");
+                if (modal && !modal.hidden) renderModalTable();
             });
         });
         const moreBtn = document.getElementById("oiHeatmapMoreBtn");
@@ -520,7 +554,7 @@
         const sortKey = document.getElementById("oiHeatmapSortKey");
         if (sortKey)
             sortKey.addEventListener("change", function () {
-                modalSortKey = String(sortKey.value || "symbol");
+                modalSortKey = String(sortKey.value || "ranking");
                 renderModalTable();
             });
         const sortDirBtn = document.getElementById("oiHeatmapSortDir");

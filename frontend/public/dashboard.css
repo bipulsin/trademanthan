@@ -2480,6 +2480,10 @@ body[data-theme="dark"] .oi-heatmap-more-link {
     cursor: pointer;
 }
 
+.oi-heatmap-modal-tabs {
+    padding: 8px 14px 0;
+}
+
 .oi-heatmap-modal-controls {
     display: flex;
     align-items: center;
