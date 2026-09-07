@@ -152,6 +152,22 @@ def test_missing_prev_close_is_not_always_up():
     assert session_prev_close_from_quote(lp, vs_open_trap) is None
 
 
+def test_match_upstox_batch_quote_by_instrument_token():
+    from backend.services.upstox_service import match_upstox_batch_quote
+
+    raw = {
+        "NSE_FO:IDEA26SEPFUT": {
+            "instrument_token": "NSE_FO|68545",
+            "last_price": 15.7,
+            "net_change": 0.56,
+        }
+    }
+    qd = match_upstox_batch_quote(raw, "NSE_FO|68545")
+    assert qd is not None
+    assert qd["net_change"] == 0.56
+    assert match_upstox_batch_quote(raw, "NSE_FO|999") is None
+
+
 def test_closed_market_keeps_live_signal_when_oi_changed(monkeypatch):
     monkeypatch.setattr(
         "backend.services.oi_heatmap.should_skip_scheduled_market_jobs_ist",

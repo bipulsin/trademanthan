@@ -12,6 +12,39 @@ import pytz
 logger = logging.getLogger(__name__)
 
 
+def match_upstox_batch_quote(raw: Dict[str, Any], req_key: str) -> Optional[Dict[str, Any]]:
+    """
+    Map a requested instrument_key (NSE_FO|token) onto an Upstox v2 quotes payload.
+
+    Response dict keys are often trading symbols (NSE_FO:IDEA26SEPFUT) while the
+    token lives on ``instrument_token``.
+    """
+    if not isinstance(raw, dict) or not req_key:
+        return None
+
+    def normalize_key(k: str) -> str:
+        return str(k).replace(" ", "").replace(":", "|").upper()
+
+    if req_key in raw and isinstance(raw[req_key], dict):
+        return raw[req_key]
+    alt1 = req_key.replace("|", ":")
+    if alt1 in raw and isinstance(raw[alt1], dict):
+        return raw[alt1]
+    alt2 = req_key.replace(":", "|")
+    if alt2 in raw and isinstance(raw[alt2], dict):
+        return raw[alt2]
+    norm_req = normalize_key(req_key)
+    for resp_key, qd in raw.items():
+        if not isinstance(qd, dict):
+            continue
+        if normalize_key(resp_key) == norm_req:
+            return qd
+        tok = str(qd.get("instrument_token") or qd.get("instrument_key") or "").strip()
+        if tok and (tok == req_key or normalize_key(tok) == norm_req):
+            return qd
+    return None
+
+
 def _upstox_v3_max_calendar_span_days(interval: str) -> Optional[int]:
     """
     Upstox V3 maximum calendar span for one historical-candle request.
@@ -2593,29 +2626,6 @@ class UpstoxService:
                 )
                 return out
 
-            def normalize_key(k: str) -> str:
-                return k.replace(" ", "").replace(":", "|").upper()
-
-            def find_quote_data(req_key: str) -> Optional[Dict[str, Any]]:
-                if req_key in raw:
-                    qd = raw[req_key]
-                    return qd if isinstance(qd, dict) else None
-                alt1 = req_key.replace("|", ":")
-                if alt1 in raw:
-                    qd = raw[alt1]
-                    return qd if isinstance(qd, dict) else None
-                alt2 = req_key.replace(":", "|")
-                if alt2 in raw:
-                    qd = raw[alt2]
-                    return qd if isinstance(qd, dict) else None
-                norm_req = normalize_key(req_key)
-                for resp_key, qd in raw.items():
-                    if not isinstance(qd, dict):
-                        continue
-                    if normalize_key(resp_key) == norm_req:
-                        return qd
-                return None
-
             def _qi(qd: Dict[str, Any], *keys: str) -> int:
                 for k in keys:
                     v = qd.get(k)
@@ -2627,7 +2637,7 @@ class UpstoxService:
                 return 0
 
             for req_key in keys_batch:
-                qd = find_quote_data(req_key)
+                qd = match_upstox_batch_quote(raw, req_key)
                 if not qd:
                     continue
                 lp = float(qd.get("last_price") or 0)

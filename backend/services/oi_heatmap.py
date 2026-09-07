@@ -124,6 +124,41 @@ def _effective_oi_change(
     return 0
 
 
+def _prime_sess_oi_from_today_db() -> None:
+    """After restart, recover session OI baseline from today's last non-zero oi_chg snapshot (no extra Upstox calls)."""
+    db = None
+    try:
+        db = SessionLocal()
+        rows = db.execute(
+            text(
+                """
+                SELECT DISTINCT ON (instrument_key)
+                    instrument_key, oi, oi_chg
+                FROM oi_heatmap_latest
+                WHERE (updated_at AT TIME ZONE 'Asia/Kolkata')::date
+                      = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date
+                  AND oi_chg IS NOT NULL
+                  AND oi_chg <> 0
+                  AND oi IS NOT NULL
+                  AND oi > 0
+                ORDER BY instrument_key, updated_at DESC
+                """
+            )
+        ).fetchall()
+        for r in rows:
+            ik = str(r.instrument_key or "").strip()
+            if not ik or ik in _sess_oi_prev_by_instrument:
+                continue
+            oi = int(r.oi)
+            chg = int(r.oi_chg)
+            _sess_oi_prev_by_instrument[ik] = oi - chg
+    except Exception as e:
+        logger.debug("oi_heatmap: prime session OI from DB failed: %s", e)
+    finally:
+        if db is not None:
+            db.close()
+
+
 def _positive_float(v: Any) -> Optional[float]:
     if v is None or v == "":
         return None
@@ -185,6 +220,8 @@ def price_dp_and_chg_pct(
         return 0.0, 0.0, None
     dp = float(lp) - float(prev)
     chg_pct = (dp / prev) * 100.0
+    if abs(chg_pct) < 0.0005:
+        return 0.0, 0.0, float(prev)
     return dp, chg_pct, float(prev)
 
 
@@ -868,6 +905,7 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
         merged.update(part)
 
     _reset_oi_delta_caches_if_new_ist_day()
+    _prime_sess_oi_from_today_db()
 
     # Read the global streamer if it is already up; never start a second WS.
     _feed_get_ws = None
@@ -904,6 +942,13 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
                 except (TypeError, ValueError):
                     pass
         raw_oi_chg = int(s.get("change_in_oi") or 0)
+        if raw_oi_chg == 0 and _feed_get_ws:
+            wsq = _feed_get_ws(ik)
+            if wsq:
+                try:
+                    raw_oi_chg = int(wsq.get("oi_change") or 0)
+                except (TypeError, ValueError):
+                    raw_oi_chg = 0
         oi_chg = _effective_oi_change(ux, ik, raw_oi_chg, oi)
         cached_pc = _sess_prev_close_by_instrument.get(ik)
         price_dp, chg_pct, prev_close = price_dp_and_chg_pct(lp, s, cached_prev=cached_pc)
