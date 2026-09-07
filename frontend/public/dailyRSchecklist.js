@@ -73,6 +73,30 @@
         return obj.display_symbol || obj.future_symbol || obj.symbol || "";
     }
 
+    /** Split "DIXON FUT 29 SEP 26" into name / FUT / date stack for Ready Now rows. */
+    function splitReadyDisplay(stock) {
+        var full = displaySym(stock) || "";
+        var name = String((stock && stock.symbol) || "").trim();
+        if (!name) {
+            var first = full.split(/\s+/)[0] || full;
+            name = first;
+        }
+        var rest = full;
+        if (name && full.toUpperCase().indexOf(name.toUpperCase()) === 0) {
+            rest = full.slice(name.length).trim();
+        }
+        var bits = rest.split(/\s+/).filter(Boolean);
+        var inst = "";
+        var dateParts = [];
+        if (bits.length && bits[0].toUpperCase() === "FUT") {
+            inst = "FUT";
+            dateParts = bits.slice(1);
+        } else if (bits.length) {
+            inst = bits.join(" ");
+        }
+        return { name: name || full, inst: inst, dateParts: dateParts, full: full };
+    }
+
     /**
      * READY NOW shows one chip: Rocket or Crash, never both.
      * Higher score wins; equal scores use live active_side, then card direction.
@@ -1737,7 +1761,34 @@
                 exitBan.title = "";
             }
         }
-        card.querySelector(".dc-ready-symbol").textContent = displaySym(stock);
+        var parts = splitReadyDisplay(stock);
+        var symEl = card.querySelector(".dc-ready-symbol");
+        symEl.textContent = parts.name;
+        symEl.title = parts.full || parts.name;
+        var instEl = card.querySelector(".dc-ready-inst");
+        if (instEl) {
+            if (parts.inst) {
+                instEl.hidden = false;
+                instEl.textContent = parts.inst;
+            } else {
+                instEl.hidden = true;
+                instEl.textContent = "";
+            }
+        }
+        var dateEl = card.querySelector(".dc-ready-date");
+        if (dateEl) {
+            dateEl.innerHTML = "";
+            if (parts.dateParts.length) {
+                dateEl.hidden = false;
+                parts.dateParts.forEach(function (p) {
+                    var s = document.createElement("span");
+                    s.textContent = p;
+                    dateEl.appendChild(s);
+                });
+            } else {
+                dateEl.hidden = true;
+            }
+        }
         var volEl = card.querySelector(".dc-vol-grade");
         if (volEl) {
             var vg = String(stock.volatility_grade || "").trim();
@@ -2102,6 +2153,7 @@
             patchReadyCard(card, stock);
         });
         Array.prototype.slice.call(gridEl.querySelectorAll(".dc-ready-card")).forEach(function (ch) {
+            if (ch.classList.contains("dc-ready-card--open-exit")) return;
             if (!syms[ch.dataset.symbol]) gridEl.removeChild(ch);
         });
     }
@@ -2116,6 +2168,84 @@
             tog.setAttribute("aria-expanded", open ? "false" : "true");
             body.hidden = open;
         };
+    }
+
+    function urgentExitOpenTrades() {
+        var panel = (state && state.open_trades_panel) || {};
+        return (panel.open_trades || []).filter(function (t) {
+            return t.state === "EXIT_NOW" || t.state === "PLAN_EXIT";
+        }).sort(function (a, b) {
+            if (a.state === "EXIT_NOW" && b.state !== "EXIT_NOW") return -1;
+            if (b.state === "EXIT_NOW" && a.state !== "EXIT_NOW") return 1;
+            return String(a.symbol || "").localeCompare(String(b.symbol || ""));
+        });
+    }
+
+    /**
+     * Mirror EXIT NOW / PLAN EXIT open trades into READY NOW so the alarm
+     * always has a visible card where the trader is looking (Open Trades alone
+     * is easy to miss when scrolled past / collapsed by attention on Zone 3).
+     */
+    function buildReadyNowExitCard(t) {
+        var card = buildOpenTradeCard(t);
+        card.classList.add("dc-ready-card", "dc-ready-card--open-exit");
+        if (t.state === "EXIT_NOW") card.classList.add("dc-ready-card--exit-now");
+        else card.classList.add("dc-ready-card--plan-exit");
+        var ban = el("div", "dc-ready-exit-now");
+        ban.hidden = false;
+        ban.textContent = t.state === "PLAN_EXIT"
+            ? ("PLAN EXIT · " + displaySym(t))
+            : ("EXIT NOW · " + displaySym(t));
+        ban.title = (t.action_hint || t.exit_trigger_reason || "Open trade needs exit decision");
+        card.insertBefore(ban, card.firstChild);
+        return card;
+    }
+
+    function syncReadyNowExitCards() {
+        var grid = $("dcZone3Grid");
+        var empty = $("dcZone3Empty");
+        var zone = $("dcZone3");
+        var title = zone ? zone.querySelector(".dc-zone-title") : null;
+        if (!grid) return 0;
+        Array.prototype.slice.call(grid.querySelectorAll(".dc-ready-card--open-exit")).forEach(function (ch) {
+            grid.removeChild(ch);
+        });
+        var exits = urgentExitOpenTrades();
+        var i;
+        for (i = exits.length - 1; i >= 0; i--) {
+            grid.insertBefore(buildReadyNowExitCard(exits[i]), grid.firstChild);
+        }
+        var hasSetup = !!grid.querySelector(".dc-ready-card:not(.dc-ready-card--open-exit)");
+        if (empty) {
+            empty.hidden = hasSetup || exits.length > 0;
+            if (!hasSetup && !exits.length) {
+                empty.textContent = "No READY setups right now.";
+            }
+        }
+        if (zone) zone.classList.toggle("dc-zone3--has-exit", exits.length > 0);
+        if (title) {
+            if (exits.length) {
+                var nExit = exits.filter(function (t) { return t.state === "EXIT_NOW"; }).length;
+                var nPlan = exits.length - nExit;
+                var bits = [];
+                if (nExit) bits.push(nExit + " EXIT NOW");
+                if (nPlan) bits.push(nPlan + " PLAN EXIT");
+                title.innerHTML =
+                    '<i class="fas fa-bolt"></i> READY NOW · <span class="dc-zone-exit-flag">' +
+                    bits.join(" · ") +
+                    "</span>";
+            } else {
+                title.innerHTML = '<i class="fas fa-bolt"></i> READY NOW';
+            }
+        }
+        return exits.length;
+    }
+
+    function findOpenTradeCard(tradeId) {
+        return (
+            document.querySelector('.dc-ready-card--open-exit[data-trade-id="' + tradeId + '"]') ||
+            document.querySelector('.dc-ot-card[data-trade-id="' + tradeId + '"]')
+        );
     }
 
     function renderZones(stocks, preview) {
@@ -2140,9 +2270,11 @@
         if (!z3 || !z4) return;
 
         _syncReadyGrid(z3, readyLive);
+        syncReadyNowExitCards();
         if (z3empty) {
-            z3empty.hidden = readyLive.length > 0;
-            z3empty.textContent = "No READY setups right now.";
+            var hasAny = z3.querySelector(".dc-ready-card");
+            z3empty.hidden = !!hasAny;
+            if (!hasAny) z3empty.textContent = "No READY setups right now.";
         }
 
         var pastSec = $("dcZone3Past");
@@ -2680,6 +2812,8 @@
             if (!openIds[id]) delete openExitDrafts[id];
         });
         persistExitDrafts();
+        // Keep EXIT NOW / PLAN EXIT mirrored in READY NOW (where the alert is heard).
+        syncReadyNowExitCards();
         // Re-open Confirm Exit for any trade the user had expanded (survives refresh).
         trades.forEach(function (t) {
             if (openExitDrafts[t.id]) showExitForm(t);
@@ -2889,8 +3023,14 @@
     }
 
     function showExitForm(t) {
-        var card = document.querySelector('.dc-ot-card[data-trade-id="' + t.id + '"]');
+        var card = findOpenTradeCard(t.id);
         if (!card || !card._exitForm) return;
+        // Prefer opening the form on the READY NOW mirror so Confirm EXIT is where the alert landed.
+        if (card.classList.contains("dc-ready-card--open-exit")) {
+            try {
+                card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            } catch (e) { /* ignore */ }
+        }
         var form = card._exitForm;
         var draft = openExitDrafts[t.id] || defaultExitDraft(t);
         openExitDrafts[t.id] = draft;

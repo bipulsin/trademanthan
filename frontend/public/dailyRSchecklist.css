@@ -1251,6 +1251,28 @@ body[data-theme="dark"] .dc-go-board-card {
     box-shadow: 0 0 0 1px rgba(254, 202, 202, 0.55), 0 0 18px rgba(220, 38, 38, 0.45);
     animation: dc-exit-now-pulse 1.2s ease-in-out infinite;
 }
+.dc-zone3--has-exit {
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    border-radius: 12px;
+    padding: 10px 12px 12px;
+    background: rgba(127, 29, 29, 0.18);
+    box-shadow: 0 0 24px rgba(220, 38, 38, 0.18);
+}
+.dc-zone-exit-flag {
+    color: #fecaca;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+}
+.dc-ready-card--open-exit {
+    border-color: #f87171;
+    grid-column: 1 / -1;
+}
+.dc-ready-card--open-exit.dc-ready-card--plan-exit {
+    border-color: #fbbf24;
+}
+.dc-ready-card--open-exit .dc-ready-exit-now {
+    display: block;
+}
 .dc-ready-card--exit-now {
     border-color: #ef4444;
     box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.55), 0 0 22px rgba(220, 38, 38, 0.35);
@@ -1289,9 +1311,45 @@ body[data-theme="dark"] .dc-go-board-card {
 }
 .dc-ready-card--missed { opacity: 0.4; border-color: #64748b; }
 .dc-ready-top {
-    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    margin-bottom: 8px;
 }
-.dc-ready-symbol { font-size: 18px; font-weight: 800; letter-spacing: 0.02em; }
+.dc-ready-symbol {
+    display: block;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+.dc-ready-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.dc-ready-inst {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: var(--theme-text, #e2e8f0);
+}
+.dc-ready-inst[hidden] { display: none !important; }
+.dc-ready-date {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.15;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    color: var(--theme-muted, #94a3b8);
+    text-transform: uppercase;
+}
+.dc-ready-date[hidden] { display: none !important; }
 .dc-vol-grade {
     flex: 0 0 auto;
     font-size: 15px;
