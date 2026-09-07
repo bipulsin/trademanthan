@@ -1317,8 +1317,14 @@ body[data-theme="dark"] .dc-go-board-card {
     gap: 6px;
     margin-bottom: 8px;
 }
+.dc-ready-identity {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
 .dc-ready-symbol {
-    display: block;
     font-size: 18px;
     font-weight: 800;
     letter-spacing: 0.02em;
@@ -1339,15 +1345,12 @@ body[data-theme="dark"] .dc-go-board-card {
 }
 .dc-ready-inst[hidden] { display: none !important; }
 .dc-ready-date {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    line-height: 1.15;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 800;
     letter-spacing: 0.04em;
     color: var(--theme-muted, #94a3b8);
     text-transform: uppercase;
+    white-space: nowrap;
 }
 .dc-ready-date[hidden] { display: none !important; }
 .dc-vol-grade {
@@ -1411,7 +1414,6 @@ body[data-theme="dark"] .dc-vol-grade--high { color: #fca5a5; background: rgba(2
     padding: 6px 10px; border-radius: 8px; border: 1px solid #475569;
     background: #334155; color: #e2e8f0 !important; cursor: pointer;
 }
-.dc-ready-gates { margin-left: auto; }
 .dc-ready-take {
     font-size: 12px; font-weight: 800;
     padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;

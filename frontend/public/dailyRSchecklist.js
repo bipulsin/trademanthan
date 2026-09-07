@@ -1777,16 +1777,12 @@
         }
         var dateEl = card.querySelector(".dc-ready-date");
         if (dateEl) {
-            dateEl.innerHTML = "";
             if (parts.dateParts.length) {
                 dateEl.hidden = false;
-                parts.dateParts.forEach(function (p) {
-                    var s = document.createElement("span");
-                    s.textContent = p;
-                    dateEl.appendChild(s);
-                });
+                dateEl.textContent = parts.dateParts.join("/");
             } else {
                 dateEl.hidden = true;
+                dateEl.textContent = "";
             }
         }
         var volEl = card.querySelector(".dc-vol-grade");
@@ -2021,18 +2017,8 @@
             if (takeBtn.disabled) return;
             takeTrade(sym);
         };
-        var gatesBtn = card.querySelector(".dc-ready-gates");
-        if (gatesBtn) {
-            gatesBtn.onclick = function (e) {
-                e.stopPropagation();
-                openModal(sym);
-            };
-        }
         card.onclick = function (e) {
-            if (e.target.closest && (
-                e.target.closest(".dc-ready-take") ||
-                e.target.closest(".dc-ready-gates")
-            )) return;
+            if (e.target.closest && e.target.closest(".dc-ready-take")) return;
             openSymbolChart(sym, { stock: stock });
         };
         card.title = "Open current-month future chart + Kavach panel";
