@@ -11,7 +11,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays every 15 min 9:30–15:00 IST): arbitrage_master current-month futures → smart_futures_daily
 - Pre-market F&O watchlist (weekdays 9:10 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
-- Live OI heatmap (weekdays, every 30 min 09:00–16:00 IST): arbitrage_master current-month FUT, Upstox REST only (no extra WS); Breakfast exclusivity defers overlap; 16:00 snapshot frozen overnight
+- Live OI heatmap (weekdays, every 30 min 09:00–16:00 IST): arbitrage_master current-month FUT, Upstox REST only (no extra WS); Breakfast exclusivity defers overlap; 16:00 snapshot frozen overnight; HTF-OI once at 16:05 IST from daily FUT candles
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -1161,6 +1161,37 @@ class SmartFutureAlgoScheduler:
                 "✅ Scheduled: OI heatmap every 30 min 09:00–16:00 IST "
                 "(Breakfast exclusivity defers 09:30 until lock or 09:25)"
             )
+
+            def run_oi_heatmap_htf_eod():
+                if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
+                    return
+                ist = pytz.timezone("Asia/Kolkata")
+                now = datetime.now(ist)
+                if _skip_ist_non_trading_job("OI heatmap HTF", now):
+                    return
+                try:
+                    from backend.services.oi_heatmap_htf import refresh_oi_heatmap_htf
+
+                    refresh_oi_heatmap_htf(force=False)
+                except Exception as e:
+                    logger.error("❌ OI heatmap HTF EOD failed: %s", e, exc_info=True)
+
+            self.scheduler.add_job(
+                run_oi_heatmap_htf_eod,
+                trigger=CronTrigger(
+                    day_of_week="mon-fri",
+                    hour=16,
+                    minute=5,
+                    timezone="Asia/Kolkata",
+                ),
+                id="smart_future_oi_heatmap_htf_eod",
+                name="OI heatmap HTF-OI (daily FUT, 16:05 IST after 16:00 freeze)",
+                replace_existing=True,
+                max_instances=1,
+                misfire_grace_time=3600,
+                coalesce=True,
+            )
+            logger.info("✅ Scheduled: OI heatmap HTF-OI once daily 16:05 IST (days/1 OI, not 30-min)")
 
             # Phase 1: Smart Futures + Vajra jobs removed (candle-budget consolidation).
             for _legacy_sf_vajra_id in (

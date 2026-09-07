@@ -6488,6 +6488,33 @@ async def oi_heatmap_refresh_now(
         )
 
 
+@router.post("/oi-heatmap/htf-refresh")
+async def oi_heatmap_htf_refresh_now(
+    force: bool = Query(
+        True,
+        description="Recompute even if HTF already ran today (off-cycle / after hours).",
+    ),
+):
+    """Once-daily HTF-OI from Upstox days/1 FUT candles (close + oi). Not the 30-min session job."""
+    try:
+        from backend.services.oi_heatmap_htf import refresh_oi_heatmap_htf
+
+        result = refresh_oi_heatmap_htf(force=force)
+        try:
+            invalidate_oi_heatmap_dashboard_cache()
+        except Exception as inv_err:
+            logger.warning("oi_heatmap_htf_refresh: dashboard cache clear failed: %s", inv_err)
+        body = dict(result) if isinstance(result, dict) else {"result": result}
+        body["dashboard_cache_cleared"] = True
+        return JSONResponse(status_code=200, content=body)
+    except Exception as e:
+        logger.exception("oi_heatmap_htf_refresh_now: %s", e)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(e), "dashboard_cache_cleared": False},
+        )
+
+
 @router.get("/dashboard-oi-heatmap")
 async def dashboard_oi_heatmap():
     """

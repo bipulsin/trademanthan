@@ -1260,6 +1260,14 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
     if frozen:
         rows = apply_previous_oi_signal_when_closed(rows)
     attached = _attach_prev_signal_for_api(rows, ts or None)
+    try:
+        from backend.services.oi_heatmap_htf import attach_htf_oi, htf_window_payload
+
+        attached = attach_htf_oi(attached)
+        htf_meta = htf_window_payload()
+    except Exception as htf_err:
+        logger.debug("oi_heatmap: HTF attach skipped: %s", htf_err)
+        htf_meta = None
     return {
         "success": True,
         "source": "upstox",
@@ -1271,6 +1279,7 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
         "frozen": frozen,
         "message": None if rows else empty_help,
         "snapshot_note": snapshot_note,
+        "htf_oi_window": htf_meta,
     }
 
 

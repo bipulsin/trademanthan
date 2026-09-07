@@ -32,6 +32,59 @@ def test_interpret_oi_signal_four_states():
     assert interpret_oi_signal(1.0, 0.0) == "NEUTRAL"
 
 
+def test_htf_oi_window_last_bar_vs_ten_sessions_back():
+    from backend.services.oi_heatmap_htf import daily_bars_with_oi, htf_oi_from_daily_bars
+
+    candles = []
+    for i in range(12):
+        candles.append(
+            {
+                "timestamp": f"2026-08-{17 + i:02d}T00:00:00+05:30",
+                "close": 100.0 + i,
+                "oi": 1000.0 + i * 10,
+            }
+        )
+    bars = daily_bars_with_oi(candles)
+    rec = htf_oi_from_daily_bars(bars)
+    assert rec is not None
+    assert rec["bar_latest"].startswith("2026-08-28")
+    assert rec["bar_prior"].startswith("2026-08-18")
+    assert rec["sessions_back"] == 10
+    assert rec["htf_oi_signal"] == "LONG_BUILDUP"
+    assert htf_oi_from_daily_bars(bars[:10]) is None
+
+
+def test_htf_oi_four_way_matches_session_rules():
+    from backend.services.oi_heatmap_htf import htf_oi_from_daily_bars
+
+    def pair(c0, oi0, c1, oi1):
+        bars = [
+            {"timestamp": "2026-08-18T00:00:00+05:30", "close": c0, "oi": oi0},
+        ] + [
+            {"timestamp": f"2026-08-{19 + i:02d}T00:00:00+05:30", "close": c0, "oi": oi0}
+            for i in range(9)
+        ]
+        bars.append({"timestamp": "2026-08-28T00:00:00+05:30", "close": c1, "oi": oi1})
+        return htf_oi_from_daily_bars(bars)["htf_oi_signal"]
+
+    assert pair(100, 1000, 110, 1100) == "LONG_BUILDUP"
+    assert pair(100, 1000, 90, 1100) == "SHORT_BUILDUP"
+    assert pair(100, 1000, 90, 900) == "LONG_UNWIND"
+    assert pair(100, 1000, 110, 900) == "SHORT_COVER"
+
+
+def test_htf_skips_bars_missing_oi():
+    from backend.services.oi_heatmap_htf import daily_bars_with_oi
+
+    bars = daily_bars_with_oi(
+        [
+            {"timestamp": "2026-08-18T00:00:00+05:30", "close": 1, "oi": 10},
+            {"timestamp": "2026-08-19T00:00:00+05:30", "close": 1},
+        ]
+    )
+    assert len(bars) == 1
+
+
 def test_bucket_aliases_and_group():
     assert bucket_key_for_oi_signal("LONG_UNWIND") == "LONG_UNWINDING"
     assert bucket_key_for_oi_signal("SHORT_COVER") == "SHORT_COVERING"

@@ -1971,6 +1971,28 @@ def _run_startup_schema_migrations(db_engine):
                     conn.execute(text("ALTER TABLE oi_heatmap_latest ADD COLUMN prev_oi_signal TEXT"))
                     print("Applied migration: added oi_heatmap_latest.prev_oi_signal")
 
+            if "oi_heatmap_htf_latest" not in inspect(db_engine).get_table_names():
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE oi_heatmap_htf_latest (
+                                instrument_key TEXT PRIMARY KEY,
+                                underlying_symbol TEXT,
+                                htf_oi_signal TEXT,
+                                price_from DOUBLE PRECISION,
+                                price_to DOUBLE PRECISION,
+                                oi_from BIGINT,
+                                oi_to BIGINT,
+                                bar_latest TEXT,
+                                bar_prior TEXT,
+                                computed_at TIMESTAMPTZ NOT NULL
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created oi_heatmap_htf_latest")
+
             # WebSocket-derived intraday 1m OHLC+OI candles (for today's backtest replay).
             if "upstox_ws_intraday_1m" not in table_names and db_engine.dialect.name == "postgresql":
                 conn.execute(

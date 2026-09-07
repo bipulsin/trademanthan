@@ -227,7 +227,7 @@
         const head =
             "<thead><tr>" +
             "<th>#</th><th>Symbol</th><th>LTP</th><th>Chg%</th><th>OI</th><th>OI Chg</th>" +
-            "<th>OI Signal</th><th>Prev OI Signal</th><th>Volume</th><th>Score</th>" +
+            "<th>OI Signal</th><th>Prev OI Signal</th><th>HTF-OI</th><th>Volume</th><th>Score</th>" +
             "</tr></thead>";
         const body = rows
             .map(function (r) {
@@ -240,6 +240,12 @@
                 const prevSigClass = /^[A-Z_]+$/.test(prevSig)
                     ? prevSig.replace(/[^A-Z_]/g, "_")
                     : "NEUTRAL";
+                const htfSig = r.htf_oi_signal || "";
+                const htfTip = signalTooltip(htfSig);
+                const htfClass = /^[A-Z_]+$/.test(htfSig)
+                    ? htfSig.replace(/[^A-Z_]/g, "_")
+                    : "NEUTRAL";
+                const htfHs = heatStyle(htfSig);
                 const sym = r.trading_symbol || r.underlying_symbol || "";
                 return (
                     "<tr>" +
@@ -276,6 +282,15 @@
                     escapeHtml(prevSigTip) +
                     "\">" +
                     escapeHtml(signalLabel(prevSig || "—")) +
+                    "</span></td>" +
+                    '<td style="' +
+                    htfHs +
+                    '"><span class="oi-heatmap-signal oi-heatmap-signal--' +
+                    htfClass +
+                    '" title="' +
+                    escapeHtml(htfTip || "10-session daily FUT OI vs last completed bar") +
+                    '">' +
+                    escapeHtml(htfSig ? signalLabel(htfSig) : "—") +
                     "</span></td>" +
                     "<td>" +
                     fmtInt(r.volume) +
@@ -314,6 +329,13 @@
                 var bs = String(signalLabel(b && b.oi_signal) || "").toUpperCase();
                 if (as < bs) return -1 * dir;
                 if (as > bs) return 1 * dir;
+                return 0;
+            }
+            if (modalSortKey === "htf_oi_signal") {
+                var hs = String(signalLabel(a && a.htf_oi_signal) || "").toUpperCase();
+                var hsb = String(signalLabel(b && b.htf_oi_signal) || "").toUpperCase();
+                if (hs < hsb) return -1 * dir;
+                if (hs > hsb) return 1 * dir;
                 return 0;
             }
             var asym = String((a && (a.underlying_symbol || a.trading_symbol)) || "").toUpperCase();
