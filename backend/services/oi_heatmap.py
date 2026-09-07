@@ -64,6 +64,7 @@ _universe_keys: List[str] = []
 # 2) First tick / after restart: delta vs prior completed daily candle OI (cached per instrument per day).
 _heatmap_oi_cache_ist_day: Optional[date] = None
 _sess_oi_prev_by_instrument: Dict[str, int] = {}
+_sess_prev_close_by_instrument: Dict[str, float] = {}
 _prior_day_oi_ref_by_instrument: Dict[str, int] = {}
 
 
@@ -73,6 +74,7 @@ def _reset_oi_delta_caches_if_new_ist_day() -> None:
     if _heatmap_oi_cache_ist_day == d:
         return
     _sess_oi_prev_by_instrument.clear()
+    _sess_prev_close_by_instrument.clear()
     _prior_day_oi_ref_by_instrument.clear()
     _heatmap_oi_cache_ist_day = d
 
@@ -120,6 +122,70 @@ def _effective_oi_change(
     if ref is not None:
         return int(current_oi) - ref
     return 0
+
+
+def _positive_float(v: Any) -> Optional[float]:
+    if v is None or v == "":
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    if f > 1e-9:
+        return f
+    return None
+
+
+def session_prev_close_from_quote(lp: float, snapshot: Dict[str, Any]) -> Optional[float]:
+    """
+    Previous close for OI price direction (LTP vs prior session close).
+
+    Never treat a missing reference as 0: ``ltp - 0`` is always Price ↑ and wipes
+    Short Buildup / Long Unwinding. Do not use day open.
+    """
+    s = snapshot if isinstance(snapshot, dict) else {}
+    ohlc = s.get("ohlc") if isinstance(s.get("ohlc"), dict) else {}
+    raw_nc = s.get("net_change")
+    if raw_nc is None:
+        raw_nc = s.get("netChange")
+    if raw_nc is not None and raw_nc != "":
+        try:
+            nc = float(raw_nc)
+            prev = float(lp) - nc
+            if prev > 1e-9:
+                return prev
+        except (TypeError, ValueError):
+            pass
+    for blob in (s, ohlc):
+        for key in ("previous_close", "prev_close"):
+            pc = _positive_float(blob.get(key))
+            if pc is not None:
+                return pc
+    for key in ("close_price",):
+        pc = _positive_float(s.get(key))
+        if pc is not None and abs(pc - float(lp or 0)) > 1e-6:
+            return pc
+    close_px = _positive_float(ohlc.get("close"))
+    if close_px is not None and abs(close_px - float(lp or 0)) > 1e-6:
+        return close_px
+    return None
+
+
+def price_dp_and_chg_pct(
+    lp: float,
+    snapshot: Dict[str, Any],
+    *,
+    cached_prev: Optional[float] = None,
+) -> Tuple[float, float, Optional[float]]:
+    """Return (price_dp, chg_pct, prev_close). Missing prev → (0, 0, None), not LTP."""
+    prev = session_prev_close_from_quote(lp, snapshot)
+    if prev is None:
+        prev = _positive_float(cached_prev)
+    if prev is None or prev <= 1e-9:
+        return 0.0, 0.0, None
+    dp = float(lp) - float(prev)
+    chg_pct = (dp / prev) * 100.0
+    return dp, chg_pct, float(prev)
 
 
 _OI_FETCH_START = dt_time(9, 0)
@@ -675,9 +741,10 @@ def apply_previous_oi_signal_when_closed(
     by_underlying: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Closed market only: if the live quote classified NEUTRAL, copy the last non-neutral
-    grade. Does not invent a signal when none exists. Live session (09:00–16:00 IST
-    trading days) leaves genuine NEUTRAL unchanged, including Friday 16:00.
+    Closed market only: if the live quote classified NEUTRAL *and* OI change is zero
+    (weekend / stale quotes), copy the last non-neutral grade. Non-zero OI change keeps
+    the live classification so an evening force scan does not wipe today's buildup.
+    Live session (09:00–16:00 IST trading days) leaves genuine NEUTRAL unchanged.
     """
     out = [dict(r) for r in (rows or [])]
     if not is_oi_heatmap_overnight_freeze(now):
@@ -697,6 +764,13 @@ def apply_previous_oi_signal_when_closed(
     restored: List[Dict[str, Any]] = []
     for d in out:
         if _signal_is_neutral(d.get("oi_signal")):
+            try:
+                oi_chg_now = int(d.get("oi_chg") or 0)
+            except (TypeError, ValueError):
+                oi_chg_now = 0
+            if oi_chg_now != 0:
+                restored.append(d)
+                continue
             ik = str(d.get("instrument_key") or "").strip()
             und = str(d.get("underlying_symbol") or "").strip().upper()
             prev = by_i.get(ik) or by_u.get(und)
@@ -831,18 +905,11 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
                     pass
         raw_oi_chg = int(s.get("change_in_oi") or 0)
         oi_chg = _effective_oi_change(ux, ik, raw_oi_chg, oi)
-        net_chg = float(s.get("net_change") or 0)
-        ohlc = s.get("ohlc") if isinstance(s.get("ohlc"), dict) else {}
-        open_ = float(ohlc.get("open") or 0)
-        if abs(net_chg) > 1e-9:
-            prev = lp - net_chg
-        elif open_ > 1e-9:
-            prev = open_
-        else:
-            prev = float(ohlc.get("close") or 0)
-        chg_pct = ((lp - prev) / prev * 100.0) if prev > 1e-9 else 0.0
+        cached_pc = _sess_prev_close_by_instrument.get(ik)
+        price_dp, chg_pct, prev_close = price_dp_and_chg_pct(lp, s, cached_prev=cached_pc)
+        if prev_close is not None:
+            _sess_prev_close_by_instrument[ik] = prev_close
         oi_chg_pct = (oi_chg / max(1, oi - oi_chg) * 100.0) if oi else 0.0
-        price_dp = lp - prev
         sig = _interpret_signal(price_dp, float(oi_chg))
         meta = ik_meta.get(ik) or {}
         und = (meta.get("underlying_symbol") or "").strip().upper()

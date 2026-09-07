@@ -2679,6 +2679,13 @@ class UpstoxService:
                 if not atp and isinstance(ohlc, dict):
                     atp = _pick_fp(ohlc, "average_price", "atp", "vwap", "ap")
 
+                prev_close = _pick_fp(
+                    qd,
+                    "previous_close",
+                    "prev_close",
+                )
+                if not prev_close and isinstance(ohlc, dict):
+                    prev_close = _pick_fp(ohlc, "previous_close", "prev_close")
                 out[req_key] = {
                     "last_price": lp,
                     "volume": vol,
@@ -2687,6 +2694,8 @@ class UpstoxService:
                     "net_change": net_chg,
                     "ohlc": ohlc,
                     "average_price": atp or None,
+                    "previous_close": prev_close or None,
+                    "close_price": _pick_fp(qd, "close_price") or None,
                 }
             missing_keys = [k for k in keys_batch if k not in out]
             zero_last = [

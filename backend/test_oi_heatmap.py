@@ -122,6 +122,59 @@ def test_closed_market_neutral_uses_previous_signal(monkeypatch):
     assert out[2]["oi_signal"] == "NEUTRAL"
 
 
+def test_missing_prev_close_is_not_always_up():
+    from backend.services.oi_heatmap import price_dp_and_chg_pct, session_prev_close_from_quote
+
+    lp = 100.0
+    empty = {"last_price": lp, "ohlc": {}}
+    assert session_prev_close_from_quote(lp, empty) is None
+    dp, pct, prev = price_dp_and_chg_pct(lp, empty)
+    assert dp == 0.0 and pct == 0.0 and prev is None
+    assert interpret_oi_signal(dp, 50.0) == "NEUTRAL"
+
+    down = {"net_change": -2.5, "ohlc": {"open": 99.0}}
+    dp, pct, prev = price_dp_and_chg_pct(lp, down)
+    assert prev == 102.5
+    assert dp < 0
+    assert interpret_oi_signal(dp, 10.0) == "SHORT_BUILDUP"
+    assert interpret_oi_signal(dp, -10.0) == "LONG_UNWINDING"
+
+    up = {"net_change": 1.5}
+    dp, pct, prev = price_dp_and_chg_pct(lp, up)
+    assert dp > 0
+    assert interpret_oi_signal(dp, 10.0) == "LONG_BUILDUP"
+    assert interpret_oi_signal(dp, -10.0) == "SHORT_COVERING"
+
+    dp, pct, prev = price_dp_and_chg_pct(lp, empty, cached_prev=105.0)
+    assert prev == 105.0 and dp < 0
+
+    vs_open_trap = {"ohlc": {"open": 90.0, "close": lp}}
+    assert session_prev_close_from_quote(lp, vs_open_trap) is None
+
+
+def test_closed_market_keeps_live_signal_when_oi_changed(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.oi_heatmap.should_skip_scheduled_market_jobs_ist",
+        lambda now=None: False,
+    )
+    from backend.services.oi_heatmap import apply_previous_oi_signal_when_closed
+
+    saturday = _ist(2026, 9, 5, 20, 48)
+    rows = [
+        {
+            "instrument_key": "NSE_FO|1",
+            "underlying_symbol": "AAA",
+            "oi_signal": "NEUTRAL",
+            "oi_chg": 100,
+        }
+    ]
+    prev_i = {"NSE_FO|1": "LONG_BUILDUP"}
+    out = apply_previous_oi_signal_when_closed(
+        rows, now=saturday, by_instrument=prev_i, by_underlying={}
+    )
+    assert out[0]["oi_signal"] == "NEUTRAL"
+
+
 def test_live_session_neutral_does_not_use_previous(monkeypatch):
     monkeypatch.setattr(
         "backend.services.oi_heatmap.should_skip_scheduled_market_jobs_ist",
