@@ -8,6 +8,7 @@ from backend.services.stock_option_signals import (
     SIDE_BEAR,
     SIDE_BULL,
     STATUS_ACTIVE,
+    STATUS_COMPLETED,
     STATUS_EXECUTED,
     STATUS_RADAR,
     STATUS_REJECTED,
@@ -20,6 +21,8 @@ from backend.services.stock_option_signals import (
     completed_2h_ohlc,
     ema_condition_holds,
     hard_stop_price,
+    realized_credit_pnl,
+    _row_public,
     next_ema_action,
     parse_chartink_symbols,
     pick_nearest_delta,
@@ -110,6 +113,7 @@ def test_ignore_if_radar_or_active_allow_if_only_executed():
     assert should_insert_new_signal([STATUS_EXECUTED]) is True
     assert should_insert_new_signal([STATUS_EXECUTED, STATUS_EXECUTED]) is True
     assert should_insert_new_signal([STATUS_REJECTED]) is True
+    assert should_insert_new_signal([STATUS_COMPLETED]) is True
 
 
 def test_invalidate_keeps_executed_only_with_arm_and_strikes():
@@ -180,3 +184,21 @@ def test_pnl_and_hard_stop():
     assert combined_pnl(10, 4, 6, 3) == (10 - 4) - (6 - 3)
     assert combined_pnl(10, 4, None, 3) is None
     assert hard_stop_price(12.5) == 37.5
+    # Credit spread: net credit at entry minus cost to close.
+    # pnl = sell_entry - buy_entry - (sell_exit - buy_exit)
+    assert realized_credit_pnl(10, 4, 6, 3) == (10 - 4) - (6 - 3)
+    assert realized_credit_pnl(10, 4, 6, 3) == 3
+    assert realized_credit_pnl(10, 4, None, 3) is None
+    assert hard_stop_price(10) == 30.0
+    done = _row_public({
+        "id": 1,
+        "status": STATUS_COMPLETED,
+        "sell_cost": 10,
+        "buy_cost": 4,
+        "sell_ltp": 99,
+        "buy_ltp": 1,
+        "sell_exit_price": 6,
+        "buy_exit_price": 3,
+    })
+    assert done["combined_pnl"] == 3
+    assert done["hard_stop"] == 30.0

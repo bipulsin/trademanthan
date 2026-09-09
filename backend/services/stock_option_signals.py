@@ -23,6 +23,7 @@ _ENSURED = False
 STATUS_RADAR = "Radar"
 STATUS_ACTIVE = "Active"
 STATUS_EXECUTED = "Executed"
+STATUS_COMPLETED = "Completed"
 STATUS_REJECTED = "Rejected"
 SIDE_BEAR = "BEAR CALL"
 SIDE_BULL = "BULL PUT"
@@ -68,6 +69,13 @@ def ensure_stock_option_tables() -> None:
     sql = _MIGRATION.read_text(encoding="utf-8")
     with engine.begin() as conn:
         conn.execute(text(sql))
+        for stmt in (
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS exit_date DATE",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS sell_exit_price DOUBLE PRECISION",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS buy_exit_price DOUBLE PRECISION",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS realized_pnl DOUBLE PRECISION",
+        ):
+            conn.execute(text(stmt))
     _ENSURED = True
     logger.info("stock_option tables ensured")
 
@@ -436,7 +444,10 @@ def spread_lines(side: Optional[str], sell_strike: Any, buy_strike: Any) -> Tupl
 
 
 def combined_pnl(sell_cost: Any, buy_cost: Any, sell_ltp: Any, buy_ltp: Any) -> Optional[float]:
-    """Credit received (sell − buy) minus current close cost (sell LTP − buy LTP)."""
+    """Credit received (sell − buy) minus current close cost (sell LTP − buy LTP).
+
+    Same formula as realized_credit_pnl: sell_entry − buy_entry − (sell_mark − buy_mark).
+    """
     sc = _as_float(sell_cost)
     bc = _as_float(buy_cost)
     sl = _as_float(sell_ltp)
@@ -446,6 +457,24 @@ def combined_pnl(sell_cost: Any, buy_cost: Any, sell_ltp: Any, buy_ltp: Any) -> 
     credit = sc - bc
     close_cost = sl - bl
     return credit - close_cost
+
+
+def realized_credit_pnl(
+    sell_entry: Any,
+    buy_entry: Any,
+    sell_exit: Any,
+    buy_exit: Any,
+) -> Optional[float]:
+    """Credit-spread P&L in premium points. Hard stop is not part of this.
+
+    net_credit_at_entry = sell_entry − buy_entry
+    cost_to_close = sell_exit − buy_exit
+    pnl = net_credit_at_entry − cost_to_close
+        = sell_entry − buy_entry − (sell_exit − buy_exit)
+
+    Hard stop stays 3 × sell entry (hard_stop_price); exit prices do not change it.
+    """
+    return combined_pnl(sell_entry, buy_entry, sell_exit, buy_exit)
 
 
 def hard_stop_price(sell_cost: Any) -> Optional[float]:
@@ -1283,7 +1312,15 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
     sell_line, buy_line = spread_lines(r.get("side"), r.get("sell_strike"), r.get("buy_strike"))
     user_sell = r.get("user_sell_strike") if r.get("user_sell_strike") is not None else r.get("sell_strike")
     user_buy = r.get("user_buy_strike") if r.get("user_buy_strike") is not None else r.get("buy_strike")
-    pnl = combined_pnl(r.get("sell_cost"), r.get("buy_cost"), r.get("sell_ltp"), r.get("buy_ltp"))
+    completed = (r.get("status") or "").strip().lower() == "completed"
+    if completed:
+        pnl = realized_credit_pnl(
+            r.get("sell_cost"), r.get("buy_cost"), r.get("sell_exit_price"), r.get("buy_exit_price")
+        )
+        if pnl is None:
+            pnl = _as_float(r.get("realized_pnl"))
+    else:
+        pnl = combined_pnl(r.get("sell_cost"), r.get("buy_cost"), r.get("sell_ltp"), r.get("buy_ltp"))
     hs = hard_stop_price(r.get("sell_cost"))
     return {
         "id": r.get("id"),
@@ -1310,6 +1347,9 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "user_buy_strike": user_buy,
         "sell_ltp": r.get("sell_ltp"),
         "buy_ltp": r.get("buy_ltp"),
+        "exit_date": _fmt_ts(r.get("exit_date")),
+        "sell_exit_price": r.get("sell_exit_price"),
+        "buy_exit_price": r.get("buy_exit_price"),
         "combined_pnl": pnl,
         "hard_stop": hs,
         "hard_stop_placed": bool(r.get("hard_stop_placed")),
@@ -1330,7 +1370,8 @@ def list_workspace() -> Dict[str, Any]:
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,
-                       remarks, sell_ltp, buy_ltp
+                       remarks, sell_ltp, buy_ltp,
+                       exit_date, sell_exit_price, buy_exit_price, realized_pnl
                 FROM stock_option_signals
                 WHERE status IS DISTINCT FROM :rejected
                 ORDER BY id DESC
@@ -1340,7 +1381,7 @@ def list_workspace() -> Dict[str, Any]:
         ).mappings().all()
     finally:
         db.close()
-    radar, active, executed = [], [], []
+    radar, active, executed, completed = [], [], [], []
     for raw in rows:
         item = _row_public(dict(raw))
         st = (item.get("status") or "").strip().lower()
@@ -1350,7 +1391,9 @@ def list_workspace() -> Dict[str, Any]:
             active.append(item)
         elif st == "executed":
             executed.append(item)
-    return {"radar": radar, "active": active, "executed": executed}
+        elif st == "completed":
+            completed.append(item)
+    return {"radar": radar, "active": active, "executed": executed, "completed": completed}
 
 
 def submit_trade(
@@ -1439,3 +1482,172 @@ def set_hard_stop_placed(signal_id: int, placed: bool) -> Dict[str, Any]:
     finally:
         db.close()
     return {"ok": True, "id": signal_id, "hard_stop_placed": bool(placed)}
+
+
+def _parse_iso_date(value: Any, field: str) -> date:
+    try:
+        return date.fromisoformat(str(value or "").strip()[:10])
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"{field} must be YYYY-MM-DD") from e
+
+
+def quote_exit_ltps(signal_id: int) -> Dict[str, Any]:
+    """Live LTP for an Executed row at exit-popup open. Does not complete the trade."""
+    ensure_stock_option_tables()
+    now = now_ist_second()
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT id, status, date_traded, sell_cost, buy_cost,
+                       sell_instrument_key, buy_instrument_key, sell_ltp, buy_ltp
+                FROM stock_option_signals
+                WHERE id = :id
+                """
+            ),
+            {"id": signal_id},
+        ).mappings().first()
+        if not row:
+            raise LookupError("signal not found")
+        if (row.get("status") or "").strip().lower() != "executed":
+            raise ValueError("only Executed rows can be quoted for exit")
+        if row.get("sell_cost") is None or row.get("buy_cost") is None:
+            raise ValueError("trade has no entry costs")
+        sell_key = str(row.get("sell_instrument_key") or "").strip()
+        buy_key = str(row.get("buy_instrument_key") or "").strip()
+        sell_ltp = _as_float(row.get("sell_ltp"))
+        buy_ltp = _as_float(row.get("buy_ltp"))
+        keys = [k for k in (sell_key, buy_key) if k]
+        if keys:
+            try:
+                from backend.services.market_data.reads import ltp_map_with_fallback
+
+                prices = ltp_map_with_fallback(keys, allow_broker_fallback=True) or {}
+                if sell_key and prices.get(sell_key) is not None:
+                    sell_ltp = _as_float(prices.get(sell_key))
+                if buy_key and prices.get(buy_key) is not None:
+                    buy_ltp = _as_float(prices.get(buy_key))
+                if sell_ltp is not None or buy_ltp is not None:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE stock_option_signals
+                            SET sell_ltp = COALESCE(:sell_ltp, sell_ltp),
+                                buy_ltp = COALESCE(:buy_ltp, buy_ltp),
+                                ltp_updated_at = :ts,
+                                updated_at = :ts
+                            WHERE id = :id AND status = :executed
+                            """
+                        ),
+                        {
+                            "sell_ltp": sell_ltp,
+                            "buy_ltp": buy_ltp,
+                            "ts": now,
+                            "id": signal_id,
+                            "executed": STATUS_EXECUTED,
+                        },
+                    )
+                    db.commit()
+            except Exception:
+                db.rollback()
+                logger.info("stock_option exit quote failed for %s", signal_id)
+        return {
+            "ok": True,
+            "id": signal_id,
+            "sell_ltp": sell_ltp,
+            "buy_ltp": buy_ltp,
+            "quoted_at": _fmt_ts(now),
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def submit_exit(
+    signal_id: int,
+    *,
+    date_traded: str,
+    buy_strike: float,
+    buy_cost: float,
+    sell_strike: float,
+    sell_cost: float,
+    exit_date: str,
+    sell_exit: float,
+    buy_exit: float,
+) -> Dict[str, Any]:
+    """Complete an Executed trade. Does not change status unless this Submit runs."""
+    ensure_stock_option_tables()
+    traded = _parse_iso_date(date_traded, "date_traded")
+    exited = _parse_iso_date(exit_date, "exit_date")
+    pnl = realized_credit_pnl(sell_cost, buy_cost, sell_exit, buy_exit)
+    if pnl is None:
+        raise ValueError("entry and exit prices are required")
+    now = now_ist_second()
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT id, status, date_traded, sell_cost, buy_cost
+                FROM stock_option_signals
+                WHERE id = :id
+                """
+            ),
+            {"id": signal_id},
+        ).mappings().first()
+        if not row:
+            raise LookupError("signal not found")
+        if (row.get("status") or "").strip().lower() != "executed":
+            raise ValueError("only Executed rows can be completed")
+        if row.get("sell_cost") is None or row.get("buy_cost") is None:
+            raise ValueError("trade has no entry costs")
+        db.execute(
+            text(
+                """
+                UPDATE stock_option_signals
+                SET status = :completed,
+                    date_traded = :date_traded,
+                    user_buy_strike = :buy_strike,
+                    user_sell_strike = :sell_strike,
+                    buy_cost = :buy_cost,
+                    sell_cost = :sell_cost,
+                    exit_date = :exit_date,
+                    sell_exit_price = :sell_exit,
+                    buy_exit_price = :buy_exit,
+                    realized_pnl = :pnl,
+                    updated_at = :ts
+                WHERE id = :id AND status = :executed
+                """
+            ),
+            {
+                "completed": STATUS_COMPLETED,
+                "date_traded": traded,
+                "buy_strike": float(buy_strike),
+                "sell_strike": float(sell_strike),
+                "buy_cost": float(buy_cost),
+                "sell_cost": float(sell_cost),
+                "exit_date": exited,
+                "sell_exit": float(sell_exit),
+                "buy_exit": float(buy_exit),
+                "pnl": float(pnl),
+                "ts": now,
+                "id": signal_id,
+                "executed": STATUS_EXECUTED,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {
+        "ok": True,
+        "id": signal_id,
+        "status": STATUS_COMPLETED,
+        "combined_pnl": pnl,
+        "hard_stop": hard_stop_price(sell_cost),
+    }

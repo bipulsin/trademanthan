@@ -173,12 +173,40 @@ body.theme-page.stock-options-body {
 
 .so-modal-card {
     width: min(480px, 100%);
+    max-height: min(92vh, 820px);
+    overflow: auto;
     background: var(--theme-card, #111827);
     color: var(--theme-text, #e2e8f0);
     border: 1px solid var(--theme-border, #334155);
     border-radius: 14px;
     padding: 18px 18px 16px;
 }
+
+.so-modal-card-wide {
+    width: min(520px, 100%);
+}
+
+.so-section {
+    margin: 12px 0 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--theme-muted, #94a3b8);
+}
+
+.so-exit-btn {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(248, 113, 113, 0.55);
+    background: rgba(220, 38, 38, 0.16);
+    color: #fecaca;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.so-exit-btn:hover { background: rgba(220, 38, 38, 0.28); }
 
 .so-modal-card h2 { margin: 0 0 6px; font-size: 1.15rem; }
 .so-modal-msg {

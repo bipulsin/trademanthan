@@ -28,10 +28,28 @@
       .replace(/>/g, "&gt;");
   }
 
-  let workspace = { radar: [], active: [], executed: [] };
+  let workspace = { radar: [], active: [], executed: [], completed: [] };
   let activeTab = "radar";
   let tradeRow = null;
+  let exitRow = null;
+  let exitQuoteGen = 0;
+  let exitPxDirty = { sell: false, buy: false };
   let sortState = { tab: "", key: "", dir: "asc" };
+
+  function todayIso() {
+    const d = new Date();
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 10);
+  }
+
+  function dateOnly(v) {
+    if (!v) return "";
+    return String(v).slice(0, 10);
+  }
+
+  function hasEntryCosts(r) {
+    return r && r.sell_cost != null && r.sell_cost !== "" && r.buy_cost != null && r.buy_cost !== "";
+  }
 
   function emptyVal(v) {
     return v == null || v === "";
@@ -112,6 +130,17 @@
       { key: "hard_stop", label: "Hard stop", type: "num", sort: (r) => r.hard_stop },
       { key: "hard_stop_placed", label: "Hard stop placed", type: "bool", sort: (r) => r.hard_stop_placed },
       { key: "remarks", label: "Remarks", type: "str", sort: (r) => r.remarks },
+      { key: "exit", label: "" },
+    ],
+    report: [
+      { key: "date", label: "Entry date", type: "date", sort: (r) => r.date_traded || r.armed_at },
+      { key: "symbol", label: "Symbol", type: "str", sort: (r) => r.symbol },
+      { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+      { key: "strikes", label: "Strikes", type: "num", sort: strikeSort },
+      { key: "costs", label: "Entry costs", type: "num", sort: (r) => r.sell_cost },
+      { key: "exit_px", label: "Exit prices", type: "num", sort: (r) => r.sell_exit_price },
+      { key: "exit_date", label: "Exit date", type: "date", sort: (r) => r.exit_date },
+      { key: "pnl", label: "P&amp;L", type: "num", sort: (r) => r.combined_pnl },
     ],
   };
 
@@ -122,6 +151,8 @@
     });
     const note = document.getElementById("soExecutedNote");
     if (note) note.hidden = name !== "executed";
+    const reportNote = document.getElementById("soReportNote");
+    if (reportNote) reportNote.hidden = name !== "report";
     render();
   }
 
@@ -184,10 +215,33 @@
         <td>${num(r.hard_stop)}</td>
         <td><input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed"></td>
         <td class="so-remarks">${esc(r.remarks || "")}</td>
+        <td>${hasEntryCosts(r) ? '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button>' : ""}</td>
       </tr>`;
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table">
       <thead><tr>${headerHtml("executed")}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
+  function renderReport() {
+    const rows = sortRows("report", workspace.completed || []);
+    if (!rows.length) return '<p class="so-empty">No completed trades.</p>';
+    const body = rows.map((r) => {
+      const pnl = r.combined_pnl;
+      const pnlCls = pnl == null ? "" : (Number(pnl) >= 0 ? "so-pnl-pos" : "so-pnl-neg");
+      return `
+      <tr>
+        <td>${esc(r.date_traded || r.armed_at || "—")}</td>
+        <td>${esc(r.symbol)}</td>
+        <td>${sideChip(r.side)}</td>
+        <td class="so-spread">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
+        <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
+        <td class="so-spread">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
+        <td>${esc(r.exit_date || "—")}</td>
+        <td class="${pnlCls}">${pnl == null ? "—" : num(pnl)}</td>
+      </tr>`;
+    }).join("");
+    return `<div class="so-table-wrap"><table class="so-table">
+      <thead><tr>${headerHtml("report")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function render() {
@@ -195,6 +249,7 @@
     if (!host) return;
     if (activeTab === "active") host.innerHTML = renderActive();
     else if (activeTab === "executed") host.innerHTML = renderExecuted();
+    else if (activeTab === "report") host.innerHTML = renderReport();
     else host.innerHTML = renderRadar();
   }
 
@@ -265,6 +320,83 @@
     }
   }
 
+  function setExitPx(id, value, dirtyKey) {
+    if (exitPxDirty[dirtyKey]) return;
+    const el = document.getElementById(id);
+    if (!el || value == null || value === "") return;
+    el.value = value;
+  }
+
+  function openExit(id) {
+    exitRow = (workspace.executed || []).find((r) => Number(r.id) === Number(id));
+    if (!exitRow || !hasEntryCosts(exitRow)) return;
+    exitPxDirty = { sell: false, buy: false };
+    const gen = ++exitQuoteGen;
+    document.getElementById("soExitSymbol").textContent = exitRow.symbol + " · " + (exitRow.side || "");
+    document.getElementById("soExitEntryDate").value = dateOnly(exitRow.date_traded || exitRow.armed_at);
+    document.getElementById("soExitBuyStrike").value = exitRow.user_buy_strike != null ? exitRow.user_buy_strike : "";
+    document.getElementById("soExitBuyEntry").value = exitRow.buy_cost != null ? exitRow.buy_cost : "";
+    document.getElementById("soExitSellStrike").value = exitRow.user_sell_strike != null ? exitRow.user_sell_strike : "";
+    document.getElementById("soExitSellEntry").value = exitRow.sell_cost != null ? exitRow.sell_cost : "";
+    document.getElementById("soExitDate").value = todayIso();
+    document.getElementById("soExitSellPx").value = exitRow.sell_ltp != null ? exitRow.sell_ltp : "";
+    document.getElementById("soExitBuyPx").value = exitRow.buy_ltp != null ? exitRow.buy_ltp : "";
+    document.getElementById("soExitErr").textContent = "";
+    document.getElementById("soExitModal").hidden = false;
+    fetch(API + "/api/stock-options/signals/" + exitRow.id + "/exit-quote", { headers: authHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data || gen !== exitQuoteGen || !exitRow) return;
+        setExitPx("soExitSellPx", data.sell_ltp, "sell");
+        setExitPx("soExitBuyPx", data.buy_ltp, "buy");
+      })
+      .catch(() => {});
+  }
+
+  function closeExit() {
+    exitRow = null;
+    exitQuoteGen += 1;
+    document.getElementById("soExitModal").hidden = true;
+  }
+
+  async function submitExit(ev) {
+    ev.preventDefault();
+    if (!exitRow) return;
+    const err = document.getElementById("soExitErr");
+    const body = {
+      date_traded: document.getElementById("soExitEntryDate").value,
+      buy_strike: Number(document.getElementById("soExitBuyStrike").value),
+      buy_cost: Number(document.getElementById("soExitBuyEntry").value),
+      sell_strike: Number(document.getElementById("soExitSellStrike").value),
+      sell_cost: Number(document.getElementById("soExitSellEntry").value),
+      exit_date: document.getElementById("soExitDate").value,
+      sell_exit: Number(document.getElementById("soExitSellPx").value),
+      buy_exit: Number(document.getElementById("soExitBuyPx").value),
+    };
+    if (!body.date_traded || !body.exit_date || !(body.buy_strike > 0) || !(body.sell_strike > 0)
+      || !Number.isFinite(body.buy_cost) || !Number.isFinite(body.sell_cost)
+      || !Number.isFinite(body.sell_exit) || !Number.isFinite(body.buy_exit)) {
+      err.textContent = "Enter entry date, both strikes and entry prices, exit date, and both exit prices.";
+      return;
+    }
+    try {
+      const res = await fetch(API + "/api/stock-options/signals/" + exitRow.id + "/exit", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const t = await res.json().catch(() => ({}));
+        throw new Error(t.detail || "Submit failed");
+      }
+      closeExit();
+      setTab("report");
+      await load();
+    } catch (e) {
+      err.textContent = e.message || "Submit failed";
+    }
+  }
+
   async function toggleHardStop(id, placed) {
     try {
       await fetch(API + "/api/stock-options/signals/" + id + "/hard-stop", {
@@ -289,6 +421,8 @@
       }
       const btn = ev.target.closest("[data-trade]");
       if (btn) openTrade(btn.dataset.trade);
+      const exitBtn = ev.target.closest("[data-exit]");
+      if (exitBtn) openExit(exitBtn.dataset.exit);
     });
     document.getElementById("soPanel").addEventListener("change", (ev) => {
       const box = ev.target.closest("[data-hs]");
@@ -296,6 +430,10 @@
     });
     document.getElementById("soTradeForm").addEventListener("submit", submitTrade);
     document.getElementById("soTradeCancel").addEventListener("click", closeTrade);
+    document.getElementById("soExitForm").addEventListener("submit", submitExit);
+    document.getElementById("soExitCancel").addEventListener("click", closeExit);
+    document.getElementById("soExitSellPx").addEventListener("input", () => { exitPxDirty.sell = true; });
+    document.getElementById("soExitBuyPx").addEventListener("input", () => { exitPxDirty.buy = true; });
     load();
     setInterval(load, 60000);
   });

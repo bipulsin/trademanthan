@@ -17,7 +17,9 @@ from backend.services.stock_option_signals import (
     insert_webhook_and_signals,
     list_workspace,
     now_ist_second,
+    quote_exit_ltps,
     set_hard_stop_placed,
+    submit_exit,
     submit_trade,
 )
 
@@ -52,6 +54,17 @@ class SubmitBody(BaseModel):
 
 class HardStopBody(BaseModel):
     placed: bool = True
+
+
+class ExitBody(BaseModel):
+    date_traded: str = Field(..., min_length=8, max_length=10)
+    buy_strike: float = Field(..., gt=0)
+    buy_cost: float = Field(..., ge=0)
+    sell_strike: float = Field(..., gt=0)
+    sell_cost: float = Field(..., ge=0)
+    exit_date: str = Field(..., min_length=8, max_length=10)
+    sell_exit: float = Field(..., ge=0)
+    buy_exit: float = Field(..., ge=0)
 
 
 async def _ingest(request: Request) -> JSONResponse:
@@ -166,4 +179,43 @@ async def stock_option_hard_stop(
         out = set_hard_stop_placed(signal_id, body.placed)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    return JSONResponse(status_code=200, content=out)
+
+
+@router.get("/stock-options/signals/{signal_id}/exit-quote")
+async def stock_option_exit_quote(
+    signal_id: int,
+    _user: User = Depends(_auth_user),
+) -> JSONResponse:
+    try:
+        out = quote_exit_ltps(signal_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return JSONResponse(status_code=200, content=out)
+
+
+@router.post("/stock-options/signals/{signal_id}/exit")
+async def stock_option_exit(
+    signal_id: int,
+    body: ExitBody,
+    _user: User = Depends(_auth_user),
+) -> JSONResponse:
+    try:
+        out = submit_exit(
+            signal_id,
+            date_traded=body.date_traded,
+            buy_strike=body.buy_strike,
+            buy_cost=body.buy_cost,
+            sell_strike=body.sell_strike,
+            sell_cost=body.sell_cost,
+            exit_date=body.exit_date,
+            sell_exit=body.sell_exit,
+            buy_exit=body.buy_exit,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return JSONResponse(status_code=200, content=out)
