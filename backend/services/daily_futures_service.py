@@ -44,6 +44,7 @@ _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
 _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _DF_PREV_CLOSE_CACHE: Dict[str, Any] = {"trade_date": None, "stock": {}, "nifty": None}
 NIFTY50_INDEX_KEY = "NSE_INDEX|Nifty 50"
+_TV_SESSION_BACKFILL_DONE: Set[str] = set()
 
 
 def _bearish_index_gate_enabled() -> bool:
@@ -1983,6 +1984,25 @@ def _df_todays_pick_in_recent_two_scans(
     return int(p.get("scan_count") or 0) >= need_scans
 
 
+def _pick_is_tv_source(p: Dict[str, Any], tv_map: Optional[Dict[Tuple[str, str], Any]] = None) -> bool:
+    if bool(p.get("tv_webhook")) or str(p.get("source") or "") == "tradingview_webhook":
+        return True
+    br = p.get("conviction_breakdown_json")
+    if isinstance(br, str):
+        try:
+            br = json.loads(br)
+        except (TypeError, ValueError):
+            br = None
+    if isinstance(br, dict) and str(br.get("source") or "") == "tradingview_webhook":
+        return True
+    if not tv_map:
+        return False
+    und = str(p.get("underlying") or "").strip().upper()
+    dtp = str(p.get("direction_type") or "LONG").strip().upper()
+    side = "bearish" if dtp == "SHORT" else "bullish"
+    return (und, side) in tv_map
+
+
 def _fmt_hm(dt: Optional[datetime]) -> str:
     return dt.strftime("%H:%M") if dt else "—"
 
@@ -3839,6 +3859,26 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         screenings = _fetch_screening_dicts(conn, td)
     _compute_effective_conviction_and_5m_momentum(screenings, now_ist)
 
+    tv_map: Dict[Tuple[str, str], Any] = {}
+    try:
+        from backend.services.premium_futures_tv_webhook import (
+            backfill_unpromoted_tv_logs,
+            session_tv_hit_map,
+        )
+
+        _bf_key = str(td)
+        if _bf_key not in _TV_SESSION_BACKFILL_DONE:
+            backfill_unpromoted_tv_logs(td)
+            _TV_SESSION_BACKFILL_DONE.add(_bf_key)
+        tv_map = session_tv_hit_map(td)
+        if tv_map:
+            with engine.connect() as conn:
+                screenings = _fetch_screening_dicts(conn, td)
+            _compute_effective_conviction_and_5m_momentum(screenings, now_ist)
+    except Exception as e:
+        logger.warning("daily_futures: TV hit map skipped: %s", e)
+
+
     br = db.execute(
         text(
             """
@@ -3864,17 +3904,20 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         [
             s
             for s in not_bought
-            if not _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
+            if not _pick_is_tv_source(s, tv_map)
+            and not _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
         ]
     )
-    # Today's pick should surface only symbols with sufficient LIVE conviction.
-    # A symbol appears automatically once live conviction reaches the threshold.
-    # Also hide symbols that did not appear in the last ~two ChartInk runs (vs fleet last_hit_at).
+    # Today's pick: ChartInk needs live conviction ≥50 and recent scans; TV first webhook is enough.
     picks = [
         s
         for s in not_bought
-        if s.get("conviction_score") is not None and float(s.get("conviction_score")) >= 50.0
-        and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
+        if _pick_is_tv_source(s, tv_map)
+        or (
+            s.get("conviction_score") is not None
+            and float(s.get("conviction_score")) >= 50.0
+            and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
+        )
     ]
     picks_before_closed_filter = list(picks)
 
@@ -4068,6 +4111,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             for s in not_bought_open
             if str(s.get("direction_type") or "LONG").strip().upper() == "LONG"
             and _under_fifty(s)
+            and not _pick_is_tv_source(s, tv_map)
             and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
         ],
         key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
@@ -4078,6 +4122,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             for s in not_bought_open
             if str(s.get("direction_type") or "LONG").strip().upper() == "SHORT"
             and _under_fifty(s)
+            and not _pick_is_tv_source(s, tv_map)
             and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
         ],
         key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
@@ -4204,6 +4249,10 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         reasons: List[str] = []
         dtp = str(p.get("direction_type") or "LONG").strip().upper()
         und_u = str(p.get("underlying") or "").strip().upper()
+        is_tv = _pick_is_tv_source(p, tv_map)
+        if is_tv:
+            p["tv_webhook"] = True
+            p["source"] = "tradingview_webhook"
         # V2 shadow audit logs (no behavior change while flag remains OFF).
         if not _df_v2_mode_enabled():
             raw_conv = _safe_float(p.get("conviction_score"))
@@ -4237,7 +4286,10 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             last_hit_dt = _parse_iso_ist(p.get("last_hit_at"))
             if last_hit_dt is None or last_hit_dt <= sold_ts:
                 reasons.append("Re-entry unlocks after next scan post-exit")
-        if not v2_mode:
+        if is_tv:
+            # TV: first success webhook opens Enter (same actions as ChartInk; no extra scan/pullback).
+            pass
+        elif not v2_mode:
             scn_ic = int(p.get("scan_count") or 0)
             if scn_ic < 1:
                 reasons.append("Needs at least 1 scan")
@@ -4422,6 +4474,27 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         logger.warning("daily_futures: target-entry EMA Upstox init failed: %s", e)
 
     for _tp in list(picks_mixed) + list(picks_low_conv_bull) + list(picks_low_conv_bear):
+        if _pick_is_tv_source(_tp, tv_map):
+            _tp["tv_webhook"] = True
+            dtp_te = str(_tp.get("direction_type") or "LONG").strip().upper()
+            br = _tp.get("conviction_breakdown_json")
+            if isinstance(br, str):
+                try:
+                    br = json.loads(br)
+                except (TypeError, ValueError):
+                    br = {}
+            if not isinstance(br, dict):
+                br = {}
+            hi = _safe_float(_tp.get("alert_candle_high")) or _safe_float(br.get("alert_candle_high")) or _safe_float(_tp.get("trigger_candle_high"))
+            lo = _safe_float(_tp.get("alert_candle_low")) or _safe_float(br.get("alert_candle_low")) or _safe_float(_tp.get("trigger_candle_low"))
+            if dtp_te == "SHORT" and lo is not None:
+                _tp["target_entry_price"] = round(float(lo), 4)
+            elif dtp_te != "SHORT" and hi is not None:
+                _tp["target_entry_price"] = round(float(hi), 4)
+            else:
+                ik_row = str((_tp.get("instrument_key") or "")).strip()
+                _workspace_attach_target_entry_price(_tp, c15_for_target.get(ik_row))
+            continue
         ik_row = str((_tp.get("instrument_key") or "")).strip()
         _workspace_attach_target_entry_price(_tp, c15_for_target.get(ik_row))
 
@@ -4544,7 +4617,23 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     ).fetchone()
     if not row:
         raise ValueError("Screening row not found for today")
-    if not _df_v2_mode_enabled():
+    brj = None
+    try:
+        br_row = db.execute(
+            text("SELECT conviction_breakdown_json FROM daily_futures_screening WHERE id = :sid"),
+            {"sid": screening_id},
+        ).fetchone()
+        brj = br_row[0] if br_row else None
+    except Exception:
+        brj = None
+    is_tv_buy = False
+    if isinstance(brj, dict) and str(brj.get("source") or "") == "tradingview_webhook":
+        is_tv_buy = True
+    elif isinstance(brj, str) and "tradingview_webhook" in brj:
+        is_tv_buy = True
+    if is_tv_buy:
+        pass
+    elif not _df_v2_mode_enabled():
         if int(row[6] or 0) < 1:
             raise ValueError("Needs at least 1 scan before order")
         anchor_t = row[9] or row[15] or row[14]
@@ -4568,7 +4657,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     dtp = str(row[2] or "LONG").strip().upper()
     live_score = float(row[10]) if row[10] is not None else None
     c2 = live_score
-    if dtp == "SHORT":
+    if not is_tv_buy and dtp == "SHORT":
         if _df_v2_mode_enabled():
             raw_conv = float(row[7]) if row[7] is not None else None
             if raw_conv is None or raw_conv < 60.0:
@@ -4581,7 +4670,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                 raise ValueError(
                     "SHORT is allowed only when NIFTY 5m bearish structure is confirmed (last 2 red + last 3 closes descending)."
                 )
-    else:
+    elif not is_tv_buy:
         if _df_v2_mode_enabled():
             raw_conv = float(row[7]) if row[7] is not None else None
             if raw_conv is None or raw_conv < 60.0:

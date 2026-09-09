@@ -1,5 +1,7 @@
 """Premium Futures TradingView webhook parse tests (no DB)."""
-from datetime import date
+from datetime import date, datetime
+
+import pytz
 
 from backend.services.premium_futures_tv_webhook import (
     PARSE_FAILED,
@@ -11,6 +13,9 @@ from backend.services.premium_futures_tv_webhook import (
     parse_tv_alert,
     parse_tv_side,
 )
+
+
+IST = pytz.timezone("Asia/Kolkata")
 
 
 def test_normalize_nse_colon_ticker():
@@ -83,24 +88,76 @@ def test_unknown_symbol_resolve_returns_none(monkeypatch):
     assert m.resolve_currmth_future("NOTAREALTICKERXYZ") is None
 
 
+def test_extract_tv_ohlc_from_payload():
+    from backend.services.premium_futures_tv_webhook import extract_tv_ohlc
+
+    hi, lo = extract_tv_ohlc({"ticker": "NSE:PFC", "high": 412.5, "low": 408.1})
+    assert hi == 412.5
+    assert lo == 408.1
+    hi2, lo2 = extract_tv_ohlc({"high": "{{high}}"})
+    assert hi2 is None and lo2 is None
+
+
+def test_floor_received_to_15m():
+    from backend.services.premium_futures_tv_webhook import floor_received_to_15m
+
+    dt = IST.localize(datetime(2026, 9, 9, 11, 14, 22))
+    slot = floor_received_to_15m(dt)
+    assert slot.hour == 11 and slot.minute == 0
+
+
 def test_merge_tv_featured_first_and_dedupes_scanner(monkeypatch):
     import backend.services.premium_futures_tv_webhook as m
 
     monkeypatch.setattr(
         m,
-        "fetch_session_tv_workspace_rows",
+        "session_tv_hit_map",
         lambda d: {
-            "bullish": [
-                {"underlying": "RELIANCE", "tv_webhook": True, "tv_featured": True},
-            ],
-            "bearish": [],
+            ("RELIANCE", "bullish"): {
+                "scan_count": 1,
+                "first_hit_at": None,
+                "last_hit_at": None,
+                "future_symbol": "RELIANCE FUT",
+                "instrument_key": "NSE_FO|x",
+                "alert_candle_high": 1400.0,
+                "alert_candle_low": 1390.0,
+            }
         },
     )
     bull, bear = merge_tv_picks_into_workspace(
-        [{"underlying": "TCS"}, {"underlying": "RELIANCE"}],
+        [{"underlying": "TCS"}, {"underlying": "RELIANCE", "direction_type": "LONG"}],
         [{"underlying": "INFY"}],
         date(2026, 9, 9),
     )
-    assert bull[0]["tv_featured"] is True
-    assert [x["underlying"] for x in bull] == ["RELIANCE", "TCS"]
+    rel = [x for x in bull if x["underlying"] == "RELIANCE"][0]
+    assert rel["tv_featured"] is True
+    assert rel["tv_webhook"] is True
+    assert rel["scan_count"] == 1
+    assert rel["target_entry_price"] == 1400.0
+    assert [x["underlying"] for x in bull] == ["TCS", "RELIANCE"]
     assert [x["underlying"] for x in bear] == ["INFY"]
+
+
+def test_repeat_tv_scan_count_from_hit_map(monkeypatch):
+    import backend.services.premium_futures_tv_webhook as m
+
+    monkeypatch.setattr(
+        m,
+        "session_tv_hit_map",
+        lambda d: {
+            ("PFC", "bullish"): {
+                "scan_count": 2,
+                "first_hit_at": None,
+                "last_hit_at": None,
+                "alert_candle_high": 100.0,
+                "alert_candle_low": 99.0,
+            }
+        },
+    )
+    bull, _ = merge_tv_picks_into_workspace(
+        [{"underlying": "PFC", "direction_type": "LONG", "ltp": 1}],
+        [],
+        date(2026, 9, 9),
+    )
+    assert bull[0]["scan_count"] == 2
+    assert bull[0]["target_entry_price"] == 100.0

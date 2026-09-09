@@ -927,20 +927,13 @@
   }
 
   function enterCellHtml(eligible, reason, enterBtn, row) {
-    if (isTvWebhookPick(row) || !(row && row.screening_id)) {
-      if (isTvWebhookPick(row)) {
-        return (
-          '<div class="df-enter-cell">' +
-          '<span class="df-tv-badge">TV</span>' +
-          '<div class="df-enter-block-reason" role="status">' +
-          esc((row && row.order_block_reason) || 'TradingView alert') +
-          '</div></div>'
-        );
-      }
+    var tvBadge = isTvWebhookPick(row) ? '<span class="df-tv-badge">TV</span> ' : '';
+    if (eligible) {
+      return '<div class="df-enter-cell">' + tvBadge + enterBtn + '</div>';
     }
-    if (eligible) return enterBtn;
     return (
       '<div class="df-enter-cell">' +
+      tvBadge +
       enterBtn +
       '<div class="df-enter-block-reason" role="status">' +
       esc(reason) +

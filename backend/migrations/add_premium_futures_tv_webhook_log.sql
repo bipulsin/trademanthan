@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS premium_futures_tv_webhook_log (
     side TEXT CHECK (side IS NULL OR side IN ('bullish', 'bearish')),
     resolved_fut_symbol TEXT,
     resolved_fut_instrument_key TEXT,
-    underlying TEXT
+    underlying TEXT,
+    promoted_at TIMESTAMP WITHOUT TIME ZONE
 );
 CREATE INDEX IF NOT EXISTS ix_premium_futures_tv_webhook_log_received
     ON premium_futures_tv_webhook_log (received_at DESC);
