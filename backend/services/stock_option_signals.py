@@ -23,6 +23,7 @@ _ENSURED = False
 STATUS_RADAR = "Radar"
 STATUS_ACTIVE = "Active"
 STATUS_EXECUTED = "Executed"
+STATUS_REJECTED = "Rejected"
 SIDE_BEAR = "BEAR CALL"
 SIDE_BULL = "BULL PUT"
 INVALIDATE_REMARKS = "Trade not executed for this symbol"
@@ -238,6 +239,20 @@ def next_ema_action(
             return "invalidate"
         return "hold"
     return "hold"
+
+
+def invalidate_outcome(
+    armed_at: Any,
+    sell_strike: Any,
+    buy_strike: Any,
+) -> str:
+    """EMA-invalidated before Trade: keep Executed only when arm date and strikes exist.
+
+    Strikes are never invented. Missing either field → Rejected (hidden from tabs).
+    """
+    if armed_at is None or sell_strike is None or buy_strike is None:
+        return STATUS_REJECTED
+    return STATUS_EXECUTED
 
 
 def trade_is_submitted(date_traded: Any, sell_cost: Any = None, buy_cost: Any = None) -> bool:
@@ -781,7 +796,7 @@ def _open_rows() -> List[Dict[str, Any]]:
             text(
                 """
                 SELECT id, symbol, instrument_key, status, side,
-                       ema9, ema30, ema100, sell_strike, buy_strike,
+                       armed_at, ema9, ema30, ema100, sell_strike, buy_strike,
                        date_traded, sell_cost, buy_cost
                 FROM stock_option_signals
                 WHERE status IN (:radar, :active)
@@ -846,24 +861,28 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         db = SessionLocal()
         try:
             if action == "invalidate":
+                dest = invalidate_outcome(
+                    row.get("armed_at"),
+                    row.get("sell_strike"),
+                    row.get("buy_strike"),
+                )
+                # Keep suggested strikes when both arm date and strikes exist.
+                # Never wipe them, and never invent replacements. No LTP snapshot
+                # unless one was already stored at arm time.
                 db.execute(
                     text(
                         """
                         UPDATE stock_option_signals
-                        SET status = :executed,
+                        SET status = :dest,
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
-                            sell_strike = NULL, sell_delta = NULL, sell_instrument_key = NULL,
-                            buy_strike = NULL, buy_delta = NULL, buy_instrument_key = NULL,
-                            sell_cost = NULL, buy_cost = NULL,
-                            user_sell_strike = NULL, user_buy_strike = NULL,
                             remarks = :remarks,
                             updated_at = :ts
                         WHERE id = :id AND status = :active AND date_traded IS NULL
                         """
                     ),
                     {
-                        "executed": STATUS_EXECUTED,
+                        "dest": dest,
                         "ema9": snap["ema9"],
                         "ema30": snap["ema30"],
                         "ema100": snap["ema100"],
@@ -1089,9 +1108,11 @@ def list_workspace() -> Dict[str, Any]:
                        user_sell_strike, user_buy_strike, hard_stop_placed,
                        remarks, sell_ltp, buy_ltp
                 FROM stock_option_signals
+                WHERE status IS DISTINCT FROM :rejected
                 ORDER BY id DESC
                 """
-            )
+            ),
+            {"rejected": STATUS_REJECTED},
         ).mappings().all()
     finally:
         db.close()

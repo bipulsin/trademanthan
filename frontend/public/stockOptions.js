@@ -15,10 +15,10 @@
     return n.toFixed(digits == null ? 2 : digits);
   }
 
-  function sideClass(side) {
-    if (side === "BEAR CALL") return "so-side-bear";
-    if (side === "BULL PUT") return "so-side-bull";
-    return "";
+  function sideChip(side) {
+    if (side === "BEAR CALL") return '<span class="so-chip so-chip-bear">' + esc(side) + "</span>";
+    if (side === "BULL PUT") return '<span class="so-chip so-chip-bull">' + esc(side) + "</span>";
+    return esc(side || "—");
   }
 
   function esc(s) {
@@ -31,10 +31,93 @@
   let workspace = { radar: [], active: [], executed: [] };
   let activeTab = "radar";
   let tradeRow = null;
+  let sortState = { tab: "", key: "", dir: "asc" };
+
+  function emptyVal(v) {
+    return v == null || v === "";
+  }
+
+  function cmpVals(a, b, type) {
+    if (emptyVal(a) && emptyVal(b)) return 0;
+    if (emptyVal(a)) return 1;
+    if (emptyVal(b)) return -1;
+    if (type === "num") return Number(a) - Number(b);
+    if (type === "bool") return (a ? 1 : 0) - (b ? 1 : 0);
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function sortRows(tab, rows) {
+    if (sortState.tab !== tab || !sortState.key) return rows.slice();
+    const col = (COLUMNS[tab] || []).find((c) => c.key === sortState.key);
+    if (!col || !col.sort) return rows.slice();
+    const dir = sortState.dir === "desc" ? -1 : 1;
+    return rows.slice().sort((ra, rb) => dir * cmpVals(col.sort(ra), col.sort(rb), col.type));
+  }
+
+  function toggleSort(tab, key) {
+    if (sortState.tab === tab && sortState.key === key) {
+      sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    } else {
+      sortState = { tab: tab, key: key, dir: "asc" };
+    }
+    render();
+  }
+
+  function headerHtml(tab) {
+    return (COLUMNS[tab] || []).map((c) => {
+      if (!c.sort) return "<th>" + c.label + "</th>";
+      const on = sortState.tab === tab && sortState.key === c.key;
+      const mark = on ? (sortState.dir === "asc" ? " ▲" : " ▼") : "";
+      return '<th class="so-sortable" data-sort="' + esc(c.key) + '" data-sort-tab="' + tab + '">' +
+        c.label + '<span class="so-sort-mark">' + mark + "</span></th>";
+    }).join("");
+  }
+
+  function strikeSort(r) {
+    const sell = r.user_sell_strike != null ? r.user_sell_strike : r.sell_strike;
+    const buy = r.user_buy_strike != null ? r.user_buy_strike : r.buy_strike;
+    if (sell == null && buy == null) return null;
+    return Number(sell != null ? sell : buy);
+  }
+
+  const COLUMNS = {
+    radar: [
+      { key: "symbol", label: "Symbol", type: "str", sort: (r) => r.symbol },
+      { key: "trigger_at", label: "Trigger date-time", type: "date", sort: (r) => r.trigger_at },
+      { key: "ema9", label: "EMA9", type: "num", sort: (r) => r.ema9 },
+      { key: "ema30", label: "EMA30", type: "num", sort: (r) => r.ema30 },
+      { key: "ema100", label: "EMA100", type: "num", sort: (r) => r.ema100 },
+      { key: "status", label: "Status", type: "str", sort: (r) => r.status },
+      { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+    ],
+    active: [
+      { key: "symbol", label: "Symbol", type: "str", sort: (r) => r.symbol },
+      { key: "armed_at", label: "Armed date-time", type: "date", sort: (r) => r.armed_at },
+      { key: "ema9", label: "EMA9", type: "num", sort: (r) => r.ema9 },
+      { key: "ema30", label: "EMA30", type: "num", sort: (r) => r.ema30 },
+      { key: "ema100", label: "EMA100", type: "num", sort: (r) => r.ema100 },
+      { key: "status", label: "Status", type: "str", sort: (r) => r.status },
+      { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+      { key: "spread", label: "Spread", type: "str", sort: (r) => [r.spread_sell, r.spread_buy].filter(Boolean).join(" ") },
+      { key: "trade", label: "" },
+    ],
+    executed: [
+      { key: "date", label: "Date traded", type: "date", sort: (r) => r.date_traded || r.armed_at },
+      { key: "symbol", label: "Symbol", type: "str", sort: (r) => r.symbol },
+      { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+      { key: "strikes", label: "Strikes", type: "num", sort: strikeSort },
+      { key: "costs", label: "Costs", type: "num", sort: (r) => r.sell_cost },
+      { key: "ltp", label: "LTP", type: "num", sort: (r) => r.sell_ltp },
+      { key: "pnl", label: "P&amp;L", type: "num", sort: (r) => r.combined_pnl },
+      { key: "hard_stop", label: "Hard stop", type: "num", sort: (r) => r.hard_stop },
+      { key: "hard_stop_placed", label: "Hard stop placed", type: "bool", sort: (r) => r.hard_stop_placed },
+      { key: "remarks", label: "Remarks", type: "str", sort: (r) => r.remarks },
+    ],
+  };
 
   function setTab(name) {
     activeTab = name;
-    document.querySelectorAll(".so-tab").forEach((btn) => {
+    document.querySelectorAll(".bf-tab").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.tab === name);
     });
     const note = document.getElementById("soExecutedNote");
@@ -43,7 +126,7 @@
   }
 
   function renderRadar() {
-    const rows = workspace.radar || [];
+    const rows = sortRows("radar", workspace.radar || []);
     if (!rows.length) return '<p class="so-empty">No Radar symbols.</p>';
     const body = rows.map((r) => `
       <tr>
@@ -53,16 +136,14 @@
         <td>${num(r.ema30)}</td>
         <td>${num(r.ema100)}</td>
         <td>${esc(r.status)}</td>
-        <td class="${sideClass(r.side)}">${esc(r.side || "—")}</td>
+        <td>${sideChip(r.side)}</td>
       </tr>`).join("");
     return `<div class="so-table-wrap"><table class="so-table">
-      <thead><tr>
-        <th>Symbol</th><th>Trigger date-time</th><th>EMA9</th><th>EMA30</th><th>EMA100</th><th>Status</th><th>Side</th>
-      </tr></thead><tbody>${body}</tbody></table></div>`;
+      <thead><tr>${headerHtml("radar")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function renderActive() {
-    const rows = workspace.active || [];
+    const rows = sortRows("active", workspace.active || []);
     if (!rows.length) return '<p class="so-empty">No Active symbols.</p>';
     const body = rows.map((r) => {
       const spread = [r.spread_sell, r.spread_buy].filter(Boolean).map(esc).join("<br>") || "—";
@@ -74,42 +155,39 @@
         <td>${num(r.ema30)}</td>
         <td>${num(r.ema100)}</td>
         <td>${esc(r.status)}</td>
-        <td class="${sideClass(r.side)}">${esc(r.side || "—")}</td>
+        <td>${sideChip(r.side)}</td>
         <td class="so-spread">${spread}</td>
-        <td><button type="button" class="so-btn" data-trade="${r.id}">Trade</button></td>
+        <td><button type="button" class="so-btn so-btn-trade" data-trade="${r.id}">Trade</button></td>
       </tr>`;
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table">
-      <thead><tr>
-        <th>Symbol</th><th>Armed date-time</th><th>EMA9</th><th>EMA30</th><th>EMA100</th><th>Status</th><th>Side</th><th>Spread</th><th></th>
-      </tr></thead><tbody>${body}</tbody></table></div>`;
+      <thead><tr>${headerHtml("active")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function renderExecuted() {
-    const rows = workspace.executed || [];
+    const rows = sortRows("executed", workspace.executed || []);
     if (!rows.length) return '<p class="so-empty">No Executed symbols.</p>';
     const body = rows.map((r) => {
       const pnl = r.combined_pnl;
       const pnlCls = pnl == null ? "" : (Number(pnl) >= 0 ? "so-pnl-pos" : "so-pnl-neg");
       const checked = r.hard_stop_placed ? "checked" : "";
+      const when = r.date_traded || r.armed_at || "—";
       return `
       <tr>
-        <td>${esc(r.date_traded || "—")}</td>
+        <td>${esc(when)}</td>
         <td>${esc(r.symbol)}</td>
+        <td>${sideChip(r.side)}</td>
         <td class="so-spread">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
         <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-spread">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
         <td class="${pnlCls}">${pnl == null ? "—" : num(pnl)}</td>
         <td>${num(r.hard_stop)}</td>
         <td><input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed"></td>
-        <td>${esc(r.remarks || "")}</td>
+        <td class="so-remarks">${esc(r.remarks || "")}</td>
       </tr>`;
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table">
-      <thead><tr>
-        <th>Date traded</th><th>Symbol</th><th>Strikes</th><th>Costs</th>
-        <th>LTP</th><th>P&amp;L</th><th>Hard stop</th><th>Hard stop placed</th><th>Remarks</th>
-      </tr></thead><tbody>${body}</tbody></table></div>`;
+      <thead><tr>${headerHtml("executed")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function render() {
@@ -200,10 +278,15 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll(".so-tab").forEach((btn) => {
+    document.querySelectorAll(".bf-tab").forEach((btn) => {
       btn.addEventListener("click", () => setTab(btn.dataset.tab));
     });
     document.getElementById("soPanel").addEventListener("click", (ev) => {
+      const th = ev.target.closest("th[data-sort]");
+      if (th) {
+        toggleSort(th.dataset.sortTab, th.dataset.sort);
+        return;
+      }
       const btn = ev.target.closest("[data-trade]");
       if (btn) openTrade(btn.dataset.trade);
     });

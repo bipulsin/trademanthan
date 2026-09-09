@@ -10,28 +10,27 @@ body.theme-page.stock-options-body {
     max-width: 1280px;
 }
 
-.so-tabs {
+/* Copied from breakfast.css Live/Wicks tabs: .bf-tabs / .bf-tab / .bf-tab.active */
+.bf-tabs {
     display: flex;
-    gap: 8px;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
     flex-wrap: wrap;
-    margin: 0 0 14px;
 }
-
-.so-tab {
-    border: 1px solid var(--theme-border, #334155);
-    background: var(--theme-card-alt, #1e293b);
-    color: var(--theme-text, #e2e8f0);
-    border-radius: 999px;
-    padding: 8px 16px;
-    font: inherit;
-    font-weight: 600;
+.bf-tab {
+    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--theme-card, #1a1a2e);
+    color: var(--theme-text, #f1f5f9);
+    padding: 0.45rem 0.9rem;
+    border-radius: 6px;
     cursor: pointer;
+    font-size: 0.88rem;
+    font-family: inherit;
 }
-
-.so-tab.active {
-    background: var(--theme-accent, #2563eb);
-    border-color: var(--theme-accent, #2563eb);
-    color: #fff;
+.bf-tab.active {
+    border-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.15);
+    color: #fde68a;
 }
 
 .so-card {
@@ -74,14 +73,45 @@ body.theme-page.stock-options-body {
     text-transform: uppercase;
 }
 
+.so-table th.so-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.so-table th.so-sortable:hover {
+    color: var(--theme-text, #e2e8f0);
+}
+
+.so-sort-mark {
+    font-size: 0.7rem;
+    opacity: 0.85;
+}
+
 .so-spread {
     white-space: normal;
     line-height: 1.35;
     min-width: 180px;
 }
 
-.so-side-bear { color: #f87171; font-weight: 600; }
-.so-side-bull { color: #34d399; font-weight: 600; }
+.so-chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 8px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: #fff;
+    line-height: 1.35;
+    white-space: nowrap;
+}
+.so-chip-bull { background: #2563eb; }
+.so-chip-bear { background: #dc2626; }
+
+.so-remarks {
+    white-space: normal;
+    min-width: 14rem;
+    max-width: 18rem;
+}
 .so-pnl-pos { color: #34d399; font-weight: 600; }
 .so-pnl-neg { color: #f87171; font-weight: 600; }
 
@@ -94,9 +124,27 @@ body.theme-page.stock-options-body {
     cursor: pointer;
 }
 
-.so-btn {
-    background: var(--theme-accent, #2563eb);
-    color: #fff;
+.so-btn-trade {
+    border-radius: 999px;
+    padding: 8px 18px;
+    color: #052e16;
+    font-weight: 700;
+    background: linear-gradient(180deg, #bbf7d0 0%, #4ade80 42%, #16a34a 100%);
+    border: 1px solid #15803d;
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.55) inset,
+        0 -2px 0 rgba(21, 128, 61, 0.45) inset,
+        0 3px 0 #166534,
+        0 5px 10px rgba(22, 101, 52, 0.35);
+}
+
+.so-btn-trade:hover { filter: brightness(1.06); }
+
+.so-btn-trade:active {
+    transform: translateY(2px);
+    box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.35) inset,
+        0 1px 0 #166534;
 }
 
 .so-empty {

@@ -9,6 +9,8 @@ from backend.services.stock_option_signals import (
     STATUS_ACTIVE,
     STATUS_EXECUTED,
     STATUS_RADAR,
+    STATUS_REJECTED,
+    invalidate_outcome,
     aggregate_intraday_to_2h,
     combined_pnl,
     ema_condition_holds,
@@ -67,6 +69,15 @@ def test_ignore_if_radar_or_active_allow_if_only_executed():
     assert should_insert_new_signal([STATUS_EXECUTED, STATUS_RADAR]) is False
     assert should_insert_new_signal([STATUS_EXECUTED]) is True
     assert should_insert_new_signal([STATUS_EXECUTED, STATUS_EXECUTED]) is True
+    assert should_insert_new_signal([STATUS_REJECTED]) is True
+
+
+def test_invalidate_keeps_executed_only_with_arm_and_strikes():
+    armed = datetime(2026, 9, 8, 11, 15)
+    assert invalidate_outcome(armed, 1400, 1350) == STATUS_EXECUTED
+    assert invalidate_outcome(None, 1400, 1350) == STATUS_REJECTED
+    assert invalidate_outcome(armed, None, 1350) == STATUS_REJECTED
+    assert invalidate_outcome(armed, 1400, None) == STATUS_REJECTED
 
 
 def test_ema_arm_and_invalidate():
