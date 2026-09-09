@@ -140,6 +140,14 @@
     return "";
   }
 
+  function setStrikeLabels(side, buyLblId, sellLblId) {
+    const xx = optionSuffix(side) || "";
+    const buyLbl = document.getElementById(buyLblId);
+    const sellLbl = document.getElementById(sellLblId);
+    if (buyLbl) buyLbl.textContent = xx ? "Buy Strike " + xx : "Buy Strike";
+    if (sellLbl) sellLbl.textContent = xx ? "Sell Strike " + xx : "Sell Strike";
+  }
+
   function strikeLine(label, strike, side) {
     if (strike == null || strike === "") return label + " —";
     const suf = optionSuffix(side);
@@ -416,6 +424,7 @@
     tradeRow = (workspace.active || []).find((r) => Number(r.id) === Number(id));
     if (!tradeRow) return;
     document.getElementById("soTradeSymbol").textContent = tradeRow.symbol + " · " + (tradeRow.side || "");
+    setStrikeLabels(tradeRow.side, "soBuyStrikeLbl", "soSellStrikeLbl");
     document.getElementById("soBuyStrike").value = tradeRow.buy_strike != null ? tradeRow.buy_strike : "";
     document.getElementById("soBuyCost").value = "";
     document.getElementById("soSellStrike").value = tradeRow.sell_strike != null ? tradeRow.sell_strike : "";
@@ -478,6 +487,7 @@
     exitPxDirty = { sell: false, buy: false };
     const gen = ++exitQuoteGen;
     document.getElementById("soExitSymbol").textContent = exitRow.symbol + " · " + (exitRow.side || "");
+    setStrikeLabels(exitRow.side, "soExitBuyStrikeLbl", "soExitSellStrikeLbl");
     document.getElementById("soExitEntryDate").value = dateOnly(exitRow.date_traded || exitRow.armed_at);
     document.getElementById("soExitBuyStrike").value = exitRow.user_buy_strike != null ? exitRow.user_buy_strike : "";
     document.getElementById("soExitBuyEntry").value = exitRow.buy_cost != null ? exitRow.buy_cost : "";

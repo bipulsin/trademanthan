@@ -261,7 +261,7 @@ body.theme-page.stock-options-body {
 }
 
 .so-modal-card-wide {
-    width: min(520px, 100%);
+    width: min(640px, 100%);
 }
 
 .so-section {
@@ -293,6 +293,15 @@ body.theme-page.stock-options-body {
     color: #fbbf24;
 }
 
+.so-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+    align-items: center;
+}
+
+.so-field-full { grid-column: 1 / -1; }
+
 .so-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .so-field label { font-size: 0.82rem; color: var(--theme-muted, #94a3b8); }
 .so-field input {
@@ -302,6 +311,39 @@ body.theme-page.stock-options-body {
     border: 1px solid var(--theme-border, #334155);
     background: var(--theme-card-alt, #0f172a);
     color: var(--theme-text, #e2e8f0);
+}
+
+.so-field-inline {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0;
+}
+
+.so-field-inline label {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-width: 7.5rem;
+}
+
+.so-field-inline input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+}
+
+.so-form-grid > .so-modal-msg {
+    margin: 4px 0 0;
+}
+
+.so-form-grid > .so-err {
+    margin: 0;
+}
+
+@media (max-width: 560px) {
+    .so-form-grid { grid-template-columns: 1fr; }
+    .so-field-inline label { min-width: 6.5rem; }
 }
 
 .so-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
