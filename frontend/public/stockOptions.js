@@ -16,10 +16,45 @@
   }
 
   function sideChip(side) {
-    if (side === "BEAR CALL") return '<span class="so-chip so-chip-bear">' + esc(side) + "</span>";
-    if (side === "BULL PUT") return '<span class="so-chip so-chip-bull">' + esc(side) + "</span>";
-    return esc(side || "—");
+    const tips = SIDE_TIPS[side];
+    if (!tips) return esc(side || "—");
+    const cls = side === "BEAR CALL" ? "so-chip-bear" : "so-chip-bull";
+    const items = tips.map((t, i) => "<li>" + esc(t) + "</li>").join("");
+    return (
+      '<span class="so-chip ' + cls + ' so-chip-tip" tabindex="0">' +
+      esc(side) +
+      '<span class="so-side-tip" role="tooltip"><ol class="so-side-tip-list">' +
+      items +
+      "</ol></span></span>"
+    );
   }
+
+  const SIDE_TIPS = {
+    "BEAR CALL": [
+      "(when William%R is OverBought Above -5 / -1)",
+      "WHEN - EMA9 crosses below both EMA30 & EMA100 (EMA30 can be above or below EMA100)",
+      "When the LOW of the candle breaches (10% rule) then create the Bear CALL Spread. PROVIDED the candle size is less than 1.5%",
+      "Higher Delta SELL - Lower Delta BUY - example",
+      "Sell ~28 Δ , Buy ~18 Δ (OR conservative: Sell 15 Δ, BUY 2 Δ)",
+      "ALWAYS - First Buy the Option , then SELL, to get the margin benefit",
+      "The Options selected should be of the current monthly expiry (but if the date to expiry is less than 3 days, look for next month expiry provided it has liquidity)",
+      "TP - 3% ROI on Margin Requirement.",
+      "SL - EMA9 above EMA30 and EMA30 above EMA100",
+      "Extreme SL - 3x of the Sell PE price, placed as GTT/Forever order",
+    ],
+    "BULL PUT": [
+      "when William%R is Oversold below -95 / -99",
+      "WHEN - EMA9 crosses above both EMA30 & EMA100 (EMA30 can be above or below EMA100)",
+      "When the High of the candle breaches (10% rule) then create the BULL PUT Spread. PROVIDED the candle size is less than 1.5%",
+      "Higher Delta SELL - Lower Delta BUY - example",
+      "Sell ~28 Δ , Buy ~18 Δ (OR conservative: Sell 15 Δ, BUY 2 Δ)",
+      "ALWAYS - First Buy the Option , then SELL, to get the margin benefit",
+      "The Options selected should be of the current monthly expiry (but if the date to expiry is less than 3 days, look for next month expiry provided it has liquidity)",
+      "TP - 3% ROI on Margin Requirement.",
+      "SL - EMA 9 below EMA30 and EMA30 below EMA100",
+      "Extreme SL - 3x of the Sell PE price, placed as GTT/Forever order",
+    ],
+  };
 
   function optionSuffix(side) {
     const s = String(side || "").toUpperCase();
@@ -125,6 +160,7 @@
       { key: "ema100", label: "EMA100", type: "num", sort: (r) => r.ema100 },
       { key: "status", label: "Status", type: "str", sort: (r) => r.status },
       { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+      { key: "contract", label: "Contract", type: "str", sort: (r) => r.contract_mmm_yyyy },
       { key: "spread", label: "Spread", type: "str", sort: (r) => [r.spread_sell, r.spread_buy].filter(Boolean).join(" ") },
       { key: "trade", label: "" },
     ],
@@ -132,6 +168,7 @@
       { key: "date", label: "Date traded", type: "date", sort: (r) => r.date_traded || r.armed_at },
       { key: "symbol", label: "Symbol", type: "str", sort: (r) => r.symbol },
       { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+      { key: "contract", label: "Contract", type: "str", sort: (r) => r.contract_mmm_yyyy },
       { key: "strikes", label: "Strikes", type: "num", sort: strikeSort },
       { key: "costs", label: "Costs", type: "num", sort: (r) => r.sell_cost },
       { key: "ltp", label: "LTP", type: "num", sort: (r) => r.sell_ltp },
@@ -143,6 +180,7 @@
       { key: "date", label: "Entry date", type: "date", sort: (r) => r.date_traded || r.armed_at },
       { key: "symbol", label: "Symbol", type: "str", sort: (r) => r.symbol },
       { key: "side", label: "Side", type: "str", sort: (r) => r.side },
+      { key: "contract", label: "Contract", type: "str", sort: (r) => r.contract_mmm_yyyy },
       { key: "strikes", label: "Strikes", type: "num", sort: strikeSort },
       { key: "costs", label: "Entry costs", type: "num", sort: (r) => r.sell_cost },
       { key: "exit_px", label: "Exit prices", type: "num", sort: (r) => r.sell_exit_price },
@@ -194,6 +232,7 @@
         <td>${num(r.ema100)}</td>
         <td>${esc(r.status)}</td>
         <td>${sideChip(r.side)}</td>
+        <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-spread">${spread}</td>
         <td><button type="button" class="button-41" role="button" data-trade="${r.id}"><span class="text">Trade</span></button></td>
       </tr>`;
@@ -237,6 +276,7 @@
         <td>${esc(when)}</td>
         <td>${esc(r.symbol)}</td>
         <td>${sideChip(r.side)}</td>
+        <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
         <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-tight">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
@@ -259,6 +299,7 @@
         <td>${esc(r.date_traded || r.armed_at || "—")}</td>
         <td>${esc(r.symbol)}</td>
         <td>${sideChip(r.side)}</td>
+        <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-spread">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
         <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-spread">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>

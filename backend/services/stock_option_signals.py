@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 _MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "add_stock_option_signals.sql"
+_CONTRACT_MIGRATION = (
+    Path(__file__).resolve().parents[1] / "migrations" / "add_stock_option_contract_mmm_yyyy.sql"
+)
 _ENSURED = False
 
 STATUS_RADAR = "Radar"
@@ -30,6 +33,12 @@ SIDE_BULL = "BULL PUT"
 INVALIDATE_REMARKS = "Trade not executed for this symbol"
 ACTIVE_MAX_HOURS = 72
 EXPIRY_REMARKS = "Auto-expired after 72 hours from armed time"
+
+_MONTH_NUM = {
+    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+}
+_MONTH_ABBR = {v: k for k, v in _MONTH_NUM.items()}
 
 WR_PERIOD = 280
 WR_BEAR_GT = -3.0
@@ -74,10 +83,188 @@ def ensure_stock_option_tables() -> None:
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS sell_exit_price DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS buy_exit_price DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS realized_pnl DOUBLE PRECISION",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS contract_mmm_yyyy TEXT",
         ):
             conn.execute(text(stmt))
+        if _CONTRACT_MIGRATION.is_file():
+            conn.execute(text(_CONTRACT_MIGRATION.read_text(encoding="utf-8")))
+    backfill_contract_mmm_yyyy()
     _ENSURED = True
     logger.info("stock_option tables ensured")
+
+
+def format_contract_mmm_yyyy(expiry: date) -> str:
+    """Format FUT expiry as MMM-YYYY (e.g. SEP-2026)."""
+    return f"{_MONTH_ABBR[int(expiry.month)]}-{int(expiry.year):04d}"
+
+
+def parse_fut_trading_symbol_expiry(trading_symbol: Any) -> Optional[date]:
+    """Parse 'BAJAJFINSV FUT 29 SEP 26' → date(2026, 9, 29)."""
+    parts = str(trading_symbol or "").strip().upper().split()
+    if "FUT" not in parts:
+        return None
+    i = parts.index("FUT")
+    if i + 3 >= len(parts):
+        return None
+    day_s, mon_s, yy_s = parts[i + 1], parts[i + 2], parts[i + 3]
+    mon = _MONTH_NUM.get(mon_s)
+    if mon is None or not day_s.isdigit() or not yy_s.isdigit():
+        return None
+    year = 2000 + int(yy_s) if len(yy_s) == 2 else int(yy_s)
+    try:
+        return date(year, mon, int(day_s))
+    except ValueError:
+        return None
+
+
+def expiry_date_from_instrument(inst: Dict[str, Any]) -> Optional[date]:
+    exp = inst.get("expiry")
+    if exp is not None:
+        try:
+            return datetime.fromtimestamp(float(exp) / 1000.0, tz=IST).date()
+        except (TypeError, ValueError, OSError):
+            pass
+    return parse_fut_trading_symbol_expiry(inst.get("trading_symbol"))
+
+
+def _pick_currmth_fut_as_of(
+    contracts: Sequence[Dict[str, Any]],
+    as_of: datetime,
+) -> Optional[Dict[str, Any]]:
+    """Front / roll-window currmth FUT as of ``as_of`` (mirrors arbitrage daily setup)."""
+    if not contracts:
+        return None
+    if as_of.tzinfo is None:
+        as_of_ist = IST.localize(as_of)
+    else:
+        as_of_ist = as_of.astimezone(IST)
+    as_of_ms = int(as_of_ist.timestamp() * 1000)
+    upcoming = [c for c in contracts if int(c.get("expiry") or 0) >= as_of_ms]
+    if not upcoming:
+        return None
+    first = upcoming[0]
+    first_exp = expiry_date_from_instrument(first)
+    in_roll = (
+        first_exp is not None
+        and as_of_ist.day > 20
+        and (as_of_ist.year, as_of_ist.month) == (first_exp.year, first_exp.month)
+        and as_of_ist.date() < first_exp
+    )
+    if in_roll:
+        return upcoming[1] if len(upcoming) >= 2 else None
+    return upcoming[0]
+
+
+def contract_from_arbitrage_master(db: Any, symbol: str) -> Optional[str]:
+    """MMM-YYYY from arbitrage_master currmth FUT symbol / instrument key."""
+    sym = _norm_symbol(symbol)
+    if not sym or db is None:
+        return None
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT currmth_future_symbol AS tsym,
+                       currmth_future_instrument_key AS ikey
+                FROM arbitrage_master
+                WHERE UPPER(TRIM(stock)) = :s
+                LIMIT 1
+                """
+            ),
+            {"s": sym},
+        ).mappings().first()
+    except Exception:
+        logger.exception("stock_option contract master lookup failed for %s", sym)
+        return None
+    if not row:
+        return None
+    exp = parse_fut_trading_symbol_expiry(row.get("tsym"))
+    if exp is not None:
+        return format_contract_mmm_yyyy(exp)
+    ikey = str(row.get("ikey") or "").strip()
+    if not ikey:
+        return None
+    for inst in _fut_contracts_for_symbol(sym):
+        if str(inst.get("instrument_key") or "").strip() == ikey:
+            exp2 = expiry_date_from_instrument(inst)
+            if exp2 is not None:
+                return format_contract_mmm_yyyy(exp2)
+    return None
+
+
+def resolve_contract_mmm_yyyy(
+    symbol: str,
+    armed_at: Any = None,
+    db: Any = None,
+) -> Optional[str]:
+    """Sticky contract label from currmth FUT expiry as of armed_at (or now).
+
+    Prefer instruments-file pick as of armed_at; else arbitrage_master currmth;
+    else map armed_at calendar month to MMM-YYYY when no master/instruments hit.
+    """
+    as_of = _naive_ist(armed_at) or now_ist_second()
+    contracts = _fut_contracts_for_symbol(symbol)
+    picked = _pick_currmth_fut_as_of(contracts, as_of)
+    if picked is not None:
+        exp = expiry_date_from_instrument(picked)
+        if exp is not None:
+            return format_contract_mmm_yyyy(exp)
+    label = contract_from_arbitrage_master(db, symbol) if db is not None else None
+    if label:
+        return label
+    if _naive_ist(armed_at) is None:
+        return None
+    # Last resort: armed_at month as FUT month (roll after day 20 → next month).
+    if as_of.day > 20:
+        y, m = as_of.year, as_of.month + 1
+        if m > 12:
+            y, m = y + 1, 1
+        return format_contract_mmm_yyyy(date(y, m, 1))
+    return format_contract_mmm_yyyy(date(as_of.year, as_of.month, 1))
+
+
+def backfill_contract_mmm_yyyy() -> int:
+    """Fill contract_mmm_yyyy for Active/Executed/Completed rows missing it (armed_at set)."""
+    db = SessionLocal()
+    updated = 0
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, symbol, armed_at, status
+                FROM stock_option_signals
+                WHERE contract_mmm_yyyy IS NULL
+                  AND armed_at IS NOT NULL
+                  AND LOWER(TRIM(status)) IN ('active', 'executed', 'completed')
+                ORDER BY id
+                """
+            )
+        ).mappings().all()
+        for row in rows:
+            label = resolve_contract_mmm_yyyy(row.get("symbol"), row.get("armed_at"), db=db)
+            if not label:
+                continue
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET contract_mmm_yyyy = :label, updated_at = :ts
+                    WHERE id = :id AND contract_mmm_yyyy IS NULL
+                    """
+                ),
+                {"label": label, "ts": now_ist_second(), "id": row["id"]},
+            )
+            updated += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("stock_option contract backfill failed")
+        return 0
+    finally:
+        db.close()
+    if updated:
+        logger.info("stock_option contract backfill: %s rows", updated)
+    return updated
 
 
 def decode_raw_payload(body: bytes) -> Tuple[Any, Dict[str, Any]]:
@@ -502,6 +689,62 @@ def _positive_lot(value: Any) -> Optional[int]:
 _LOT_CACHE: Tuple[Dict[str, int], Dict[str, int]] = ({}, {})
 _LOT_CACHE_AT = 0.0
 _LOT_CACHE_TTL = 600.0
+_FUT_BY_UND: Dict[str, List[Dict[str, Any]]] = {}
+_FUT_BY_UND_AT = 0.0
+_FUT_BY_UND_TTL = 600.0
+
+
+def _fut_contracts_index() -> Dict[str, List[Dict[str, Any]]]:
+    """underlying → NSE_FO FUT instrument rows. Cached 10 minutes."""
+    global _FUT_BY_UND, _FUT_BY_UND_AT
+    now = time.monotonic()
+    if _FUT_BY_UND and (now - _FUT_BY_UND_AT) < _FUT_BY_UND_TTL:
+        return _FUT_BY_UND
+    from backend.config import get_instruments_file_path
+
+    path = get_instruments_file_path()
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    if not path.is_file():
+        _FUT_BY_UND = {}
+        _FUT_BY_UND_AT = now
+        return _FUT_BY_UND
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("stock_option contract: instruments unreadable")
+        return _FUT_BY_UND or {}
+    if not isinstance(data, list):
+        return {}
+    for inst in data:
+        if not isinstance(inst, dict):
+            continue
+        if str(inst.get("segment") or "").upper() != "NSE_FO":
+            continue
+        if str(inst.get("instrument_type") or "").upper() != "FUT":
+            continue
+        if expiry_date_from_instrument(inst) is None:
+            continue
+        und = _norm_symbol(inst.get("underlying_symbol") or "")
+        if not und:
+            tsym = str(inst.get("trading_symbol") or "")
+            if " FUT " in tsym.upper():
+                und = _norm_symbol(tsym.split(" FUT ", 1)[0])
+        if not und:
+            continue
+        out.setdefault(und, []).append(inst)
+    for und in out:
+        out[und].sort(key=lambda x: int(x.get("expiry") or 0))
+    _FUT_BY_UND = out
+    _FUT_BY_UND_AT = now
+    return out
+
+
+def _fut_contracts_for_symbol(symbol: str) -> List[Dict[str, Any]]:
+    """NSE_FO FUT rows for underlying from instruments file."""
+    sym = _norm_symbol(symbol)
+    if not sym:
+        return []
+    return list(_fut_contracts_index().get(sym) or [])
 
 
 def _instrument_lot_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
@@ -1261,12 +1504,16 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                 )
                 invalidated += 1
             elif action == "arm":
+                contract = resolve_contract_mmm_yyyy(
+                    row.get("symbol"), now_naive, db=db
+                )
                 db.execute(
                     text(
                         """
                         UPDATE stock_option_signals
                         SET status = :active,
                             armed_at = COALESCE(armed_at, :ts),
+                            contract_mmm_yyyy = COALESCE(contract_mmm_yyyy, :contract),
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
                             williamsr = COALESCE(:williamsr, williamsr),
@@ -1281,12 +1528,15 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                         "ema100": snap["ema100"],
                         "williamsr": wr_now,
                         "ts": now_naive,
+                        "contract": contract,
                         "id": row["id"],
                         "radar": STATUS_RADAR,
                     },
                 )
                 armed += 1
                 row["status"] = STATUS_ACTIVE
+                if contract:
+                    row["contract_mmm_yyyy"] = contract
             else:
                 db.execute(
                     text(
@@ -1457,6 +1707,7 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "side": r.get("side"),
         "trigger_at": _fmt_ts(r.get("trigger_at")),
         "armed_at": _fmt_ts(r.get("armed_at")),
+        "contract_mmm_yyyy": r.get("contract_mmm_yyyy"),
         "ema9": r.get("ema9"),
         "ema30": r.get("ema30"),
         "ema100": r.get("ema100"),
@@ -1492,7 +1743,7 @@ def list_workspace() -> Dict[str, Any]:
             text(
                 """
                 SELECT id, symbol, williamsr, instrument_key, status, side,
-                       trigger_at, armed_at, ema9, ema30, ema100,
+                       trigger_at, armed_at, contract_mmm_yyyy, ema9, ema30, ema100,
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,

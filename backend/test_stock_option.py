@@ -1,5 +1,5 @@
 """Stock Options webhook gate, duplicate ignore, EMA arm/invalidate (no DB)."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytz
 
@@ -15,6 +15,7 @@ from backend.services.stock_option_signals import (
     WR_PERIOD,
     active_past_max_age,
     expiry_remarks,
+    format_contract_mmm_yyyy,
     invalidate_outcome,
     aggregate_intraday_to_2h,
     attach_rupee_pnl,
@@ -27,7 +28,9 @@ from backend.services.stock_option_signals import (
     _row_public,
     next_ema_action,
     parse_chartink_symbols,
+    parse_fut_trading_symbol_expiry,
     pick_nearest_delta,
+    resolve_contract_mmm_yyyy,
     should_insert_new_signal,
     side_from_williamsr,
     spread_lines,
@@ -216,3 +219,28 @@ def test_pnl_and_hard_stop():
     attach_rupee_pnl(missing, None)
     assert missing["lot_size"] is None
     assert missing["combined_pnl_inr"] is None
+
+
+def test_contract_mmm_yyyy_from_fut_symbol():
+    assert format_contract_mmm_yyyy(date(2026, 9, 29)) == "SEP-2026"
+    assert parse_fut_trading_symbol_expiry("BAJAJFINSV FUT 29 SEP 26") == date(2026, 9, 29)
+    assert parse_fut_trading_symbol_expiry("BAJAJ-AUTO FUT 29 SEP 26") == date(2026, 9, 29)
+    assert parse_fut_trading_symbol_expiry("") is None
+    label = resolve_contract_mmm_yyyy("BAJAJFINSV", datetime(2026, 9, 7, 13, 15))
+    assert label in (None, "SEP-2026")
+
+
+def test_row_public_includes_contract():
+    row = _row_public({
+        "id": 1,
+        "symbol": "BAJAJFINSV",
+        "status": "Completed",
+        "side": "BEAR CALL",
+        "contract_mmm_yyyy": "SEP-2026",
+        "sell_cost": 10,
+        "buy_cost": 4,
+        "sell_exit_price": 6,
+        "buy_exit_price": 3,
+        "hard_stop_placed": False,
+    })
+    assert row["contract_mmm_yyyy"] == "SEP-2026"
