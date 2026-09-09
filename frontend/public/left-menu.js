@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.30';
+const MENU_HTML_PATH = 'left-menu.html?v=3.31';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|analysis/.test(path);
+        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|analysis/.test(path);
     }
 
     getCurrentPage() {
@@ -48,6 +48,7 @@ class LeftMenu {
         if (path.includes('tradelog')) return 'tradelog';
         if (path.includes('kavach-bt-checkpoint')) return 'kavach-bt-checkpoint';
         if (path.includes('reports')) return 'reports';
+        if (path.toLowerCase().includes('stockoptions')) return 'stockoptions';
         if (path.includes('intraoption')) return 'intraoption';
         if (path.includes('smartfuture')) return 'smartfuture';
         if (path.includes('vajrafutures')) return 'vajrafutures';
@@ -274,6 +275,7 @@ class LeftMenu {
             <ul class="nav-list">
                 <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
+                <li class="nav-item" data-page="stockOptions.html"><i class="fas fa-chart-line" style="color:#38bdf8;"></i><span>Stock Options</span></li>
                 <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
                 <li class="nav-item" data-page="volumemismatchfutures.html"><i class="fas fa-chart-bar" style="color:#7c3aed;"></i><span>Volume Mismatch Futures</span></li>
                 <li class="nav-item" data-page="iron-condor.html"><i class="fas fa-layer-group"></i><span>Iron Condor</span></li>
@@ -699,6 +701,7 @@ class LeftMenu {
         const pageTitles = {
             dashboard: 'Dashboard',
             intraoption: 'Intraday Stock Options Algo',
+            stockoptions: 'Stock Options',
             smartfuture: 'Smart Futures',
             dailyfutures: 'Premium Futures',
             volumemismatchfutures: 'Volume Mismatch Futures',
@@ -789,6 +792,7 @@ class LeftMenu {
             case 'tradelog': return 'tradelog.html';
             case 'kavach-bt-checkpoint': return 'kavach-bt-checkpoint.html';
             case 'intraoption': return 'intraoption.html';
+            case 'stockoptions': return 'stockOptions.html';
             case 'smartfuture': return 'smartfuture.html';
             case 'vajrafutures': return 'vajrafutures.html';
             case 'dailyfutures': return 'dailyfutures.html';

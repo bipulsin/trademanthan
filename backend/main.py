@@ -36,6 +36,7 @@ import backend.routers.ha_vwap as ha_vwap
 import backend.routers.breakfast_strategy as breakfast_strategy
 import backend.routers.trap_ce_live_webhook as trap_ce_live_webhook
 import backend.routers.premium_futures_tv_webhook as premium_futures_tv_webhook
+import backend.routers.stock_option as stock_option
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -95,6 +96,10 @@ from backend.services.arbitrage_volatility_grade_scheduler import (
 from backend.services.analysis_page.scheduler import (
     start_analysis_snapshot_scheduler,
     stop_analysis_snapshot_scheduler,
+)
+from backend.services.stock_option_scheduler import (
+    start_stock_option_scheduler,
+    stop_stock_option_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -260,6 +265,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Analysis snapshot scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Analysis snapshot scheduler")
 
+        try:
+            logger.info("Starting Stock Options 2h EMA scheduler (11:15/13:15/15:15 IST)...")
+            start_stock_option_scheduler()
+            logger.info("✅ Stock Options EMA scheduler: STARTED (11:15, 13:15, 15:15 IST)")
+        except Exception as e:
+            logger.error(f"❌ Stock Options EMA scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Stock Options EMA scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -387,6 +400,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping Analysis snapshot scheduler: {e}", exc_info=True)
 
+    try:
+        stop_stock_option_scheduler()
+        logger.info("✅ Stock Options EMA scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Stock Options EMA scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -453,6 +472,8 @@ app.include_router(ha_vwap.router)
 app.include_router(breakfast_strategy.router, prefix="")
 app.include_router(trap_ce_live_webhook.router)
 app.include_router(premium_futures_tv_webhook.router)
+app.include_router(stock_option.router)
+app.include_router(stock_option.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")
