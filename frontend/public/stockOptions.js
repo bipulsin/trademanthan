@@ -157,7 +157,7 @@
         <td>${esc(r.status)}</td>
         <td>${sideChip(r.side)}</td>
         <td class="so-spread">${spread}</td>
-        <td><button type="button" class="so-btn so-btn-trade" data-trade="${r.id}">Trade</button></td>
+        <td><button type="button" class="button-41" role="button" data-trade="${r.id}"><span class="text">Trade</span></button></td>
       </tr>`;
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table">

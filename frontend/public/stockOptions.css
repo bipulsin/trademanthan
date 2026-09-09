@@ -124,28 +124,34 @@ body.theme-page.stock-options-body {
     cursor: pointer;
 }
 
-.so-btn-trade {
-    border-radius: 999px;
-    padding: 8px 18px;
-    color: #052e16;
-    font-weight: 700;
-    background: linear-gradient(180deg, #bbf7d0 0%, #4ade80 42%, #16a34a 100%);
-    border: 1px solid #15803d;
+.button-41 {
+    padding: 12px 26px;
+    border: 0;
+    font-size: 16px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 150ms ease-in-out;
+    border-radius: 14px;
+    font-weight: 600;
+    color: #fff;
+    background-color: transparent;
+    background-image: radial-gradient(50% 115% at 50% -5%, rgba(255, 255, 255, 0.11) 0%, transparent 100%);
     box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.55) inset,
-        0 -2px 0 rgba(21, 128, 61, 0.45) inset,
-        0 3px 0 #166534,
-        0 5px 10px rgba(22, 101, 52, 0.35);
+        inset 0 0px 10px 0px rgba(80, 160, 255, 0.28),
+        inset 0px 5px 10px 0px rgba(80, 160, 255, 0.22),
+        inset 0px 2px 5px 0px rgba(186, 220, 255, 0.45),
+        inset 0px 3px 20px 0px rgba(37, 99, 235, 0.55),
+        0 0 14px rgba(80, 160, 255, 0.35);
 }
 
-.so-btn-trade:hover { filter: brightness(1.06); }
-
-.so-btn-trade:active {
-    transform: translateY(2px);
-    box-shadow:
-        0 1px 0 rgba(255, 255, 255, 0.35) inset,
-        0 1px 0 #166534;
+.button-41 .text {
+    display: inline-block;
+    line-height: 1;
 }
+
+.button-41:hover { background-color: rgba(255, 255, 255, 0.05); }
+
+.button-41:active { transform: scale(.95); }
 
 .so-empty {
     color: var(--theme-muted, #94a3b8);
