@@ -1654,8 +1654,6 @@ def quote_exit_ltps(signal_id: int) -> Dict[str, Any]:
             raise LookupError("signal not found")
         if (row.get("status") or "").strip().lower() != "executed":
             raise ValueError("only Executed rows can be quoted for exit")
-        if row.get("sell_cost") is None or row.get("buy_cost") is None:
-            raise ValueError("trade has no entry costs")
         sell_key = str(row.get("sell_instrument_key") or "").strip()
         buy_key = str(row.get("buy_instrument_key") or "").strip()
         sell_ltp = _as_float(row.get("sell_ltp"))
@@ -1744,8 +1742,6 @@ def submit_exit(
             raise LookupError("signal not found")
         if (row.get("status") or "").strip().lower() != "executed":
             raise ValueError("only Executed rows can be completed")
-        if row.get("sell_cost") is None or row.get("buy_cost") is None:
-            raise ValueError("trade has no entry costs")
         db.execute(
             text(
                 """

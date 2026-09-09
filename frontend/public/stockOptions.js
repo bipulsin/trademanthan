@@ -47,10 +47,6 @@
     return String(v).slice(0, 10);
   }
 
-  function hasEntryCosts(r) {
-    return r && r.sell_cost != null && r.sell_cost !== "" && r.buy_cost != null && r.buy_cost !== "";
-  }
-
   function emptyVal(v) {
     return v == null || v === "";
   }
@@ -233,7 +229,7 @@
         <td class="so-tight">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
         <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-hs"><span class="so-hs-cell">${num(r.hard_stop)}${hsBox}</span></td>
-        <td class="so-exit-cell">${hasEntryCosts(r) ? '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button>' : ""}</td>
+        <td class="so-exit-cell"><button type="button" class="so-exit-btn" data-exit="${r.id}">Exit</button></td>
       </tr>`;
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table so-table-executed">
@@ -346,7 +342,7 @@
 
   function openExit(id) {
     exitRow = (workspace.executed || []).find((r) => Number(r.id) === Number(id));
-    if (!exitRow || !hasEntryCosts(exitRow)) return;
+    if (!exitRow) return;
     exitPxDirty = { sell: false, buy: false };
     const gen = ++exitQuoteGen;
     document.getElementById("soExitSymbol").textContent = exitRow.symbol + " · " + (exitRow.side || "");
