@@ -922,7 +922,22 @@
     if (bearBtn) bearBtn.hidden = !(open && bear.length > 0);
   }
 
-  function enterCellHtml(eligible, reason, enterBtn) {
+  function isTvWebhookPick(r) {
+    return !!(r && (r.tv_webhook === true || r.source === 'tradingview_webhook'));
+  }
+
+  function enterCellHtml(eligible, reason, enterBtn, row) {
+    if (isTvWebhookPick(row) || !(row && row.screening_id)) {
+      if (isTvWebhookPick(row)) {
+        return (
+          '<div class="df-enter-cell">' +
+          '<span class="df-tv-badge">TV</span>' +
+          '<div class="df-enter-block-reason" role="status">' +
+          esc((row && row.order_block_reason) || 'TradingView alert') +
+          '</div></div>'
+        );
+      }
+    }
     if (eligible) return enterBtn;
     return (
       '<div class="df-enter-cell">' +
@@ -1013,7 +1028,7 @@
           '<button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
           '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
-        const enterCell = enterCellHtml(eligible, reason, enterBtn);
+        const enterCell = enterCellHtml(eligible, reason, enterBtn, r);
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
@@ -1112,7 +1127,7 @@
           '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
           r.screening_id +
           '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
-        const enterCell = enterCellHtml(eligible, reason, enterBtn);
+        const enterCell = enterCellHtml(eligible, reason, enterBtn, r);
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +

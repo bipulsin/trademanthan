@@ -50,6 +50,16 @@
         .df-btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .df-enter-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 240px; }
         .df-enter-block-reason { font-size: 0.72rem; line-height: 1.35; color: var(--theme-muted, #64748b); }
+        .df-tv-badge {
+            display: inline-block;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            padding: 2px 6px;
+            border-radius: 6px;
+            background: #0f766e;
+            color: #ecfdf5;
+        }
         .df-blink { display: inline-block; color: #ef4444; font-weight: 800; margin-left: 4px; animation: df-blink-anim 0.9s ease-in-out infinite; }
         @keyframes df-blink-anim { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
         .df-pnl-pos { color: #16a34a; font-weight: 600; }
@@ -508,6 +518,6 @@
 
     <script src="left-menu.js?v=3.24"></script>
     <script src="notify-trade-channel.js?v=1"></script>
-    <script src="dailyfutures.js?v=63"></script>
+    <script src="dailyfutures.js?v=64"></script>
 </body>
 </html>

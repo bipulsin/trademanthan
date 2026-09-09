@@ -4428,6 +4428,13 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     picks_bull = _sort_todays_pick_workspace_rows(list(picks_bull))
     picks_bearish = _sort_todays_pick_workspace_rows(list(picks_bearish))
 
+    try:
+        from backend.services.premium_futures_tv_webhook import merge_tv_picks_into_workspace
+
+        picks_bull, picks_bearish = merge_tv_picks_into_workspace(picks_bull, picks_bearish, td)
+    except Exception as e:
+        logger.warning("daily_futures: TradingView picks merge skipped: %s", e)
+
     return {
         "trade_date": str(td),
         "session_before_open": False,
