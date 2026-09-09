@@ -1,4 +1,4 @@
-"""Stock Options algo: ChartInk webhook ingest, 2h EMA arm/invalidate, credit spreads."""
+"""Stock Options algo: ChartInk webhook ingest, Upstox WR(280), 2h EMA arm/invalidate."""
 from __future__ import annotations
 
 import json
@@ -30,6 +30,7 @@ INVALIDATE_REMARKS = "Trade not executed for this symbol"
 ACTIVE_MAX_HOURS = 72
 EXPIRY_REMARKS = "Auto-expired after 72 hours from armed time"
 
+WR_PERIOD = 280
 WR_BEAR_GT = -3.0
 WR_BULL_LT = -97.0
 DELTA_SELL = 28.0
@@ -51,8 +52,7 @@ JSON_FIELDS = (
     "webhook_url",
     "columns",
 )
-COLUMN_KEYS = ("symbol", "williamsr")
-WR_ALIASES = ("williamsr", "williams_r", "williamsR", "williams_R")
+COLUMN_KEYS = ("symbol",)
 
 
 def now_ist_second() -> datetime:
@@ -121,15 +121,12 @@ def _norm_symbol(raw: Any) -> str:
     return s.strip()
 
 
-def _wr_from_column(col: Dict[str, Any]) -> Any:
-    for key in WR_ALIASES:
-        if key in col and col.get(key) is not None and str(col.get(key)).strip() != "":
-            return col.get(key)
-    return None
-
-
 def parse_chartink_symbols(parsed: Any) -> Tuple[str, List[Dict[str, Any]], Dict[str, Optional[str]]]:
-    """Return (parse_status, candidates, meta). candidates have symbol + williamsr."""
+    """Return (parse_status, candidates, meta). candidates are symbols only.
+
+    ChartInk ``columns[].williamsr`` is ignored. Side comes from Upstox WR(280).
+    The raw webhook body (including any williamsr) is stored only on the webhook log.
+    """
     meta = {"triggered_at_raw": None, "scan_name": None, "alert_name": None}
     if not isinstance(parsed, dict):
         return "failed", [], meta
@@ -155,7 +152,7 @@ def parse_chartink_symbols(parsed: Any) -> Tuple[str, List[Dict[str, Any]], Dict
             sym = _norm_symbol(col.get("symbol"))
             if not sym:
                 continue
-            rows.append({"symbol": sym, "williamsr": _wr_from_column(col)})
+            rows.append({"symbol": sym})
     else:
         stocks = parsed.get("stocks")
         parts: List[str] = []
@@ -163,17 +160,11 @@ def parse_chartink_symbols(parsed: Any) -> Tuple[str, List[Dict[str, Any]], Dict
             parts = [_norm_symbol(x) for x in stocks if _norm_symbol(x)]
         elif stocks is not None:
             parts = [_norm_symbol(p) for p in str(stocks).split(",") if _norm_symbol(p)]
-        top_wr = parsed.get("williamsr", parsed.get("williams_r"))
         for sym in parts:
-            rows.append({"symbol": sym, "williamsr": top_wr})
+            rows.append({"symbol": sym})
 
     if not rows:
         return "failed", [], meta
-    usable = [r for r in rows if side_from_williamsr(r.get("williamsr")) is not None]
-    if not usable:
-        return "partial", rows, meta
-    if len(usable) < len(rows):
-        return "partial", rows, meta
     return "success", rows, meta
 
 
@@ -585,6 +576,106 @@ def aggregate_intraday_to_2h(candles: Sequence[Dict[str, Any]], now: Optional[da
     return out
 
 
+def completed_2h_ohlc(raw: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Completed 2h candles as {end, high, low, close}. end = bucket start + 120m."""
+    out: List[Dict[str, Any]] = []
+    for bar in raw or []:
+        ts = _parse_candle_ts(bar.get("timestamp"))
+        high = bar.get("high")
+        low = bar.get("low")
+        close = bar.get("close")
+        if ts is None or high is None or low is None or close is None:
+            continue
+        try:
+            h, lo, c = float(high), float(low), float(close)
+        except (TypeError, ValueError):
+            continue
+        out.append({"end": naive_ist(ts + timedelta(minutes=BAR_MINUTES)), "high": h, "low": lo, "close": c})
+    out.sort(key=lambda b: b["end"])
+    dedup: Dict[datetime, Dict[str, Any]] = {}
+    for b in out:
+        dedup[b["end"]] = b
+    return [dedup[k] for k in sorted(dedup)]
+
+
+def williams_r_at(
+    bars: Sequence[Dict[str, Any]],
+    asof: datetime,
+    period: int = WR_PERIOD,
+) -> Optional[float]:
+    """WR(period) of the last completed bar with end <= asof.
+
+    (Highest High(period) - Close) / (Highest High(period) - Lowest Low(period)) * -100
+    """
+    asof_n = naive_ist(asof)
+    idx = -1
+    for i, bar in enumerate(bars):
+        end = bar.get("end")
+        if not isinstance(end, datetime):
+            continue
+        if naive_ist(end) <= asof_n:
+            idx = i
+        else:
+            break
+    if idx < period - 1:
+        return None
+    window = bars[idx - period + 1 : idx + 1]
+    if len(window) < period:
+        return None
+    hh = max(b["high"] for b in window)
+    ll = min(b["low"] for b in window)
+    if hh <= ll:
+        return None
+    close = window[-1]["close"]
+    return (hh - close) / (hh - ll) * -100.0
+
+
+def fetch_completed_2h_ohlc(instrument_key: str, asof: datetime) -> List[Dict[str, Any]]:
+    """hours/1 chunks aggregated to completed 09:15 2h bars, same window as WR(280) backfill."""
+    from backend.config import settings
+    from backend.services.upstox_service import UpstoxService
+
+    u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    asof_n = naive_ist(asof)
+    asof_d = asof_n.date()
+    ends = [asof_d - timedelta(days=55 * i) for i in range(5)]
+    chunks: List[List[Dict[str, Any]]] = []
+    for end_d in ends:
+        kwargs: Dict[str, Any] = {"interval": "hours/1", "days_back": 60}
+        if end_d < asof_d:
+            kwargs["range_end_date"] = end_d
+        raw = None
+        last_err: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                raw = u.get_historical_candles_by_instrument_key(instrument_key, **kwargs)
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(1.5 * (attempt + 1))
+        if last_err is not None:
+            logger.info("stock_option hours/1 end=%s failed %s: %s", end_d, instrument_key, last_err)
+        chunks.append(raw or [])
+        time.sleep(FETCH_SLEEP_SEC)
+
+    by_ts: Dict[str, Dict[str, Any]] = {}
+    for chunk in chunks:
+        for c in chunk or []:
+            key = str(c.get("timestamp") or "")
+            if key:
+                by_ts[key] = c
+    merged = [by_ts[k] for k in sorted(by_ts)]
+    agg = aggregate_intraday_to_2h(merged, now=IST.localize(asof_n))
+    return completed_2h_ohlc(agg)
+
+
+def compute_williams_r_280(instrument_key: str, asof: datetime) -> Optional[float]:
+    """WR(280) from Upstox completed 2h bars ending at or before ``asof``."""
+    bars = fetch_completed_2h_ohlc(instrument_key, asof)
+    return williams_r_at(bars, asof, WR_PERIOD)
+
+
 def resolve_equity_instrument_key(symbol: str, db: Any) -> Optional[str]:
     sym = _norm_symbol(symbol)
     if not sym:
@@ -669,16 +760,27 @@ def insert_webhook_and_signals(
             if sym in seen:
                 continue
             seen.add(sym)
-            side = side_from_williamsr(cand.get("williamsr"))
-            if side is None:
-                discarded += 1
-                continue
             statuses = _statuses_for_symbol(db, sym)
             if not should_insert_new_signal(statuses):
                 ignored += 1
                 continue
-            wr = _as_float(cand.get("williamsr"))
             ik = resolve_equity_instrument_key(sym, db)
+            wr = None
+            if ik:
+                try:
+                    wr = compute_williams_r_280(ik, received_at)
+                except Exception as e:
+                    logger.info("stock_option WR(280) fetch failed for %s: %s", sym, e)
+                    wr = None
+            side = side_from_williamsr(wr)
+            if side is None:
+                discarded += 1
+                logger.info(
+                    "stock_option rejected %s: computed WR(280)=%s (webhook williamsr ignored)",
+                    sym,
+                    wr,
+                )
+                continue
             db.execute(
                 text(
                     """
@@ -951,6 +1053,12 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
             time.sleep(FETCH_SLEEP_SEC)
             continue
         snap = ema_snapshot(closes)
+        wr_now = None
+        try:
+            wr_now = compute_williams_r_280(ik, now_naive)
+        except Exception as e:
+            logger.info("stock_option WR(280) refresh failed for %s: %s", row.get("symbol"), e)
+            wr_now = None
         submitted = trade_is_submitted(row.get("date_traded"), row.get("sell_cost"), row.get("buy_cost"))
         action = next_ema_action(
             row.get("status") or "",
@@ -978,6 +1086,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                         SET status = :dest,
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
+                            williamsr = COALESCE(:williamsr, williamsr),
                             remarks = :remarks,
                             updated_at = :ts
                         WHERE id = :id AND status = :active AND date_traded IS NULL
@@ -988,6 +1097,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                         "ema9": snap["ema9"],
                         "ema30": snap["ema30"],
                         "ema100": snap["ema100"],
+                        "williamsr": wr_now,
                         "ts": now_naive,
                         "remarks": INVALIDATE_REMARKS,
                         "id": row["id"],
@@ -1004,6 +1114,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                             armed_at = COALESCE(armed_at, :ts),
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
+                            williamsr = COALESCE(:williamsr, williamsr),
                             updated_at = :ts
                         WHERE id = :id AND status = :radar
                         """
@@ -1013,6 +1124,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                         "ema9": snap["ema9"],
                         "ema30": snap["ema30"],
                         "ema100": snap["ema100"],
+                        "williamsr": wr_now,
                         "ts": now_naive,
                         "id": row["id"],
                         "radar": STATUS_RADAR,
@@ -1029,6 +1141,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                             ema30 = COALESCE(:ema30, ema30),
                             ema100 = COALESCE(:ema100, ema100),
                             ema_updated_at = :ts,
+                            williamsr = COALESCE(:williamsr, williamsr),
                             updated_at = :ts
                         WHERE id = :id
                         """
@@ -1037,6 +1150,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                         "ema9": snap["ema9"],
                         "ema30": snap["ema30"],
                         "ema100": snap["ema100"],
+                        "williamsr": wr_now,
                         "ts": now_naive,
                         "id": row["id"],
                     },

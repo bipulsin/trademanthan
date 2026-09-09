@@ -35,7 +35,6 @@ from backend.database import SessionLocal
 from backend.services.ist_datetime import naive_ist
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.stock_option_signals import (
-    BAR_MINUTES,
     EMA_SLOW,
     EXPIRY_REMARKS,
     FETCH_SLEEP_SEC,
@@ -44,20 +43,21 @@ from backend.services.stock_option_signals import (
     STATUS_EXECUTED,
     STATUS_RADAR,
     STATUS_REJECTED,
+    WR_PERIOD,
     _fill_spreads_if_blank,
-    _parse_candle_ts,
     active_past_max_age,
     aggregate_intraday_to_2h,
+    completed_2h_ohlc,
     ema_snapshot,
     expiry_remarks,
     invalidate_outcome,
     next_ema_action,
     resolve_equity_instrument_key,
     side_from_williamsr,
+    williams_r_at,
 )
 
 IST = pytz.timezone("Asia/Kolkata")
-WR_PERIOD = 280
 WR_OUTSIDE = "Williams %R(280) outside gate"
 WR_SHORT = "Williams %R(280) insufficient 2h history"
 IGNORED_OPEN = "Ignored: open row already exists for symbol"
@@ -88,55 +88,6 @@ def tick_times(start: datetime, end: datetime) -> List[datetime]:
             out.append(tick)
         day += timedelta(days=1)
     return out
-
-
-def bar_end(bar: Dict[str, Any]) -> Optional[datetime]:
-    ts = _parse_candle_ts(bar.get("timestamp"))
-    if ts is None:
-        return None
-    return naive_ist(ts + timedelta(minutes=BAR_MINUTES))
-
-
-def ohlc_bars(raw: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for bar in raw or []:
-        end = bar_end(bar)
-        high = bar.get("high")
-        low = bar.get("low")
-        close = bar.get("close")
-        if end is None or high is None or low is None or close is None:
-            continue
-        try:
-            h, lo, c = float(high), float(low), float(close)
-        except (TypeError, ValueError):
-            continue
-        out.append({"end": end, "high": h, "low": lo, "close": c})
-    out.sort(key=lambda b: b["end"])
-    dedup: Dict[datetime, Dict[str, Any]] = {}
-    for b in out:
-        dedup[b["end"]] = b
-    return [dedup[k] for k in sorted(dedup)]
-
-
-def williams_r_at(bars: Sequence[Dict[str, Any]], asof: datetime, period: int = WR_PERIOD) -> Optional[float]:
-    """%R of the last completed bar with end <= asof. Needs ``period`` bars."""
-    idx = -1
-    for i, bar in enumerate(bars):
-        if bar["end"] <= asof:
-            idx = i
-        else:
-            break
-    if idx < period - 1:
-        return None
-    window = bars[idx - period + 1 : idx + 1]
-    if len(window) < period:
-        return None
-    hh = max(b["high"] for b in window)
-    ll = min(b["low"] for b in window)
-    if hh <= ll:
-        return None
-    close = window[-1]["close"]
-    return (hh - close) / (hh - ll) * -100.0
 
 
 def ema_snaps(bars: Sequence[Dict[str, Any]]) -> List[Tuple[datetime, Dict[str, Optional[float]]]]:
@@ -198,7 +149,7 @@ def fetch_2h_ohlc(instrument_key: str, asof: datetime, sleep_sec: float) -> List
                 by_ts[key] = c
     merged = [by_ts[k] for k in sorted(by_ts)]
     agg = aggregate_intraday_to_2h(merged, now=IST.localize(asof))
-    return ohlc_bars(agg)
+    return completed_2h_ohlc(agg)
 
 
 def load_rows() -> List[Dict[str, Any]]:

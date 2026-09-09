@@ -1,5 +1,5 @@
 """Stock Options webhook gate, duplicate ignore, EMA arm/invalidate (no DB)."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 
@@ -11,11 +11,13 @@ from backend.services.stock_option_signals import (
     STATUS_EXECUTED,
     STATUS_RADAR,
     STATUS_REJECTED,
+    WR_PERIOD,
     active_past_max_age,
     expiry_remarks,
     invalidate_outcome,
     aggregate_intraday_to_2h,
     combined_pnl,
+    completed_2h_ohlc,
     ema_condition_holds,
     hard_stop_price,
     next_ema_action,
@@ -24,6 +26,7 @@ from backend.services.stock_option_signals import (
     should_insert_new_signal,
     side_from_williamsr,
     spread_lines,
+    williams_r_at,
 )
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -41,7 +44,7 @@ def test_williamsr_gate_bounds_excluded():
     assert side_from_williamsr("nope") is None
 
 
-def test_parse_columns_williamsr_and_alias():
+def test_parse_columns_ignores_webhook_williamsr():
     parsed = {
         "stocks": "AAA, BBB, CCC",
         "trigger_prices": "1,2,3",
@@ -57,12 +60,46 @@ def test_parse_columns_williamsr_and_alias():
         ],
     }
     status, rows, meta = parse_chartink_symbols(parsed)
-    assert status == "partial"
-    assert [r["symbol"] for r in rows] == ["RELIANCE", "TCS", "INFY"]
-    assert side_from_williamsr(rows[0]["williamsr"]) == SIDE_BEAR
-    assert side_from_williamsr(rows[1]["williamsr"]) == SIDE_BULL
-    assert side_from_williamsr(rows[2]["williamsr"]) is None
+    assert status == "success"
+    assert rows == [{"symbol": "RELIANCE"}, {"symbol": "TCS"}, {"symbol": "INFY"}]
+    assert all("williamsr" not in r for r in rows)
     assert meta["scan_name"] == "HA-stock option"
+
+
+def _bars(n: int, close: float, start: datetime) -> list:
+    out = []
+    for i in range(n):
+        out.append({"end": start + timedelta(hours=2 * i), "high": 110.0, "low": 90.0, "close": close})
+    return out
+
+
+def test_williams_r_280_gate_uses_last_completed_bar():
+    start = datetime(2026, 1, 1, 11, 15)
+    asof = start + timedelta(hours=2 * (WR_PERIOD - 1))
+    later = asof + timedelta(hours=2)
+
+    bear = _bars(WR_PERIOD, 109.5, start)
+    bear.append({"end": later, "high": 110.0, "low": 90.0, "close": 90.0})
+    wr_bear = williams_r_at(bear, asof)
+    assert wr_bear == (110.0 - 109.5) / (110.0 - 90.0) * -100.0
+    assert side_from_williamsr(wr_bear) == SIDE_BEAR
+    assert williams_r_at(bear, asof) != williams_r_at(bear, later)
+
+    bull = _bars(WR_PERIOD, 90.2, start)
+    assert side_from_williamsr(williams_r_at(bull, asof)) == SIDE_BULL
+
+    mid = _bars(WR_PERIOD, 100.0, start)
+    assert side_from_williamsr(williams_r_at(mid, asof)) is None
+    assert williams_r_at(bear[: WR_PERIOD - 1], asof) is None
+
+    candles = [
+        {"timestamp": "2026-09-08T09:15:00+05:30", "open": 10, "high": 12, "low": 9, "close": 11},
+        {"timestamp": "2026-09-08T10:15:00+05:30", "open": 11, "high": 13, "low": 10, "close": 12},
+    ]
+    ohlc = completed_2h_ohlc(aggregate_intraday_to_2h(candles, now=IST.localize(datetime(2026, 9, 8, 11, 15))))
+    assert ohlc[0]["end"] == datetime(2026, 9, 8, 11, 15)
+    assert ohlc[0]["high"] == 13
+    assert ohlc[0]["low"] == 9
 
 
 def test_ignore_if_radar_or_active_allow_if_only_executed():

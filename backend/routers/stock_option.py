@@ -119,6 +119,7 @@ async def stock_option_webhook_ping() -> JSONResponse:
                 "columns[].symbol",
                 "columns[].williamsr",
             ],
+            "williamsr": "received and logged only; side uses Upstox WR(280) on completed 2h bars",
         },
     )
 
