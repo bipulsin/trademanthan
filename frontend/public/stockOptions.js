@@ -128,8 +128,6 @@
       { key: "ltp", label: "LTP", type: "num", sort: (r) => r.sell_ltp },
       { key: "pnl", label: "P&amp;L", type: "num", sort: (r) => r.combined_pnl },
       { key: "hard_stop", label: "Hard stop", type: "num", sort: (r) => r.hard_stop },
-      { key: "hard_stop_placed", label: "Hard stop placed", type: "bool", sort: (r) => r.hard_stop_placed },
-      { key: "remarks", label: "Remarks", type: "str", sort: (r) => r.remarks },
       { key: "exit", label: "" },
     ],
     report: [
@@ -201,24 +199,24 @@
     const body = rows.map((r) => {
       const pnl = r.combined_pnl;
       const pnlCls = pnl == null ? "" : (Number(pnl) >= 0 ? "so-pnl-pos" : "so-pnl-neg");
+      const hsBlank = r.hard_stop == null || r.hard_stop === "";
       const checked = r.hard_stop_placed ? "checked" : "";
+      const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
       const when = r.date_traded || r.armed_at || "—";
       return `
       <tr>
         <td>${esc(when)}</td>
         <td>${esc(r.symbol)}</td>
         <td>${sideChip(r.side)}</td>
-        <td class="so-spread">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
-        <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
-        <td class="so-spread">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
-        <td class="${pnlCls}">${pnl == null ? "—" : num(pnl)}</td>
-        <td>${num(r.hard_stop)}</td>
-        <td><input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed"></td>
-        <td class="so-remarks">${esc(r.remarks || "")}</td>
-        <td>${hasEntryCosts(r) ? '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button>' : ""}</td>
+        <td class="so-tight">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
+        <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
+        <td class="so-tight">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
+        <td class="so-tight ${pnlCls}">${pnl == null ? "—" : num(pnl)}</td>
+        <td class="so-hs"><span class="so-hs-cell">${num(r.hard_stop)}${hsBox}</span></td>
+        <td class="so-exit-cell">${hasEntryCosts(r) ? '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button>' : ""}</td>
       </tr>`;
     }).join("");
-    return `<div class="so-table-wrap"><table class="so-table">
+    return `<div class="so-table-wrap"><table class="so-table so-table-executed">
       <thead><tr>${headerHtml("executed")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 

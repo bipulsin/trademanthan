@@ -107,10 +107,36 @@ body.theme-page.stock-options-body {
 .so-chip-bull { background: #2563eb; }
 .so-chip-bear { background: #dc2626; }
 
-.so-remarks {
-    white-space: normal;
-    min-width: 14rem;
-    max-width: 18rem;
+.so-table-executed th,
+.so-table-executed td {
+    padding: 6px 6px;
+}
+
+.so-tight {
+    white-space: nowrap;
+    line-height: 1.25;
+    min-width: 0;
+    width: 1%;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.so-hs-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.so-hs-cell input[type="checkbox"] {
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.so-exit-cell {
+    white-space: nowrap;
+    width: 1%;
+    padding-left: 4px;
 }
 .so-pnl-pos { color: #34d399; font-weight: 600; }
 .so-pnl-neg { color: #f87171; font-weight: 600; }
