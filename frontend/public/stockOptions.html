@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="settings.css" />
     <link rel="stylesheet" href="left-menu.css?v=3.24" />
     <link rel="stylesheet" href="theme.css?v=1.3" />
-    <link rel="stylesheet" href="stockOptions.css?v=5" />
+    <link rel="stylesheet" href="stockOptions.css?v=6" />
 </head>
 <body class="theme-page stock-options-body">
     <div class="mobile-title-bar">
@@ -41,7 +41,7 @@
                 </nav>
                 <div class="so-card">
                     <p class="so-note" id="soExecutedNote" hidden>Ensure GTT order at this price for SELL leg</p>
-                    <p class="so-note" id="soReportNote" hidden>P&amp;L = (sell entry − buy entry) − (sell exit − buy exit). Hard stop stays 3 × sell entry.</p>
+                    <p class="so-note" id="soReportNote" hidden>P&amp;L ₹ = ((sell entry − buy entry) − (sell exit − buy exit)) × lot size. Hard stop stays 3 × sell entry.</p>
                     <div id="soPanel"></div>
                 </div>
             </div>
@@ -131,6 +131,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.31"></script>
-    <script src="stockOptions.js?v=6"></script>
+    <script src="stockOptions.js?v=7"></script>
 </body>
 </html>

@@ -140,6 +140,8 @@ body.theme-page.stock-options-body {
 }
 .so-pnl-pos { color: #34d399; font-weight: 600; }
 .so-pnl-neg { color: #f87171; font-weight: 600; }
+.so-pnl-pts { color: #94a3b8; font-weight: 600; }
+.so-pnl-unit { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; }
 
 .so-btn, .so-modal-btn {
     border: 0;

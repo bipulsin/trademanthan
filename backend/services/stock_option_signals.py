@@ -477,6 +477,132 @@ def realized_credit_pnl(
     return combined_pnl(sell_entry, buy_entry, sell_exit, buy_exit)
 
 
+def pnl_rupees(points: Any, lot_size: Any) -> Optional[float]:
+    """Premium points × option lot. Missing or non-positive lot is not treated as 1."""
+    pts = _as_float(points)
+    if pts is None:
+        return None
+    try:
+        lot = int(float(lot_size))
+    except (TypeError, ValueError):
+        return None
+    if lot <= 0:
+        return None
+    return round(pts * lot, 2)
+
+
+def _positive_lot(value: Any) -> Optional[int]:
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+_LOT_CACHE: Tuple[Dict[str, int], Dict[str, int]] = ({}, {})
+_LOT_CACHE_AT = 0.0
+_LOT_CACHE_TTL = 600.0
+
+
+def _instrument_lot_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
+    """Upstox instrument file: key → lot, and underlying → CE/PE/FUT lot. Cached 10 minutes."""
+    global _LOT_CACHE, _LOT_CACHE_AT
+    now = time.monotonic()
+    if _LOT_CACHE[0] and (now - _LOT_CACHE_AT) < _LOT_CACHE_TTL:
+        return _LOT_CACHE
+    from backend.config import get_instruments_file_path
+
+    path = get_instruments_file_path()
+    if not path.is_file():
+        logger.warning("stock_option lot lookup: instruments file missing at %s", path)
+        return {}, {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("stock_option lot lookup: instruments file unreadable")
+        return {}, {}
+    if not isinstance(data, list):
+        return {}, {}
+    by_key: Dict[str, int] = {}
+    by_und: Dict[str, int] = {}
+    for inst in data:
+        if not isinstance(inst, dict):
+            continue
+        lot = _positive_lot(inst.get("lot_size") or inst.get("lotSize"))
+        if not lot:
+            continue
+        ik = str(inst.get("instrument_key") or "").strip()
+        if ik:
+            by_key[ik] = lot
+        kind = str(inst.get("instrument_type") or "").strip().upper()
+        und = _norm_symbol(inst.get("underlying_symbol") or "")
+        if und and kind in ("CE", "PE", "FUT") and und not in by_und:
+            by_und[und] = lot
+    _LOT_CACHE = (by_key, by_und)
+    _LOT_CACHE_AT = now
+    return by_key, by_und
+
+
+def lookup_option_lots(
+    db,
+    pairs: Sequence[Tuple[str, Optional[str]]],
+) -> Dict[str, int]:
+    """Map symbol → option lot. Prefer sell-leg option key, else FUT lot from arbitrage_master.
+
+    Never substitutes 1. Missing symbols are omitted.
+    """
+    wanted: Dict[str, Optional[str]] = {}
+    for raw_sym, option_key in pairs:
+        sym = _norm_symbol(raw_sym)
+        if not sym:
+            continue
+        prev = wanted.get(sym)
+        if prev:
+            continue
+        wanted[sym] = str(option_key).strip() if option_key else None
+    if not wanted:
+        return {}
+    try:
+        lots, by_und = _instrument_lot_maps()
+        placeholders = ", ".join(f":s{i}" for i in range(len(wanted)))
+        params = {f"s{i}": sym for i, sym in enumerate(wanted)}
+        fut_rows = db.execute(
+            text(
+                f"""
+                SELECT UPPER(TRIM(stock)) AS stock, currmth_future_instrument_key AS ikey
+                FROM arbitrage_master
+                WHERE UPPER(TRIM(stock)) IN ({placeholders})
+                """
+            ),
+            params,
+        ).mappings().all()
+    except Exception:
+        logger.exception("stock_option lot lookup failed")
+        return {}
+    fut_by_sym = {
+        _norm_symbol(r.get("stock")): str(r.get("ikey") or "").strip()
+        for r in fut_rows
+        if _norm_symbol(r.get("stock"))
+    }
+    found: Dict[str, int] = {}
+    for sym, option_key in wanted.items():
+        lot = _positive_lot(lots.get(str(option_key or "").strip()))
+        if lot is None:
+            lot = _positive_lot(lots.get(fut_by_sym.get(sym) or ""))
+        if lot is None:
+            lot = _positive_lot(by_und.get(sym))
+        if lot is not None:
+            found[sym] = lot
+    return found
+
+
+def attach_rupee_pnl(item: Dict[str, Any], lot_size: Optional[int]) -> None:
+    """Set lot_size and combined_pnl_inr. combined_pnl stays premium points."""
+    lot = _positive_lot(lot_size)
+    item["lot_size"] = lot
+    item["combined_pnl_inr"] = pnl_rupees(item.get("combined_pnl"), lot)
+
+
 def hard_stop_price(sell_cost: Any) -> Optional[float]:
     sc = _as_float(sell_cost)
     if sc is None:
@@ -1370,7 +1496,7 @@ def list_workspace() -> Dict[str, Any]:
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,
-                       remarks, sell_ltp, buy_ltp,
+                       remarks, sell_ltp, buy_ltp, sell_instrument_key,
                        exit_date, sell_exit_price, buy_exit_price, realized_pnl
                 FROM stock_option_signals
                 WHERE status IS DISTINCT FROM :rejected
@@ -1379,12 +1505,28 @@ def list_workspace() -> Dict[str, Any]:
             ),
             {"rejected": STATUS_REJECTED},
         ).mappings().all()
+        raws = [dict(r) for r in rows]
+        need = [
+            (r.get("symbol"), r.get("sell_instrument_key"))
+            for r in raws
+            if (r.get("status") or "").strip().lower() in ("executed", "completed")
+        ]
+        lots_by_sym = lookup_option_lots(db, need) if need else {}
     finally:
         db.close()
     radar, active, executed, completed = [], [], [], []
-    for raw in rows:
-        item = _row_public(dict(raw))
+    for raw in raws:
+        item = _row_public(raw)
         st = (item.get("status") or "").strip().lower()
+        if st in ("executed", "completed"):
+            sym = _norm_symbol(item.get("symbol"))
+            lot = lots_by_sym.get(sym)
+            attach_rupee_pnl(item, lot)
+            if item.get("combined_pnl") is not None and item.get("lot_size") is None:
+                logger.warning(
+                    "stock_option lot size missing for %s; P&L shown as premium points, not ₹",
+                    sym or item.get("symbol"),
+                )
         if st == "radar":
             radar.append(item)
         elif st == "active":

@@ -126,7 +126,7 @@
       { key: "strikes", label: "Strikes", type: "num", sort: strikeSort },
       { key: "costs", label: "Costs", type: "num", sort: (r) => r.sell_cost },
       { key: "ltp", label: "LTP", type: "num", sort: (r) => r.sell_ltp },
-      { key: "pnl", label: "P&amp;L", type: "num", sort: (r) => r.combined_pnl },
+      { key: "pnl", label: "P&amp;L ₹", type: "num", sort: (r) => (r.combined_pnl_inr != null ? r.combined_pnl_inr : r.combined_pnl) },
       { key: "hard_stop", label: "Hard stop", type: "num", sort: (r) => r.hard_stop },
       { key: "exit", label: "" },
     ],
@@ -138,7 +138,7 @@
       { key: "costs", label: "Entry costs", type: "num", sort: (r) => r.sell_cost },
       { key: "exit_px", label: "Exit prices", type: "num", sort: (r) => r.sell_exit_price },
       { key: "exit_date", label: "Exit date", type: "date", sort: (r) => r.exit_date },
-      { key: "pnl", label: "P&amp;L", type: "num", sort: (r) => r.combined_pnl },
+      { key: "pnl", label: "P&amp;L ₹", type: "num", sort: (r) => (r.combined_pnl_inr != null ? r.combined_pnl_inr : r.combined_pnl) },
     ],
   };
 
@@ -193,12 +193,32 @@
       <thead><tr>${headerHtml("active")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  function pnlDisplay(r) {
+    const lot = Number(r.lot_size);
+    const inr = r.combined_pnl_inr;
+    if (inr != null && inr !== "" && Number.isFinite(lot) && lot > 0) {
+      const n = Number(inr);
+      return {
+        cls: Number.isFinite(n) ? (n >= 0 ? "so-pnl-pos" : "so-pnl-neg") : "",
+        html: "₹" + num(inr),
+        title: "P&L ₹ = premium points × lot " + lot,
+      };
+    }
+    if (r.combined_pnl != null && r.combined_pnl !== "") {
+      return {
+        cls: "so-pnl-pts",
+        html: num(r.combined_pnl) + ' <span class="so-pnl-unit">pts</span>',
+        title: "Lot size unknown — premium points, not ₹",
+      };
+    }
+    return { cls: "", html: "—", title: "" };
+  }
+
   function renderExecuted() {
     const rows = sortRows("executed", workspace.executed || []);
     if (!rows.length) return '<p class="so-empty">No Executed symbols.</p>';
     const body = rows.map((r) => {
-      const pnl = r.combined_pnl;
-      const pnlCls = pnl == null ? "" : (Number(pnl) >= 0 ? "so-pnl-pos" : "so-pnl-neg");
+      const pnl = pnlDisplay(r);
       const hsBlank = r.hard_stop == null || r.hard_stop === "";
       const checked = r.hard_stop_placed ? "checked" : "";
       const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
@@ -211,7 +231,7 @@
         <td class="so-tight">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
         <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-tight">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
-        <td class="so-tight ${pnlCls}">${pnl == null ? "—" : num(pnl)}</td>
+        <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-hs"><span class="so-hs-cell">${num(r.hard_stop)}${hsBox}</span></td>
         <td class="so-exit-cell">${hasEntryCosts(r) ? '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button>' : ""}</td>
       </tr>`;
@@ -224,8 +244,7 @@
     const rows = sortRows("report", workspace.completed || []);
     if (!rows.length) return '<p class="so-empty">No completed trades.</p>';
     const body = rows.map((r) => {
-      const pnl = r.combined_pnl;
-      const pnlCls = pnl == null ? "" : (Number(pnl) >= 0 ? "so-pnl-pos" : "so-pnl-neg");
+      const pnl = pnlDisplay(r);
       return `
       <tr>
         <td>${esc(r.date_traded || r.armed_at || "—")}</td>
@@ -235,7 +254,7 @@
         <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-spread">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
         <td>${esc(r.exit_date || "—")}</td>
-        <td class="${pnlCls}">${pnl == null ? "—" : num(pnl)}</td>
+        <td class="${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
       </tr>`;
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table">

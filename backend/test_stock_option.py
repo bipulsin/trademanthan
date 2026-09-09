@@ -17,7 +17,9 @@ from backend.services.stock_option_signals import (
     expiry_remarks,
     invalidate_outcome,
     aggregate_intraday_to_2h,
+    attach_rupee_pnl,
     combined_pnl,
+    pnl_rupees,
     completed_2h_ohlc,
     ema_condition_holds,
     hard_stop_price,
@@ -202,3 +204,15 @@ def test_pnl_and_hard_stop():
     })
     assert done["combined_pnl"] == 3
     assert done["hard_stop"] == 30.0
+    assert pnl_rupees(3, 125) == 375.0
+    assert pnl_rupees(3, None) is None
+    assert pnl_rupees(3, 0) is None
+    assert pnl_rupees(None, 125) is None
+    attach_rupee_pnl(done, 125)
+    assert done["lot_size"] == 125
+    assert done["combined_pnl_inr"] == 375.0
+    assert done["combined_pnl"] == 3
+    missing = {"combined_pnl": 3}
+    attach_rupee_pnl(missing, None)
+    assert missing["lot_size"] is None
+    assert missing["combined_pnl_inr"] is None
