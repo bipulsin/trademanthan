@@ -622,5 +622,54 @@
     document.getElementById("soExitBuyPx").addEventListener("input", () => { exitPxDirty.buy = true; });
     load();
     setInterval(load, 60000);
+    loadIndiaVix();
+    setInterval(loadIndiaVix, VIX_POLL_MS);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") loadIndiaVix();
+    });
   });
+
+  const VIX_API = "/scan/market-sentiment-dials";
+  const VIX_POLL_MS = 5 * 60 * 1000;
+
+  function applyVixDisplay(vix) {
+    const valEl = document.getElementById("soVixValue");
+    const warnEl = document.getElementById("soVixWarn");
+    if (!valEl) return;
+    valEl.classList.remove("so-vix-green", "so-vix-red", "so-vix-blink");
+    if (vix == null || !Number.isFinite(vix)) {
+      valEl.textContent = "—";
+      if (warnEl) warnEl.hidden = true;
+      return;
+    }
+    valEl.textContent = vix.toFixed(2);
+    if (vix < 20.01) {
+      valEl.classList.add("so-vix-green");
+    } else {
+      valEl.classList.add("so-vix-red");
+      if (vix > 23) valEl.classList.add("so-vix-blink");
+    }
+    if (warnEl) warnEl.hidden = !(vix > 22.7);
+  }
+
+  async function loadIndiaVix() {
+    try {
+      const url = VIX_API + "?basis=today&_=" + Date.now();
+      const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+      const data = await res.json();
+      let vix = null;
+      if (data && data.success && Array.isArray(data.indices)) {
+        const row = data.indices.find((r) => String(r.id || "").toLowerCase() === "indiavix");
+        if (row) {
+          const raw = row.vix_value != null ? row.vix_value : row.last;
+          const n = Number(raw);
+          if (Number.isFinite(n)) vix = n;
+        }
+      }
+      applyVixDisplay(vix);
+    } catch (e) {
+      console.warn("stockOptions india vix:", e);
+      applyVixDisplay(null);
+    }
+  }
 })();

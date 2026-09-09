@@ -10,6 +10,71 @@ body.theme-page.stock-options-body {
     max-width: 1280px;
 }
 
+.stock-options-body .settings-header {
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.so-vix-panel {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding-top: 0.15rem;
+}
+
+.so-vix-label {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--theme-muted, #94a3b8);
+    white-space: nowrap;
+}
+
+.so-vix-value {
+    font-size: 1.8rem;
+    font-weight: 600;
+    font-family: 'Montserrat', 'Inter', sans-serif;
+    line-height: 1.1;
+    color: var(--theme-text, #f1f5f9);
+    font-variant-numeric: tabular-nums;
+}
+
+.so-vix-value.so-vix-green {
+    color: #86efac;
+}
+
+.so-vix-value.so-vix-red {
+    color: #ef4444;
+}
+
+.so-vix-value.so-vix-blink {
+    animation: so-vix-blink 1s step-end infinite;
+}
+
+.so-vix-warn {
+    margin: 0.65rem 0 0;
+    color: #fbbf24;
+    font-weight: 700;
+    font-size: 0.95rem;
+    animation: so-vix-blink 1s step-end infinite;
+}
+
+@keyframes so-vix-blink {
+    50% { opacity: 0; }
+}
+
+@media (max-width: 768px) {
+    .so-vix-panel {
+        margin-left: 0;
+        width: 100%;
+    }
+    .so-vix-value {
+        font-size: 1.5rem;
+    }
+}
+
 /* Copied from breakfast.css Live/Wicks tabs: .bf-tabs / .bf-tab / .bf-tab.active */
 .bf-tabs {
     display: flex;
