@@ -21,6 +21,19 @@
     return esc(side || "—");
   }
 
+  function optionSuffix(side) {
+    const s = String(side || "").toUpperCase();
+    if (s.indexOf("CALL") >= 0) return "CE";
+    if (s.indexOf("PUT") >= 0) return "PE";
+    return "";
+  }
+
+  function strikeLine(label, strike, side) {
+    if (strike == null || strike === "") return label + " —";
+    const suf = optionSuffix(side);
+    return label + " " + esc(strike) + (suf ? " " + suf : "");
+  }
+
   function esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -224,7 +237,7 @@
         <td>${esc(when)}</td>
         <td>${esc(r.symbol)}</td>
         <td>${sideChip(r.side)}</td>
-        <td class="so-tight">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
+        <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
         <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-tight">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
         <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
@@ -246,7 +259,7 @@
         <td>${esc(r.date_traded || r.armed_at || "—")}</td>
         <td>${esc(r.symbol)}</td>
         <td>${sideChip(r.side)}</td>
-        <td class="so-spread">Sell ${esc(r.user_sell_strike == null ? "—" : r.user_sell_strike)}<br>Buy ${esc(r.user_buy_strike == null ? "—" : r.user_buy_strike)}</td>
+        <td class="so-spread">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
         <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-spread">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
         <td>${esc(r.exit_date || "—")}</td>
