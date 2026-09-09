@@ -123,7 +123,7 @@
   async function load() {
     const banner = document.getElementById("soBanner");
     try {
-      const res = await fetch(API + "/stock-options/workspace", { headers: authHeaders() });
+      const res = await fetch(API + "/api/stock-options/workspace", { headers: authHeaders() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       workspace = data;
@@ -170,7 +170,7 @@
       return;
     }
     try {
-      const res = await fetch(API + "/stock-options/signals/" + tradeRow.id + "/submit", {
+      const res = await fetch(API + "/api/stock-options/signals/" + tradeRow.id + "/submit", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify(body),
@@ -189,7 +189,7 @@
 
   async function toggleHardStop(id, placed) {
     try {
-      await fetch(API + "/stock-options/signals/" + id + "/hard-stop", {
+      await fetch(API + "/api/stock-options/signals/" + id + "/hard-stop", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({ placed: placed }),
