@@ -192,29 +192,11 @@ def contract_from_arbitrage_master(db: Any, symbol: str) -> Optional[str]:
     return None
 
 
-def resolve_contract_mmm_yyyy(
-    symbol: str,
-    armed_at: Any = None,
-    db: Any = None,
-) -> Optional[str]:
-    """Sticky contract label from currmth FUT expiry as of armed_at (or now).
+def _expected_contract_from_as_of(as_of: datetime) -> str:
+    """MMM-YYYY guess from armed_at when historical FUT rows are gone from instruments.
 
-    Prefer instruments-file pick as of armed_at; else arbitrage_master currmth;
-    else map armed_at calendar month to MMM-YYYY when no master/instruments hit.
+    Mirrors arbitrage roll window: after day 20, treat next calendar month as currmth.
     """
-    as_of = _naive_ist(armed_at) or now_ist_second()
-    contracts = _fut_contracts_for_symbol(symbol)
-    picked = _pick_currmth_fut_as_of(contracts, as_of)
-    if picked is not None:
-        exp = expiry_date_from_instrument(picked)
-        if exp is not None:
-            return format_contract_mmm_yyyy(exp)
-    label = contract_from_arbitrage_master(db, symbol) if db is not None else None
-    if label:
-        return label
-    if _naive_ist(armed_at) is None:
-        return None
-    # Last resort: armed_at month as FUT month (roll after day 20 → next month).
     if as_of.day > 20:
         y, m = as_of.year, as_of.month + 1
         if m > 12:
@@ -223,19 +205,65 @@ def resolve_contract_mmm_yyyy(
     return format_contract_mmm_yyyy(date(as_of.year, as_of.month, 1))
 
 
-def backfill_contract_mmm_yyyy() -> int:
-    """Fill contract_mmm_yyyy for Active/Executed/Completed rows missing it (armed_at set)."""
+def resolve_contract_mmm_yyyy(
+    symbol: str,
+    armed_at: Any = None,
+    db: Any = None,
+) -> Optional[str]:
+    """Sticky contract label from currmth FUT expiry as of armed_at (or now).
+
+    Prefer instruments-file pick as of armed_at; if that month is no longer in the
+    file (rolled off), map armed_at via the day-20 roll heuristic; else
+    arbitrage_master currmth.
+    """
+    armed = _naive_ist(armed_at)
+    as_of = armed or now_ist_second()
+    contracts = _fut_contracts_for_symbol(symbol)
+    picked = _pick_currmth_fut_as_of(contracts, as_of)
+    if picked is not None:
+        exp = expiry_date_from_instrument(picked)
+        if exp is not None:
+            # Instruments often only keep upcoming months — for older armed_at the
+            # front contract month may already be gone; fall back to as_of mapping.
+            if armed is not None and as_of.day <= 20:
+                has_asof_month = any(
+                    (expiry_date_from_instrument(c) or date.min).year == as_of.year
+                    and (expiry_date_from_instrument(c) or date.min).month == as_of.month
+                    for c in contracts
+                )
+                if not has_asof_month and (exp.year, exp.month) > (as_of.year, as_of.month):
+                    return _expected_contract_from_as_of(as_of)
+            return format_contract_mmm_yyyy(exp)
+    label = contract_from_arbitrage_master(db, symbol) if db is not None else None
+    if label:
+        # Master is always "today's" currmth — only trust for live arm / same month.
+        if armed is None or (
+            as_of.year == now_ist_second().year and as_of.month == now_ist_second().month
+        ):
+            return label
+    if armed is None:
+        return None
+    return _expected_contract_from_as_of(as_of)
+
+
+def backfill_contract_mmm_yyyy(*, overwrite: bool = False) -> int:
+    """Fill contract_mmm_yyyy for Active/Executed/Completed rows (armed_at set).
+
+    By default only NULL rows. Pass overwrite=True to recompute (used once after
+    improving historical as-of mapping when instruments dropped old months).
+    """
     db = SessionLocal()
     updated = 0
     try:
+        where_null = "" if overwrite else "AND contract_mmm_yyyy IS NULL"
         rows = db.execute(
             text(
-                """
-                SELECT id, symbol, armed_at, status
+                f"""
+                SELECT id, symbol, armed_at, status, contract_mmm_yyyy
                 FROM stock_option_signals
-                WHERE contract_mmm_yyyy IS NULL
-                  AND armed_at IS NOT NULL
+                WHERE armed_at IS NOT NULL
                   AND LOWER(TRIM(status)) IN ('active', 'executed', 'completed')
+                  {where_null}
                 ORDER BY id
                 """
             )
@@ -244,12 +272,16 @@ def backfill_contract_mmm_yyyy() -> int:
             label = resolve_contract_mmm_yyyy(row.get("symbol"), row.get("armed_at"), db=db)
             if not label:
                 continue
+            if not overwrite and row.get("contract_mmm_yyyy"):
+                continue
+            if overwrite and row.get("contract_mmm_yyyy") == label:
+                continue
             db.execute(
                 text(
                     """
                     UPDATE stock_option_signals
                     SET contract_mmm_yyyy = :label, updated_at = :ts
-                    WHERE id = :id AND contract_mmm_yyyy IS NULL
+                    WHERE id = :id
                     """
                 ),
                 {"label": label, "ts": now_ist_second(), "id": row["id"]},

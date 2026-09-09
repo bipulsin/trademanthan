@@ -228,6 +228,10 @@ def test_contract_mmm_yyyy_from_fut_symbol():
     assert parse_fut_trading_symbol_expiry("") is None
     label = resolve_contract_mmm_yyyy("BAJAJFINSV", datetime(2026, 9, 7, 13, 15))
     assert label in (None, "SEP-2026")
+    # Historical month missing from instruments → map armed_at (day ≤ 20 → same month)
+    assert resolve_contract_mmm_yyyy("NIFTY", datetime(2026, 8, 19, 11, 15)) == "AUG-2026"
+    # Roll window after day 20 → next month
+    assert resolve_contract_mmm_yyyy("NIFTY", datetime(2026, 8, 26, 13, 15)) == "SEP-2026"
 
 
 def test_row_public_includes_contract():
