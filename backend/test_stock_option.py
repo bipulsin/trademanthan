@@ -4,12 +4,15 @@ from datetime import datetime
 import pytz
 
 from backend.services.stock_option_signals import (
+    EXPIRY_REMARKS,
     SIDE_BEAR,
     SIDE_BULL,
     STATUS_ACTIVE,
     STATUS_EXECUTED,
     STATUS_RADAR,
     STATUS_REJECTED,
+    active_past_max_age,
+    expiry_remarks,
     invalidate_outcome,
     aggregate_intraday_to_2h,
     combined_pnl,
@@ -78,6 +81,16 @@ def test_invalidate_keeps_executed_only_with_arm_and_strikes():
     assert invalidate_outcome(None, 1400, 1350) == STATUS_REJECTED
     assert invalidate_outcome(armed, None, 1350) == STATUS_REJECTED
     assert invalidate_outcome(armed, 1400, None) == STATUS_REJECTED
+
+
+def test_active_expires_after_72h():
+    armed = datetime(2026, 9, 6, 11, 15)
+    assert active_past_max_age(armed, datetime(2026, 9, 9, 11, 14)) is False
+    assert active_past_max_age(armed, datetime(2026, 9, 9, 11, 15)) is True
+    assert active_past_max_age(None, datetime(2026, 9, 9, 11, 15)) is False
+    assert expiry_remarks(None) == EXPIRY_REMARKS
+    assert expiry_remarks("keep strikes") == f"keep strikes | {EXPIRY_REMARKS}"
+    assert expiry_remarks(EXPIRY_REMARKS) == EXPIRY_REMARKS
 
 
 def test_ema_arm_and_invalidate():

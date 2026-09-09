@@ -27,6 +27,8 @@ STATUS_REJECTED = "Rejected"
 SIDE_BEAR = "BEAR CALL"
 SIDE_BULL = "BULL PUT"
 INVALIDATE_REMARKS = "Trade not executed for this symbol"
+ACTIVE_MAX_HOURS = 72
+EXPIRY_REMARKS = "Auto-expired after 72 hours from armed time"
 
 WR_BEAR_GT = -3.0
 WR_BULL_LT = -97.0
@@ -239,6 +241,40 @@ def next_ema_action(
             return "invalidate"
         return "hold"
     return "hold"
+
+
+def _naive_ist(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(IST).replace(tzinfo=None)
+        return value
+    return None
+
+
+def active_past_max_age(
+    armed_at: Any,
+    now: datetime,
+    hours: int = ACTIVE_MAX_HOURS,
+) -> bool:
+    """True once Active has been armed for 72 hours or longer."""
+    armed = _naive_ist(armed_at)
+    if armed is None:
+        return False
+    current = _naive_ist(now)
+    if current is None:
+        return False
+    return (current - armed) >= timedelta(hours=hours)
+
+
+def expiry_remarks(existing: Any) -> str:
+    note = (existing or "").strip()
+    if not note:
+        return EXPIRY_REMARKS
+    if EXPIRY_REMARKS in note:
+        return note
+    return f"{note} | {EXPIRY_REMARKS}"
 
 
 def invalidate_outcome(
@@ -810,8 +846,73 @@ def _open_rows() -> List[Dict[str, Any]]:
         db.close()
 
 
+def expire_stale_active(now: Optional[datetime] = None) -> int:
+    """Move Active rows armed 72h+ ago to Executed. Keep strikes/side/EMAs.
+
+    Trade date is the armed calendar date. Does not invent or clear strikes.
+    Skips rows that already have a submitted trade date or costs.
+    """
+    ensure_stock_option_tables()
+    now_naive = now_ist_second() if now is None else naive_ist(now)
+    cutoff = now_naive - timedelta(hours=ACTIVE_MAX_HOURS)
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, armed_at, remarks
+                FROM stock_option_signals
+                WHERE status = :active
+                  AND armed_at IS NOT NULL
+                  AND armed_at <= :cutoff
+                  AND date_traded IS NULL
+                  AND sell_cost IS NULL
+                  AND buy_cost IS NULL
+                """
+            ),
+            {"active": STATUS_ACTIVE, "cutoff": cutoff},
+        ).mappings().all()
+        n = 0
+        for row in rows:
+            armed = _naive_ist(row.get("armed_at"))
+            if armed is None or not active_past_max_age(armed, now_naive):
+                continue
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET status = :executed,
+                        date_traded = CAST(:armed_date AS DATE),
+                        remarks = :remarks,
+                        updated_at = :ts
+                    WHERE id = :id
+                      AND status = :active
+                      AND date_traded IS NULL
+                    """
+                ),
+                {
+                    "executed": STATUS_EXECUTED,
+                    "armed_date": armed.date().isoformat(),
+                    "remarks": expiry_remarks(row.get("remarks")),
+                    "ts": now_naive,
+                    "id": row["id"],
+                    "active": STATUS_ACTIVE,
+                },
+            )
+            n += 1
+        if n:
+            db.commit()
+        return n
+    except Exception:
+        db.rollback()
+        logger.exception("stock_option 72h active expiry failed")
+        return 0
+    finally:
+        db.close()
+
+
 def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
-    """2h job: update EMAs, arm, invalidate, fill blank Active spreads. REST only."""
+    """2h job: expire stale Active, update EMAs, arm, invalidate, fill spreads."""
     ensure_stock_option_tables()
     from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
 
@@ -819,6 +920,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         return {"ok": True, "skipped": "breakfast_exclusivity"}
 
     now_naive = now_ist_second() if now is None else naive_ist(now)
+    expired = expire_stale_active(now_naive)
     rows = _open_rows()
     updated = armed = invalidated = 0
     for row in rows:
@@ -966,6 +1068,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         "updated": updated,
         "armed": armed,
         "invalidated": invalidated,
+        "expired_72h": expired,
         "ltp_refreshed": ltp_n,
     }
 
@@ -983,10 +1086,16 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
                 FROM stock_option_signals
                 WHERE status = :executed
                   AND date_traded IS NOT NULL
+                  AND sell_cost IS NOT NULL
                   AND remarks IS DISTINCT FROM :remarks
+                  AND COALESCE(remarks, '') NOT LIKE :expiry
                 """
             ),
-            {"executed": STATUS_EXECUTED, "remarks": INVALIDATE_REMARKS},
+            {
+                "executed": STATUS_EXECUTED,
+                "remarks": INVALIDATE_REMARKS,
+                "expiry": f"%{EXPIRY_REMARKS}%",
+            },
         ).mappings().all()
     finally:
         db.close()
@@ -1096,6 +1205,7 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
 
 def list_workspace() -> Dict[str, Any]:
     ensure_stock_option_tables()
+    expire_stale_active()
     db = SessionLocal()
     try:
         rows = db.execute(
