@@ -19,7 +19,7 @@
     const tips = SIDE_TIPS[side];
     if (!tips) return esc(side || "—");
     const cls = side === "BEAR CALL" ? "so-chip-bear" : "so-chip-bull";
-    const items = tips.map((t, i) => "<li>" + esc(t) + "</li>").join("");
+    const items = tips.map((t) => "<li>" + esc(t) + "</li>").join("");
     return (
       '<span class="so-chip ' + cls + ' so-chip-tip" tabindex="0">' +
       esc(side) +
@@ -27,6 +27,83 @@
       items +
       "</ol></span></span>"
     );
+  }
+
+  let floatTipChip = null;
+
+  function ensureFloatTip() {
+    let el = document.getElementById("soSideTipFloat");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "soSideTipFloat";
+      el.className = "so-side-tip-float";
+      el.setAttribute("role", "tooltip");
+      el.addEventListener("pointerleave", (ev) => {
+        if (ev.relatedTarget && floatTipChip && floatTipChip.contains(ev.relatedTarget)) return;
+        hideFloatTip();
+      });
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
+  function hideFloatTip() {
+    floatTipChip = null;
+    const el = document.getElementById("soSideTipFloat");
+    if (!el) return;
+    el.classList.remove("so-side-tip-visible", "so-side-tip-scroll");
+    el.style.top = "";
+    el.style.left = "";
+    el.style.maxHeight = "";
+    el.innerHTML = "";
+  }
+
+  function positionFloatTip(chip) {
+    const src = chip && chip.querySelector(".so-side-tip");
+    if (!src) return;
+    const el = ensureFloatTip();
+    floatTipChip = chip;
+    el.innerHTML = src.innerHTML;
+    el.classList.add("so-side-tip-visible");
+    el.classList.remove("so-side-tip-scroll");
+    el.style.maxHeight = "";
+    el.style.top = "0px";
+    el.style.left = "0px";
+
+    const margin = 12;
+    const gap = 8;
+    const chipRect = chip.getBoundingClientRect();
+    let tipRect = el.getBoundingClientRect();
+    const spaceAbove = chipRect.top - margin;
+    const spaceBelow = window.innerHeight - chipRect.bottom - margin;
+    const placeBelow = spaceAbove < tipRect.height + gap && spaceBelow > spaceAbove;
+
+    let top = placeBelow
+      ? chipRect.bottom + gap
+      : chipRect.top - tipRect.height - gap;
+
+    const maxAvail = Math.max(spaceAbove, spaceBelow, window.innerHeight - 2 * margin);
+    if (tipRect.height > maxAvail) {
+      el.style.maxHeight = Math.floor(maxAvail) + "px";
+      el.classList.add("so-side-tip-scroll");
+      tipRect = el.getBoundingClientRect();
+      top = placeBelow ? chipRect.bottom + gap : Math.max(margin, chipRect.top - tipRect.height - gap);
+    }
+
+    top = Math.min(top, window.innerHeight - margin - tipRect.height);
+    top = Math.max(margin, top);
+
+    let left = chipRect.left;
+    left = Math.min(left, window.innerWidth - tipRect.width - margin);
+    left = Math.max(margin, left);
+
+    el.style.top = Math.round(top) + "px";
+    el.style.left = Math.round(left) + "px";
+  }
+
+  function showFloatTip(chip) {
+    if (!chip) return;
+    positionFloatTip(chip);
   }
 
   const SIDE_TIPS = {
@@ -312,6 +389,7 @@
   }
 
   function render() {
+    hideFloatTip();
     const host = document.getElementById("soPanel");
     if (!host) return;
     if (activeTab === "active") host.innerHTML = renderActive();
@@ -480,7 +558,8 @@
     document.querySelectorAll(".bf-tab").forEach((btn) => {
       btn.addEventListener("click", () => setTab(btn.dataset.tab));
     });
-    document.getElementById("soPanel").addEventListener("click", (ev) => {
+    const panel = document.getElementById("soPanel");
+    panel.addEventListener("click", (ev) => {
       const th = ev.target.closest("th[data-sort]");
       if (th) {
         toggleSort(th.dataset.sortTab, th.dataset.sort);
@@ -491,9 +570,39 @@
       const exitBtn = ev.target.closest("[data-exit]");
       if (exitBtn) openExit(exitBtn.dataset.exit);
     });
-    document.getElementById("soPanel").addEventListener("change", (ev) => {
+    panel.addEventListener("change", (ev) => {
       const box = ev.target.closest("[data-hs]");
       if (box) toggleHardStop(box.dataset.hs, box.checked);
+    });
+    panel.addEventListener("pointerover", (ev) => {
+      const chip = ev.target.closest(".so-chip-tip");
+      if (!chip || !panel.contains(chip)) return;
+      if (ev.relatedTarget && chip.contains(ev.relatedTarget)) return;
+      showFloatTip(chip);
+    });
+    panel.addEventListener("pointerout", (ev) => {
+      const chip = ev.target.closest(".so-chip-tip");
+      if (!chip) return;
+      if (ev.relatedTarget && chip.contains(ev.relatedTarget)) return;
+      const floatEl = document.getElementById("soSideTipFloat");
+      if (ev.relatedTarget && floatEl && floatEl.contains(ev.relatedTarget)) return;
+      if (floatTipChip === chip) hideFloatTip();
+    });
+    panel.addEventListener("focusin", (ev) => {
+      const chip = ev.target.closest(".so-chip-tip");
+      if (chip && panel.contains(chip)) showFloatTip(chip);
+    });
+    panel.addEventListener("focusout", (ev) => {
+      const chip = ev.target.closest(".so-chip-tip");
+      if (!chip) return;
+      if (ev.relatedTarget && chip.contains(ev.relatedTarget)) return;
+      if (floatTipChip === chip) hideFloatTip();
+    });
+    window.addEventListener("scroll", () => {
+      if (floatTipChip) positionFloatTip(floatTipChip);
+    }, true);
+    window.addEventListener("resize", () => {
+      if (floatTipChip) positionFloatTip(floatTipChip);
     });
     document.getElementById("soTradeForm").addEventListener("submit", submitTrade);
     document.getElementById("soTradeCancel").addEventListener("click", closeTrade);

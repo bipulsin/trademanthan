@@ -111,13 +111,17 @@ body.theme-page.stock-options-body {
     position: relative;
     cursor: help;
 }
-.so-side-tip {
+/* Nested tip is content source only — shown via body-ported float (avoids table overflow clip). */
+.so-chip-tip > .so-side-tip {
+    display: none !important;
+}
+.so-side-tip-float {
     display: none;
-    position: absolute;
-    bottom: calc(100% + 8px);
-    top: auto;
+    position: fixed;
+    top: 0;
     left: 0;
-    width: min(28rem, calc(100vw - 2.5rem));
+    width: min(32rem, calc(100vw - 2rem));
+    max-width: calc(100vw - 2rem);
     padding: 0.7rem 0.85rem;
     border-radius: 8px;
     background: #1e293b;
@@ -130,14 +134,17 @@ body.theme-page.stock-options-body {
     text-align: left;
     text-transform: none;
     white-space: normal;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
-    z-index: 50;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    z-index: 5000;
     pointer-events: none;
+    box-sizing: border-box;
 }
-.so-chip-tip:hover .so-side-tip,
-.so-chip-tip:focus .so-side-tip,
-.so-chip-tip:focus-visible .so-side-tip {
+.so-side-tip-float.so-side-tip-visible {
     display: block;
+}
+.so-side-tip-float.so-side-tip-scroll {
+    pointer-events: auto;
+    overflow-y: auto;
 }
 .so-side-tip-list {
     margin: 0;
