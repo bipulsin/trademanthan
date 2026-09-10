@@ -436,28 +436,48 @@ def insert_tv_webhook_row(
         raise
     finally:
         db.close()
-    promoted: Optional[int] = None
-    if status == PARSE_SUCCESS and fut and log_id is not None:
-        try:
-            promoted = promote_tv_log_to_screening(
-                log_id=log_id,
-                received_at=received_at,
-                parsed=parsed,
-                raw_payload=raw_payload,
-                side=side or "",
-                fut=fut,
-            )
-        except Exception as e:
-            logger.warning("premium_futures TV: screening promote failed log_id=%s: %s", log_id, e)
+    # Enrichment (Upstox quotes / 15m H-L / conviction) is deferred by the router so
+    # TradingView gets HTTP 200 within its ~3–5s webhook timeout.
     return {
+        "log_id": log_id,
         "parse_status": status,
         "parse_note": note,
         "symbol": symbol,
         "side": side,
         "resolved_fut": (fut or {}).get("fut_symbol") if fut else None,
         "underlying": (fut or {}).get("underlying") if fut else None,
-        "screening_id": promoted,
+        "fut_instrument_key": (fut or {}).get("fut_instrument_key") if fut else None,
+        "promote_queued": bool(status == PARSE_SUCCESS and fut and log_id is not None),
+        "screening_id": None,
     }
+
+
+def promote_tv_webhook_after_ack(
+    *,
+    log_id: int,
+    received_at: datetime,
+    parsed: Any,
+    raw_payload: Dict[str, Any],
+    side: str,
+    fut: Dict[str, str],
+) -> Optional[int]:
+    """Background worker: ChartInk-parity ingest + alert-candle H/L after fast webhook ack."""
+    try:
+        return promote_tv_log_to_screening(
+            log_id=log_id,
+            received_at=received_at,
+            parsed=parsed,
+            raw_payload=raw_payload if isinstance(raw_payload, dict) else {},
+            side=side,
+            fut=fut,
+        )
+    except Exception as e:
+        logger.warning(
+            "premium_futures TV: background screening promote failed log_id=%s: %s",
+            log_id,
+            e,
+        )
+        return None
 
 
 def _iso_hit(dt: Any) -> Optional[str]:
