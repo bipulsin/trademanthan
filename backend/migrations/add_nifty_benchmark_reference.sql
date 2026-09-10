@@ -42,7 +42,8 @@ VALUES
     ('NSE_INDEX|Nifty Chemicals',       'Nifty Chemicals',            'sector', 14),
     ('NSE_INDEX|Nifty Serv Sector',     'Nifty Services',             'sector', 15),
     ('NSE_INDEX|Nifty MS IT Telcm',     'Nifty Telecom',              'sector', 16),
-    ('NSE_INDEX|Nifty 50',              'NIFTY50',                    'broad',  NULL)
+    ('NSE_INDEX|Nifty 50',              'NIFTY50',                    'broad',  NULL),
+    ('NSE_INDEX|Nifty Bank',            'BANKNIFTY',                  'broad',  NULL)
 ON CONFLICT (instrument_key) DO UPDATE SET
     display_label        = EXCLUDED.display_label,
     benchmark_kind       = EXCLUDED.benchmark_kind,

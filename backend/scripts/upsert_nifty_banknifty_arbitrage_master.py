@@ -44,6 +44,24 @@ def main() -> int:
     args = ap.parse_args()
 
     with engine.begin() as conn:
+        # FK: arbitrage_master.sector_instrument_key → nifty_benchmark_reference
+        conn.execute(
+            text(
+                """
+                INSERT INTO nifty_benchmark_reference
+                    (instrument_key, display_label, benchmark_kind, breakfast_sort_order)
+                VALUES
+                    ('NSE_INDEX|Nifty Bank', 'BANKNIFTY', 'broad', NULL)
+                ON CONFLICT (instrument_key) DO UPDATE SET
+                    display_label = EXCLUDED.display_label,
+                    benchmark_kind = EXCLUDED.benchmark_kind,
+                    breakfast_sort_order = EXCLUDED.breakfast_sort_order,
+                    updated_at = NOW()
+                """
+            )
+        )
+        print("nifty_benchmark_reference: ensured NSE_INDEX|Nifty Bank (BANKNIFTY broad)")
+
         for stock, sector, idx in INDEX_ROWS:
             conn.execute(
                 text(
