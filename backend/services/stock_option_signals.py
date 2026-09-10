@@ -2550,34 +2550,43 @@ def _optional_exit_bundle(
 def update_trade(
     signal_id: int,
     *,
-    date_traded: str,
-    buy_strike: float,
-    buy_cost: float,
-    sell_strike: float,
-    sell_cost: float,
+    date_traded: Optional[str] = None,
+    buy_strike: Optional[float] = None,
+    buy_cost: Optional[float] = None,
+    sell_strike: Optional[float] = None,
+    sell_cost: Optional[float] = None,
     exit_date: Optional[str] = None,
     sell_exit: Optional[float] = None,
     buy_exit: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Edit Executed/Completed fields without changing status.
+    """Edit Executed/Completed fields without changing status. Partial updates OK.
 
-    Entry fields always update. Exit fields are optional for Executed (omit to leave
-    unchanged). Completed requires a full exit trio so P&L stays consistent.
+    Omitted fields keep their existing DB values. Provided fields replace. Status never
+    changes (Exit Submit is the path to Completed).
     """
     ensure_stock_option_tables()
-    traded = _parse_iso_date(date_traded, "date_traded")
-    if not (float(buy_strike) > 0 and float(sell_strike) > 0):
-        raise ValueError("strikes must be > 0")
-    if float(buy_cost) < 0 or float(sell_cost) < 0:
-        raise ValueError("entry costs must be >= 0")
-    exit_bundle = _optional_exit_bundle(exit_date, sell_exit, buy_exit)
+    provided = {
+        "date_traded": date_traded,
+        "buy_strike": buy_strike,
+        "buy_cost": buy_cost,
+        "sell_strike": sell_strike,
+        "sell_cost": sell_cost,
+        "exit_date": exit_date,
+        "sell_exit": sell_exit,
+        "buy_exit": buy_exit,
+    }
+    if all(v is None or (isinstance(v, str) and not str(v).strip()) for v in provided.values()):
+        raise ValueError("provide at least one field to update")
+
     now = now_ist_second()
     db = SessionLocal()
     try:
         row = db.execute(
             text(
                 """
-                SELECT id, status, exit_date, sell_exit_price, buy_exit_price, realized_pnl
+                SELECT id, status, date_traded, user_buy_strike, user_sell_strike,
+                       buy_cost, sell_cost, exit_date, sell_exit_price, buy_exit_price,
+                       realized_pnl
                 FROM stock_option_signals
                 WHERE id = :id
                 """
@@ -2590,130 +2599,89 @@ def update_trade(
         if st not in ("executed", "completed"):
             raise ValueError("only Executed or Completed rows can be edited")
 
-        if st == "completed":
-            if exit_bundle is None:
-                # Keep existing exits if client omitted them; still require them in DB.
-                if row.get("exit_date") is None or row.get("sell_exit_price") is None or row.get("buy_exit_price") is None:
-                    raise ValueError("completed trades need exit date and both exit prices")
-                exited = row.get("exit_date")
-                if isinstance(exited, datetime):
-                    exited = exited.date()
-                sell_x = float(row.get("sell_exit_price"))
-                buy_x = float(row.get("buy_exit_price"))
-            else:
-                exited, sell_x, buy_x = exit_bundle
-            pnl = realized_credit_pnl(sell_cost, buy_cost, sell_x, buy_x)
-            if pnl is None:
-                raise ValueError("entry and exit prices are required")
-            db.execute(
-                text(
-                    """
-                    UPDATE stock_option_signals
-                    SET date_traded = :date_traded,
-                        user_buy_strike = :buy_strike,
-                        user_sell_strike = :sell_strike,
-                        buy_cost = :buy_cost,
-                        sell_cost = :sell_cost,
-                        exit_date = :exit_date,
-                        sell_exit_price = :sell_exit,
-                        buy_exit_price = :buy_exit,
-                        realized_pnl = :pnl,
-                        updated_at = :ts
-                    WHERE id = :id AND status = :completed
-                    """
-                ),
-                {
-                    "date_traded": traded,
-                    "buy_strike": float(buy_strike),
-                    "sell_strike": float(sell_strike),
-                    "buy_cost": float(buy_cost),
-                    "sell_cost": float(sell_cost),
-                    "exit_date": exited,
-                    "sell_exit": float(sell_x),
-                    "buy_exit": float(buy_x),
-                    "pnl": float(pnl),
-                    "ts": now,
-                    "id": signal_id,
-                    "completed": STATUS_COMPLETED,
-                },
-            )
-            status_out = STATUS_COMPLETED
-            pnl_out = pnl
+        # Merge: provided wins; blank string for exit_date treated as omit.
+        date_raw = date_traded if date_traded is not None and str(date_traded).strip() else None
+        if date_raw is not None:
+            traded = _parse_iso_date(date_raw, "date_traded")
         else:
-            # Executed: entry always; exit only when a full bundle is provided.
-            if exit_bundle is not None:
-                exited, sell_x, buy_x = exit_bundle
-                pnl = realized_credit_pnl(sell_cost, buy_cost, sell_x, buy_x)
-                db.execute(
-                    text(
-                        """
-                        UPDATE stock_option_signals
-                        SET date_traded = :date_traded,
-                            user_buy_strike = :buy_strike,
-                            user_sell_strike = :sell_strike,
-                            buy_cost = :buy_cost,
-                            sell_cost = :sell_cost,
-                            exit_date = :exit_date,
-                            sell_exit_price = :sell_exit,
-                            buy_exit_price = :buy_exit,
-                            realized_pnl = :pnl,
-                            updated_at = :ts
-                        WHERE id = :id AND status = :executed
-                        """
-                    ),
-                    {
-                        "date_traded": traded,
-                        "buy_strike": float(buy_strike),
-                        "sell_strike": float(sell_strike),
-                        "buy_cost": float(buy_cost),
-                        "sell_cost": float(sell_cost),
-                        "exit_date": exited,
-                        "sell_exit": float(sell_x),
-                        "buy_exit": float(buy_x),
-                        "pnl": float(pnl) if pnl is not None else None,
-                        "ts": now,
-                        "id": signal_id,
-                        "executed": STATUS_EXECUTED,
-                    },
-                )
-                pnl_out = pnl
-            else:
-                db.execute(
-                    text(
-                        """
-                        UPDATE stock_option_signals
-                        SET date_traded = :date_traded,
-                            user_buy_strike = :buy_strike,
-                            user_sell_strike = :sell_strike,
-                            buy_cost = :buy_cost,
-                            sell_cost = :sell_cost,
-                            updated_at = :ts
-                        WHERE id = :id AND status = :executed
-                        """
-                    ),
-                    {
-                        "date_traded": traded,
-                        "buy_strike": float(buy_strike),
-                        "sell_strike": float(sell_strike),
-                        "buy_cost": float(buy_cost),
-                        "sell_cost": float(sell_cost),
-                        "ts": now,
-                        "id": signal_id,
-                        "executed": STATUS_EXECUTED,
-                    },
-                )
-                pnl_out = None
-            status_out = STATUS_EXECUTED
+            traded = row.get("date_traded")
+            if isinstance(traded, datetime):
+                traded = traded.date()
+            if traded is None:
+                raise ValueError("date_traded is required")
+
+        buy_s = float(buy_strike) if buy_strike is not None else _as_float(row.get("user_buy_strike"))
+        sell_s = float(sell_strike) if sell_strike is not None else _as_float(row.get("user_sell_strike"))
+        buy_c = float(buy_cost) if buy_cost is not None else _as_float(row.get("buy_cost"))
+        sell_c = float(sell_cost) if sell_cost is not None else _as_float(row.get("sell_cost"))
+
+        if buy_s is None or sell_s is None or not (buy_s > 0 and sell_s > 0):
+            raise ValueError("strikes must be > 0")
+        if buy_c is None or sell_c is None or buy_c < 0 or sell_c < 0:
+            raise ValueError("entry costs must be >= 0")
+
+        exit_date_raw = exit_date if exit_date is not None and str(exit_date).strip() else None
+        if exit_date_raw is not None:
+            exited = _parse_iso_date(exit_date_raw, "exit_date")
+        else:
+            exited = row.get("exit_date")
+            if isinstance(exited, datetime):
+                exited = exited.date()
+
+        sell_x = float(sell_exit) if sell_exit is not None else _as_float(row.get("sell_exit_price"))
+        buy_x = float(buy_exit) if buy_exit is not None else _as_float(row.get("buy_exit_price"))
+        if sell_exit is not None and sell_exit < 0:
+            raise ValueError("exit prices must be >= 0")
+        if buy_exit is not None and buy_exit < 0:
+            raise ValueError("exit prices must be >= 0")
+
+        pnl = realized_credit_pnl(sell_c, buy_c, sell_x, buy_x)
+        if pnl is None:
+            pnl = row.get("realized_pnl")
+
+        status_const = STATUS_COMPLETED if st == "completed" else STATUS_EXECUTED
+        db.execute(
+            text(
+                """
+                UPDATE stock_option_signals
+                SET date_traded = :date_traded,
+                    user_buy_strike = :buy_strike,
+                    user_sell_strike = :sell_strike,
+                    buy_cost = :buy_cost,
+                    sell_cost = :sell_cost,
+                    exit_date = :exit_date,
+                    sell_exit_price = :sell_exit,
+                    buy_exit_price = :buy_exit,
+                    realized_pnl = :pnl,
+                    updated_at = :ts
+                WHERE id = :id AND status = :status
+                """
+            ),
+            {
+                "date_traded": traded,
+                "buy_strike": float(buy_s),
+                "sell_strike": float(sell_s),
+                "buy_cost": float(buy_c),
+                "sell_cost": float(sell_c),
+                "exit_date": exited,
+                "sell_exit": float(sell_x) if sell_x is not None else None,
+                "buy_exit": float(buy_x) if buy_x is not None else None,
+                "pnl": float(pnl) if pnl is not None else None,
+                "ts": now,
+                "id": signal_id,
+                "status": status_const,
+            },
+        )
         db.commit()
+        return {
+            "ok": True,
+            "id": signal_id,
+            "status": status_const,
+            "combined_pnl": float(pnl) if pnl is not None else None,
+            "hard_stop": hard_stop_price(sell_c),
+        }
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
-    return {
-        "ok": True,
-        "id": signal_id,
-        "status": status_out,
-        "combined_pnl": pnl_out,
-        "hard_stop": hard_stop_price(sell_cost),
-    }

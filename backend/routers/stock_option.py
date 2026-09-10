@@ -69,12 +69,12 @@ class ExitBody(BaseModel):
 
 
 class UpdateBody(BaseModel):
-    """Edit Executed/Completed fields; status unchanged. Exit trio optional for Executed."""
-    date_traded: str = Field(..., min_length=8, max_length=10)
-    buy_strike: float = Field(..., gt=0)
-    buy_cost: float = Field(..., ge=0)
-    sell_strike: float = Field(..., gt=0)
-    sell_cost: float = Field(..., ge=0)
+    """Edit Executed/Completed fields; status unchanged. All fields optional (partial update)."""
+    date_traded: Optional[str] = Field(None, max_length=10)
+    buy_strike: Optional[float] = Field(None, gt=0)
+    buy_cost: Optional[float] = Field(None, ge=0)
+    sell_strike: Optional[float] = Field(None, gt=0)
+    sell_cost: Optional[float] = Field(None, ge=0)
     exit_date: Optional[str] = Field(None, max_length=10)
     sell_exit: Optional[float] = Field(None, ge=0)
     buy_exit: Optional[float] = Field(None, ge=0)

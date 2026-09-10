@@ -431,15 +431,15 @@
         <td>${symbolCell(r)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
-        <td class="so-spread">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
-        <td class="so-spread">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
-        <td class="so-spread">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
-        <td>${esc(r.exit_date || "—")}</td>
-        <td class="${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
+        <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
+        <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
+        <td class="so-exit-px">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
+        <td class="so-exit-date">${esc(r.exit_date || "—")}</td>
+        <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-exit-cell"><button type="button" class="so-edit-btn" data-edit="${r.id}" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></td>
       </tr>`;
     }).join("");
-    return `<div class="so-table-wrap"><table class="so-table">
+    return `<div class="so-table-wrap"><table class="so-table so-table-report">
       <thead><tr>${headerHtml("report")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
@@ -542,24 +542,29 @@
     });
   }
 
-  function applyExitModalChrome(mode, row) {
+  function setEntryFieldRequired(required) {
+    ["soExitEntryDate", "soExitBuyStrike", "soExitBuyEntry", "soExitSellStrike", "soExitSellEntry"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.required = !!required;
+    });
+  }
+
+  function applyExitModalChrome(mode) {
     exitModalMode = mode;
     const title = document.getElementById("soExitTitle");
     const hint = document.getElementById("soExitHint");
     const submitBtn = document.getElementById("soExitSubmit");
-    const st = String((row && row.status) || "").toLowerCase();
-    const isCompleted = st === "completed";
     if (mode === "edit") {
       if (title) title.textContent = "Edit trade";
-      if (hint) hint.textContent = isCompleted
-        ? "Update entry and exit fields. Save writes to the database without changing status."
-        : "Update entry fields anytime. Exit fields optional until you use Exit Submit.";
+      if (hint) hint.textContent = "Partial updates OK — fill only the fields you want to change, then Save.";
       if (submitBtn) submitBtn.textContent = "Save";
-      setExitFieldRequired(isCompleted);
+      setEntryFieldRequired(false);
+      setExitFieldRequired(false);
     } else {
       if (title) title.textContent = "Exit";
       if (hint) hint.textContent = "First Exit SELL leg then the BUY leg";
       if (submitBtn) submitBtn.textContent = "Submit";
+      setEntryFieldRequired(true);
       setExitFieldRequired(true);
     }
   }
@@ -567,6 +572,7 @@
   function fillExitForm(row, opts) {
     const preferStoredExit = !!(opts && opts.preferStoredExit);
     const fetchQuote = !!(opts && opts.fetchQuote);
+    const forEdit = !!(opts && opts.forEdit);
     exitPxDirty = { sell: false, buy: false };
     const gen = ++exitQuoteGen;
     document.getElementById("soExitSymbol").textContent = row.symbol + " · " + (row.side || "");
@@ -581,7 +587,12 @@
     const hasSellExit = row.sell_exit_price != null && row.sell_exit_price !== "";
     const hasBuyExit = row.buy_exit_price != null && row.buy_exit_price !== "";
 
-    if (preferStoredExit && (hasExitDate || hasSellExit || hasBuyExit)) {
+    if (forEdit) {
+      // Edit: only show stored values — blank means "leave unchanged" on Save.
+      document.getElementById("soExitDate").value = hasExitDate ? dateOnly(row.exit_date) : "";
+      document.getElementById("soExitSellPx").value = hasSellExit ? row.sell_exit_price : "";
+      document.getElementById("soExitBuyPx").value = hasBuyExit ? row.buy_exit_price : "";
+    } else if (preferStoredExit && (hasExitDate || hasSellExit || hasBuyExit)) {
       document.getElementById("soExitDate").value = hasExitDate ? dateOnly(row.exit_date) : todayIso();
       document.getElementById("soExitSellPx").value = hasSellExit ? row.sell_exit_price : (row.sell_ltp != null ? row.sell_ltp : "");
       document.getElementById("soExitBuyPx").value = hasBuyExit ? row.buy_exit_price : (row.buy_ltp != null ? row.buy_ltp : "");
@@ -615,16 +626,15 @@
   function openExit(id) {
     exitRow = (workspace.executed || []).find((r) => Number(r.id) === Number(id));
     if (!exitRow) return;
-    applyExitModalChrome("exit", exitRow);
+    applyExitModalChrome("exit");
     fillExitForm(exitRow, { preferStoredExit: true, fetchQuote: true });
   }
 
   function openEdit(id) {
     exitRow = findTradeRow(id);
     if (!exitRow) return;
-    applyExitModalChrome("edit", exitRow);
-    const completed = String(exitRow.status || "").toLowerCase() === "completed";
-    fillExitForm(exitRow, { preferStoredExit: true, fetchQuote: !completed });
+    applyExitModalChrome("edit");
+    fillExitForm(exitRow, { preferStoredExit: true, fetchQuote: false, forEdit: true });
   }
 
   function closeExit() {
@@ -632,6 +642,13 @@
     exitModalMode = "exit";
     exitQuoteGen += 1;
     document.getElementById("soExitModal").hidden = true;
+  }
+
+  function readNumField(id) {
+    const raw = document.getElementById(id).value;
+    if (raw === "" || raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
   }
 
   function readExitFormBody() {
@@ -651,31 +668,61 @@
     return { body, exitDate, sellExit, buyExit, anyExit };
   }
 
+  function readPartialUpdateBody() {
+    const body = {};
+    const dateTraded = document.getElementById("soExitEntryDate").value;
+    if (dateTraded) body.date_traded = dateTraded;
+    const buyStrike = readNumField("soExitBuyStrike");
+    if (buyStrike != null) body.buy_strike = buyStrike;
+    const buyCost = readNumField("soExitBuyEntry");
+    if (buyCost != null) body.buy_cost = buyCost;
+    const sellStrike = readNumField("soExitSellStrike");
+    if (sellStrike != null) body.sell_strike = sellStrike;
+    const sellCost = readNumField("soExitSellEntry");
+    if (sellCost != null) body.sell_cost = sellCost;
+    const exitDate = document.getElementById("soExitDate").value;
+    if (exitDate) body.exit_date = exitDate;
+    const sellExit = readNumField("soExitSellPx");
+    if (sellExit != null) body.sell_exit = sellExit;
+    const buyExit = readNumField("soExitBuyPx");
+    if (buyExit != null) body.buy_exit = buyExit;
+    return body;
+  }
+
   async function submitExit(ev) {
     ev.preventDefault();
     if (!exitRow) return;
     const err = document.getElementById("soExitErr");
-    const parsed = readExitFormBody();
-    const body = parsed.body;
-
-    if (!body.date_traded || !(body.buy_strike > 0) || !(body.sell_strike > 0)
-      || !Number.isFinite(body.buy_cost) || !Number.isFinite(body.sell_cost)) {
-      err.textContent = "Enter entry date, both strikes, and both entry prices.";
-      return;
-    }
 
     if (exitModalMode === "edit") {
-      const completed = String(exitRow.status || "").toLowerCase() === "completed";
-      if (completed || parsed.anyExit) {
-        if (!parsed.exitDate || !Number.isFinite(parsed.sellExit) || !Number.isFinite(parsed.buyExit)) {
-          err.textContent = completed
-            ? "Completed trades need exit date and both exit prices."
-            : "Provide exit date and both exit prices together, or leave all exit fields blank.";
-          return;
-        }
-        body.exit_date = parsed.exitDate;
-        body.sell_exit = parsed.sellExit;
-        body.buy_exit = parsed.buyExit;
+      const body = readPartialUpdateBody();
+      if (!Object.keys(body).length) {
+        err.textContent = "Fill at least one field to save.";
+        return;
+      }
+      if (body.buy_strike != null && !(body.buy_strike > 0)) {
+        err.textContent = "Buy strike must be > 0.";
+        return;
+      }
+      if (body.sell_strike != null && !(body.sell_strike > 0)) {
+        err.textContent = "Sell strike must be > 0.";
+        return;
+      }
+      if (body.buy_cost != null && body.buy_cost < 0) {
+        err.textContent = "Buy entry price must be >= 0.";
+        return;
+      }
+      if (body.sell_cost != null && body.sell_cost < 0) {
+        err.textContent = "Sell entry price must be >= 0.";
+        return;
+      }
+      if (body.sell_exit != null && body.sell_exit < 0) {
+        err.textContent = "Sell exit price must be >= 0.";
+        return;
+      }
+      if (body.buy_exit != null && body.buy_exit < 0) {
+        err.textContent = "Buy exit price must be >= 0.";
+        return;
       }
       try {
         const res = await fetch(API + "/api/stock-options/signals/" + exitRow.id + "/update", {
@@ -687,6 +734,7 @@
           const t = await res.json().catch(() => ({}));
           throw new Error(t.detail || "Save failed");
         }
+        const completed = String(exitRow.status || "").toLowerCase() === "completed";
         const stayTab = completed ? "report" : "executed";
         closeExit();
         setTab(stayTab);
@@ -694,6 +742,15 @@
       } catch (e) {
         err.textContent = e.message || "Save failed";
       }
+      return;
+    }
+
+    const parsed = readExitFormBody();
+    const body = parsed.body;
+
+    if (!body.date_traded || !(body.buy_strike > 0) || !(body.sell_strike > 0)
+      || !Number.isFinite(body.buy_cost) || !Number.isFinite(body.sell_cost)) {
+      err.textContent = "Enter entry date, both strikes, and both entry prices.";
       return;
     }
 

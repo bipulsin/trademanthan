@@ -253,6 +253,28 @@ body.light-theme .so-index-arrow {
     padding: 6px 6px;
 }
 
+.so-table-report th,
+.so-table-report td {
+    padding: 6px 6px;
+}
+
+.so-table-report .so-exit-px,
+.so-table-report .so-exit-date {
+    padding-left: 4px;
+    padding-right: 4px;
+    min-width: 0;
+    width: 1%;
+    white-space: nowrap;
+    line-height: 1.25;
+    font-size: 0.8rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.so-table-report .so-exit-date {
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
 .so-tight {
     white-space: nowrap;
     line-height: 1.25;
