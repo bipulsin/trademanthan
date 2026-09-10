@@ -279,6 +279,32 @@ body.light-theme .so-index-arrow {
     width: 1%;
     padding-left: 4px;
 }
+
+.so-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.so-edit-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    background: rgba(51, 65, 85, 0.35);
+    color: #cbd5e1;
+    cursor: pointer;
+}
+
+.so-edit-btn:hover {
+    background: rgba(37, 99, 235, 0.22);
+    border-color: rgba(96, 165, 250, 0.55);
+    color: #93c5fd;
+}
 .so-pnl-pos { color: #34d399; font-weight: 600; }
 .so-pnl-neg { color: #f87171; font-weight: 600; }
 .so-pnl-pts { color: #94a3b8; font-weight: 600; }

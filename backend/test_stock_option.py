@@ -30,6 +30,7 @@ from backend.services.stock_option_signals import (
     hard_stop_price,
     is_index_symbol,
     realized_credit_pnl,
+    _optional_exit_bundle,
     _row_public,
     next_ema_action,
     next_index_ema_action,
@@ -291,6 +292,20 @@ def test_aggregate_2h_from_1h_aligned_0915():
     assert bars[0]["close"] == 12
     assert bars[0]["open"] == 10
     assert bars[0]["high"] == 13
+
+
+def test_optional_exit_bundle():
+    assert _optional_exit_bundle(None, None, None) is None
+    assert _optional_exit_bundle("", "", "") is None
+    try:
+        _optional_exit_bundle("2026-09-10", None, 1.0)
+        assert False, "partial exit should raise"
+    except ValueError:
+        pass
+    exited, sell_x, buy_x = _optional_exit_bundle("2026-09-10", 6.5, 2.0)
+    assert exited == date(2026, 9, 10)
+    assert sell_x == 6.5
+    assert buy_x == 2.0
 
 
 def test_pnl_and_hard_stop():
