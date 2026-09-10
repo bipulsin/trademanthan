@@ -41,6 +41,25 @@ body.theme-page.stock-options-body {
     font-variant-numeric: tabular-nums;
 }
 
+/* Permanent index underlyings (NIFTY / BANKNIFTY): pin marker */
+.so-index-sym {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 600;
+}
+.so-index-arrow {
+    font-weight: 700;
+    font-size: 1.05em;
+    line-height: 1;
+    color: #eab308; /* yellow in dark theme */
+}
+body[data-theme="light"] .so-index-arrow,
+body.theme-light .so-index-arrow,
+body.light-theme .so-index-arrow {
+    color: #16a34a; /* green in light theme */
+}
+
 .so-vix-value.so-vix-green {
     color: #86efac;
 }

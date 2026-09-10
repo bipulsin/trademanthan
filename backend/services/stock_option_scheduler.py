@@ -7,7 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
-from backend.services.stock_option_signals import run_ema_tick
+from backend.services.stock_option_signals import ensure_index_radar_rows, run_ema_tick
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,12 @@ def start_stock_option_scheduler() -> None:
     global _scheduler
     if _scheduler is not None:
         return
+    try:
+        n = ensure_index_radar_rows()
+        if n:
+            logger.info("stock_option seeded %s permanent index Radar row(s) on start", n)
+    except Exception:
+        logger.exception("stock_option index Radar seed on start failed")
     sch = BackgroundScheduler(timezone="Asia/Kolkata")
     sch.add_job(
         _tick,

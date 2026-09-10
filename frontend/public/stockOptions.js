@@ -193,12 +193,53 @@
     return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
   }
 
+  const INDEX_PIN = { NIFTY: 0, BANKNIFTY: 1 };
+
+  function isIndexRow(r) {
+    if (r && r.is_index) return true;
+    const s = String((r && r.symbol) || "").trim().toUpperCase();
+    return Object.prototype.hasOwnProperty.call(INDEX_PIN, s);
+  }
+
+  function pinIndexRows(rows) {
+    const pinned = [];
+    const rest = [];
+    (rows || []).forEach((r) => {
+      if (isIndexRow(r)) pinned.push(r);
+      else rest.push(r);
+    });
+    pinned.sort((a, b) => {
+      const ia = INDEX_PIN[String(a.symbol || "").toUpperCase()];
+      const ib = INDEX_PIN[String(b.symbol || "").toUpperCase()];
+      return (ia == null ? 99 : ia) - (ib == null ? 99 : ib);
+    });
+    return pinned.concat(rest);
+  }
+
+  function symbolCell(r) {
+    const name = esc(r.symbol || "—");
+    if (!isIndexRow(r)) return name;
+    return (
+      '<span class="so-index-sym">' +
+      '<span class="so-index-arrow" aria-hidden="true">→</span>' +
+      name +
+      "</span>"
+    );
+  }
+
   function sortRows(tab, rows) {
-    if (sortState.tab !== tab || !sortState.key) return rows.slice();
-    const col = (COLUMNS[tab] || []).find((c) => c.key === sortState.key);
-    if (!col || !col.sort) return rows.slice();
-    const dir = sortState.dir === "desc" ? -1 : 1;
-    return rows.slice().sort((ra, rb) => dir * cmpVals(col.sort(ra), col.sort(rb), col.type));
+    let out;
+    if (sortState.tab !== tab || !sortState.key) {
+      out = rows.slice();
+    } else {
+      const col = (COLUMNS[tab] || []).find((c) => c.key === sortState.key);
+      if (!col || !col.sort) out = rows.slice();
+      else {
+        const dir = sortState.dir === "desc" ? -1 : 1;
+        out = rows.slice().sort((ra, rb) => dir * cmpVals(col.sort(ra), col.sort(rb), col.type));
+      }
+    }
+    return pinIndexRows(out);
   }
 
   function toggleSort(tab, key) {
@@ -290,8 +331,8 @@
     const rows = sortRows("radar", workspace.radar || []);
     if (!rows.length) return '<p class="so-empty">No Radar symbols.</p>';
     const body = rows.map((r) => `
-      <tr>
-        <td>${esc(r.symbol)}</td>
+      <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
+        <td>${symbolCell(r)}</td>
         <td>${esc(r.trigger_at || "—")}</td>
         <td>${num(r.ema9)}</td>
         <td>${num(r.ema30)}</td>
@@ -309,8 +350,8 @@
     const body = rows.map((r) => {
       const spread = [r.spread_sell, r.spread_buy].filter(Boolean).map(esc).join("<br>") || "—";
       return `
-      <tr>
-        <td>${esc(r.symbol)}</td>
+      <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
+        <td>${symbolCell(r)}</td>
         <td>${esc(r.armed_at || "—")}</td>
         <td>${num(r.ema9)}</td>
         <td>${num(r.ema30)}</td>
@@ -357,9 +398,9 @@
       const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
       const when = r.date_traded || r.armed_at || "—";
       return `
-      <tr>
+      <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${esc(when)}</td>
-        <td>${esc(r.symbol)}</td>
+        <td>${symbolCell(r)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
@@ -380,9 +421,9 @@
     const body = rows.map((r) => {
       const pnl = pnlDisplay(r);
       return `
-      <tr>
+      <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${esc(r.date_traded || r.armed_at || "—")}</td>
-        <td>${esc(r.symbol)}</td>
+        <td>${symbolCell(r)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-spread">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>

@@ -4,6 +4,8 @@ from datetime import date, datetime, timedelta
 import pytz
 
 from backend.services.stock_option_signals import (
+    DELTA_BUY_INDEX,
+    DELTA_SELL_INDEX,
     EXPIRY_REMARKS,
     SIDE_BEAR,
     SIDE_BULL,
@@ -14,6 +16,8 @@ from backend.services.stock_option_signals import (
     STATUS_REJECTED,
     WR_PERIOD,
     active_past_max_age,
+    delta_targets_for_symbol,
+    detect_ema_cross_side,
     expiry_remarks,
     format_contract_mmm_yyyy,
     invalidate_outcome,
@@ -24,9 +28,11 @@ from backend.services.stock_option_signals import (
     completed_2h_ohlc,
     ema_condition_holds,
     hard_stop_price,
+    is_index_symbol,
     realized_credit_pnl,
     _row_public,
     next_ema_action,
+    next_index_ema_action,
     parse_chartink_symbols,
     parse_fut_trading_symbol_expiry,
     pick_nearest_delta,
@@ -154,6 +160,89 @@ def test_ema_arm_and_invalidate():
     assert next_ema_action(STATUS_ACTIVE, SIDE_BULL, 130, 100, 110, False) == "hold"
 
 
+def test_index_symbols_and_delta_targets():
+    assert is_index_symbol("NIFTY") is True
+    assert is_index_symbol("banknifty") is True
+    assert is_index_symbol("RELIANCE") is False
+    assert delta_targets_for_symbol("NIFTY") == (DELTA_SELL_INDEX, DELTA_BUY_INDEX)
+    assert delta_targets_for_symbol("BANKNIFTY") == (15.0, 2.0)
+    assert delta_targets_for_symbol("TCS") == (28.0, 18.0)
+    sell, buy = spread_lines(SIDE_BEAR, 25000, 25500, symbol="NIFTY")
+    assert sell == "Sell CE:~15 Δ - 25000"
+    assert buy == "Buy CE~2 Δ 25500"
+
+
+def test_index_ema_cross_vs_hold_bull_put():
+    """BULL PUT: arm only on cross above both — not when already holding above."""
+    # Cross: prev not above both (e9 below e30), curr strictly above both
+    assert detect_ema_cross_side(95, 100, 90, 120, 100, 90) == SIDE_BULL
+    # Hold already true on prev (e9 > both) — not a cross
+    assert detect_ema_cross_side(120, 100, 90, 130, 100, 90) is None
+    # Curr equal to one EMA — not strictly above both
+    assert detect_ema_cross_side(95, 100, 90, 100, 100, 90) is None
+    # Curr above one but not both
+    assert detect_ema_cross_side(95, 100, 110, 105, 100, 110) is None
+
+    action, side = next_index_ema_action(
+        STATUS_RADAR, None, 95, 100, 90, 120, 100, 90, False
+    )
+    assert action == "arm" and side == SIDE_BULL
+    # Same levels that would arm a stock on hold alone — index stays hold (already above)
+    action, side = next_index_ema_action(
+        STATUS_RADAR, None, 120, 100, 90, 130, 100, 90, False
+    )
+    assert action == "hold" and side is None
+    # Stock path WOULD arm when condition merely holds
+    assert next_ema_action(STATUS_RADAR, SIDE_BULL, 130, 100, 90, False) == "arm"
+
+
+def test_index_ema_cross_vs_hold_bear_call():
+    """BEAR CALL: arm only on cross below both — not when already holding below."""
+    assert detect_ema_cross_side(105, 100, 110, 90, 100, 110) == SIDE_BEAR
+    assert detect_ema_cross_side(90, 100, 110, 85, 100, 110) is None
+    assert detect_ema_cross_side(105, 100, 110, 100, 100, 110) is None
+
+    action, side = next_index_ema_action(
+        STATUS_RADAR, None, 105, 100, 110, 90, 100, 110, False
+    )
+    assert action == "arm" and side == SIDE_BEAR
+    action, side = next_index_ema_action(
+        STATUS_RADAR, None, 90, 100, 110, 85, 100, 110, False
+    )
+    assert action == "hold" and side is None
+    assert next_ema_action(STATUS_RADAR, SIDE_BEAR, 85, 100, 110, False) == "arm"
+
+
+def test_index_active_invalidates_when_hold_fails():
+    """After arm, indices use hold-fail invalidate (same as stocks), not reverse-cross."""
+    action, side = next_index_ema_action(
+        STATUS_ACTIVE, SIDE_BULL, 95, 100, 90, 120, 100, 90, False
+    )
+    assert action == "hold" and side is None
+    action, side = next_index_ema_action(
+        STATUS_ACTIVE, SIDE_BULL, 120, 100, 90, 80, 100, 90, False
+    )
+    assert action == "invalidate"
+    action, side = next_index_ema_action(
+        STATUS_ACTIVE, SIDE_BEAR, 105, 100, 110, 90, 100, 110, False
+    )
+    assert action == "hold"
+    action, side = next_index_ema_action(
+        STATUS_ACTIVE, SIDE_BEAR, 90, 100, 110, 120, 100, 110, False
+    )
+    assert action == "invalidate"
+    # Trade submitted → never invalidate
+    action, _ = next_index_ema_action(
+        STATUS_ACTIVE, SIDE_BULL, 120, 100, 90, 80, 100, 90, True
+    )
+    assert action == "hold"
+    # Incomplete EMAs → hold
+    action, _ = next_index_ema_action(
+        STATUS_RADAR, None, None, 100, 90, 120, 100, 90, False
+    )
+    assert action == "hold"
+
+
 def test_spread_labels_and_delta_volume_tiebreak():
     sell, buy = spread_lines(SIDE_BEAR, 2500, 2600)
     assert sell == "Sell CE:~28 Δ - 2500"
@@ -170,6 +259,13 @@ def test_spread_labels_and_delta_volume_tiebreak():
     picked = pick_nearest_delta(legs, 28)
     assert picked["strike"] == 110
 
+    near15 = [
+        {"strike": 200, "delta_pts": 14.5, "volume": 10},
+        {"strike": 210, "delta_pts": 15.2, "volume": 900},
+        {"strike": 220, "delta_pts": 2.1, "volume": 50},
+    ]
+    assert pick_nearest_delta(near15, DELTA_SELL_INDEX)["strike"] == 210
+    assert pick_nearest_delta(near15, DELTA_BUY_INDEX)["strike"] == 220
 
 def test_aggregate_2h_from_1h_aligned_0915():
     candles = [

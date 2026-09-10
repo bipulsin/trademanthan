@@ -1,4 +1,8 @@
-"""Stock Options algo: ChartInk webhook ingest, Upstox WR(280), 2h EMA arm/invalidate."""
+"""Stock Options algo: ChartInk webhook ingest, Upstox WR(280), 2h EMA arm/invalidate.
+
+Permanent indices NIFTY/BANKNIFTY (arbitrage_master): always on Radar, no WR gate,
+arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads, re-seed Radar after Executed.
+"""
 from __future__ import annotations
 
 import json
@@ -45,6 +49,11 @@ WR_BEAR_GT = -3.0
 WR_BULL_LT = -97.0
 DELTA_SELL = 28.0
 DELTA_BUY = 18.0
+# Permanent index underlyings (arbitrage_master): no WR gate; EMA cross to arm.
+INDEX_SYMBOLS = frozenset({"NIFTY", "BANKNIFTY"})
+INDEX_PIN_ORDER = ("NIFTY", "BANKNIFTY")
+DELTA_SELL_INDEX = 15.0
+DELTA_BUY_INDEX = 2.0
 EMA_FAST = 9
 EMA_MID = 30
 EMA_SLOW = 100
@@ -348,6 +357,18 @@ def _norm_symbol(raw: Any) -> str:
     return s.strip()
 
 
+def is_index_symbol(symbol: Any) -> bool:
+    """NIFTY / BANKNIFTY permanent Stock Options treatment (no ChartInk / WR)."""
+    return _norm_symbol(symbol) in INDEX_SYMBOLS
+
+
+def delta_targets_for_symbol(symbol: Any) -> Tuple[float, float]:
+    """(sell_delta, buy_delta) targets. Indices use ~15Δ / ~2Δ; stocks ~28Δ / ~18Δ."""
+    if is_index_symbol(symbol):
+        return DELTA_SELL_INDEX, DELTA_BUY_INDEX
+    return DELTA_SELL, DELTA_BUY
+
+
 def parse_chartink_symbols(parsed: Any) -> Tuple[str, List[Dict[str, Any]], Dict[str, Optional[str]]]:
     """Return (parse_status, candidates, meta). candidates are symbols only.
 
@@ -422,6 +443,21 @@ def ema_snapshot(closes: Sequence[float]) -> Dict[str, Optional[float]]:
     }
 
 
+def ema_snapshot_pair(
+    closes: Sequence[float],
+) -> Optional[Tuple[Dict[str, float], Dict[str, float]]]:
+    """(prev, curr) EMA snaps on the last two completed bars. Needs ≥ EMA100+1 closes."""
+    if len(closes) < EMA_SLOW + 1:
+        return None
+    prev_raw = ema_snapshot(closes[:-1])
+    curr_raw = ema_snapshot(closes)
+    if any(prev_raw[k] is None or curr_raw[k] is None for k in ("ema9", "ema30", "ema100")):
+        return None
+    prev = {k: float(prev_raw[k]) for k in ("ema9", "ema30", "ema100")}
+    curr = {k: float(curr_raw[k]) for k in ("ema9", "ema30", "ema100")}
+    return prev, curr
+
+
 def ema_condition_holds(side: Optional[str], ema9: Any, ema30: Any, ema100: Any) -> bool:
     try:
         e9 = float(ema9)
@@ -436,6 +472,37 @@ def ema_condition_holds(side: Optional[str], ema9: Any, ema30: Any, ema100: Any)
     return False
 
 
+def detect_ema_cross_side(
+    prev_ema9: Any,
+    prev_ema30: Any,
+    prev_ema100: Any,
+    curr_ema9: Any,
+    curr_ema30: Any,
+    curr_ema100: Any,
+) -> Optional[str]:
+    """Index arm side from EMA9 cross vs EMA30+EMA100 on consecutive completed 2h bars.
+
+    BULL PUT: previous bar EMA9 was *not* above both; current bar EMA9 is *strictly*
+    above both EMA30 and EMA100.
+    BEAR CALL: previous bar EMA9 was *not* below both; current is *strictly* below both.
+    Hold (condition already true on previous bar) does not qualify — that is stocks only.
+    """
+    try:
+        p9, p30, p100 = float(prev_ema9), float(prev_ema30), float(prev_ema100)
+        c9, c30, c100 = float(curr_ema9), float(curr_ema30), float(curr_ema100)
+    except (TypeError, ValueError):
+        return None
+    bull_now = c9 > c30 and c9 > c100
+    bull_prev = p9 > p30 and p9 > p100
+    if bull_now and not bull_prev:
+        return SIDE_BULL
+    bear_now = c9 < c30 and c9 < c100
+    bear_prev = p9 < p30 and p9 < p100
+    if bear_now and not bear_prev:
+        return SIDE_BEAR
+    return None
+
+
 def next_ema_action(
     status: str,
     side: Optional[str],
@@ -444,7 +511,10 @@ def next_ema_action(
     ema100: Any,
     trade_submitted: bool,
 ) -> str:
-    """arm | invalidate | hold. Incomplete EMAs never arm or invalidate."""
+    """Stock path: arm | invalidate | hold when EMA *condition holds* (not cross).
+
+    Incomplete EMAs never arm or invalidate. Indices use ``next_index_ema_action``.
+    """
     st = (status or "").strip().lower()
     incomplete = ema9 is None or ema30 is None or ema100 is None
     holds = (not incomplete) and ema_condition_holds(side, ema9, ema30, ema100)
@@ -459,6 +529,52 @@ def next_ema_action(
             return "invalidate"
         return "hold"
     return "hold"
+
+
+def next_index_ema_action(
+    status: str,
+    side: Optional[str],
+    prev_ema9: Any,
+    prev_ema30: Any,
+    prev_ema100: Any,
+    curr_ema9: Any,
+    curr_ema30: Any,
+    curr_ema100: Any,
+    trade_submitted: bool,
+) -> Tuple[str, Optional[str]]:
+    """Index path: Radar arms only on EMA *cross*; Active invalidates when hold fails.
+
+    Returns ``(action, side_on_arm)``. ``side_on_arm`` is set when arming from Radar
+    (may be blank before arm). Incomplete prev/curr EMAs → hold.
+    """
+    st = (status or "").strip().lower()
+    incomplete = any(
+        v is None
+        for v in (
+            prev_ema9,
+            prev_ema30,
+            prev_ema100,
+            curr_ema9,
+            curr_ema30,
+            curr_ema100,
+        )
+    )
+    if incomplete:
+        return "hold", None
+    if st == "radar":
+        crossed = detect_ema_cross_side(
+            prev_ema9, prev_ema30, prev_ema100, curr_ema9, curr_ema30, curr_ema100
+        )
+        if crossed:
+            return "arm", crossed
+        return "hold", None
+    if st == "active":
+        if trade_submitted:
+            return "hold", None
+        if not ema_condition_holds(side, curr_ema9, curr_ema30, curr_ema100):
+            return "invalidate", None
+        return "hold", None
+    return "hold", None
 
 
 def _naive_ist(value: Any) -> Optional[datetime]:
@@ -612,17 +728,23 @@ def pick_nearest_delta(legs: Sequence[Dict[str, Any]], target: float, exclude_st
     return pool[0][2]
 
 
-def pick_credit_spread(chain: Any, side: str) -> Optional[Dict[str, Any]]:
+def pick_credit_spread(
+    chain: Any,
+    side: str,
+    *,
+    sell_target: float = DELTA_SELL,
+    buy_target: float = DELTA_BUY,
+) -> Optional[Dict[str, Any]]:
     call = side == SIDE_BEAR
     if side not in (SIDE_BEAR, SIDE_BULL):
         return None
     legs = legs_from_chain(chain, call=call)
     if not legs:
         return None
-    sell = pick_nearest_delta(legs, DELTA_SELL)
+    sell = pick_nearest_delta(legs, sell_target)
     if not sell:
         return None
-    buy = pick_nearest_delta(legs, DELTA_BUY, exclude_strike=sell["strike"])
+    buy = pick_nearest_delta(legs, buy_target, exclude_strike=sell["strike"])
     if not buy:
         return None
     return {
@@ -652,13 +774,25 @@ def fmt_strike(value: Any) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".")
 
 
-def spread_lines(side: Optional[str], sell_strike: Any, buy_strike: Any) -> Tuple[Optional[str], Optional[str]]:
+def spread_lines(
+    side: Optional[str],
+    sell_strike: Any,
+    buy_strike: Any,
+    *,
+    symbol: Any = None,
+    sell_target: Optional[float] = None,
+    buy_target: Optional[float] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     code = option_code(side)
     if not code or sell_strike is None or buy_strike is None:
         return None, None
+    if sell_target is None or buy_target is None:
+        sell_target, buy_target = delta_targets_for_symbol(symbol)
+    sell_label = int(round(float(sell_target)))
+    buy_label = int(round(float(buy_target)))
     return (
-        f"Sell {code}:~28 Δ - {fmt_strike(sell_strike)}",
-        f"Buy {code}~18 Δ {fmt_strike(buy_strike)}",
+        f"Sell {code}:~{sell_label} Δ - {fmt_strike(sell_strike)}",
+        f"Buy {code}~{buy_label} Δ {fmt_strike(buy_strike)}",
     )
 
 
@@ -1147,6 +1281,73 @@ def _statuses_for_symbol(db: Any, symbol: str) -> List[str]:
     return [str(r[0]) for r in rows]
 
 
+def ensure_index_radar_row(
+    db: Any,
+    symbol: str,
+    *,
+    now: Optional[datetime] = None,
+) -> bool:
+    """Insert a fresh Radar row for NIFTY/BANKNIFTY when no Radar/Active exists.
+
+    Side and WR stay blank until a 2h EMA cross arms the row. Returns True if inserted.
+    """
+    sym = _norm_symbol(symbol)
+    if not is_index_symbol(sym):
+        return False
+    if not should_insert_new_signal(_statuses_for_symbol(db, sym)):
+        return False
+    ts = now_ist_second() if now is None else naive_ist(now)
+    ik = resolve_equity_instrument_key(sym, db)
+    db.execute(
+        text(
+            """
+            INSERT INTO stock_option_signals (
+                symbol, williamsr, instrument_key, status, side,
+                trigger_at, triggered_at_raw, scan_name, alert_name, raw_payload,
+                hard_stop_placed, created_at, updated_at
+            ) VALUES (
+                :symbol, NULL, :instrument_key, :status, NULL,
+                :trigger_at, NULL, :scan_name, :alert_name, NULL,
+                FALSE, :created_at, :updated_at
+            )
+            """
+        ),
+        {
+            "symbol": sym,
+            "instrument_key": ik,
+            "status": STATUS_RADAR,
+            "trigger_at": ts,
+            "scan_name": "index-permanent-radar",
+            "alert_name": "NIFTY/BANKNIFTY permanent Radar",
+            "created_at": ts,
+            "updated_at": ts,
+        },
+    )
+    logger.info("stock_option seeded Radar for permanent index %s", sym)
+    return True
+
+
+def ensure_index_radar_rows(now: Optional[datetime] = None) -> int:
+    """Ensure Radar availability for NIFTY and BANKNIFTY (seed if missing)."""
+    ensure_stock_option_tables()
+    ts = now_ist_second() if now is None else naive_ist(now)
+    n = 0
+    db = SessionLocal()
+    try:
+        for sym in INDEX_PIN_ORDER:
+            if ensure_index_radar_row(db, sym, now=ts):
+                n += 1
+        if n:
+            db.commit()
+        return n
+    except Exception:
+        db.rollback()
+        logger.exception("stock_option ensure_index_radar_rows failed")
+        return 0
+    finally:
+        db.close()
+
+
 def insert_webhook_and_signals(
     *,
     received_at: datetime,
@@ -1190,6 +1391,10 @@ def insert_webhook_and_signals(
             if sym in seen:
                 continue
             seen.add(sym)
+            # Permanent indices are seeded/managed by the 2h job — never ChartInk.
+            if is_index_symbol(sym):
+                ignored += 1
+                continue
             statuses = _statuses_for_symbol(db, sym)
             if not should_insert_new_signal(statuses):
                 ignored += 1
@@ -1325,7 +1530,10 @@ def _fill_spreads_if_blank(row: Dict[str, Any], now: datetime) -> None:
     except Exception as e:
         logger.info("stock_option option chain failed for %s: %s", row.get("symbol"), e)
         return
-    spread = pick_credit_spread(chain, row.get("side"))
+    sell_t, buy_t = delta_targets_for_symbol(row.get("symbol"))
+    spread = pick_credit_spread(
+        chain, row.get("side"), sell_target=sell_t, buy_target=buy_t
+    )
     if not spread:
         logger.info("stock_option delta spread blank for %s (chain/greeks unavailable)", row.get("symbol"))
         return
@@ -1383,16 +1591,18 @@ def expire_stale_active(now: Optional[datetime] = None) -> int:
 
     Trade date is the armed calendar date. Does not invent or clear strikes.
     Skips rows that already have a submitted trade date or costs.
+    Re-seeds permanent index Radar after expiry.
     """
     ensure_stock_option_tables()
     now_naive = now_ist_second() if now is None else naive_ist(now)
     cutoff = now_naive - timedelta(hours=ACTIVE_MAX_HOURS)
     db = SessionLocal()
+    reseeds: List[str] = []
     try:
         rows = db.execute(
             text(
                 """
-                SELECT id, armed_at, remarks
+                SELECT id, symbol, armed_at, remarks
                 FROM stock_option_signals
                 WHERE status = :active
                   AND armed_at IS NOT NULL
@@ -1432,7 +1642,12 @@ def expire_stale_active(now: Optional[datetime] = None) -> int:
                 },
             )
             n += 1
-        if n:
+            sym = _norm_symbol(row.get("symbol"))
+            if is_index_symbol(sym):
+                reseeds.append(sym)
+        for sym in reseeds:
+            ensure_index_radar_row(db, sym, now=now_naive)
+        if n or reseeds:
             db.commit()
         return n
     except Exception:
@@ -1444,7 +1659,11 @@ def expire_stale_active(now: Optional[datetime] = None) -> int:
 
 
 def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
-    """2h job: expire stale Active, update EMAs, arm, invalidate, fill spreads."""
+    """2h job: seed index Radar, expire stale Active, update EMAs, arm, invalidate, fill spreads.
+
+    NIFTY/BANKNIFTY: no WR gate; Radar→Active only on EMA9 cross vs EMA30+EMA100.
+    Stocks: WR side already set; arm when EMA condition holds.
+    """
     ensure_stock_option_tables()
     from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
 
@@ -1452,6 +1671,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         return {"ok": True, "skipped": "breakfast_exclusivity"}
 
     now_naive = now_ist_second() if now is None else naive_ist(now)
+    seeded = ensure_index_radar_rows(now_naive)
     expired = expire_stale_active(now_naive)
     rows = _open_rows()
     updated = armed = invalidated = 0
@@ -1483,21 +1703,43 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
             time.sleep(FETCH_SLEEP_SEC)
             continue
         snap = ema_snapshot(closes)
+        index_sym = is_index_symbol(row.get("symbol"))
+        pair = ema_snapshot_pair(closes) if index_sym else None
         wr_now = None
-        try:
-            wr_now = compute_williams_r_280(ik, now_naive)
-        except Exception as e:
-            logger.info("stock_option WR(280) refresh failed for %s: %s", row.get("symbol"), e)
-            wr_now = None
+        if not index_sym:
+            try:
+                wr_now = compute_williams_r_280(ik, now_naive)
+            except Exception as e:
+                logger.info("stock_option WR(280) refresh failed for %s: %s", row.get("symbol"), e)
+                wr_now = None
         submitted = trade_is_submitted(row.get("date_traded"), row.get("sell_cost"), row.get("buy_cost"))
-        action = next_ema_action(
-            row.get("status") or "",
-            row.get("side"),
-            snap["ema9"],
-            snap["ema30"],
-            snap["ema100"],
-            submitted,
-        )
+        arm_side: Optional[str] = None
+        if index_sym:
+            if pair is None:
+                action = "hold"
+            else:
+                prev, curr = pair
+                snap = curr
+                action, arm_side = next_index_ema_action(
+                    row.get("status") or "",
+                    row.get("side"),
+                    prev["ema9"],
+                    prev["ema30"],
+                    prev["ema100"],
+                    curr["ema9"],
+                    curr["ema30"],
+                    curr["ema100"],
+                    submitted,
+                )
+        else:
+            action = next_ema_action(
+                row.get("status") or "",
+                row.get("side"),
+                snap["ema9"],
+                snap["ema30"],
+                snap["ema100"],
+                submitted,
+            )
         db = SessionLocal()
         try:
             if action == "invalidate":
@@ -1535,15 +1777,19 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                     },
                 )
                 invalidated += 1
+                if index_sym:
+                    ensure_index_radar_row(db, row.get("symbol") or "", now=now_naive)
             elif action == "arm":
                 contract = resolve_contract_mmm_yyyy(
                     row.get("symbol"), now_naive, db=db
                 )
+                side_set = arm_side if arm_side else row.get("side")
                 db.execute(
                     text(
                         """
                         UPDATE stock_option_signals
                         SET status = :active,
+                            side = COALESCE(:side, side),
                             armed_at = COALESCE(armed_at, :ts),
                             contract_mmm_yyyy = COALESCE(contract_mmm_yyyy, :contract),
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
@@ -1555,6 +1801,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                     ),
                     {
                         "active": STATUS_ACTIVE,
+                        "side": side_set,
                         "ema9": snap["ema9"],
                         "ema30": snap["ema30"],
                         "ema100": snap["ema100"],
@@ -1567,6 +1814,8 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                 )
                 armed += 1
                 row["status"] = STATUS_ACTIVE
+                if side_set:
+                    row["side"] = side_set
                 if contract:
                     row["contract_mmm_yyyy"] = contract
             else:
@@ -1620,6 +1869,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         "armed": armed,
         "invalidated": invalidated,
         "expired_72h": expired,
+        "index_radar_seeded": seeded,
         "ltp_refreshed": ltp_n,
     }
 
@@ -1717,7 +1967,9 @@ def _fmt_ts(value: Any) -> Optional[str]:
 
 
 def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
-    sell_line, buy_line = spread_lines(r.get("side"), r.get("sell_strike"), r.get("buy_strike"))
+    sell_line, buy_line = spread_lines(
+        r.get("side"), r.get("sell_strike"), r.get("buy_strike"), symbol=r.get("symbol")
+    )
     user_sell = r.get("user_sell_strike") if r.get("user_sell_strike") is not None else r.get("sell_strike")
     user_buy = r.get("user_buy_strike") if r.get("user_buy_strike") is not None else r.get("buy_strike")
     completed = (r.get("status") or "").strip().lower() == "completed"
@@ -1730,9 +1982,11 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
     else:
         pnl = combined_pnl(r.get("sell_cost"), r.get("buy_cost"), r.get("sell_ltp"), r.get("buy_ltp"))
     hs = hard_stop_price(r.get("sell_cost"))
+    sym = r.get("symbol")
     return {
         "id": r.get("id"),
-        "symbol": r.get("symbol"),
+        "symbol": sym,
+        "is_index": is_index_symbol(sym),
         "williamsr": r.get("williamsr"),
         "instrument_key": r.get("instrument_key"),
         "status": r.get("status"),
@@ -1766,8 +2020,24 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _pin_index_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """NIFTY then BANKNIFTY first; remaining rows keep relative order."""
+    order = {s: i for i, s in enumerate(INDEX_PIN_ORDER)}
+    pinned: List[Dict[str, Any]] = []
+    rest: List[Dict[str, Any]] = []
+    for item in rows:
+        sym = _norm_symbol(item.get("symbol"))
+        if sym in order:
+            pinned.append(item)
+        else:
+            rest.append(item)
+    pinned.sort(key=lambda r: order.get(_norm_symbol(r.get("symbol")), 99))
+    return pinned + rest
+
+
 def list_workspace() -> Dict[str, Any]:
     ensure_stock_option_tables()
+    ensure_index_radar_rows()
     expire_stale_active()
     db = SessionLocal()
     try:
@@ -1818,7 +2088,12 @@ def list_workspace() -> Dict[str, Any]:
             executed.append(item)
         elif st == "completed":
             completed.append(item)
-    return {"radar": radar, "active": active, "executed": executed, "completed": completed}
+    return {
+        "radar": _pin_index_rows(radar),
+        "active": _pin_index_rows(active),
+        "executed": _pin_index_rows(executed),
+        "completed": _pin_index_rows(completed),
+    }
 
 
 def submit_trade(
@@ -1839,7 +2114,7 @@ def submit_trade(
     db = SessionLocal()
     try:
         row = db.execute(
-            text("SELECT id, status, date_traded FROM stock_option_signals WHERE id = :id"),
+            text("SELECT id, symbol, status, date_traded FROM stock_option_signals WHERE id = :id"),
             {"id": signal_id},
         ).mappings().first()
         if not row:
@@ -1874,6 +2149,8 @@ def submit_trade(
                 "id": signal_id,
             },
         )
+        # Permanent indices: immediately start a fresh Radar cycle.
+        ensure_index_radar_row(db, row.get("symbol") or "", now=now)
         db.commit()
     except Exception:
         db.rollback()
