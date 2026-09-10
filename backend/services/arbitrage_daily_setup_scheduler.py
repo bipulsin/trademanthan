@@ -312,6 +312,10 @@ def _build_mappings(instruments: List[Dict]) -> Tuple[Dict[str, str], Dict[str, 
         if segment == "NSE_EQ" and trading_symbol:
             eq_map[trading_symbol] = inst.get("instrument_key")
 
+        # Index underlyings (NIFTY / BANKNIFTY / …) live as NSE_INDEX, not NSE_EQ.
+        if segment == "NSE_INDEX" and trading_symbol and inst.get("instrument_key"):
+            eq_map.setdefault(trading_symbol, inst.get("instrument_key"))
+
         if segment == "NSE_FO" and inst_type == "FUT" and " FUT " in trading_symbol:
             symbol = trading_symbol.split(" FUT ", 1)[0].strip()
             fut_map.setdefault(symbol, []).append(inst)
@@ -449,6 +453,8 @@ def _build_arbitrage_metadata_updates(
     *,
     apply_roll_window: bool,
 ) -> List[Dict]:
+    from backend.services.arbitrage_universe import INDEX_MASTER_SPOT_KEYS
+
     fno_sector_map = load_fno_sector_index_map()
     metadata_updates: List[Dict] = []
     for stock in stocks:
@@ -458,9 +464,15 @@ def _build_arbitrage_metadata_updates(
             apply_roll_window=apply_roll_window,
         )
         sym_u = str(stock or "").strip().upper()
-        sector_idx = normalize_sector_instrument_key(
-            fno_sector_map.get(sym_u) or equity_sector_index_instrument_key(stock)
-        )
+        # Index master rows use themselves as sector_index (not a stock→sector map).
+        if sym_u in INDEX_MASTER_SPOT_KEYS:
+            sector_idx = INDEX_MASTER_SPOT_KEYS[sym_u]
+            if not stock_key:
+                stock_key = sector_idx
+        else:
+            sector_idx = normalize_sector_instrument_key(
+                fno_sector_map.get(sym_u) or equity_sector_index_instrument_key(stock)
+            )
         metadata_updates.append(
             {
                 "stock": stock,

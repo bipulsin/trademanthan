@@ -26,6 +26,7 @@ SET sector = CASE COALESCE(NULLIF(TRIM(sector_instrument_key), ''), TRIM(sector_
     WHEN 'NSE_INDEX|Nifty Pvt Bank' THEN 'Pvt Bank'
     WHEN 'NSE_INDEX|Nifty Private Bank' THEN 'Pvt Bank'
     WHEN 'NSE_INDEX|Nifty Realty' THEN 'Realty'
+    WHEN 'NSE_INDEX|Nifty 50' THEN 'Nifty 50'
     WHEN 'NSE_INDEX|Nifty Serv Sector' THEN 'Serv Sector'
     WHEN 'NSE_INDEX|Nifty Services' THEN 'Serv Sector'
     WHEN 'NSE_INDEX|Nifty Trans Logis' THEN 'Trans Logis'

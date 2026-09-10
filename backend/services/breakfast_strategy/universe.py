@@ -57,6 +57,9 @@ def sector_index_key_for_label(label: str) -> Optional[str]:
 
 
 def load_arbitrage_by_sector() -> Dict[str, List[Dict[str, str]]]:
+    """Stock FO members by sector_index. Excludes index underlyings (NIFTY/BANKNIFTY)."""
+    from backend.services.arbitrage_universe import INDEX_FUT_UNDERLYINGS
+
     db = SessionLocal()
     try:
         rows = db.execute(
@@ -77,13 +80,16 @@ def load_arbitrage_by_sector() -> Dict[str, List[Dict[str, str]]]:
         db.close()
     out: Dict[str, List[Dict[str, str]]] = {}
     for r in rows:
+        stock = str(r.get("stock") or "").strip().upper()
+        if stock in INDEX_FUT_UNDERLYINGS:
+            continue
         raw = str(r.get("sector_index") or "").strip()
         key = normalize_sector_instrument_key(raw) or raw
         if not key:
             continue
         out.setdefault(key, []).append(
             {
-                "stock": str(r.get("stock") or "").strip().upper(),
+                "stock": stock,
                 "sector": str(r.get("sector") or "").strip(),
                 "sector_index": key,
             }

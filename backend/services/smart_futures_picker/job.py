@@ -1611,6 +1611,14 @@ def run_smart_futures_picker_job(scan_trigger: str = "") -> Dict[str, Any]:
     finally:
         db.close()
 
+    from backend.services.arbitrage_universe import INDEX_FUT_UNDERLYINGS
+
+    rows = [
+        r
+        for r in rows
+        if str(r[0] or "").strip().upper() not in INDEX_FUT_UNDERLYINGS
+    ]
+
     if not rows:
         logger.info("smart_futures_picker: no arbitrage_master futures keys")
         return {"skipped": "no_universe", "scan_trigger": scan_trigger}

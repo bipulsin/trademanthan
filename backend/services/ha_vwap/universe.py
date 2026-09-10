@@ -9,6 +9,7 @@ from typing import List, Optional
 from sqlalchemy import text
 
 from backend.database import SessionLocal
+from backend.services.arbitrage_universe import INDEX_FUT_UNDERLYINGS
 from backend.services.smart_futures_picker.position_sizing import get_futures_lot_size_by_instrument_key
 from backend.services.trap_ce.universe import LotSizeLookup, resolve_eq
 
@@ -55,7 +56,7 @@ def load_universe(mode: str, *, lots: Optional[LotSizeLookup] = None) -> List[Ha
                 sym = str(r[0] or "").strip().upper()
                 ik = str(r[1] or "").strip()
                 fut_ik = str(r[2] or "").strip()
-                if not sym:
+                if not sym or sym in INDEX_FUT_UNDERLYINGS:
                     continue
                 if not ik:
                     eq = resolve_eq(sym)
@@ -84,7 +85,7 @@ def load_universe(mode: str, *, lots: Optional[LotSizeLookup] = None) -> List[Ha
         for r in rows:
             sym = str(r[0] or "").strip().upper()
             ik = str(r[1] or "").strip()
-            if not sym or not ik:
+            if not sym or not ik or sym in INDEX_FUT_UNDERLYINGS:
                 continue
             lot = fut_lot_size(ik, lots)
             if lot <= 0:

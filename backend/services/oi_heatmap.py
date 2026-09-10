@@ -540,6 +540,7 @@ def build_universe_instrument_keys_from_arbitrage_master() -> List[str]:
     """
     Universe from arbitrage_master (current-month futures keys), preserving stock sort order.
     This is the canonical source for dashboard/modal coverage.
+    Excludes index underlyings (NIFTY/BANKNIFTY/…) — stock-FUT OI only.
     """
     db = None
     out: List[str] = []
@@ -556,7 +557,10 @@ def build_universe_instrument_keys_from_arbitrage_master() -> List[str]:
                 """
             )
         ).fetchall()
-        out = currmth_future_keys_from_arbitrage_rows(rows)
+        stock_rows = [
+            r for r in rows if str(r[0] or "").strip().upper() not in _NSE_INDEX_FUT_UNDERLYINGS
+        ]
+        out = currmth_future_keys_from_arbitrage_rows(stock_rows)
     except Exception as e:
         logger.warning("oi_heatmap: arbitrage_master universe load failed: %s", e)
     finally:
