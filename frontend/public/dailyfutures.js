@@ -360,9 +360,48 @@
     refreshSeq: 0,
     /** Reused for repeated 15m strip beeps (avoids dozens of AudioContext instances). */
     sharedStripAudioCtx: null,
-    stripAlarmIntervalId: null,
     stripAlarmTimeoutId: null,
+    /** Alert beeps on by default; localStorage key df_alert_sound = "1"|"0". */
+    alertSoundEnabled: true,
   };
+
+  var DF_ALERT_SOUND_LS = 'df_alert_sound';
+
+  function isAlertSoundEnabled() {
+    return state.alertSoundEnabled !== false;
+  }
+
+  function loadAlertSoundPreference() {
+    try {
+      var v = localStorage.getItem(DF_ALERT_SOUND_LS);
+      if (v === '0') state.alertSoundEnabled = false;
+      else if (v === '1') state.alertSoundEnabled = true;
+      else state.alertSoundEnabled = true; // default: enabled
+    } catch (e) {
+      state.alertSoundEnabled = true;
+    }
+    var cb = document.getElementById('dfAlertSound');
+    if (cb) cb.checked = isAlertSoundEnabled();
+  }
+
+  function setAlertSoundEnabled(on) {
+    state.alertSoundEnabled = !!on;
+    try {
+      localStorage.setItem(DF_ALERT_SOUND_LS, state.alertSoundEnabled ? '1' : '0');
+    } catch (e) {
+      /* ignore */
+    }
+    if (!state.alertSoundEnabled) stopStripDecisionAlarm();
+  }
+
+  function bindAlertSoundToggle() {
+    loadAlertSoundPreference();
+    var cb = document.getElementById('dfAlertSound');
+    if (!cb) return;
+    cb.addEventListener('change', function () {
+      setAlertSoundEnabled(!!cb.checked);
+    });
+  }
 
   function getSharedStripAudioContext() {
     try {
@@ -382,10 +421,6 @@
   }
 
   function stopStripDecisionAlarm() {
-    if (state.stripAlarmIntervalId != null) {
-      clearInterval(state.stripAlarmIntervalId);
-      state.stripAlarmIntervalId = null;
-    }
     if (state.stripAlarmTimeoutId != null) {
       clearTimeout(state.stripAlarmTimeoutId);
       state.stripAlarmTimeoutId = null;
@@ -393,19 +428,18 @@
   }
 
   /**
-   * Repeating beep: HARD EXIT = 3 min, EXIT NOW = 1 min (interval 3s).
+   * At most two beeps per alert event (no multi-minute loop).
    * @param {'amber' | 'hard'} beepKind
-   * @param {number} durationMs
    */
-  function startStripDecisionAlarm(beepKind, durationMs) {
+  function startStripDecisionAlarm(beepKind) {
     stopStripDecisionAlarm();
+    if (!isAlertSoundEnabled()) return;
     playStrip15mBeep(beepKind);
-    state.stripAlarmIntervalId = window.setInterval(function () {
-      playStrip15mBeep(beepKind);
-    }, 3000);
     state.stripAlarmTimeoutId = window.setTimeout(function () {
-      stopStripDecisionAlarm();
-    }, durationMs);
+      state.stripAlarmTimeoutId = null;
+      if (!isAlertSoundEnabled()) return;
+      playStrip15mBeep(beepKind);
+    }, 450);
   }
 
   if (typeof window !== 'undefined') {
@@ -416,6 +450,7 @@
 
   /** @param {'amber' | 'hard'} kind */
   function playStrip15mBeep(kind) {
+    if (!isAlertSoundEnabled()) return;
     try {
       const ctx = getSharedStripAudioContext();
       if (!ctx) return;
@@ -486,9 +521,9 @@
       }
     });
     if (wantHard) {
-      startStripDecisionAlarm('hard', 3 * 60 * 1000);
+      startStripDecisionAlarm('hard');
     } else if (wantExit) {
-      startStripDecisionAlarm('amber', 60 * 1000);
+      startStripDecisionAlarm('amber');
     }
   }
 
@@ -668,7 +703,9 @@
     updateStrip15mDecisionAudio(rows);
   }
 
-  function playExitAlertBeep() {
+  /** One short tone; caller may schedule a second for the 2-beep cap. */
+  function playExitAlertBeepOnce() {
+    if (!isAlertSoundEnabled()) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
@@ -686,6 +723,16 @@
     } catch (e) {
       /* ignore */
     }
+  }
+
+  /** At most two beeps per running-exit alert event. */
+  function playExitAlertBeep() {
+    if (!isAlertSoundEnabled()) return;
+    playExitAlertBeepOnce();
+    window.setTimeout(function () {
+      if (!isAlertSoundEnabled()) return;
+      playExitAlertBeepOnce();
+    }, 450);
   }
 
   function updateRunningExitAlertAudio(rows) {
@@ -1909,6 +1956,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    bindAlertSoundToggle();
     bindSecurityChartClicks(document.body);
     bindModals();
     refresh();
