@@ -1348,6 +1348,182 @@ def ensure_index_radar_rows(now: Optional[datetime] = None) -> int:
         db.close()
 
 
+def _ema_snap_at(instrument_key: str, asof: datetime) -> Dict[str, Optional[float]]:
+    """EMA9/30/100 on completed 2h closes ending at or before ``asof``."""
+    bars = fetch_completed_2h_ohlc(instrument_key, asof)
+    asof_n = naive_ist(asof)
+    closes: List[float] = []
+    for bar in bars:
+        end = bar.get("end")
+        close = bar.get("close")
+        if not isinstance(end, datetime) or close is None:
+            continue
+        if naive_ist(end) <= asof_n:
+            closes.append(float(close))
+    return ema_snapshot(closes)
+
+
+def record_index_executed_at(
+    symbol: str,
+    armed_at: datetime,
+    *,
+    side: str = SIDE_BEAR,
+    remarks: Optional[str] = None,
+    try_strikes: bool = True,
+) -> Dict[str, Any]:
+    """Insert an Executed history row for a permanent index (keep Radar open).
+
+    Idempotent on (symbol, armed_at minute, status=Executed). Contract from
+    currmth-as-of armed_at. Strikes ~15Δ/~2Δ from live chain when available
+    (blank OK for historical dates).
+    """
+    ensure_stock_option_tables()
+    sym = _norm_symbol(symbol)
+    if not is_index_symbol(sym):
+        raise ValueError(f"not an index symbol: {symbol}")
+    if side not in (SIDE_BEAR, SIDE_BULL):
+        raise ValueError(f"invalid side: {side}")
+    armed = naive_ist(armed_at).replace(second=0, microsecond=0)
+    trade_date = armed.date()
+    note = remarks or (
+        f"Index EMA9 cross → {side} at {armed.strftime('%Y-%m-%d %H:%M')} IST"
+    )
+
+    db = SessionLocal()
+    try:
+        existing = db.execute(
+            text(
+                """
+                SELECT id FROM stock_option_signals
+                WHERE symbol = :sym
+                  AND status = :executed
+                  AND armed_at >= :lo AND armed_at < :hi
+                ORDER BY id
+                LIMIT 1
+                """
+            ),
+            {
+                "sym": sym,
+                "executed": STATUS_EXECUTED,
+                "lo": armed,
+                "hi": armed + timedelta(minutes=1),
+            },
+        ).fetchone()
+        if existing:
+            ensure_index_radar_row(db, sym, now=now_ist_second())
+            db.commit()
+            return {"ok": True, "id": int(existing[0]), "created": False, "symbol": sym}
+
+        ik = resolve_equity_instrument_key(sym, db)
+        snap: Dict[str, Optional[float]] = {"ema9": None, "ema30": None, "ema100": None}
+        if ik:
+            try:
+                snap = _ema_snap_at(ik, armed)
+            except Exception as e:
+                logger.info("stock_option index EMA snap failed for %s @ %s: %s", sym, armed, e)
+
+        contract = resolve_contract_mmm_yyyy(sym, armed, db=db)
+        sell_strike = buy_strike = sell_delta = buy_delta = None
+        sell_ik = buy_ik = None
+        if try_strikes:
+            try:
+                chain = _option_chain_for_symbol(sym)
+                sell_t, buy_t = delta_targets_for_symbol(sym)
+                spread = pick_credit_spread(
+                    chain, side, sell_target=sell_t, buy_target=buy_t
+                )
+                if spread:
+                    sell_strike = spread.get("sell_strike")
+                    buy_strike = spread.get("buy_strike")
+                    sell_delta = spread.get("sell_delta")
+                    buy_delta = spread.get("buy_delta")
+                    sell_ik = spread.get("sell_instrument_key")
+                    buy_ik = spread.get("buy_instrument_key")
+            except Exception as e:
+                logger.info("stock_option index historical strikes blank for %s: %s", sym, e)
+
+        now = now_ist_second()
+        row = db.execute(
+            text(
+                """
+                INSERT INTO stock_option_signals (
+                    symbol, williamsr, instrument_key, status, side,
+                    trigger_at, armed_at, date_traded, contract_mmm_yyyy,
+                    ema9, ema30, ema100, ema_updated_at,
+                    sell_strike, buy_strike, sell_delta, buy_delta,
+                    sell_instrument_key, buy_instrument_key,
+                    user_sell_strike, user_buy_strike,
+                    scan_name, alert_name, remarks,
+                    hard_stop_placed, created_at, updated_at
+                ) VALUES (
+                    :symbol, NULL, :instrument_key, :status, :side,
+                    :trigger_at, :armed_at, :date_traded, :contract,
+                    :ema9, :ema30, :ema100, :armed_at,
+                    :sell_strike, :buy_strike, :sell_delta, :buy_delta,
+                    :sell_ik, :buy_ik,
+                    :sell_strike, :buy_strike,
+                    :scan_name, :alert_name, :remarks,
+                    FALSE, :created_at, :updated_at
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "symbol": sym,
+                "instrument_key": ik,
+                "status": STATUS_EXECUTED,
+                "side": side,
+                "trigger_at": armed,
+                "armed_at": armed,
+                "date_traded": trade_date,
+                "contract": contract,
+                "ema9": snap.get("ema9"),
+                "ema30": snap.get("ema30"),
+                "ema100": snap.get("ema100"),
+                "sell_strike": sell_strike,
+                "buy_strike": buy_strike,
+                "sell_delta": sell_delta,
+                "buy_delta": buy_delta,
+                "sell_ik": sell_ik,
+                "buy_ik": buy_ik,
+                "scan_name": "index-ema-cross-executed",
+                "alert_name": "NIFTY/BANKNIFTY EMA cross (Executed)",
+                "remarks": note,
+                "created_at": now,
+                "updated_at": now,
+            },
+        ).fetchone()
+        ensure_index_radar_row(db, sym, now=now)
+        db.commit()
+        new_id = int(row[0]) if row else None
+        logger.info(
+            "stock_option recorded index Executed %s id=%s armed=%s contract=%s",
+            sym,
+            new_id,
+            armed,
+            contract,
+        )
+        return {
+            "ok": True,
+            "id": new_id,
+            "created": True,
+            "symbol": sym,
+            "side": side,
+            "armed_at": armed.isoformat(sep=" "),
+            "contract_mmm_yyyy": contract,
+            "ema9": snap.get("ema9"),
+            "ema30": snap.get("ema30"),
+            "ema100": snap.get("ema100"),
+            "sell_strike": sell_strike,
+            "buy_strike": buy_strike,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def insert_webhook_and_signals(
     *,
     received_at: datetime,
@@ -1987,6 +2163,7 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "id": r.get("id"),
         "symbol": sym,
         "is_index": is_index_symbol(sym),
+        "index_fut": is_index_symbol(sym),
         "williamsr": r.get("williamsr"),
         "instrument_key": r.get("instrument_key"),
         "status": r.get("status"),

@@ -170,6 +170,18 @@ def test_index_symbols_and_delta_targets():
     sell, buy = spread_lines(SIDE_BEAR, 25000, 25500, symbol="NIFTY")
     assert sell == "Sell CE:~15 Δ - 25000"
     assert buy == "Buy CE~2 Δ 25500"
+    pub = _row_public({"symbol": "NIFTY", "status": "Radar", "side": None})
+    assert pub["is_index"] is True
+    assert pub["index_fut"] is True
+    pub2 = _row_public({"symbol": "RELIANCE", "status": "Radar", "side": None})
+    assert pub2["is_index"] is False
+    assert pub2["index_fut"] is False
+
+
+def test_index_contract_as_of_roll_day20():
+    """Armed after day 20 rolls contract month; early-month stays same month."""
+    assert resolve_contract_mmm_yyyy("NIFTY", datetime(2026, 8, 27, 13, 15)) == "SEP-2026"
+    assert resolve_contract_mmm_yyyy("BANKNIFTY", datetime(2026, 9, 7, 11, 15)) == "SEP-2026"
 
 
 def test_index_ema_cross_vs_hold_bull_put():

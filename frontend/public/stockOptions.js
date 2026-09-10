@@ -196,7 +196,7 @@
   const INDEX_PIN = { NIFTY: 0, BANKNIFTY: 1 };
 
   function isIndexRow(r) {
-    if (r && r.is_index) return true;
+    if (r && (r.is_index || r.index_fut)) return true;
     const s = String((r && r.symbol) || "").trim().toUpperCase();
     return Object.prototype.hasOwnProperty.call(INDEX_PIN, s);
   }
@@ -220,8 +220,8 @@
     const name = esc(r.symbol || "—");
     if (!isIndexRow(r)) return name;
     return (
-      '<span class="so-index-sym">' +
-      '<span class="so-index-arrow" aria-hidden="true">→</span>' +
+      '<span class="so-index-sym" title="Index FUT">' +
+      '<span class="so-index-arrow" aria-hidden="true"></span>' +
       name +
       "</span>"
     );
