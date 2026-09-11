@@ -1890,66 +1890,99 @@ def _fetch_2h_closes_from_10m_fallback(
 
 
 def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
-    """REST historical only. Prefer hours/2; else hours/1, minutes/15, then 10m/5m."""
+    """REST historical only. Prefer hours/2; else hours/1, minutes/15, then 10m/5m.
+
+    Always try Kavach 10m/5m when EMA100 history is still short — do not early-return
+    on a mid-length hours/1 series that skips the finer fallbacks.
+    """
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
     u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    best: List[float] = []
+
     native = _upstox_candles_with_retry(
         u, instrument_key, interval="hours/2", days_back=120
     )
     bars = completed_2h_bars(native, now=now)
-    if len(bars) >= EMA_SLOW:
-        return [float(b["close"]) for b in bars]
+    closes = [float(b["close"]) for b in bars]
+    if _ema_closes_ready(closes):
+        return closes
+    if len(closes) > len(best):
+        best = closes
 
     one = _upstox_candles_with_retry(
         u, instrument_key, interval="hours/1", days_back=60
     )
     agg = aggregate_intraday_to_2h(one, now=now)
-    if len(agg) >= EMA_SLOW:
-        return [float(b["close"]) for b in agg]
-    if len(agg) >= EMA_MID:
-        return [float(b["close"]) for b in agg]
+    closes = [float(b["close"]) for b in agg]
+    if _ema_closes_ready(closes):
+        return closes
+    if len(closes) > len(best):
+        best = closes
 
     fifteen = _upstox_candles_with_retry(
         u, instrument_key, interval="minutes/15", days_back=60
     )
     agg15 = aggregate_intraday_to_2h(fifteen, now=now)
-    best = agg15 if len(agg15) > len(agg) else agg
-    if len(best) >= EMA_SLOW:
-        return [float(b["close"]) for b in best]
+    closes = [float(b["close"]) for b in agg15]
+    if _ema_closes_ready(closes):
+        return closes
+    if len(closes) > len(best):
+        best = closes
 
     # Last resort: Kavach-style 10m (5m paired) → 2h.
     from10 = _fetch_2h_closes_from_10m_fallback(instrument_key, now=now)
+    if _ema_closes_ready(from10):
+        return from10
     if len(from10) > len(best):
         return from10
-    if best:
-        return [float(b["close"]) for b in best]
-    if bars:
-        return [float(b["close"]) for b in bars]
-    if from10:
-        return from10
-    return [float(b["close"]) for b in agg15]
+    return best
 
 
-def _mark_ema_fetch_failed(row_id: int, now_naive: datetime) -> None:
-    """Clear EMA display values and flag fetch failure for this cycle."""
+def _mark_ema_fetch_failed(
+    row_id: int,
+    now_naive: datetime,
+    *,
+    prior_ema9: Any = None,
+    prior_ema30: Any = None,
+    prior_ema100: Any = None,
+) -> None:
+    """On fetch fail: preserve last good EMAs; only wipe when none existed."""
+    has_prior = any(v is not None for v in (prior_ema9, prior_ema30, prior_ema100))
     db = SessionLocal()
     try:
-        db.execute(
-            text(
-                """
-                UPDATE stock_option_signals
-                SET ema9 = NULL,
-                    ema30 = NULL,
-                    ema100 = NULL,
-                    ema_fetch_ok = FALSE,
-                    updated_at = :ts
-                WHERE id = :id
-                """
-            ),
-            {"ts": now_naive, "id": row_id},
-        )
+        if has_prior:
+            # Transient empty Upstox response must not blank a prior good cycle.
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET updated_at = :ts
+                    WHERE id = :id
+                    """
+                ),
+                {"ts": now_naive, "id": row_id},
+            )
+            logger.info(
+                "stock_option EMA fetch failed id=%s; preserved prior EMAs (no wipe)",
+                row_id,
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET ema9 = NULL,
+                        ema30 = NULL,
+                        ema100 = NULL,
+                        ema_fetch_ok = FALSE,
+                        updated_at = :ts
+                    WHERE id = :id
+                    """
+                ),
+                {"ts": now_naive, "id": row_id},
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -2143,7 +2176,13 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
             finally:
                 db.close()
         if not ik:
-            _mark_ema_fetch_failed(int(row["id"]), now_naive)
+            _mark_ema_fetch_failed(
+                int(row["id"]),
+                now_naive,
+                prior_ema9=row.get("ema9"),
+                prior_ema30=row.get("ema30"),
+                prior_ema100=row.get("ema100"),
+            )
             failed += 1
             continue
         closes: List[float] = []
@@ -2176,7 +2215,13 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                 fetch_err,
                 len(closes),
             )
-            _mark_ema_fetch_failed(int(row["id"]), now_naive)
+            _mark_ema_fetch_failed(
+                int(row["id"]),
+                now_naive,
+                prior_ema9=row.get("ema9"),
+                prior_ema30=row.get("ema30"),
+                prior_ema100=row.get("ema100"),
+            )
             failed += 1
             time.sleep(FETCH_SLEEP_SEC)
             continue
@@ -2336,7 +2381,13 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         except Exception:
             db.rollback()
             logger.exception("stock_option ema update failed for %s", row.get("symbol"))
-            _mark_ema_fetch_failed(int(row["id"]), now_naive)
+            _mark_ema_fetch_failed(
+                int(row["id"]),
+                now_naive,
+                prior_ema9=row.get("ema9"),
+                prior_ema30=row.get("ema30"),
+                prior_ema100=row.get("ema100"),
+            )
             failed += 1
         finally:
             db.close()

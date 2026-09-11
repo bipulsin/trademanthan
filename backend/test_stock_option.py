@@ -418,6 +418,84 @@ def test_closes_from_5m_via_10m_aggregates(monkeypatch):
     assert closes[-1] == candles[-1]["close"]
 
 
+def test_fetch_2h_closes_tries_10m_when_hours1_only_mid_length(monkeypatch):
+    """Mid-length hours/1 must not skip Kavach 10m (need EMA100 history)."""
+    from backend.services import stock_option_signals as sos
+
+    class _FakeUpstox:
+        def __init__(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(
+        "backend.services.upstox_service.UpstoxService",
+        _FakeUpstox,
+    )
+    monkeypatch.setattr(
+        sos,
+        "_upstox_candles_with_retry",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(sos, "completed_2h_bars", lambda candles, now=None: [])
+    monkeypatch.setattr(
+        sos,
+        "aggregate_intraday_to_2h",
+        lambda candles, now=None: [{"close": float(i)} for i in range(40)],
+    )
+    called = {"n": 0}
+
+    def fake_10m(ikey, now=None):
+        called["n"] += 1
+        return [float(i) for i in range(120)]
+
+    monkeypatch.setattr(sos, "_fetch_2h_closes_from_10m_fallback", fake_10m)
+    out = sos._fetch_2h_closes("NSE_EQ|X", now=IST.localize(datetime(2026, 9, 11, 15, 45)))
+    assert called["n"] == 1
+    assert len(out) == 120
+
+
+def test_mark_ema_fetch_failed_preserves_prior_emas(monkeypatch):
+    from backend.services import stock_option_signals as sos
+
+    executed: list[str] = []
+
+    class _FakeResult:
+        pass
+
+    class _FakeDb:
+        def execute(self, stmt, params=None):
+            executed.append(str(stmt))
+            return _FakeResult()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sos, "SessionLocal", lambda: _FakeDb())
+    sos._mark_ema_fetch_failed(
+        42,
+        datetime(2026, 9, 11, 15, 15),
+        prior_ema9=100.0,
+        prior_ema30=99.0,
+        prior_ema100=98.0,
+    )
+    assert len(executed) == 1
+    sql = executed[0].lower()
+    assert "ema_fetch_ok" not in sql
+    assert "ema9" not in sql
+
+    executed.clear()
+    sos._mark_ema_fetch_failed(43, datetime(2026, 9, 11, 15, 15))
+    assert len(executed) == 1
+    sql = executed[0].lower()
+    assert "ema_fetch_ok" in sql
+    assert "ema9" in sql
+
+
 def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):
     """Index OHLC falls back to currmth FUT when NSE_INDEX history is thin."""
     from backend.services import stock_option_signals as sos

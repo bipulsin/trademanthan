@@ -1,4 +1,4 @@
-"""IST 11:15 / 13:15 / 15:15 — completed 2h bars from 09:15 for Stock Options."""
+"""IST 11:15 / 13:15 / 15:15 + post-market 15:45 — Stock Options 2h EMAs."""
 from __future__ import annotations
 
 import logging
@@ -50,9 +50,27 @@ def start_stock_option_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # After cash close: last 2h bucket (13:15–15:15) and Upstox history are settled.
+    # Retries same path as session ticks (hours/2 → 1h → 15m → Kavach 10m/5m).
+    sch.add_job(
+        _tick,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=15,
+            minute=45,
+            timezone="Asia/Kolkata",
+        ),
+        id="stock_option_ema_post_market",
+        name="Stock Options post-market EMA 15:45",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     sch.start()
     _scheduler = sch
-    logger.info("Stock Options 2h EMA scheduler started (11:15, 13:15, 15:15 IST)")
+    logger.info(
+        "Stock Options 2h EMA scheduler started (11:15, 13:15, 15:15, post-market 15:45 IST)"
+    )
 
 
 def stop_stock_option_scheduler() -> None:

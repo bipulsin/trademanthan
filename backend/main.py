@@ -266,9 +266,15 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Continuing without Analysis snapshot scheduler")
 
         try:
-            logger.info("Starting Stock Options 2h EMA scheduler (11:15/13:15/15:15 IST)...")
+            logger.info(
+                "Starting Stock Options 2h EMA scheduler "
+                "(11:15/13:15/15:15 + post-market 15:45 IST)..."
+            )
             start_stock_option_scheduler()
-            logger.info("✅ Stock Options EMA scheduler: STARTED (11:15, 13:15, 15:15 IST)")
+            logger.info(
+                "✅ Stock Options EMA scheduler: STARTED "
+                "(11:15, 13:15, 15:15, post-market 15:45 IST)"
+            )
         except Exception as e:
             logger.error(f"❌ Stock Options EMA scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Stock Options EMA scheduler")
