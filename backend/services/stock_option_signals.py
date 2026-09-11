@@ -1273,6 +1273,83 @@ def resolve_equity_instrument_key(symbol: str, db: Any) -> Optional[str]:
     return None
 
 
+def resolve_currmth_fut_instrument_key(symbol: str, db: Any) -> Optional[str]:
+    """currmth FUT instrument key from arbitrage_master (OHLC for index EMAs)."""
+    sym = _norm_symbol(symbol)
+    if not sym or db is None:
+        return None
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT currmth_future_instrument_key
+                FROM arbitrage_master
+                WHERE UPPER(TRIM(stock)) = :s
+                  AND currmth_future_instrument_key IS NOT NULL
+                  AND TRIM(currmth_future_instrument_key) <> ''
+                LIMIT 1
+                """
+            ),
+            {"s": sym},
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0]).strip()
+    except Exception as e:
+        logger.debug("arbitrage_master currmth FUT key lookup failed for %s: %s", sym, e)
+    return None
+
+
+def _ema_closes_ready(closes: Sequence[float]) -> bool:
+    return len(closes) >= EMA_SLOW
+
+
+def _fetch_2h_closes_for_ema(
+    symbol: str,
+    instrument_key: str,
+    *,
+    db: Any = None,
+    now: Optional[datetime] = None,
+) -> List[float]:
+    """2h closes for EMA9/30/100.
+
+    Indices keep display/equity key as NSE_INDEX on the row, but if that history is
+    empty/thin, fall back to arbitrage_master currmth FUT for OHLC only.
+    """
+    closes = _fetch_2h_closes(instrument_key, now=now)
+    if _ema_closes_ready(closes) or not is_index_symbol(symbol):
+        return closes
+    fut_ik: Optional[str] = None
+    own_db = False
+    sess = db
+    try:
+        if sess is None:
+            sess = SessionLocal()
+            own_db = True
+        fut_ik = resolve_currmth_fut_instrument_key(symbol, sess)
+    except Exception:
+        logger.exception("stock_option FUT key resolve failed for %s", symbol)
+        fut_ik = None
+    finally:
+        if own_db and sess is not None:
+            sess.close()
+    if not fut_ik or fut_ik == instrument_key:
+        logger.info(
+            "stock_option index OHLC thin for %s key=%s closes=%s (no FUT fallback)",
+            symbol,
+            instrument_key,
+            len(closes),
+        )
+        return closes
+    logger.info(
+        "stock_option index OHLC fallback %s %s -> FUT %s (index closes=%s)",
+        symbol,
+        instrument_key,
+        fut_ik,
+        len(closes),
+    )
+    return _fetch_2h_closes(fut_ik, now=now)
+
+
 def _statuses_for_symbol(db: Any, symbol: str) -> List[str]:
     rows = db.execute(
         text("SELECT status FROM stock_option_signals WHERE symbol = :s"),
@@ -1348,9 +1425,7 @@ def ensure_index_radar_rows(now: Optional[datetime] = None) -> int:
         db.close()
 
 
-def _ema_snap_at(instrument_key: str, asof: datetime) -> Dict[str, Optional[float]]:
-    """EMA9/30/100 on completed 2h closes ending at or before ``asof``."""
-    bars = fetch_completed_2h_ohlc(instrument_key, asof)
+def _closes_from_2h_bars(bars: Sequence[Dict[str, Any]], asof: datetime) -> List[float]:
     asof_n = naive_ist(asof)
     closes: List[float] = []
     for bar in bars:
@@ -1360,6 +1435,33 @@ def _ema_snap_at(instrument_key: str, asof: datetime) -> Dict[str, Optional[floa
             continue
         if naive_ist(end) <= asof_n:
             closes.append(float(close))
+    return closes
+
+
+def _ema_snap_at(
+    instrument_key: str,
+    asof: datetime,
+    *,
+    symbol: Optional[str] = None,
+    db: Any = None,
+) -> Dict[str, Optional[float]]:
+    """EMA9/30/100 on completed 2h closes ending at or before ``asof``.
+
+    For NIFTY/BANKNIFTY, fall back to currmth FUT OHLC when NSE_INDEX history is thin.
+    """
+    closes = _closes_from_2h_bars(fetch_completed_2h_ohlc(instrument_key, asof), asof)
+    if _ema_closes_ready(closes) or not is_index_symbol(symbol):
+        return ema_snapshot(closes)
+    fut_ik = resolve_currmth_fut_instrument_key(symbol or "", db)
+    if fut_ik and fut_ik != instrument_key:
+        logger.info(
+            "stock_option index EMA snap fallback %s %s -> FUT %s (index closes=%s)",
+            symbol,
+            instrument_key,
+            fut_ik,
+            len(closes),
+        )
+        closes = _closes_from_2h_bars(fetch_completed_2h_ohlc(fut_ik, asof), asof)
     return ema_snapshot(closes)
 
 
@@ -1418,7 +1520,7 @@ def record_index_executed_at(
         snap: Dict[str, Optional[float]] = {"ema9": None, "ema30": None, "ema100": None}
         if ik:
             try:
-                snap = _ema_snap_at(ik, armed)
+                snap = _ema_snap_at(ik, armed, symbol=sym, db=db)
             except Exception as e:
                 logger.info("stock_option index EMA snap failed for %s @ %s: %s", sym, armed, e)
 
@@ -1849,7 +1951,9 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
     now_naive = now_ist_second() if now is None else naive_ist(now)
     seeded = ensure_index_radar_rows(now_naive)
     expired = expire_stale_active(now_naive)
-    rows = _open_rows()
+    # Indices first so permanent NIFTY/BANKNIFTY EMA/arm is not starved by late-loop
+    # Upstox empty responses after many stock candle fetches.
+    rows = _pin_index_rows(_open_rows())
     updated = armed = invalidated = 0
     for row in rows:
         ik = (row.get("instrument_key") or "").strip()
@@ -1873,12 +1977,24 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         if not ik:
             continue
         try:
-            closes = _fetch_2h_closes(ik, now=now or datetime.now(IST))
+            closes = _fetch_2h_closes_for_ema(
+                row.get("symbol") or "",
+                ik,
+                now=now or datetime.now(IST),
+            )
         except Exception as e:
             logger.info("stock_option 2h candles failed for %s: %s", row.get("symbol"), e)
             time.sleep(FETCH_SLEEP_SEC)
             continue
         snap = ema_snapshot(closes)
+        if not _ema_closes_ready(closes):
+            logger.info(
+                "stock_option EMA incomplete for %s closes=%s key=%s snap=%s",
+                row.get("symbol"),
+                len(closes),
+                ik,
+                snap,
+            )
         index_sym = is_index_symbol(row.get("symbol"))
         pair = ema_snapshot_pair(closes) if index_sym else None
         wr_now = None

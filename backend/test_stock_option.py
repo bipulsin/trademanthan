@@ -371,3 +371,43 @@ def test_row_public_includes_contract():
         "hard_stop_placed": False,
     })
     assert row["contract_mmm_yyyy"] == "SEP-2026"
+
+
+def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):
+    """Index OHLC falls back to currmth FUT when NSE_INDEX history is thin."""
+    from backend.services import stock_option_signals as sos
+
+    assert not sos._ema_closes_ready([1.0] * 99)
+    assert sos._ema_closes_ready([1.0] * 100)
+
+    calls: list[str] = []
+
+    def fake_fetch(ik, now=None):
+        calls.append(ik)
+        if ik.startswith("NSE_INDEX"):
+            return [1.0] * 10  # too thin for EMA100
+        return [float(i) for i in range(120)]
+
+    monkeypatch.setattr(sos, "_fetch_2h_closes", fake_fetch)
+    monkeypatch.setattr(
+        sos,
+        "resolve_currmth_fut_instrument_key",
+        lambda symbol, db: "NSE_FO|68407",
+    )
+    closes = sos._fetch_2h_closes_for_ema(
+        "NIFTY",
+        "NSE_INDEX|Nifty 50",
+        db=object(),
+    )
+    assert calls == ["NSE_INDEX|Nifty 50", "NSE_FO|68407"]
+    assert len(closes) == 120
+
+    calls.clear()
+    stock_closes = sos._fetch_2h_closes_for_ema(
+        "RELIANCE",
+        "NSE_EQ|RELIANCE",
+        db=object(),
+    )
+    assert calls == ["NSE_EQ|RELIANCE"]
+    assert len(stock_closes) == 120  # stock path: no FUT fallback call
+
