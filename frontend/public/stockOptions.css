@@ -493,3 +493,40 @@ body.light-theme .so-index-arrow {
 }
 .so-modal-btn.primary { background: var(--theme-accent, #2563eb); color: #fff; }
 .so-err { color: #f87171; min-height: 1.2em; font-size: 0.85rem; }
+
+.so-header-aside {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.45rem;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.so-header-aside .so-vix-panel {
+    margin-left: 0;
+}
+
+.so-mute-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--theme-muted, #94a3b8);
+    cursor: pointer;
+    user-select: none;
+}
+
+.so-mute-label input {
+    margin: 0;
+}
+
+.so-activated-ack {
+    color: #fbbf24;
+}
+
+.so-ema-warn {
+    color: #f59e0b;
+    font-weight: 700;
+    cursor: help;
+}

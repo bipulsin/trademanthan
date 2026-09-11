@@ -15,6 +15,134 @@
     return n.toFixed(digits == null ? 2 : digits);
   }
 
+  function emaCell(r, key) {
+    if (r && (r.ema_stale === true || r.ema_fetch_ok === false)) {
+      return '<span class="so-ema-warn" title="EMA not updated this cycle">⚠</span>';
+    }
+    return num(r ? r[key] : null);
+  }
+
+  const ACTIVATED_SOUND = "option_activated.mp3";
+  const ACTIVATED_MUTE_KEY = "so_option_activated_mute";
+  const ACTIVATED_SEEN_KEY = "so_option_activated_seen";
+  let optionActivatedAudio = null;
+  let optionActivatedUnlocked = false;
+
+  function isActivatedMuted() {
+    try {
+      return localStorage.getItem(ACTIVATED_MUTE_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setActivatedMuted(muted) {
+    try {
+      localStorage.setItem(ACTIVATED_MUTE_KEY, muted ? "1" : "0");
+    } catch (e) { /* ignore */ }
+    const cb = document.getElementById("soActivatedMute");
+    if (cb) cb.checked = !!muted;
+  }
+
+  function loadSeenActivated() {
+    try {
+      const raw = sessionStorage.getItem(ACTIVATED_SEEN_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function saveSeenActivated(set) {
+    try {
+      sessionStorage.setItem(ACTIVATED_SEEN_KEY, JSON.stringify(Array.from(set)));
+    } catch (e) { /* ignore */ }
+  }
+
+  function activatedKey(row) {
+    return String(row.id) + "|" + String(row.armed_at || "");
+  }
+
+  function ensureActivatedAudio() {
+    if (!optionActivatedAudio) {
+      optionActivatedAudio = new Audio(ACTIVATED_SOUND);
+      optionActivatedAudio.preload = "auto";
+    }
+    return optionActivatedAudio;
+  }
+
+  function setActivatedAckBanner(visible) {
+    const ban = document.getElementById("soActivatedAck");
+    if (!ban) return;
+    ban.hidden = !visible;
+  }
+
+  function unlockActivatedAudio() {
+    if (optionActivatedUnlocked) return Promise.resolve(true);
+    try {
+      const a = ensureActivatedAudio();
+      a.muted = true;
+      const p = a.play();
+      if (p && typeof p.then === "function") {
+        return p.then(function () {
+          a.pause();
+          a.currentTime = 0;
+          a.muted = false;
+          optionActivatedUnlocked = true;
+          setActivatedAckBanner(false);
+          return true;
+        }).catch(function () {
+          a.muted = false;
+          setActivatedAckBanner(true);
+          return false;
+        });
+      }
+      a.muted = false;
+      optionActivatedUnlocked = true;
+      setActivatedAckBanner(false);
+      return Promise.resolve(true);
+    } catch (e) {
+      setActivatedAckBanner(true);
+      return Promise.resolve(false);
+    }
+  }
+
+  function playActivatedSound() {
+    if (isActivatedMuted()) return;
+    unlockActivatedAudio().then(function (ok) {
+      if (!ok || isActivatedMuted()) return;
+      try {
+        const a = ensureActivatedAudio();
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(function () { setActivatedAckBanner(true); });
+        }
+      } catch (e) {
+        setActivatedAckBanner(true);
+      }
+    });
+  }
+
+  function maybePlayActivatedSounds(data) {
+    const rows = (data && data.active) || [];
+    const seen = loadSeenActivated();
+    let played = false;
+    rows.forEach(function (r) {
+      if (!r || r.id == null) return;
+      const key = activatedKey(r);
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (!played) {
+        playActivatedSound();
+        played = true;
+      }
+    });
+    // Seed seen set on first poll so pre-existing Active rows don't all chime.
+    saveSeenActivated(seen);
+  }
+
   function sideChip(side) {
     const tips = SIDE_TIPS[side];
     if (!tips) return esc(side || "—");
@@ -336,9 +464,9 @@
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${symbolCell(r)}</td>
         <td>${esc(r.trigger_at || "—")}</td>
-        <td>${num(r.ema9)}</td>
-        <td>${num(r.ema30)}</td>
-        <td>${num(r.ema100)}</td>
+        <td>${emaCell(r, "ema9")}</td>
+        <td>${emaCell(r, "ema30")}</td>
+        <td>${emaCell(r, "ema100")}</td>
         <td>${esc(r.status)}</td>
         <td>${sideChip(r.side)}</td>
       </tr>`).join("");
@@ -355,9 +483,9 @@
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${symbolCell(r)}</td>
         <td>${esc(r.armed_at || "—")}</td>
-        <td>${num(r.ema9)}</td>
-        <td>${num(r.ema30)}</td>
-        <td>${num(r.ema100)}</td>
+        <td>${emaCell(r, "ema9")}</td>
+        <td>${emaCell(r, "ema30")}</td>
+        <td>${emaCell(r, "ema100")}</td>
         <td>${esc(r.status)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
@@ -453,6 +581,8 @@
     else host.innerHTML = renderRadar();
   }
 
+  let workspaceBootstrapped = false;
+
   async function load() {
     const banner = document.getElementById("soBanner");
     try {
@@ -461,6 +591,17 @@
       const data = await res.json();
       workspace = data;
       if (banner) banner.textContent = "";
+      if (!workspaceBootstrapped) {
+        // First poll: remember current Active arms without playing sound.
+        const seen = loadSeenActivated();
+        ((data && data.active) || []).forEach(function (r) {
+          if (r && r.id != null) seen.add(activatedKey(r));
+        });
+        saveSeenActivated(seen);
+        workspaceBootstrapped = true;
+      } else {
+        maybePlayActivatedSounds(data);
+      }
       render();
     } catch (e) {
       if (banner) banner.textContent = "Could not load Stock Options workspace.";
@@ -849,6 +990,21 @@
     document.getElementById("soExitCancel").addEventListener("click", closeExit);
     document.getElementById("soExitSellPx").addEventListener("input", () => { exitPxDirty.sell = true; });
     document.getElementById("soExitBuyPx").addEventListener("input", () => { exitPxDirty.buy = true; });
+    const muteCb = document.getElementById("soActivatedMute");
+    if (muteCb) {
+      muteCb.checked = isActivatedMuted();
+      muteCb.addEventListener("change", () => {
+        setActivatedMuted(!!muteCb.checked);
+        if (!muteCb.checked) unlockActivatedAudio();
+      });
+    }
+    const unlockOnce = () => {
+      unlockActivatedAudio();
+      document.removeEventListener("pointerdown", unlockOnce, true);
+      document.removeEventListener("keydown", unlockOnce, true);
+    };
+    document.addEventListener("pointerdown", unlockOnce, true);
+    document.addEventListener("keydown", unlockOnce, true);
     load();
     setInterval(load, 60000);
     loadIndiaVix();

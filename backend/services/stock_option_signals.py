@@ -60,6 +60,8 @@ EMA_SLOW = 100
 SESSION_OPEN = dt_time(9, 15)
 BAR_MINUTES = 120
 FETCH_SLEEP_SEC = 0.4
+EMA_FETCH_RETRIES = 3
+EMA_FETCH_RETRY_PAUSE_SEC = 1.5
 
 JSON_FIELDS = (
     "stocks",
@@ -93,6 +95,7 @@ def ensure_stock_option_tables() -> None:
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS buy_exit_price DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS realized_pnl DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS contract_mmm_yyyy TEXT",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS ema_fetch_ok BOOLEAN",
         ):
             conn.execute(text(stmt))
         if _CONTRACT_MIGRATION.is_file():
@@ -1740,54 +1743,219 @@ def insert_webhook_and_signals(
     }
 
 
-def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
-    """REST historical only. Prefer hours/2; else aggregate hours/1, then minutes/15."""
+def _upstox_candles_with_retry(
+    u: Any,
+    instrument_key: str,
+    *,
+    interval: str,
+    days_back: int,
+    range_end_date: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    """Fetch Upstox candles; retry transient failures a few times with pause."""
+    last_err: Optional[Exception] = None
+    for attempt in range(EMA_FETCH_RETRIES):
+        try:
+            kwargs: Dict[str, Any] = {"interval": interval, "days_back": days_back}
+            if range_end_date is not None:
+                kwargs["range_end_date"] = range_end_date
+            raw = u.get_historical_candles_by_instrument_key(instrument_key, **kwargs)
+            return list(raw or [])
+        except Exception as e:
+            last_err = e
+            time.sleep(EMA_FETCH_RETRY_PAUSE_SEC * (attempt + 1))
+    if last_err is not None:
+        logger.info(
+            "stock_option %s fetch failed for %s after %s tries: %s",
+            interval,
+            instrument_key,
+            EMA_FETCH_RETRIES,
+            last_err,
+        )
+    return []
+
+
+def _cached_minutes_5(instrument_key: str, days_back: int = 6) -> List[Dict[str, Any]]:
+    """Best-effort read of Kavach/market-data shared minutes/5 cache (no REST)."""
+    try:
+        from backend.services.market_data import candle_cache
+
+        end_d = datetime.now(IST).date()
+        from_date = (end_d - timedelta(days=max(1, int(days_back)))).strftime("%Y-%m-%d")
+        cached = candle_cache.get(instrument_key, "minutes/5", from_date, max_age_sec=300)
+        return list(cached or [])
+    except Exception as e:
+        logger.debug("stock_option minutes/5 cache miss for %s: %s", instrument_key, e)
+        return []
+
+
+def _closes_from_5m_via_10m(
+    candles_5m: Sequence[Dict[str, Any]],
+    now: Optional[datetime] = None,
+) -> List[float]:
+    """Kavach 5m→10m pair, then session-aligned aggregate to completed 2h closes."""
+    if not candles_5m:
+        return []
+    try:
+        from backend.services.kavach_10m import aggregate_10m_bars
+
+        bars_10m = aggregate_10m_bars(list(candles_5m))
+    except Exception as e:
+        logger.info("stock_option 5m→10m aggregate failed: %s", e)
+        bars_10m = []
+    if not bars_10m:
+        # Direct 5m→2h if Kavach pairing unavailable.
+        agg = aggregate_intraday_to_2h(candles_5m, now=now)
+        return [float(b["close"]) for b in agg]
+    # Normalize Kavach 10m shape (may use bar_end) into aggregate_intraday_to_2h input.
+    normalized: List[Dict[str, Any]] = []
+    for b in bars_10m:
+        ts = b.get("timestamp") or b.get("bar_end")
+        if ts is None:
+            continue
+        if hasattr(ts, "isoformat"):
+            ts = ts.isoformat()
+        normalized.append(
+            {
+                "timestamp": ts,
+                "open": b.get("open"),
+                "high": b.get("high"),
+                "low": b.get("low"),
+                "close": b.get("close"),
+                "volume": b.get("volume") or 0.0,
+            }
+        )
+    agg = aggregate_intraday_to_2h(normalized, now=now)
+    return [float(b["close"]) for b in agg]
+
+
+def _fetch_2h_closes_from_10m_fallback(
+    instrument_key: str,
+    now: Optional[datetime] = None,
+) -> List[float]:
+    """Build 2h closes from 10m (via 5m) when hours/2h Upstox paths fail.
+
+    Uses shared Kavach minutes/5 cache when present, then chunked REST minutes/5
+    (and minutes/10) windows so EMA100 can warm beyond a single 31d span.
+    """
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
     u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-    native = None
-    try:
-        native = u.get_historical_candles_by_instrument_key(
-            instrument_key, interval="hours/2", days_back=120
+    asof_n = naive_ist(now if now is not None else datetime.now(IST))
+    asof_d = asof_n.date()
+
+    # Prefer already-warmed Kavach/market-data 5m candles when available.
+    cached = _cached_minutes_5(instrument_key)
+    best = _closes_from_5m_via_10m(cached, now=now)
+    if _ema_closes_ready(best):
+        logger.info(
+            "stock_option 2h from cached 5m→10m for %s closes=%s",
+            instrument_key,
+            len(best),
         )
-    except Exception as e:
-        logger.info("stock_option hours/2 fetch failed for %s: %s", instrument_key, e)
-        native = None
-    bars = completed_2h_bars(native or [], now=now)
+        return best
+
+    by_ts: Dict[str, Dict[str, Any]] = {}
+    ends = [asof_d - timedelta(days=28 * i) for i in range(4)]
+    for end_d in ends:
+        for interval in ("minutes/5", "minutes/10"):
+            raw = _upstox_candles_with_retry(
+                u,
+                instrument_key,
+                interval=interval,
+                days_back=30,
+                range_end_date=end_d if end_d < asof_d else None,
+            )
+            for c in raw:
+                key = str(c.get("timestamp") or "")
+                if key:
+                    by_ts[key] = c
+            time.sleep(FETCH_SLEEP_SEC)
+            if interval == "minutes/5" and len(by_ts) >= 500:
+                break
+        time.sleep(FETCH_SLEEP_SEC)
+
+    merged = [by_ts[k] for k in sorted(by_ts)]
+    if not merged and cached:
+        merged = cached
+    closes = _closes_from_5m_via_10m(merged, now=now)
+    if closes:
+        logger.info(
+            "stock_option 2h from 10m fallback for %s raw=%s closes=%s",
+            instrument_key,
+            len(merged),
+            len(closes),
+        )
+    return closes
+
+
+def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
+    """REST historical only. Prefer hours/2; else hours/1, minutes/15, then 10m/5m."""
+    from backend.config import settings
+    from backend.services.upstox_service import UpstoxService
+
+    u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    native = _upstox_candles_with_retry(
+        u, instrument_key, interval="hours/2", days_back=120
+    )
+    bars = completed_2h_bars(native, now=now)
     if len(bars) >= EMA_SLOW:
         return [float(b["close"]) for b in bars]
 
-    one = None
-    try:
-        one = u.get_historical_candles_by_instrument_key(
-            instrument_key, interval="hours/1", days_back=60
-        )
-    except Exception as e:
-        logger.info("stock_option hours/1 fetch failed for %s: %s", instrument_key, e)
-        one = None
-    agg = aggregate_intraday_to_2h(one or [], now=now)
+    one = _upstox_candles_with_retry(
+        u, instrument_key, interval="hours/1", days_back=60
+    )
+    agg = aggregate_intraday_to_2h(one, now=now)
     if len(agg) >= EMA_SLOW:
         return [float(b["close"]) for b in agg]
     if len(agg) >= EMA_MID:
         return [float(b["close"]) for b in agg]
 
-    fifteen = None
-    try:
-        fifteen = u.get_historical_candles_by_instrument_key(
-            instrument_key, interval="minutes/15", days_back=60
-        )
-    except Exception as e:
-        logger.info("stock_option minutes/15 fetch failed for %s: %s", instrument_key, e)
-        fifteen = None
-    agg15 = aggregate_intraday_to_2h(fifteen or [], now=now)
-    if len(agg15) > len(agg):
-        return [float(b["close"]) for b in agg15]
-    if agg:
-        return [float(b["close"]) for b in agg]
+    fifteen = _upstox_candles_with_retry(
+        u, instrument_key, interval="minutes/15", days_back=60
+    )
+    agg15 = aggregate_intraday_to_2h(fifteen, now=now)
+    best = agg15 if len(agg15) > len(agg) else agg
+    if len(best) >= EMA_SLOW:
+        return [float(b["close"]) for b in best]
+
+    # Last resort: Kavach-style 10m (5m paired) → 2h.
+    from10 = _fetch_2h_closes_from_10m_fallback(instrument_key, now=now)
+    if len(from10) > len(best):
+        return from10
+    if best:
+        return [float(b["close"]) for b in best]
     if bars:
         return [float(b["close"]) for b in bars]
+    if from10:
+        return from10
     return [float(b["close"]) for b in agg15]
+
+
+def _mark_ema_fetch_failed(row_id: int, now_naive: datetime) -> None:
+    """Clear EMA display values and flag fetch failure for this cycle."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE stock_option_signals
+                SET ema9 = NULL,
+                    ema30 = NULL,
+                    ema100 = NULL,
+                    ema_fetch_ok = FALSE,
+                    updated_at = :ts
+                WHERE id = :id
+                """
+            ),
+            {"ts": now_naive, "id": row_id},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("stock_option ema fail-mark failed for id=%s", row_id)
+    finally:
+        db.close()
 
 
 def _option_chain_for_symbol(symbol: str) -> Any:
@@ -1954,7 +2122,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
     # Indices first so permanent NIFTY/BANKNIFTY EMA/arm is not starved by late-loop
     # Upstox empty responses after many stock candle fetches.
     rows = _pin_index_rows(_open_rows())
-    updated = armed = invalidated = 0
+    updated = armed = invalidated = failed = 0
     for row in rows:
         ik = (row.get("instrument_key") or "").strip()
         if not ik:
@@ -1975,15 +2143,41 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
             finally:
                 db.close()
         if not ik:
+            _mark_ema_fetch_failed(int(row["id"]), now_naive)
+            failed += 1
             continue
-        try:
-            closes = _fetch_2h_closes_for_ema(
-                row.get("symbol") or "",
+        closes: List[float] = []
+        fetch_err: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                closes = _fetch_2h_closes_for_ema(
+                    row.get("symbol") or "",
+                    ik,
+                    now=now or datetime.now(IST),
+                )
+                fetch_err = None
+                if closes:
+                    break
+            except Exception as e:
+                fetch_err = e
+                logger.info(
+                    "stock_option 2h candles failed for %s attempt=%s: %s",
+                    row.get("symbol"),
+                    attempt + 1,
+                    e,
+                )
+            if attempt == 0:
+                time.sleep(EMA_FETCH_RETRY_PAUSE_SEC)
+        if fetch_err is not None or not closes:
+            logger.info(
+                "stock_option EMA fetch exhausted for %s key=%s err=%s closes=%s",
+                row.get("symbol"),
                 ik,
-                now=now or datetime.now(IST),
+                fetch_err,
+                len(closes),
             )
-        except Exception as e:
-            logger.info("stock_option 2h candles failed for %s: %s", row.get("symbol"), e)
+            _mark_ema_fetch_failed(int(row["id"]), now_naive)
+            failed += 1
             time.sleep(FETCH_SLEEP_SEC)
             continue
         snap = ema_snapshot(closes)
@@ -2050,6 +2244,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                         SET status = :dest,
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
+                            ema_fetch_ok = TRUE,
                             williamsr = COALESCE(:williamsr, williamsr),
                             remarks = :remarks,
                             updated_at = :ts
@@ -2086,6 +2281,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                             contract_mmm_yyyy = COALESCE(contract_mmm_yyyy, :contract),
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
+                            ema_fetch_ok = TRUE,
                             williamsr = COALESCE(:williamsr, williamsr),
                             updated_at = :ts
                         WHERE id = :id AND status = :radar
@@ -2111,14 +2307,16 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
                 if contract:
                     row["contract_mmm_yyyy"] = contract
             else:
+                # Write snap as-is (including NULL). Do not COALESCE-preserve stale EMAs.
                 db.execute(
                     text(
                         """
                         UPDATE stock_option_signals
-                        SET ema9 = COALESCE(:ema9, ema9),
-                            ema30 = COALESCE(:ema30, ema30),
-                            ema100 = COALESCE(:ema100, ema100),
+                        SET ema9 = :ema9,
+                            ema30 = :ema30,
+                            ema100 = :ema100,
                             ema_updated_at = :ts,
+                            ema_fetch_ok = TRUE,
                             williamsr = COALESCE(:williamsr, williamsr),
                             updated_at = :ts
                         WHERE id = :id
@@ -2138,6 +2336,8 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         except Exception:
             db.rollback()
             logger.exception("stock_option ema update failed for %s", row.get("symbol"))
+            _mark_ema_fetch_failed(int(row["id"]), now_naive)
+            failed += 1
         finally:
             db.close()
 
@@ -2160,6 +2360,7 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
         "updated": updated,
         "armed": armed,
         "invalidated": invalidated,
+        "ema_fetch_failed": failed,
         "expired_72h": expired,
         "index_radar_seeded": seeded,
         "ltp_refreshed": ltp_n,
@@ -2275,6 +2476,11 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         pnl = combined_pnl(r.get("sell_cost"), r.get("buy_cost"), r.get("sell_ltp"), r.get("buy_ltp"))
     hs = hard_stop_price(r.get("sell_cost"))
     sym = r.get("symbol")
+    fetch_ok = r.get("ema_fetch_ok")
+    if fetch_ok is None:
+        ema_stale = False
+    else:
+        ema_stale = not bool(fetch_ok)
     return {
         "id": r.get("id"),
         "symbol": sym,
@@ -2287,9 +2493,12 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "trigger_at": _fmt_ts(r.get("trigger_at")),
         "armed_at": _fmt_ts(r.get("armed_at")),
         "contract_mmm_yyyy": r.get("contract_mmm_yyyy"),
-        "ema9": r.get("ema9"),
-        "ema30": r.get("ema30"),
-        "ema100": r.get("ema100"),
+        "ema9": None if ema_stale else r.get("ema9"),
+        "ema30": None if ema_stale else r.get("ema30"),
+        "ema100": None if ema_stale else r.get("ema100"),
+        "ema_updated_at": _fmt_ts(r.get("ema_updated_at")),
+        "ema_fetch_ok": None if fetch_ok is None else bool(fetch_ok),
+        "ema_stale": ema_stale,
         "sell_strike": r.get("sell_strike"),
         "buy_strike": r.get("buy_strike"),
         "sell_delta": r.get("sell_delta"),
@@ -2339,6 +2548,7 @@ def list_workspace() -> Dict[str, Any]:
                 """
                 SELECT id, symbol, williamsr, instrument_key, status, side,
                        trigger_at, armed_at, contract_mmm_yyyy, ema9, ema30, ema100,
+                       ema_updated_at, ema_fetch_ok,
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,

@@ -371,6 +371,51 @@ def test_row_public_includes_contract():
         "hard_stop_placed": False,
     })
     assert row["contract_mmm_yyyy"] == "SEP-2026"
+    assert row["ema_stale"] is False
+    assert row["ema_fetch_ok"] is None
+
+
+def test_row_public_hides_stale_emas():
+    row = _row_public({
+        "id": 2,
+        "symbol": "RELIANCE",
+        "status": "Radar",
+        "ema9": 100.5,
+        "ema30": 99.0,
+        "ema100": 98.0,
+        "ema_fetch_ok": False,
+        "ema_updated_at": datetime(2026, 9, 11, 11, 15),
+        "hard_stop_placed": False,
+    })
+    assert row["ema_stale"] is True
+    assert row["ema_fetch_ok"] is False
+    assert row["ema9"] is None
+    assert row["ema30"] is None
+    assert row["ema100"] is None
+    assert row["ema_updated_at"] == "2026-09-11 11:15:00"
+
+
+def test_closes_from_5m_via_10m_aggregates(monkeypatch):
+    from backend.services import stock_option_signals as sos
+
+    # Two hours of 5m bars inside 09:15–11:15 session bucket.
+    base = IST.localize(datetime(2026, 9, 11, 9, 15))
+    candles = []
+    for i in range(24):
+        ts = base + timedelta(minutes=5 * i)
+        candles.append({
+            "timestamp": ts.isoformat(),
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0 + i * 0.1,
+            "volume": 10,
+        })
+    # Force completed bucket relative to after 11:15.
+    now = IST.localize(datetime(2026, 9, 11, 11, 20))
+    closes = sos._closes_from_5m_via_10m(candles, now=now)
+    assert len(closes) >= 1
+    assert closes[-1] == candles[-1]["close"]
 
 
 def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):
