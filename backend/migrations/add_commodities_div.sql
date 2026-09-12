@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS commodities_div_webhook_log (
     disposition TEXT
         CHECK (disposition IS NULL OR disposition IN (
             'applied', 'replaced_prior', 'ignored_in_trade_block',
-            'unmatched', 'parse_failed'
+            'unmatched', 'parse_failed',
+            'blocked_different_symbol_active',
+            'blocked_different_direction'
         )),
     active_signal_id BIGINT
 );

@@ -218,15 +218,11 @@
       row.status === "In-Trade" && !row.instrument_key
         ? '<p class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</p>'
         : "";
-    var symHtml =
-      fmt(row.symbol_mapped) +
-      (row.symbol_raw && row.symbol_raw !== row.symbol_mapped
-        ? ' <span class="cd-muted">(' + fmt(row.symbol_raw) + ")</span>"
-        : "");
+    var displaySym = row.symbol_raw || row.symbol_mapped || "—";
 
     panel.innerHTML =
       '<div><span class="cd-field-label">Symbol</span><div class="cd-field-val">' +
-      symHtml +
+      fmt(displaySym) +
       "</div></div>" +
       '<div><span class="cd-field-label">Direction</span><div class="cd-field-val ' +
       dirClass +
@@ -266,7 +262,7 @@
         esc(cardTimeLabel(timeSrc)) +
         "</span>" +
         '<span class="cd-mcard-sym">' +
-        esc(row.symbol_mapped || "—") +
+        esc(displaySym) +
         "</span>" +
         '<span class="cd-mcard-side">' +
         dirChip(row.direction) +
@@ -315,7 +311,7 @@
       var tr = document.createElement("tr");
       tr.innerHTML =
         "<td>" +
-        fmt(r.symbol_mapped) +
+        fmt(r.symbol_raw || r.symbol_mapped) +
         "</td><td>" +
         fmt(r.direction) +
         "</td><td>" +
@@ -364,7 +360,7 @@
               esc(cardTimeLabel(tSrc)) +
               "</span>" +
               '<span class="cd-mcard-sym">' +
-              esc(r.symbol_mapped || "—") +
+              esc(r.symbol_raw || r.symbol_mapped || "—") +
               "</span>" +
               '<span class="cd-mcard-side">' +
               dirChip(r.direction) +
@@ -403,7 +399,8 @@
 
   function openTake(row) {
     takeSignalId = row.id;
-    $("cdTakeMeta").textContent = row.symbol_mapped + " " + row.direction;
+    $("cdTakeMeta").textContent =
+      (row.symbol_raw || row.symbol_mapped || "") + " " + row.direction;
     $("cdEntryPrice").value = "";
     $("cdTakeModal").hidden = false;
   }
@@ -437,7 +434,8 @@
 
   function openExit(row) {
     exitSignalId = row.id;
-    $("cdExitMeta").textContent = row.symbol_mapped + " " + row.direction;
+    $("cdExitMeta").textContent =
+      (row.symbol_raw || row.symbol_mapped || "") + " " + row.direction;
     $("cdExitEntryReadonly").value = row.entry_price != null ? row.entry_price : "";
     $("cdExitPrice").value = "";
     $("cdExitAt").value = toDatetimeLocalValue($("cdServerTime").textContent);

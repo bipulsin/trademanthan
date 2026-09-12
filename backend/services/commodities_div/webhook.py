@@ -14,6 +14,7 @@ from backend.services.commodities_div.mapping import (
     ALLOWED_UNDERLYINGS,
     attach_instrument_fields,
     normalize_tv_ticker,
+    parse_underlying,
 )
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.ist_datetime import naive_ist
@@ -257,7 +258,7 @@ def process_webhook(
         kind = fields["signal_kind"]
         direction = fields["direction"]
 
-        # Unknown underlying (not one of the five) — log only, never create / mutate active.
+        # Unknown underlying — log only, never create / mutate active.
         if not inst.get("underlying_matched"):
             log_id = _insert_log(
                 db,
@@ -282,9 +283,40 @@ def process_webhook(
                 "allowed": list(ALLOWED_UNDERLYINGS),
             }
 
+        # Different underlying than the single active cycle → never replace / mutate.
+        if active and not _symbols_match(active, fields["symbol_raw"], symbol_mapped):
+            log_id = _insert_log(
+                db,
+                received_at=received_at,
+                source_ip=source_ip,
+                fields=fields,
+                raw_payload=raw_payload,
+                parse_status="unmatched",
+                disposition="blocked_different_symbol_active",
+                active_signal_id=int(active["id"]),
+                symbol_mapped=symbol_mapped,
+            )
+            db.commit()
+            return {
+                "ok": True,
+                "stored": True,
+                "parse_status": "unmatched",
+                "disposition": "blocked_different_symbol_active",
+                "log_id": log_id,
+                "active_id": int(active["id"]),
+                "active_symbol": active.get("symbol_raw") or active.get("symbol_mapped"),
+                "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "underlying_matched": True,
+            }
+
         # --- DIV ---
         if kind == "DIV":
+            same_direction = (
+                active is not None and str(active.get("direction")) == direction
+            )
+
             if active and active["status"] in BLOCKING_STATUSES:
+                # Same symbol (checked above); In-Trade / Exit Trade blocks new DIV.
                 log_id = _insert_log(
                     db,
                     received_at=received_at,
@@ -309,12 +341,35 @@ def process_webhook(
                     "instrument_key": inst.get("instrument_key"),
                 }
 
+            if active and active["status"] in ACTIVE_PRE_TRADE and not same_direction:
+                log_id = _insert_log(
+                    db,
+                    received_at=received_at,
+                    source_ip=source_ip,
+                    fields=fields,
+                    raw_payload=raw_payload,
+                    parse_status="unmatched",
+                    disposition="blocked_different_direction",
+                    active_signal_id=int(active["id"]),
+                    symbol_mapped=symbol_mapped,
+                )
+                db.commit()
+                return {
+                    "ok": True,
+                    "stored": True,
+                    "parse_status": "unmatched",
+                    "disposition": "blocked_different_direction",
+                    "log_id": log_id,
+                    "active_id": int(active["id"]),
+                    "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "underlying_matched": True,
+                }
+
             disposition = "applied"
-            if active and active["status"] in ACTIVE_PRE_TRADE:
+            if active and active["status"] in ACTIVE_PRE_TRADE and same_direction:
                 _delete_active_pre_trade(db)
                 disposition = "replaced_prior"
 
-            # Insert log first without signal id, then update
             log_id = _insert_log(
                 db,
                 received_at=received_at,
@@ -343,6 +398,7 @@ def process_webhook(
                 "log_id": log_id,
                 "signal_id": sig_id,
                 "status": STATUS_DIVERGENCE,
+                "symbol_raw": fields["symbol_raw"],
                 "symbol_mapped": symbol_mapped,
                 "underlying_matched": True,
                 "instrument_key": inst.get("instrument_key"),
@@ -352,14 +408,36 @@ def process_webhook(
 
         # --- GO ---
         if kind == "GO":
+            if active and active["status"] in BLOCKING_STATUSES:
+                log_id = _insert_log(
+                    db,
+                    received_at=received_at,
+                    source_ip=source_ip,
+                    fields=fields,
+                    raw_payload=raw_payload,
+                    parse_status="unmatched",
+                    disposition="ignored_in_trade_block",
+                    active_signal_id=int(active["id"]),
+                    symbol_mapped=symbol_mapped,
+                )
+                db.commit()
+                return {
+                    "ok": True,
+                    "stored": True,
+                    "parse_status": "unmatched",
+                    "disposition": "ignored_in_trade_block",
+                    "log_id": log_id,
+                    "active_id": int(active["id"]),
+                    "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "reason": "in_trade_block",
+                }
+
             match = (
                 active
                 and str(active.get("direction")) == direction
-                and _symbols_match(active, fields["symbol_raw"], symbol_mapped)
                 and active["status"] == STATUS_DIVERGENCE
             )
             if not match:
-                # Also allow GO if already Activated same symbol (idempotent) — treat as unmatched duplicate
                 log_id = _insert_log(
                     db,
                     received_at=received_at,
@@ -393,7 +471,6 @@ def process_webhook(
                 active_signal_id=int(active["id"]),
                 symbol_mapped=symbol_mapped,
             )
-            # Refresh instrument if mapping now available
             db.execute(
                 text(
                     """
@@ -437,10 +514,16 @@ def process_webhook(
             match = (
                 active
                 and str(active.get("direction")) == direction
-                and _symbols_match(active, fields["symbol_raw"], symbol_mapped)
                 and active["status"] == STATUS_IN_TRADE
             )
             if not match:
+                # Same symbol already checked; wrong status / direction → unmatched
+                # (In-Trade block for EXIT when already Exit Trade, etc.)
+                disposition = "unmatched"
+                if active and active["status"] in BLOCKING_STATUSES and str(
+                    active.get("direction")
+                ) == direction:
+                    disposition = "ignored_in_trade_block"
                 log_id = _insert_log(
                     db,
                     received_at=received_at,
@@ -448,7 +531,7 @@ def process_webhook(
                     fields=fields,
                     raw_payload=raw_payload,
                     parse_status="unmatched",
-                    disposition="unmatched",
+                    disposition=disposition,
                     active_signal_id=int(active["id"]) if active else None,
                     symbol_mapped=symbol_mapped,
                 )
@@ -457,7 +540,7 @@ def process_webhook(
                     "ok": True,
                     "stored": True,
                     "parse_status": "unmatched",
-                    "disposition": "unmatched",
+                    "disposition": disposition,
                     "log_id": log_id,
                     "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
                     "reason": "no_matching_in_trade",
@@ -527,16 +610,17 @@ def process_webhook(
 
 
 def _symbols_match(active: Dict[str, Any], symbol_raw: str, symbol_mapped: str) -> bool:
+    """True when incoming TV symbol resolves to the same underlying as the active row."""
     a_raw = str(active.get("symbol_raw") or "").strip().upper()
     a_map = str(active.get("symbol_mapped") or "").strip().upper()
     raw_u = (symbol_raw or "").strip().upper()
     map_u = (symbol_mapped or "").strip().upper()
-    norm_in = normalize_tv_ticker(raw_u) or raw_u
-    norm_a = normalize_tv_ticker(a_raw) or a_raw
-    if raw_u == a_raw or map_u == a_map:
+    a_und = parse_underlying(a_raw) or a_map or (normalize_tv_ticker(a_raw) or "")
+    in_und = parse_underlying(raw_u) or map_u or (normalize_tv_ticker(raw_u) or "")
+    if a_und and in_und and a_und == in_und:
         return True
-    if norm_in and norm_in == norm_a:
+    if raw_u and a_raw and raw_u == a_raw:
         return True
-    if map_u and map_u == a_map:
+    if map_u and a_map and map_u == a_map:
         return True
     return False

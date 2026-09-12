@@ -23,5 +23,30 @@ def ensure_commodities_div_tables() -> None:
     sql = _MIGRATION.read_text(encoding="utf-8")
     with engine.begin() as conn:
         conn.execute(text(sql))
+        # Widen disposition CHECK for Section 4a (existing DBs keep old constraint otherwise).
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_webhook_log
+                    DROP CONSTRAINT IF EXISTS commodities_div_webhook_log_disposition_check
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_webhook_log
+                    ADD CONSTRAINT commodities_div_webhook_log_disposition_check
+                    CHECK (
+                        disposition IS NULL OR disposition IN (
+                            'applied', 'replaced_prior', 'ignored_in_trade_block',
+                            'unmatched', 'parse_failed',
+                            'blocked_different_symbol_active',
+                            'blocked_different_direction'
+                        )
+                    )
+                """
+            )
+        )
     _ENSURED = True
     logger.info("commodities_div tables ensured")
