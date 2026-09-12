@@ -23,6 +23,9 @@ The standalone Node app under `divtest/` is **deprecated** (kept for reference o
 - Period: 6 or 12 calendar months (current month backwards)
 - Timeframes: 10min, 15min, 1hr
 - Instrument resolution: Upstox complete master → futures for month, else cash
+- Each month runs with the **previous month as MACD/pivot warmup**; only in-month entries are stored
+- Divergence pivots: swing order 5 (DaviddTech pivot L/R = 5); lookback up to 60 bars
+- Entry: regular MACD divergence + **histogram zero-cross** within flip window → next bar open
 - Idempotent month JSON cache; **Force Refresh** re-runs
 - Live job progress via SSE `/api/divtest/jobs/{id}/events`
 - Demo mode: set `DIVTEST_DEMO_MODE=1` (synthetic candles, no Upstox)

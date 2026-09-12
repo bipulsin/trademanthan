@@ -163,22 +163,20 @@ def detect_divergences_at(
 
 
 def histogram_flip_signal(histogram: List[Optional[float]], i: int) -> Optional[str]:
-    if i < 2:
+    """Zero-cross only (matches TradingView histogram colour flip through zero).
+
+    Soft contraction / "less negative" patterns are intentionally excluded — they
+    fired entries before a true bullish/bearish histogram cross and diverged from
+    DaviddTech-style MACD divergence workflows.
+    """
+    if i < 1:
         return None
-    a, b, c = histogram[i - 2], histogram[i - 1], histogram[i]
-    if a is None or b is None or c is None:
+    b, c = histogram[i - 1], histogram[i]
+    if b is None or c is None:
         return None
     if b < 0 <= c:
         return "bullish_flip"
     if b > 0 >= c:
-        return "bearish_flip"
-    if a < 0 and b < 0 and c < 0 and abs(b) > abs(a) and abs(c) < abs(b):
-        return "bullish_flip"
-    if a > 0 and b > 0 and c > 0 and abs(b) > abs(a) and abs(c) < abs(b):
-        return "bearish_flip"
-    if b < 0 and c > b and a <= b:
-        return "bullish_flip"
-    if b > 0 and c < b and a >= b:
         return "bearish_flip"
     return None
 
@@ -236,7 +234,7 @@ def run_strategy(candles: List[Dict[str, Any]], options: Optional[Dict[str, Any]
         "macd_fast": 12,
         "macd_slow": 26,
         "macd_signal": 9,
-        "divergence_lookback": 25,
+        "divergence_lookback": 60,
         "histogram_flip_window": 10,
         "entry_mode": "next_open",
         "exit_opposite_flip": True,
@@ -246,7 +244,8 @@ def run_strategy(candles: List[Dict[str, Any]], options: Optional[Dict[str, Any]
         "atr_stop_multiplier": 1.5,
         "atr_target_multiplier": 2.5,
         "max_holding_bars": 40,
-        "swing_order": 3,
+        # Pivot L/R = 5 to align with DaviddTech MACD Divergences defaults
+        "swing_order": 5,
         "instrument": "UNKNOWN",
         "timeframe": "15min",
         "qty_per_lot": 1,

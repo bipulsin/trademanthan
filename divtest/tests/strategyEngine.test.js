@@ -33,6 +33,10 @@ describe('histogramFlipSignal', () => {
     const h = [null, null, 1, 0.5, -0.1];
     assert.equal(histogramFlipSignal(h, 4), 'bearish_flip');
   });
+  it('ignores soft contraction without zero cross', () => {
+    const h = [null, -3, -5, -4];
+    assert.equal(histogramFlipSignal(h, 3), null);
+  });
 });
 
 describe('swing points', () => {

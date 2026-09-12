@@ -20,7 +20,7 @@ _DEFAULTS: Dict[str, Any] = {
     "macd_fast": 12,
     "macd_slow": 26,
     "macd_signal": 9,
-    "divergence_lookback": 25,
+    "divergence_lookback": 60,  # DaviddTech max lookback range
     "histogram_flip_window": 10,
     "entry_mode": "next_open",  # next_open | same_close
     "exit_opposite_flip": True,
@@ -33,7 +33,7 @@ _DEFAULTS: Dict[str, Any] = {
     "brokerage_per_side": 20.0,
     "brokerage_enabled": True,
     "equity_default_qty": 1,
-    "swing_order": 3,
+    "swing_order": 5,  # pivot lookback L/R = 5 (DaviddTech default)
     "demo_mode": os.getenv("DIVTEST_DEMO_MODE", "").lower() in ("1", "true", "yes"),
 }
 

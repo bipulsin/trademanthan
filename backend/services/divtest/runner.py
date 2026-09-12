@@ -27,6 +27,39 @@ _jobs: Dict[str, Dict[str, Any]] = {}
 _lock = threading.Lock()
 
 
+def _prev_yyyy_mm(yyyy_mm: str) -> str:
+    y, m = [int(x) for x in yyyy_mm.split("-")]
+    m -= 1
+    if m == 0:
+        m = 12
+        y -= 1
+    return f"{y:04d}-{m:02d}"
+
+
+def _merge_candles(*series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for chunk in series:
+        for c in chunk or []:
+            k = str(c.get("timestamp") or c.get("datetime") or "")
+            if not k or k in seen:
+                continue
+            seen.add(k)
+            out.append(c)
+    out.sort(key=lambda x: str(x.get("timestamp") or x.get("datetime") or ""))
+    return out
+
+
+def _trades_in_month(trades: List[Dict[str, Any]], yyyy_mm: str) -> List[Dict[str, Any]]:
+    """Keep only trades whose entry timestamp falls in the target calendar month."""
+    kept: List[Dict[str, Any]] = []
+    for t in trades or []:
+        entry = str(t.get("entry_datetime") or "")
+        if len(entry) >= 7 and entry[:7] == yyyy_mm:
+            kept.append(t)
+    return kept
+
+
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     with _lock:
         job = _jobs.get(job_id)
@@ -155,10 +188,24 @@ def _execute(job_id: str, cfg: Dict[str, Any]) -> None:
                             job["progress"]["done"] += 1
                             continue
 
+                        # Prior calendar month as indicator/pivot warmup so early-month
+                        # MACD + divergences are not computed on a cold series.
+                        warmup_ym = _prev_yyyy_mm(yyyy_mm)
+                        warmup, w_source, _, w_notes = _fetch_month(
+                            symbol, resolved, warmup_ym, tf, demo, log
+                        )
+                        if warmup:
+                            notes = list(notes) + [
+                                f"warmup:{warmup_ym}:{len(warmup)}:{w_source}"
+                            ]
+                        elif w_notes:
+                            notes = list(notes) + [f"warmup_empty:{warmup_ym}"] + list(w_notes)
+
+                        series = _merge_candles(warmup, candles)
                         qty = int(resolved.get("lot_size") or cfg["equity_default_qty"])
                         entry_mode = "same_close" if cfg.get("entry_mode") == "same_close" else "next_open"
                         result = run_strategy(
-                            candles,
+                            series,
                             {
                                 "macd_fast": cfg["macd_fast"],
                                 "macd_slow": cfg["macd_slow"],
@@ -181,21 +228,29 @@ def _execute(job_id: str, cfg: Dict[str, Any]) -> None:
                                 "brokerage_enabled": cfg["brokerage_enabled"],
                             },
                         )
-                        trades = result.get("trades") or []
+                        trades = _trades_in_month(result.get("trades") or [], yyyy_mm)
                         payload = {
                             "trades": trades,
                             "candles": len(candles),
+                            "warmup_candles": len(warmup or []),
                             "source": source,
                             "instrument_key": ikey,
                             "notes": notes,
-                            "meta": result.get("meta") or {},
+                            "meta": {
+                                **(result.get("meta") or {}),
+                                "series_candles": len(series),
+                                "month_trade_count": len(trades),
+                            },
                         }
                         if job["force_refresh"]:
                             write_month(symbol, tf["id"], yyyy_mm, payload)
                         else:
                             append_month_trades(symbol, tf["id"], yyyy_mm, trades, payload)
                         job["partial_trades"] += len(trades)
-                        log(f"{step}: {len(candles)} candles via {source}, {len(trades)} trades")
+                        log(
+                            f"{step}: {len(candles)} month + {len(warmup or [])} warmup "
+                            f"via {source}, {len(trades)} trades"
+                        )
                     except Exception as exc:
                         log(f"Error on {step}: {exc} — continuing", "error")
                         write_month(

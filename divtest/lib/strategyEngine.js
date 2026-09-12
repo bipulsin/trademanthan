@@ -199,37 +199,16 @@ function nearestSwing(swings, targetIdx, maxDist) {
 }
 
 /**
- * Histogram flip:
- * - zero cross (sign change)
- * - OR reverse from expanding-negative to contracting (and vice versa for positive)
+ * Histogram flip: zero-cross only (TradingView histogram colour through zero).
+ * Soft contraction / "less negative" patterns are excluded.
  */
 function histogramFlipSignal(histogram, i) {
-  if (i < 2) return null;
-  const a = histogram[i - 2];
+  if (i < 1) return null;
   const b = histogram[i - 1];
   const c = histogram[i];
-  if (a == null || b == null || c == null) return null;
-
-  // Zero cross
+  if (b == null || c == null) return null;
   if (b < 0 && c >= 0) return 'bullish_flip';
   if (b > 0 && c <= 0) return 'bearish_flip';
-
-  // Expanding negative → contracting (magnitude shrinking) toward zero / positive
-  if (a < 0 && b < 0 && c < 0) {
-    const expanding = Math.abs(b) > Math.abs(a);
-    const contracting = Math.abs(c) < Math.abs(b);
-    if (expanding && contracting) return 'bullish_flip';
-  }
-  if (a > 0 && b > 0 && c > 0) {
-    const expanding = Math.abs(b) > Math.abs(a);
-    const contracting = Math.abs(c) < Math.abs(b);
-    if (expanding && contracting) return 'bearish_flip';
-  }
-
-  // Negative to less-negative / positive already covered; also catch b negative, c less negative without cross
-  if (b < 0 && c > b && a <= b) return 'bullish_flip';
-  if (b > 0 && c < b && a >= b) return 'bearish_flip';
-
   return null;
 }
 
@@ -248,7 +227,7 @@ function runStrategy(candles, options = {}) {
     macdFast: 12,
     macdSlow: 26,
     macdSignal: 9,
-    divergenceLookback: 25,
+    divergenceLookback: 60,
     histogramFlipWindow: 10,
     entryMode: 'next_open', // next_open | same_close
     exitOppositeFlip: true,
@@ -258,7 +237,7 @@ function runStrategy(candles, options = {}) {
     atrStopMultiplier: 1.5,
     atrTargetMultiplier: 2.5,
     maxHoldingBars: 40,
-    swingOrder: 3,
+    swingOrder: 5,
     instrument: 'UNKNOWN',
     timeframe: '15min',
     qtyPerLot: 1,
