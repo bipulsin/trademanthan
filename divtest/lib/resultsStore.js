@@ -15,9 +15,15 @@ function safeName(s) {
     .replace(/[^A-Z0-9._-]+/g, '_');
 }
 
+function safeTimeframe(tf) {
+  return String(tf || '15min')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '_');
+}
+
 function monthFile(instrument, timeframe, yyyyMm) {
   const root = getConfig().dataDir;
-  return path.join(root, safeName(instrument), safeName(timeframe), `${yyyyMm}.json`);
+  return path.join(root, safeName(instrument), safeTimeframe(timeframe), `${yyyyMm}.json`);
 }
 
 function ensureDir(filePath) {
@@ -96,7 +102,7 @@ function listInstruments() {
 }
 
 function listMonths(instrument, timeframe) {
-  const dir = path.join(getConfig().dataDir, safeName(instrument), safeName(timeframe));
+  const dir = path.join(getConfig().dataDir, safeName(instrument), safeTimeframe(timeframe));
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)
@@ -119,7 +125,7 @@ function loadAllTrades({ instrument = null, timeframe = null } = {}) {
 
   for (const inst of instruments) {
     for (const tf of tfs) {
-      const dir = path.join(root, inst, tf);
+      const dir = path.join(root, inst, safeTimeframe(tf));
       if (!fs.existsSync(dir)) continue;
       for (const f of fs.readdirSync(dir)) {
         if (!f.endsWith('.json')) continue;
@@ -170,4 +176,5 @@ module.exports = {
   listMonths,
   loadAllTrades,
   getResultsSummary,
+  safeTimeframe,
 };

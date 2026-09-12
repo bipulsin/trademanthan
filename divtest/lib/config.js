@@ -13,7 +13,7 @@ const defaults = {
   macdFast: 12,
   macdSlow: 26,
   macdSignal: 9,
-  divergenceLookback: 25,
+  divergenceLookback: 30,
   histogramFlipWindow: 10,
   entryMode: 'next_open', // next_open | same_close
   exitOppositeFlip: true,

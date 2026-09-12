@@ -118,24 +118,26 @@ function findSwingPoints(values, order = 3) {
 function detectDivergencesAt(priceSwings, macdSwings, confirmIndex, lookback) {
   const results = [];
   const minIdx = Math.max(0, confirmIndex - lookback);
+  // Allow MACD swings a little outside the price lookback so pivots need not align exactly
+  const macdMin = Math.max(0, confirmIndex - lookback - 8);
 
   // Bearish: price HH, MACD LH — among swing highs confirmed at confirmIndex
   const priceHighs = priceSwings.highs.filter(
     (s) => s.index >= minIdx && s.index <= confirmIndex
   );
   const macdHighs = macdSwings.highs.filter(
-    (s) => s.index >= minIdx && s.index <= confirmIndex
+    (s) => s.index >= macdMin && s.index <= confirmIndex
   );
   if (priceHighs.length >= 2 && macdHighs.length >= 2) {
     const p2 = priceHighs[priceHighs.length - 1];
     const p1 = priceHighs[priceHighs.length - 2];
     // Require the second price swing to be near confirmIndex (within order slack)
     if (p2.index >= confirmIndex - 2) {
-      const m2 = nearestSwing(macdHighs, p2.index, 5);
+      const m2 = nearestSwing(macdHighs, p2.index, 6);
       const m1 = nearestSwing(
-        macdHighs.filter((s) => s.index < (m2 ? m2.index : p2.index)),
+        macdHighs.filter((s) => s.index < (m2 ? m2.index : p2.index) - 2),
         p1.index,
-        8
+        10
       );
       if (m1 && m2 && p2.value > p1.value && m2.value < m1.value) {
         results.push({
@@ -155,17 +157,17 @@ function detectDivergencesAt(priceSwings, macdSwings, confirmIndex, lookback) {
     (s) => s.index >= minIdx && s.index <= confirmIndex
   );
   const macdLows = macdSwings.lows.filter(
-    (s) => s.index >= minIdx && s.index <= confirmIndex
+    (s) => s.index >= macdMin && s.index <= confirmIndex
   );
   if (priceLows.length >= 2 && macdLows.length >= 2) {
     const p2 = priceLows[priceLows.length - 1];
     const p1 = priceLows[priceLows.length - 2];
     if (p2.index >= confirmIndex - 2) {
-      const m2 = nearestSwing(macdLows, p2.index, 5);
+      const m2 = nearestSwing(macdLows, p2.index, 6);
       const m1 = nearestSwing(
-        macdLows.filter((s) => s.index < (m2 ? m2.index : p2.index)),
+        macdLows.filter((s) => s.index < (m2 ? m2.index : p2.index) - 2),
         p1.index,
-        8
+        10
       );
       if (m1 && m2 && p2.value < p1.value && m2.value > m1.value) {
         results.push({

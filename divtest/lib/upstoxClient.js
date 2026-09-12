@@ -578,47 +578,72 @@ function aggregateMinutes(candles, n) {
 
 /**
  * Synthetic OHLC series for demo / offline tests (includes planted divergences).
+ * Builds a repeatable close-path that yields regular bullish + bearish divergences.
  */
 function generateDemoCandles(yyyyMm, timeframeId, seed = 1) {
   const [y, m] = yyyyMm.split('-').map(Number);
   const start = startOfMonth(y, m - 1);
   const end = endOfMonth(y, m - 1);
   const stepMin = timeframeId === '1hr' ? 60 : timeframeId === '15min' ? 15 : 10;
-  const candles = [];
-  let price = 1000 + (seed % 50) * 3;
+  const times = [];
   let t = new Date(start);
-  t.setUTCHours(3, 45, 0, 0); // ~09:15 IST
-  let i = 0;
+  t.setUTCHours(3, 45, 0, 0);
   while (t <= end) {
     const day = t.getUTCDay();
-    if (day !== 0 && day !== 6) {
-      const wave = Math.sin(i / 8) * 12 + Math.sin(i / 23) * 25;
-      const drift = (i % 40 < 20 ? 0.4 : -0.35);
-      // Plant swing structure for divergence every ~80 bars
-      const plant = i % 80 === 55 ? 18 : i % 80 === 70 ? -8 : 0;
-      const open = price;
-      const close = price + drift + wave * 0.05 + plant * 0.15 + ((i * seed) % 7) * 0.1 - 0.3;
-      const high = Math.max(open, close) + 2 + (i % 3);
-      const low = Math.min(open, close) - 2 - (i % 2);
-      candles.push({
-        timestamp: new Date(t.getTime()).toISOString(),
-        open,
-        high,
-        low,
-        close,
-        volume: 1000 + (i % 50) * 10,
-      });
-      price = close;
-      i += 1;
-    }
+    if (day !== 0 && day !== 6) times.push(new Date(t.getTime()));
     t = new Date(t.getTime() + stepMin * 60_000);
-    // skip overnight: if past 15:30 IST (~10:00 UTC), jump to next day 09:15
     const utcH = t.getUTCHours();
     const utcM = t.getUTCMinutes();
     if (utcH > 10 || (utcH === 10 && utcM > 0)) {
       t.setUTCDate(t.getUTCDate() + 1);
       t.setUTCHours(3, 45, 0, 0);
     }
+  }
+
+  const pattern = [];
+  let p = 100 + (seed % 17);
+  const pushN = (n, delta) => {
+    for (let i = 0; i < n; i++) {
+      p += delta;
+      pattern.push(p);
+    }
+  };
+  // Warm-up
+  pushN(25, 0.25);
+  // Bullish divergence: LL in price, HL in MACD, then reclaim/flip
+  pushN(12, -1.6);
+  pushN(10, 1.3);
+  pushN(15, -1.15);
+  pushN(1, -2.2);
+  pushN(18, 2.1);
+  // Bearish divergence: HH in price, LH in MACD, then selloff/flip
+  pushN(8, 0.9);
+  pushN(10, -0.85);
+  pushN(12, 1.35);
+  pushN(16, -1.55);
+  // Mild chop filler
+  for (let i = 0; i < 20; i++) pushN(1, i % 2 === 0 ? 0.35 : -0.3);
+
+  const scale = 1 + (seed % 5) * 0.05;
+  const base = 900 + (seed % 40) * 5;
+  const candles = [];
+  for (let i = 0; i < times.length; i++) {
+    const raw = pattern[i % pattern.length];
+    const cycle = Math.floor(i / pattern.length);
+    const close = base + raw * scale + cycle * 3;
+    const prev =
+      i === 0
+        ? close
+        : base + pattern[(i - 1) % pattern.length] * scale + Math.floor((i - 1) / pattern.length) * 3;
+    const open = prev;
+    candles.push({
+      timestamp: times[i].toISOString(),
+      open,
+      high: Math.max(open, close) + 0.8,
+      low: Math.min(open, close) - 0.8,
+      close,
+      volume: 1000 + (i % 50) * 10,
+    });
   }
   return candles;
 }
