@@ -983,26 +983,26 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 }
 
 .tm-web-topbar-actions .theme-btn {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    font-size: 0.82rem;
+    width: 39px;
+    height: 39px;
+    border-radius: 9px;
+    font-size: 1.07rem;
 }
 
 .tm-web-topbar-actions .panel-nav-telegram-btn,
 .tm-web-topbar-actions .panel-nav-logout-btn {
-    width: 32px;
-    height: 32px;
-    min-width: 32px;
-    min-height: 32px;
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
 }
 
 .tm-web-topbar-actions .panel-nav-telegram-btn i {
-    font-size: 0.95rem;
+    font-size: 1.24rem;
 }
 
 .tm-web-topbar-actions .panel-nav-logout-btn i {
-    font-size: 0.85rem;
+    font-size: 1.1rem;
 }
 
 @media (min-width: 1025px) {
@@ -1012,6 +1012,11 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 
     /* Theme / support / logout live in the web topbar only */
     body.left-menu-web-hamburger .left-panel .panel-nav-toolbar {
+        display: none !important;
+    }
+
+    /* Logo lives in the web topbar — hide duplicate from pull-down */
+    body.left-menu-web-hamburger .left-panel .panel-header {
         display: none !important;
     }
 
