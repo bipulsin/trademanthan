@@ -37,6 +37,8 @@ import backend.routers.ha_vwap as ha_vwap
 import backend.routers.breakfast_strategy as breakfast_strategy
 import backend.routers.trap_ce_live_webhook as trap_ce_live_webhook
 import backend.routers.premium_futures_tv_webhook as premium_futures_tv_webhook
+import backend.routers.commodities_div_webhook as commodities_div_webhook
+import backend.routers.commodities_div as commodities_div
 import backend.routers.stock_option as stock_option
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
@@ -482,6 +484,9 @@ app.include_router(ha_vwap.router)
 app.include_router(breakfast_strategy.router, prefix="")
 app.include_router(trap_ce_live_webhook.router)
 app.include_router(premium_futures_tv_webhook.router)
+app.include_router(commodities_div_webhook.router)
+app.include_router(commodities_div.router, prefix="/api/commodities-div")
+app.include_router(commodities_div.router, prefix="/commodities-div")
 app.include_router(stock_option.router)
 app.include_router(stock_option.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")

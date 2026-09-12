@@ -703,6 +703,14 @@ class SmartFutureAlgoScheduler:
                     logger.info("✅ Centralized market data refresh: %s", out)
                 except Exception as e:
                     logger.error("❌ Centralized market data refresh failed: %s", e, exc_info=True)
+                # Narrow sidecar: Commodities Div In-Trade LTP only (no arbitrage_master writes).
+                try:
+                    from backend.services.commodities_div.ltp_sidecar import refresh_in_trade_ltp
+
+                    cd_out = refresh_in_trade_ltp()
+                    logger.info("commodities_div LTP sidecar: %s", cd_out)
+                except Exception as e:
+                    logger.warning("commodities_div LTP sidecar failed: %s", e, exc_info=True)
 
             # Replace legacy interval job ids so APScheduler does not keep old cadences.
             for _legacy_md_id in (

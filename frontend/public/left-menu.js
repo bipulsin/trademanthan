@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.43';
+const MENU_HTML_PATH = 'left-menu.html?v=3.44';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|havwap|divtest|analysis|iron-condor/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor/.test(path);
     }
 
     getCurrentPage() {
@@ -64,6 +64,7 @@ class LeftMenu {
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         if (path.includes('breakfast')) return 'breakfast';
+        if (path.toLowerCase().includes('commdiv')) return 'commdiv';
         if (path.includes('havwap')) return 'havwap';
         if (path.includes('divtest')) return 'divtest';
         if (path.includes('analysis')) return 'analysis';
@@ -445,6 +446,10 @@ class LeftMenu {
                 <li class="nav-item" data-page="breakfast.html">
                     <a class="nav-item-link" href="breakfast.html"><i class="fas fa-mug-hot" style="color:#f59e0b;"></i>
                     <span>Breakfast Strategy</span></a>
+                </li>
+                <li class="nav-item" data-page="commDiv.html">
+                    <a class="nav-item-link" href="commDiv.html"><i class="fas fa-oil-can" style="color:#fbbf24;"></i>
+                    <span>Commodities Div</span></a>
                 </li>
                 <li class="nav-item" data-page="havwap.html">
                     <a class="nav-item-link" href="havwap.html"><i class="fas fa-chart-area" style="color:#34d399;"></i>
@@ -919,6 +924,7 @@ class LeftMenu {
             'kavach-bt-checkpoint': 'Kavach BT Checkpoint',
             future_screener: 'Future Screener',
             breakfast: 'Breakfast Strategy',
+            commdiv: 'Commodities Div',
             settings: 'Settings',
             algo: 'Algo Trading',
             admin: 'Admin',
@@ -1025,6 +1031,7 @@ class LeftMenu {
             case 'admin': return 'admintwc.html';
             case 'future_screener': return 'future_screener.html';
             case 'breakfast': return 'breakfast.html';
+            case 'commdiv': return 'commDiv.html';
             case 'havwap': return 'havwap.html';
             case 'divtest': return 'divtest.html';
             case 'iron-condor': return 'iron-condor.html';

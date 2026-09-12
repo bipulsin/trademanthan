@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Long-lived JWT: survives hard refresh until explicit logout (token cleared client-side). Override via env if needed.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "525600"))  # default ~365 days
     
+    # Commodities Div TradingView webhook shared secret (?token=). Empty rejects in production.
+    COMM_DIV_WEBHOOK_TOKEN: str = os.getenv("COMM_DIV_WEBHOOK_TOKEN", "")
+
     # Upstox OAuth Configuration (redirect URI must match Upstox "My Apps" redirect URL exactly)
     UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "dd1d3bcc-e1a4-4eed-be7c-1833d9301738")
     UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "8lvpi8fb1f")

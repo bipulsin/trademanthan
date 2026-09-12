@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <title>Commodities Div | TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+    <script src="auth-check.js?v=1"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <link rel="stylesheet" href="settings.css?v=2" />
+    <link rel="stylesheet" href="left-menu.css?v=3.42" />
+    <link rel="stylesheet" href="theme.css?v=1.4" />
+    <link rel="stylesheet" href="commDiv.css?v=1" />
+</head>
+<body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
+            <h1 class="mobile-title">Commodities Div</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="cd-page">
+                <header class="cd-header">
+                    <div>
+                        <h1 class="cd-title"><i class="fas fa-oil-can" aria-hidden="true"></i> Commodities Div</h1>
+                        <p class="cd-lede">Single-active MACD divergence desk for MCX commodities. Webhook → Divergence → Activated → In-Trade → Exit Trade → History.</p>
+                    </div>
+                    <div class="cd-header-actions">
+                        <span class="cd-server-time" id="cdServerTime">—</span>
+                        <button type="button" class="cd-btn cd-btn-ghost" id="cdReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
+                    </div>
+                </header>
+
+                <p class="cd-banner" id="cdBanner" hidden></p>
+
+                <section class="cd-section" aria-label="Active signal">
+                    <h2 class="cd-section-title">Active</h2>
+                    <div class="cd-card" id="cdActivePanel">
+                        <p class="cd-empty" id="cdActiveEmpty">No active signal. Waiting for DIV webhook.</p>
+                        <div class="cd-active-row" id="cdActiveRow" hidden></div>
+                    </div>
+                </section>
+
+                <section class="cd-section" aria-label="History">
+                    <h2 class="cd-section-title">History</h2>
+                    <div class="cd-card">
+                        <div class="cd-table-wrap">
+                            <table class="cd-table" id="cdHistoryTable">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Dir</th>
+                                        <th>DIV</th>
+                                        <th>GO</th>
+                                        <th>Entry</th>
+                                        <th>Entry time</th>
+                                        <th>Exit</th>
+                                        <th>Exit time</th>
+                                        <th>trade_log</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="cdHistoryBody"></tbody>
+                            </table>
+                        </div>
+                        <p class="cd-empty" id="cdHistoryEmpty">No completed trades yet.</p>
+                    </div>
+                </section>
+
+                <section class="cd-section" aria-label="Symbol mapping">
+                    <h2 class="cd-section-title">Symbol mapping <span class="cd-muted">(empty until you add rows)</span></h2>
+                    <div class="cd-card">
+                        <form class="cd-map-form" id="cdMapForm">
+                            <label>TV ticker <input name="tv_ticker" required placeholder="CRUDEOIL1!" /></label>
+                            <label>Upstox symbol <input name="upstox_symbol" required placeholder="CRUDEOIL" /></label>
+                            <label>Exchange <input name="exchange" value="MCX" /></label>
+                            <button type="submit" class="cd-btn cd-btn-primary">Save mapping</button>
+                        </form>
+                        <div class="cd-table-wrap">
+                            <table class="cd-table" id="cdMapTable">
+                                <thead>
+                                    <tr><th>TV ticker</th><th>Upstox</th><th>Exch</th><th></th></tr>
+                                </thead>
+                                <tbody id="cdMapBody"></tbody>
+                            </table>
+                        </div>
+                        <p class="cd-note">LTP / instrument_key require a mapping row + successful MCX FUT resolve. Unmapped DIVs still create active rows with best-effort display symbols.</p>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="cd-modal" id="cdTakeModal" hidden>
+        <div class="cd-modal-card" role="dialog" aria-modal="true" aria-labelledby="cdTakeTitle">
+            <h2 id="cdTakeTitle">Take Trade</h2>
+            <p class="cd-note" id="cdTakeMeta"></p>
+            <form id="cdTakeForm">
+                <label>Entry price
+                    <input type="number" step="any" id="cdEntryPrice" required />
+                </label>
+                <div class="cd-modal-actions">
+                    <button type="button" class="cd-btn cd-btn-ghost" id="cdTakeCancel">Cancel</button>
+                    <button type="submit" class="cd-btn cd-btn-primary">Confirm</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="cd-modal" id="cdExitModal" hidden>
+        <div class="cd-modal-card" role="dialog" aria-modal="true" aria-labelledby="cdExitTitle">
+            <h2 id="cdExitTitle">Exit Trade</h2>
+            <p class="cd-note" id="cdExitMeta"></p>
+            <form id="cdExitForm">
+                <label>Entry price (read-only)
+                    <input type="number" id="cdExitEntryReadonly" readonly />
+                </label>
+                <label>Exit price
+                    <input type="number" step="any" id="cdExitPrice" required />
+                </label>
+                <label>Exit date &amp; time (IST)
+                    <input type="datetime-local" id="cdExitAt" required />
+                </label>
+                <div class="cd-modal-actions">
+                    <button type="button" class="cd-btn cd-btn-ghost" id="cdExitCancel">Cancel</button>
+                    <button type="submit" class="cd-btn cd-btn-primary">Submit &amp; move to History</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="left-menu.js?v=3.44"></script>
+    <script src="commDiv.js?v=1"></script>
+</body>
+</html>
