@@ -76,16 +76,7 @@ body.stock-options-page .so-page-header {
     gap: 1rem;
     flex-wrap: wrap;
     margin-bottom: 1.25rem;
-    padding: 28px 20px 8px;
-}
-
-body.stock-options-page .so-brand {
-    font-family: var(--font-display);
-    font-weight: 700;
-    font-size: clamp(1.35rem, 3vw, 1.85rem);
-    letter-spacing: -0.03em;
-    margin: 0 0 2px;
-    color: var(--text);
+    padding: 16px 20px 8px;
 }
 
 body.stock-options-page .settings-title,
@@ -95,7 +86,7 @@ body.stock-options-page .so-page-title {
     font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
     color: var(--accent) !important;
     letter-spacing: 0.02em;
-    margin: 0 0 8px !important;
+    margin: 0 0 6px !important;
 }
 
 body.stock-options-page .settings-title i,
@@ -103,12 +94,15 @@ body.stock-options-page .so-page-title i {
     color: var(--accent) !important;
 }
 
-body.stock-options-page .settings-subtitle {
+body.stock-options-page .settings-subtitle,
+body.stock-options-page .so-subtitle-oneline {
     color: var(--muted) !important;
     font-family: var(--font-body) !important;
     font-size: 0.95rem !important;
-    line-height: 1.5;
-    max-width: 42rem;
+    line-height: 1.4;
+    margin: 0 !important;
+    max-width: none;
+    white-space: nowrap;
 }
 
 /* Web hamburger topbar */
@@ -256,6 +250,11 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
     body.stock-options-page .settings-content {
         padding: 0 14px 40px;
     }
+    body.stock-options-page .so-subtitle-oneline {
+        font-size: 0.82rem !important;
+        overflow-x: auto;
+        max-width: 100%;
+    }
 }
 
 /* Tabs — lime active (not amber) */
@@ -285,9 +284,9 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
 }
 
 .bf-tab.active {
-    border-color: rgba(61, 186, 122, 0.55);
-    background: rgba(61, 186, 122, 0.18);
-    color: #b8f5d0;
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #062015;
 }
 
 .so-card {
@@ -370,15 +369,15 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
 }
 
 .so-chip-bull {
-    background: rgba(61, 186, 122, 0.28);
-    color: #b8f5d0;
-    border: 1px solid rgba(61, 186, 122, 0.4);
+    background: #2563eb;
+    color: #fff;
+    border: 1px solid #1d4ed8;
 }
 
 .so-chip-bear {
-    background: rgba(224, 107, 107, 0.22);
-    color: #f5c0c0;
-    border: 1px solid rgba(224, 107, 107, 0.4);
+    background: #dc2626;
+    color: #fff;
+    border: 1px solid #b91c1c;
 }
 
 .so-chip-tip {
@@ -799,14 +798,21 @@ body.stock-options-page[data-theme="light"] .bf-tab {
 }
 
 body.stock-options-page[data-theme="light"] .bf-tab.active {
-    background: rgba(31, 122, 77, 0.12);
-    color: #1f7a4d;
-    border-color: rgba(31, 122, 77, 0.4);
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
 }
 
 body.stock-options-page[data-theme="light"] .so-chip-bull {
-    background: rgba(31, 122, 77, 0.15);
-    color: #145c3a;
+    background: #2563eb;
+    color: #fff;
+    border-color: #1d4ed8;
+}
+
+body.stock-options-page[data-theme="light"] .so-chip-bear {
+    background: #dc2626;
+    color: #fff;
+    border-color: #b91c1c;
 }
 
 body.stock-options-page[data-theme="light"] .so-vix-value.so-vix-green {
@@ -823,13 +829,34 @@ body.stock-options-page[data-theme="light"] .so-modal-btn.primary {
 }
 
 body.stock-options-page[data-theme="light"] .button-41 {
-    color: #fff;
-    box-shadow:
-        inset 0 0px 10px 0px rgba(31, 122, 77, 0.28),
-        inset 0px 5px 10px 0px rgba(31, 122, 77, 0.22),
-        inset 0px 2px 5px 0px rgba(184, 245, 208, 0.25),
-        inset 0px 3px 20px 0px rgba(31, 122, 77, 0.45),
-        0 0 14px rgba(31, 122, 77, 0.25);
+    color: #062015 !important;
+    background: var(--accent) !important;
+    background-image: none !important;
+    box-shadow: 0 2px 8px rgba(31, 122, 77, 0.28);
+}
+
+body.stock-options-page[data-theme="light"] .button-41 .text {
+    color: #062015 !important;
+}
+
+body.stock-options-page[data-theme="light"] .button-41:hover {
+    background: #2a8f5c !important;
+    color: #fff !important;
+}
+
+body.stock-options-page[data-theme="light"] .button-41:hover .text {
+    color: #fff !important;
+}
+
+body.stock-options-page[data-theme="light"] .so-exit-btn {
+    background: #dc2626;
+    border-color: #b91c1c;
+    color: #fff !important;
+}
+
+body.stock-options-page[data-theme="light"] .so-exit-btn:hover {
+    background: #b91c1c;
+    color: #fff !important;
 }
 
 body.stock-options-page[data-theme="light"] .tm-web-topbar {
