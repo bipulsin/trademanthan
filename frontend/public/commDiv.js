@@ -118,7 +118,7 @@
     }
     var mapWarn =
       row.status === "In-Trade" && !row.instrument_key
-        ? '<p class="cd-note">No instrument_key — add mapping for LTP.</p>'
+        ? '<p class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</p>'
         : "";
 
     panel.innerHTML =
@@ -208,35 +208,6 @@
     });
   }
 
-  function renderMaps(rows) {
-    var body = $("cdMapBody");
-    body.innerHTML = "";
-    (rows || []).forEach(function (m) {
-      var tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td>" +
-        fmt(m.tv_ticker) +
-        "</td><td>" +
-        fmt(m.upstox_symbol) +
-        "</td><td>" +
-        fmt(m.exchange) +
-        '</td><td><button type="button" class="cd-btn cd-btn-ghost cd-map-del" data-id="' +
-        m.id +
-        '">Delete</button></td>';
-      body.appendChild(tr);
-    });
-    body.querySelectorAll(".cd-map-del").forEach(function (btn) {
-      btn.addEventListener("click", async function () {
-        try {
-          await api("/mappings/" + btn.getAttribute("data-id"), { method: "DELETE" });
-          await load();
-        } catch (e) {
-          showBanner(String(e.message || e), true);
-        }
-      });
-    });
-  }
-
   function openTake(row) {
     takeSignalId = row.id;
     $("cdTakeMeta").textContent = row.symbol_mapped + " " + row.direction;
@@ -291,7 +262,6 @@
       if (data.server_time_ist) $("cdServerTime").textContent = data.server_time_ist;
       renderActive(data.active);
       renderHistory(data.history || []);
-      renderMaps(data.mappings || []);
       showBanner("");
     } catch (e) {
       showBanner(String(e.message || e), true);
@@ -342,26 +312,6 @@
         });
         closeExit();
         lastExitAudioForId = null;
-        await load();
-      } catch (e) {
-        showBanner(String(e.message || e), true);
-      }
-    });
-
-    $("cdMapForm").addEventListener("submit", async function (ev) {
-      ev.preventDefault();
-      var fd = new FormData(ev.target);
-      try {
-        await api("/mappings", {
-          method: "PUT",
-          body: JSON.stringify({
-            tv_ticker: fd.get("tv_ticker"),
-            upstox_symbol: fd.get("upstox_symbol"),
-            exchange: fd.get("exchange") || "MCX",
-          }),
-        });
-        ev.target.reset();
-        ev.target.exchange.value = "MCX";
         await load();
       } catch (e) {
         showBanner(String(e.message || e), true);

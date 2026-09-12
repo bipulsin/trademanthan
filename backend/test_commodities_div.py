@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 
-from backend.services.commodities_div.mapping import normalize_tv_ticker
+from backend.services.commodities_div.mapping import (
+    normalize_tv_ticker,
+    parse_underlying,
+)
 from backend.services.commodities_div.webhook import (
     decode_raw_payload,
     parse_flag_fields,
@@ -15,7 +18,27 @@ def test_normalize_tv_ticker_strips_exchange_and_continuous():
     assert normalize_tv_ticker("CRUDEOIL1!") == "CRUDEOIL"
     assert normalize_tv_ticker("NATURALGAS") == "NATURALGAS"
     assert normalize_tv_ticker("GOLDPETAL") == "GOLDPETAL"
+    assert normalize_tv_ticker("CRUDEOILZ2026") == "CRUDEOIL"
     assert normalize_tv_ticker("") is None
+
+
+def test_parse_underlying_allowed_forms():
+    assert parse_underlying("CRUDEOIL1!") == "CRUDEOIL"
+    assert parse_underlying("MCX:CRUDEOIL1!") == "CRUDEOIL"
+    assert parse_underlying("CRUDEOILZ2026") == "CRUDEOIL"
+    assert parse_underlying("NATURALGAS1!") == "NATURALGAS"
+    assert parse_underlying("NATURALGASM2026") == "NATURALGAS"
+    assert parse_underlying("COPPER") == "COPPER"
+    assert parse_underlying("GOLDPETAL1!") == "GOLDPETAL"
+    assert parse_underlying("SILVERMINI1!") == "SILVERMINI"
+    assert parse_underlying("SILVERMINIZ2026") == "SILVERMINI"
+
+
+def test_parse_underlying_rejects_unknown():
+    assert parse_underlying("GOLD1!") is None
+    assert parse_underlying("NIFTY1!") is None
+    assert parse_underlying("CDTEST1!") is None
+    assert parse_underlying("") is None
 
 
 def test_decode_text_plain_json_body():

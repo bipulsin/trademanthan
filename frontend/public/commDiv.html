@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.42" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=2" />
+    <link rel="stylesheet" href="commDiv.css?v=3" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -33,7 +33,7 @@
                 <div class="cd-page-header">
                     <div class="cd-title-section">
                         <h1 class="cd-page-title"><i class="fas fa-oil-can" aria-hidden="true"></i> Commodities Div</h1>
-                        <p class="cd-subtitle">Single-active MACD divergence desk for MCX commodities. Webhook → Divergence → Activated → In-Trade → Exit Trade → History.</p>
+                        <p class="cd-subtitle">MCX desk for CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI. Auto-resolves Upstox front-month FUT. Webhook → Divergence → Activated → In-Trade → Exit Trade → History.</p>
                     </div>
                     <div class="cd-header-aside">
                         <span class="cd-server-time" id="cdServerTime">—</span>
@@ -73,27 +73,6 @@
                             </table>
                         </div>
                         <p class="cd-empty" id="cdHistoryEmpty">No completed trades yet.</p>
-                    </div>
-                </section>
-
-                <section class="cd-section" aria-label="Symbol mapping">
-                    <h2 class="cd-section-title">Symbol mapping <span class="cd-muted">(empty until you add rows)</span></h2>
-                    <div class="cd-card">
-                        <form class="cd-map-form" id="cdMapForm">
-                            <label>TV ticker <input name="tv_ticker" required placeholder="CRUDEOIL1!" /></label>
-                            <label>Upstox symbol <input name="upstox_symbol" required placeholder="CRUDEOIL" /></label>
-                            <label>Exchange <input name="exchange" value="MCX" /></label>
-                            <button type="submit" class="cd-btn cd-btn-primary">Save mapping</button>
-                        </form>
-                        <div class="cd-table-wrap">
-                            <table class="cd-table" id="cdMapTable">
-                                <thead>
-                                    <tr><th>TV ticker</th><th>Upstox</th><th>Exch</th><th></th></tr>
-                                </thead>
-                                <tbody id="cdMapBody"></tbody>
-                            </table>
-                        </div>
-                        <p class="cd-note">LTP / instrument_key require a mapping row + successful MCX FUT resolve. Unmapped DIVs still create active rows with best-effort display symbols.</p>
                     </div>
                 </section>
             </div>
@@ -139,6 +118,6 @@
     </div>
 
     <script src="left-menu.js?v=3.44"></script>
-    <script src="commDiv.js?v=2"></script>
+    <script src="commDiv.js?v=3"></script>
 </body>
 </html>

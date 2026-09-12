@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -19,7 +19,7 @@ from backend.services.commodities_div.actions import (
     workspace_payload,
 )
 from backend.services.commodities_div.ltp_sidecar import refresh_in_trade_ltp
-from backend.services.commodities_div.mapping import delete_mapping, list_mappings, upsert_mapping
+from backend.services.commodities_div.mapping import ALLOWED_UNDERLYINGS
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import now_ist_second
 
@@ -43,13 +43,6 @@ class ExitSubmitBody(BaseModel):
     exit_at: str = Field(..., min_length=8, description="YYYY-MM-DD HH:MM:SS IST")
 
 
-class MappingBody(BaseModel):
-    tv_ticker: str = Field(..., min_length=1)
-    upstox_symbol: str = Field(..., min_length=1)
-    exchange: str = Field(default="MCX")
-    notes: Optional[str] = None
-
-
 @router.get("/health")
 def commodities_div_health() -> Dict[str, Any]:
     ensure_commodities_div_tables()
@@ -57,6 +50,7 @@ def commodities_div_health() -> Dict[str, Any]:
         "ok": True,
         "service": "commodities_div",
         "server_time_ist": now_ist_second().strftime("%Y-%m-%d %H:%M:%S"),
+        "underlyings": list(ALLOWED_UNDERLYINGS),
     }
 
 
@@ -64,7 +58,7 @@ def commodities_div_health() -> Dict[str, Any]:
 def commodities_div_workspace(user: User = Depends(_auth_user)) -> Dict[str, Any]:
     ensure_commodities_div_tables()
     payload = workspace_payload()
-    payload["mappings"] = list_mappings()
+    payload["underlyings"] = list(ALLOWED_UNDERLYINGS)
     payload["user"] = getattr(user, "email", None) or getattr(user, "id", None)
     return payload
 
@@ -105,40 +99,6 @@ def commodities_div_exit_submit(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "signal": row}
-
-
-@router.get("/mappings")
-def commodities_div_list_mappings(user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    return {"ok": True, "mappings": list_mappings()}
-
-
-@router.put("/mappings")
-@router.post("/mappings")
-def commodities_div_upsert_mapping(
-    body: MappingBody,
-    user: User = Depends(_auth_user),
-) -> Dict[str, Any]:
-    try:
-        row = upsert_mapping(
-            tv_ticker=body.tv_ticker,
-            upstox_symbol=body.upstox_symbol,
-            exchange=body.exchange or "MCX",
-            notes=body.notes,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"ok": True, "mapping": row}
-
-
-@router.delete("/mappings/{map_id}")
-def commodities_div_delete_mapping(
-    map_id: int,
-    user: User = Depends(_auth_user),
-) -> Dict[str, Any]:
-    ok = delete_mapping(map_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="mapping not found")
-    return {"ok": True, "deleted": map_id}
 
 
 @router.post("/ltp-refresh")

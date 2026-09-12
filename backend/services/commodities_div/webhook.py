@@ -253,6 +253,37 @@ def process_webhook(
         kind = fields["signal_kind"]
         direction = fields["direction"]
 
+        # Unknown underlying (not one of the five) — log only, never create / mutate active.
+        if not inst.get("underlying_matched"):
+            log_id = _insert_log(
+                db,
+                received_at=received_at,
+                source_ip=source_ip,
+                fields=fields,
+                raw_payload=raw_payload,
+                parse_status="unmatched",
+                disposition="unmatched",
+                active_signal_id=int(active["id"]) if active else None,
+                symbol_mapped=symbol_mapped or None,
+            )
+            db.commit()
+            return {
+                "ok": True,
+                "stored": True,
+                "parse_status": "unmatched",
+                "disposition": "unmatched",
+                "log_id": log_id,
+                "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "reason": "unknown_underlying",
+                "allowed": [
+                    "CRUDEOIL",
+                    "NATURALGAS",
+                    "COPPER",
+                    "GOLDPETAL",
+                    "SILVERMINI",
+                ],
+            }
+
         # --- DIV ---
         if kind == "DIV":
             if active and active["status"] in BLOCKING_STATUSES:
@@ -276,7 +307,8 @@ def process_webhook(
                     "log_id": log_id,
                     "active_id": int(active["id"]),
                     "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "mapping_found": inst["mapping_found"],
+                    "underlying_matched": True,
+                    "instrument_key": inst.get("instrument_key"),
                 }
 
             disposition = "applied"
@@ -314,8 +346,9 @@ def process_webhook(
                 "signal_id": sig_id,
                 "status": STATUS_DIVERGENCE,
                 "symbol_mapped": symbol_mapped,
-                "mapping_found": inst["mapping_found"],
+                "underlying_matched": True,
                 "instrument_key": inst.get("instrument_key"),
+                "contract": inst.get("contract"),
                 "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
@@ -397,7 +430,7 @@ def process_webhook(
                 "log_id": log_id,
                 "signal_id": int(active["id"]),
                 "status": STATUS_ACTIVATED,
-                "mapping_found": inst["mapping_found"],
+                "underlying_matched": True,
                 "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
             }
 

@@ -153,7 +153,7 @@ def take_trade(*, signal_id: int, entry_price: float) -> Dict[str, Any]:
         out = serialize_signal(dict(updated))
         out["play_trade_audio"] = True
         out["mapping_warning"] = None if ik else (
-            "No mapping/instrument_key — LTP will not update until mapping + Upstox resolve succeed"
+            "Upstox front-month FUT not resolved yet — LTP will retry on the 10-min sidecar"
         )
         return out
     except Exception:
