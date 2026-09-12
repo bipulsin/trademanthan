@@ -27,9 +27,20 @@ class LeftMenu {
     }
 
     applyThemeImmediate() {
-        const theme = localStorage.getItem('tradentical_theme') || 'dark';
+        let theme = localStorage.getItem('tradentical_theme') || 'dark';
+        // Desktop shell is designed around the divtest green night skin; keep dark by default.
+        if (window.location.pathname.includes('desktop') && theme !== 'light' && theme !== 'dark') {
+            theme = 'dark';
+        }
+        if (window.location.pathname.includes('desktop') && !localStorage.getItem('tradentical_theme')) {
+            theme = 'dark';
+            localStorage.setItem('tradentical_theme', 'dark');
+        }
         document.body.setAttribute('data-theme', theme);
         if (this.isThemePage()) document.body.classList.add('theme-page');
+        if (window.location.pathname.includes('desktop')) {
+            document.body.classList.add('desktop-page', 'left-menu-web-hamburger');
+        }
     }
 
     isThemePage() {
