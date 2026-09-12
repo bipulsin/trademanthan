@@ -1,0 +1,191 @@
+/**
+ * Desktop shell — divtest skin (TradeWithCTO green night theme)
+ * Used by desktop.html; pairs with left-menu web-hamburger mode.
+ */
+
+body.desktop-page {
+  --bg0: #0c1210;
+  --bg1: #121a17;
+  --bg2: #1a2621;
+  --line: rgba(180, 210, 190, 0.14);
+  --text: #e7f0ea;
+  --muted: #8fa398;
+  --accent: #3dba7a;
+  --accent-dim: #2a8f5c;
+  --danger: #e06b6b;
+  --warn: #d4a017;
+  --card: rgba(22, 34, 29, 0.85);
+  --font-display: "Syne", sans-serif;
+  --font-body: "DM Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  --theme-bg:
+    radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+    linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%);
+  --theme-card: var(--card);
+  --theme-card-alt: rgba(18, 26, 23, 0.9);
+  --theme-border: var(--line);
+  --theme-text: var(--text);
+  --theme-muted: var(--muted);
+  --theme-accent: var(--accent);
+  --theme-accent-hover: #4fd48c;
+  --theme-success: var(--accent);
+  --theme-danger: var(--danger);
+
+  --left-menu-bg: rgba(12, 18, 16, 0.96);
+  --left-menu-border: var(--line);
+  --left-menu-accent: var(--accent);
+  --left-menu-text: var(--text);
+  --left-menu-muted: var(--muted);
+
+  margin: 0;
+  min-height: 100%;
+  background: var(--theme-bg) !important;
+  color: var(--theme-text) !important;
+  font-family: var(--font-body);
+}
+
+body.desktop-page .main-content-area,
+body.desktop-page .right-panel {
+  background: transparent !important;
+  color: var(--theme-text) !important;
+}
+
+body.desktop-page .dashboard-card,
+body.desktop-page .crypto-card,
+body.desktop-page .panel {
+  background: var(--theme-card) !important;
+  border: 1px solid var(--theme-border) !important;
+  border-radius: 14px !important;
+  backdrop-filter: blur(8px);
+  color: var(--theme-text) !important;
+}
+
+body.desktop-page .dashboard-card .card-header,
+body.desktop-page .crypto-card .card-header {
+  border-color: var(--theme-border) !important;
+}
+
+body.desktop-page .dashboard-card h3,
+body.desktop-page .crypto-card h3,
+body.desktop-page .card-header h3 {
+  font-family: var(--font-display);
+  color: var(--theme-text) !important;
+}
+
+body.desktop-page .last-updated,
+body.desktop-page .crypto-name,
+body.desktop-page .crypto-price,
+body.desktop-page .sf-watchlist-card .sf-wl-updated,
+body.desktop-page .sf-watchlist-card .sf-wl-hint,
+body.desktop-page .sf-watchlist-card .sf-wl-msg,
+body.desktop-page .sf-watchlist-card .sf-wl-empty {
+  color: var(--theme-muted) !important;
+}
+
+body.desktop-page .sf-watchlist-card .sf-wl-table th {
+  background: rgba(26, 38, 33, 0.9) !important;
+  color: var(--muted) !important;
+  border-bottom-color: var(--line) !important;
+}
+
+body.desktop-page .sf-watchlist-card .sf-wl-table td {
+  border-bottom-color: var(--line) !important;
+  color: var(--text) !important;
+}
+
+body.desktop-page .sf-watchlist-card .sf-wl-table tbody tr:hover {
+  background: rgba(61, 186, 122, 0.08) !important;
+}
+
+body.desktop-page .sf-watchlist-card .sf-wl-row-today {
+  background: rgba(61, 186, 122, 0.12) !important;
+}
+
+body.desktop-page .sf-watchlist-card .sf-wl-row-today:hover {
+  background: rgba(61, 186, 122, 0.18) !important;
+}
+
+body.desktop-page .sf-side-long {
+  background: rgba(61, 186, 122, 0.22) !important;
+  color: #b8f5d0 !important;
+}
+
+body.desktop-page .sf-side-short {
+  background: rgba(224, 107, 107, 0.22) !important;
+  color: #f5c0c0 !important;
+}
+
+body.desktop-page .rs-scanner-card .rs-checklist-link {
+  color: var(--accent) !important;
+  border-color: rgba(61, 186, 122, 0.35) !important;
+}
+
+body.desktop-page .rs-scanner-card .rs-checklist-link:hover {
+  background: rgba(61, 186, 122, 0.12) !important;
+}
+
+body.desktop-page .mobile-title-bar {
+  background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+  border-bottom: 1px solid var(--line);
+}
+
+body.desktop-page .mobile-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+body.desktop-page .sentiment-basis-btn.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #0c1210 !important;
+}
+
+body.desktop-page .btn-icon {
+  color: var(--accent) !important;
+}
+
+/* Web top bar (hamburger) — shown ≥1025px via left-menu web-hamburger */
+body.desktop-page .tm-web-topbar {
+  background:
+    linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+}
+
+body.desktop-page .tm-web-topbar-brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+body.desktop-page .tm-web-hamburger {
+  background: rgba(26, 38, 33, 0.9);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+
+body.desktop-page .tm-web-hamburger:hover,
+body.desktop-page .tm-web-hamburger[aria-expanded="true"] {
+  background: rgba(61, 186, 122, 0.18);
+  border-color: rgba(61, 186, 122, 0.45);
+}
+
+/* Light theme still available via toggle */
+body.desktop-page[data-theme="light"] {
+  --theme-bg: #f4f7f5;
+  --theme-card: rgba(255, 255, 255, 0.95);
+  --theme-card-alt: #eef3f0;
+  --theme-border: rgba(40, 70, 55, 0.15);
+  --theme-text: #14201a;
+  --theme-muted: #5a6e63;
+  --theme-accent: #2a8f5c;
+  --left-menu-bg: rgba(255, 255, 255, 0.98);
+  --left-menu-text: #14201a;
+  --left-menu-muted: #5a6e63;
+  --left-menu-accent: #2a8f5c;
+  background: var(--theme-bg) !important;
+  color: var(--theme-text) !important;
+}

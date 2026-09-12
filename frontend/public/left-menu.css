@@ -9,11 +9,11 @@
     --left-menu-min: 200px;
     --left-menu-max: 320px;
     --left-menu-collapsed: 72px;
-    --left-menu-bg: rgba(15, 23, 42, 0.98);
-    --left-menu-border: rgba(148, 163, 184, 0.15);
-    --left-menu-accent: #3b82f6;
-    --left-menu-text: #f1f5f9;
-    --left-menu-muted: #94a3b8;
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: rgba(180, 210, 190, 0.14);
+    --left-menu-accent: #3dba7a;
+    --left-menu-text: #e7f0ea;
+    --left-menu-muted: #8fa398;
 }
 
 /* App layout - left menu + main content */
@@ -818,7 +818,131 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 }
 
 .mobile-menu-toggle:hover {
-    background: rgba(59, 130, 246, 0.2);
+    background: rgba(61, 186, 122, 0.2);
+}
+
+/* =============================================================================
+   Web (desktop) hamburger pull-down — body.left-menu-web-hamburger
+   ≥1025px: top bar + dropdown menu. ≤1024px: keep footer bar sheet.
+   ============================================================================= */
+
+.tm-web-topbar {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1002;
+    height: 56px;
+    padding: 0 14px;
+    align-items: center;
+    gap: 12px;
+    box-sizing: border-box;
+}
+
+.tm-web-hamburger {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.15rem;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.tm-web-topbar-brand-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    text-decoration: none;
+    color: inherit;
+}
+
+.tm-web-topbar-logo {
+    height: 28px;
+    width: auto;
+    max-width: 140px;
+    object-fit: contain;
+}
+
+.tm-web-topbar-brand {
+    font-size: 1.05rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (min-width: 1025px) {
+    body.left-menu-web-hamburger .tm-web-topbar {
+        display: flex;
+    }
+
+    body.left-menu-web-hamburger .app-with-left-menu {
+        padding-top: 56px;
+    }
+
+    body.left-menu-web-hamburger .main-content-area,
+    body.left-menu-web-hamburger .main-content-area.menu-collapsed {
+        margin-left: 0 !important;
+    }
+
+    body.left-menu-web-hamburger .left-panel .panel-toggle {
+        display: none !important;
+    }
+
+    /* Pull-down panel under top bar */
+    body.left-menu-web-hamburger .left-panel {
+        width: min(340px, calc(100vw - 24px)) !important;
+        min-width: 0 !important;
+        height: auto !important;
+        max-height: min(78vh, 720px);
+        left: 12px !important;
+        top: 64px !important;
+        bottom: auto !important;
+        right: auto !important;
+        border-radius: 14px;
+        border: 1px solid var(--left-menu-border);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+        transform: translateY(-10px);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        overflow-y: auto;
+        overflow-x: hidden;
+        transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s;
+    }
+
+    body.left-menu-web-hamburger .left-panel.mobile-open,
+    body.left-menu-web-hamburger .left-panel.desktop-open {
+        transform: translateY(0);
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+    }
+
+    body.left-menu-web-hamburger .mobile-menu-overlay {
+        display: none;
+        z-index: 1001;
+    }
+
+    body.left-menu-web-hamburger .mobile-menu-overlay.visible {
+        display: block !important;
+        opacity: 1;
+    }
+
+    /* Hide page mobile title bar on wide screens (web topbar replaces it) */
+    body.left-menu-web-hamburger .mobile-title-bar {
+        display: none !important;
+    }
+}
+
+@media (max-width: 1024px) {
+    body.left-menu-web-hamburger .tm-web-topbar {
+        display: none !important;
+    }
 }
 
 /* Mobile overlay */
@@ -843,6 +967,15 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     }
 }
 
+/* Web hamburger pages still need dim overlay when the pull-down is open */
+@media (min-width: 1025px) {
+    body.left-menu-web-hamburger .mobile-menu-overlay.visible {
+        display: block !important;
+        opacity: 1;
+    }
+}
+
+
 /* =============================================================================
    Global mobile footer (post-login): NIFTY / BANKNIFTY + center nav (tradewithcto)
    Bottom sheet for .left-panel when body.left-menu-footer-mode
@@ -860,7 +993,7 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     align-items: flex-end;
     justify-content: space-between;
     gap: 6px;
-    background: linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%);
+    background: linear-gradient(180deg, #1a3d2e 0%, #0f241c 100%);
     box-shadow:
         0 -4px 14px rgba(0, 0, 0, 0.32),
         inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -911,8 +1044,8 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     height: 46px;
     border-radius: 50%;
     border: none;
-    background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
-    color: #1e3a8a;
+    background: linear-gradient(180deg, #ffffff 0%, #e7f0ea 100%);
+    color: #1a3d2e;
     box-shadow:
         0 8px 22px rgba(0, 0, 0, 0.38),
         0 3px 8px rgba(0, 0, 0, 0.22),

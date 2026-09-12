@@ -297,11 +297,11 @@ async function handleCredentialResponse(response) {
             
             // Force a hard redirect to dashboard
             try {
-                window.location.replace('dashboard.html');
+                window.location.replace('desktop.html');
             } catch (redirectError) {
                 console.error("Redirect error:", redirectError);
                 // Fallback to href if replace fails
-                window.location.href = 'dashboard.html';
+                window.location.href = 'desktop.html';
             }
         }, 1500);
         
@@ -350,7 +350,7 @@ function simulateLogin(userData) {
         // Redirect to dashboard after a short delay
         setTimeout(() => {
         // Force a hard redirect to dashboard
-        window.location.replace('dashboard.html');
+        window.location.replace('desktop.html');
         }, 1000);
 }
 
