@@ -41,7 +41,11 @@ def test_parse_underlying_test_only_crypto():
     assert parse_underlying("BTCUSD1!") == "BTCUSD"
     assert parse_underlying("BINANCE:ETHUSD") == "ETHUSD"
     assert parse_underlying("CRYPTO:BTCUSD1!") == "BTCUSD"
-    inst = attach_instrument_fields("BTCUSD")
+    # Binance dated USDT perpetual/futures tickers from the chart
+    assert parse_underlying("BTCUSDT25U2026") == "BTCUSD"
+    assert parse_underlying("BINANCE:BTCUSDT25U2026") == "BTCUSD"
+    assert parse_underlying("ETHUSDT") == "ETHUSD"
+    inst = attach_instrument_fields("BTCUSDT25U2026")
     assert inst["underlying_matched"] is True
     assert inst["test_only"] is True
     assert inst["instrument_key"] is None

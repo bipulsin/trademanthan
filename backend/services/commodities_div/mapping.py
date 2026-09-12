@@ -97,6 +97,7 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
 
     Accepts:
       CRUDEOIL1!, MCX:CRUDEOIL1!, CRUDEOILZ2026, CRUDEOIL, NATURALGAS1!, …
+      Test-only: BTCUSD, BTCUSDT25U2026, ETHUSD1!, BINANCE:ETHUSDT, …
     """
     core = _strip_to_core(symbol_raw)
     if not core:
@@ -104,7 +105,13 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
     core = _CONT_FUT.sub("", core).replace("!", "").strip()
     if core in ALLOWED_UNDERLYINGS:
         return core
+    # Test crypto: BTCUSD / ETHUSD prefix (covers BTCUSDT dated futures like BTCUSDT25U2026).
+    for u in TEST_ONLY_UNDERLYINGS:
+        if core == u or core.startswith(u):
+            return u
     for u in ALLOWED_UNDERLYINGS:
+        if u in TEST_ONLY_UNDERLYINGS:
+            continue
         if not core.startswith(u):
             continue
         rest = core[len(u) :]
