@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.42" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="stockOptions.css?v=19" />
+    <link rel="stylesheet" href="stockOptions.css?v=20" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -57,8 +57,8 @@
                         <button type="button" class="bf-tab" data-tab="report">Trade report</button>
                     </nav>
                     <div class="so-card">
-                        <p class="so-note" id="soExecutedNote" hidden>Ensure GTT order at this price for SELL leg</p>
-                        <p class="so-note" id="soReportNote" hidden>P&amp;L ₹ = ((sell entry − buy entry) − (sell exit − buy exit)) × lot size. Hard stop stays 3 × sell entry.</p>
+                        <p class="so-note" id="soExecutedNote" hidden>Grouped by date traded. Ensure GTT order at this price for SELL leg. LTP/P&amp;L refresh after each 2h EMA cycle; P&amp;L blinks when &gt; ₹1100.</p>
+                        <p class="so-note" id="soReportNote" hidden>Grouped by exit-date month. Monthly PnL sums row P&amp;L ₹. Row P&amp;L ₹ = ((sell entry − buy entry) − (sell exit − buy exit)) × lot size. Hard stop stays 3 × sell entry.</p>
                         <div id="soPanel"></div>
                     </div>
                 </div>
@@ -147,6 +147,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.42"></script>
-    <script src="stockOptions.js?v=17"></script>
+    <script src="stockOptions.js?v=18"></script>
 </body>
 </html>

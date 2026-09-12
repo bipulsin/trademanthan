@@ -533,6 +533,65 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
 .so-pnl-pts { color: var(--muted); font-weight: 600; }
 .so-pnl-unit { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; }
 
+.so-pnl-blink {
+    animation: so-pnl-blink 1s ease-in-out infinite;
+}
+
+@keyframes so-pnl-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.18; }
+}
+
+.so-group-header td {
+    padding: 0 !important;
+    border-bottom: 1px solid rgba(61, 186, 122, 0.28);
+    background: rgba(26, 38, 33, 0.97);
+    position: sticky;
+    top: 2.35rem;
+    z-index: 2;
+    white-space: normal;
+}
+
+.so-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+}
+
+.so-group-bar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    background: linear-gradient(90deg, rgba(61, 186, 122, 0.16), rgba(26, 38, 33, 0.35));
+    border-left: 3px solid var(--accent);
+}
+
+.so-group-title {
+    font-family: Syne, sans-serif;
+    font-weight: 700;
+    font-size: 0.92rem;
+    letter-spacing: 0.02em;
+    color: #b8f5d0;
+}
+
+.so-group-meta {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.so-table tbody tr.so-group-header:hover {
+    background: transparent;
+}
+
+.so-table tbody tr.so-group-header:hover td {
+    background: rgba(26, 38, 33, 0.97);
+}
+
 .so-btn, .so-modal-btn {
     border: 0;
     border-radius: 8px;
@@ -895,6 +954,19 @@ body.stock-options-page[data-theme="light"] .mobile-title {
 
 body.stock-options-page[data-theme="light"] .so-table th {
     background: #eef3f0;
+}
+
+body.stock-options-page[data-theme="light"] .so-group-header td,
+body.stock-options-page[data-theme="light"] .so-table tbody tr.so-group-header:hover td {
+    background: #e8f2ec;
+}
+
+body.stock-options-page[data-theme="light"] .so-group-bar {
+    background: linear-gradient(90deg, rgba(31, 122, 77, 0.12), rgba(238, 243, 240, 0.9));
+}
+
+body.stock-options-page[data-theme="light"] .so-group-title {
+    color: #1f7a4d;
 }
 
 body.stock-options-page[data-theme="light"] .so-side-tip-float {

@@ -356,7 +356,7 @@
     );
   }
 
-  function sortRows(tab, rows) {
+  function sortRows(tab, rows, opts) {
     let out;
     if (sortState.tab !== tab || !sortState.key) {
       out = rows.slice();
@@ -368,7 +368,119 @@
         out = rows.slice().sort((ra, rb) => dir * cmpVals(col.sort(ra), col.sort(rb), col.type));
       }
     }
+    if (opts && opts.skipPin) return out;
     return pinIndexRows(out);
+  }
+
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+
+  /** YYYY-MM from exit_date; null when missing. */
+  function exitMonthKey(r) {
+    const d = dateOnly(r && r.exit_date);
+    if (!d || d.length < 7) return null;
+    return d.slice(0, 7);
+  }
+
+  function formatMonthLabel(ym) {
+    if (!ym || ym.length < 7) return "Unknown month";
+    const y = ym.slice(0, 4);
+    const m = Number(ym.slice(5, 7));
+    if (!Number.isFinite(m) || m < 1 || m > 12) return ym;
+    return MONTH_NAMES[m - 1] + " " + y;
+  }
+
+  function tradeDateKey(r) {
+    return dateOnly((r && (r.date_traded || r.armed_at)) || "") || "—";
+  }
+
+  function formatTradeDateLabel(iso) {
+    if (!iso || iso === "—") return "Date unknown";
+    const parts = String(iso).slice(0, 10).split("-");
+    if (parts.length !== 3) return iso;
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    const d = Number(parts[2]);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return iso;
+    return MONTH_NAMES[m - 1] + " " + d + ", " + y;
+  }
+
+  function pnlInrValue(r) {
+    const lot = Number(r && r.lot_size);
+    const inr = r && r.combined_pnl_inr;
+    if (inr != null && inr !== "" && Number.isFinite(lot) && lot > 0) {
+      const n = Number(inr);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  function sumGroupPnlInr(rows) {
+    let sum = 0;
+    let any = false;
+    (rows || []).forEach((r) => {
+      const v = pnlInrValue(r);
+      if (v != null) {
+        sum += v;
+        any = true;
+      }
+    });
+    return any ? sum : null;
+  }
+
+  /**
+   * Group rows by keyFn. Group keys sorted desc by default (newest first),
+   * or follow active sort when sorting the grouping column.
+   */
+  function groupRowsBy(tab, rows, keyFn, groupSortKey) {
+    const sorted = sortRows(tab, rows || [], { skipPin: true });
+    const map = new Map();
+    sorted.forEach((r) => {
+      const k = keyFn(r);
+      const key = k == null || k === "" ? "—" : String(k);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    let keys = Array.from(map.keys());
+    const sortingGroup =
+      sortState.tab === tab && sortState.key && sortState.key === groupSortKey;
+    if (sortingGroup) {
+      const dir = sortState.dir === "desc" ? -1 : 1;
+      keys.sort((a, b) => {
+        if (a === "—") return 1;
+        if (b === "—") return -1;
+        return dir * String(a).localeCompare(String(b));
+      });
+    } else {
+      keys.sort((a, b) => {
+        if (a === "—") return 1;
+        if (b === "—") return -1;
+        return String(b).localeCompare(String(a));
+      });
+    }
+    return keys.map((key) => ({
+      key: key,
+      rows: pinIndexRows(map.get(key) || []),
+    }));
+  }
+
+  function groupHeaderRow(colspan, titleHtml, metaHtml) {
+    return (
+      '<tr class="so-group-header">' +
+      '<td colspan="' + colspan + '">' +
+      '<div class="so-group-bar">' +
+      '<span class="so-group-title">' + titleHtml + "</span>" +
+      (metaHtml ? '<span class="so-group-meta">' + metaHtml + "</span>" : "") +
+      "</div></td></tr>"
+    );
+  }
+
+  function formatMonthlyPnlMeta(sum) {
+    if (sum == null || !Number.isFinite(sum)) return "Monthly PnL —";
+    const cls = sum >= 0 ? "so-pnl-pos" : "so-pnl-neg";
+    return 'Monthly PnL <span class="' + cls + '">₹' + num(sum) + "</span>";
   }
 
   function toggleSort(tab, key) {
@@ -497,15 +609,22 @@
       <thead><tr>${headerHtml("active")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
-  function pnlDisplay(r) {
+  const PNL_BLINK_INR = 1100;
+
+  function pnlDisplay(r, opts) {
     const lot = Number(r.lot_size);
     const inr = r.combined_pnl_inr;
+    const blinkOn = opts && opts.blink;
     if (inr != null && inr !== "" && Number.isFinite(lot) && lot > 0) {
       const n = Number(inr);
+      let cls = Number.isFinite(n) ? (n >= 0 ? "so-pnl-pos" : "so-pnl-neg") : "";
+      if (blinkOn && Number.isFinite(n) && n > PNL_BLINK_INR) {
+        cls = (cls ? cls + " " : "") + "so-pnl-blink";
+      }
       return {
-        cls: Number.isFinite(n) ? (n >= 0 ? "so-pnl-pos" : "so-pnl-neg") : "",
+        cls: cls,
         html: "₹" + num(inr),
-        title: "P&L ₹ = premium points × lot " + lot,
+        title: "P&L ₹ = ((buy LTP − buy entry) + (sell entry − sell LTP)) × lot " + lot,
       };
     }
     if (r.combined_pnl != null && r.combined_pnl !== "") {
@@ -518,16 +637,13 @@
     return { cls: "", html: "—", title: "" };
   }
 
-  function renderExecuted() {
-    const rows = sortRows("executed", workspace.executed || []);
-    if (!rows.length) return '<p class="so-empty">No Executed symbols.</p>';
-    const body = rows.map((r) => {
-      const pnl = pnlDisplay(r);
-      const hsBlank = r.hard_stop == null || r.hard_stop === "";
-      const checked = r.hard_stop_placed ? "checked" : "";
-      const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
-      const when = r.date_traded || r.armed_at || "—";
-      return `
+  function executedRowHtml(r) {
+    const pnl = pnlDisplay(r, { blink: true });
+    const hsBlank = r.hard_stop == null || r.hard_stop === "";
+    const checked = r.hard_stop_placed ? "checked" : "";
+    const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
+    const when = r.date_traded || r.armed_at || "—";
+    return `
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${esc(when)}</td>
         <td>${symbolCell(r)}</td>
@@ -543,17 +659,25 @@
           <button type="button" class="so-exit-btn" data-exit="${r.id}">Exit</button>
         </span></td>
       </tr>`;
+  }
+
+  function renderExecuted() {
+    const all = workspace.executed || [];
+    if (!all.length) return '<p class="so-empty">No Executed symbols.</p>';
+    const groups = groupRowsBy("executed", all, tradeDateKey, "date");
+    const colCount = (COLUMNS.executed || []).length;
+    const body = groups.map((g) => {
+      const title = esc(formatTradeDateLabel(g.key));
+      const meta = g.rows.length + (g.rows.length === 1 ? " trade" : " trades");
+      return groupHeaderRow(colCount, title, meta) + g.rows.map(executedRowHtml).join("");
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table so-table-executed">
       <thead><tr>${headerHtml("executed")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
-  function renderReport() {
-    const rows = sortRows("report", workspace.completed || []);
-    if (!rows.length) return '<p class="so-empty">No completed trades.</p>';
-    const body = rows.map((r) => {
-      const pnl = pnlDisplay(r);
-      return `
+  function reportRowHtml(r) {
+    const pnl = pnlDisplay(r);
+    return `
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${esc(r.date_traded || r.armed_at || "—")}</td>
         <td>${symbolCell(r)}</td>
@@ -566,6 +690,17 @@
         <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-exit-cell"><button type="button" class="so-edit-btn" data-edit="${r.id}" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></td>
       </tr>`;
+  }
+
+  function renderReport() {
+    const all = workspace.completed || [];
+    if (!all.length) return '<p class="so-empty">No completed trades.</p>';
+    const groups = groupRowsBy("report", all, (r) => exitMonthKey(r) || "—", "exit_date");
+    const colCount = (COLUMNS.report || []).length;
+    const body = groups.map((g) => {
+      const title = esc(g.key === "—" ? "Unknown month" : formatMonthLabel(g.key));
+      const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
+      return groupHeaderRow(colCount, title, monthly) + g.rows.map(reportRowHtml).join("");
     }).join("");
     return `<div class="so-table-wrap"><table class="so-table so-table-report">
       <thead><tr>${headerHtml("report")}</tr></thead><tbody>${body}</tbody></table></div>`;

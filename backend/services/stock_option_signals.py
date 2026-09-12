@@ -800,9 +800,14 @@ def spread_lines(
 
 
 def combined_pnl(sell_cost: Any, buy_cost: Any, sell_ltp: Any, buy_ltp: Any) -> Optional[float]:
-    """Credit received (sell − buy) minus current close cost (sell LTP − buy LTP).
+    """Mark / realized credit-spread P&L in premium points (× lot elsewhere for ₹).
 
-    Same formula as realized_credit_pnl: sell_entry − buy_entry − (sell_mark − buy_mark).
+    Equivalent leg-wise form:
+      buy  = (buy_ltp − buy_entry)
+      sell = (sell_entry − sell_ltp)
+      pnl  = buy + sell
+
+    Same as: sell_entry − buy_entry − (sell_mark − buy_mark).
     """
     sc = _as_float(sell_cost)
     bc = _as_float(buy_cost)
@@ -810,9 +815,8 @@ def combined_pnl(sell_cost: Any, buy_cost: Any, sell_ltp: Any, buy_ltp: Any) -> 
     bl = _as_float(buy_ltp)
     if sc is None or bc is None or sl is None or bl is None:
         return None
-    credit = sc - bc
-    close_cost = sl - bl
-    return credit - close_cost
+    # buy_leg + sell_leg == credit − close_cost
+    return (bl - bc) + (sc - sl)
 
 
 def realized_credit_pnl(
@@ -2419,7 +2423,11 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
 
 
 def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
-    """Quote LTPs for submitted Executed legs. No websocket."""
+    """Quote LTPs for Executed rows with strikes + entry costs filled.
+
+    Called at the end of ``run_ema_tick`` (after EMA / WR work) so it never races
+    ahead of the 2h indicator cycle. No websocket.
+    """
     ensure_stock_option_tables()
     now_naive = now_ist_second() if now is None else naive_ist(now)
     db = SessionLocal()
@@ -2432,6 +2440,11 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
                 WHERE status = :executed
                   AND date_traded IS NOT NULL
                   AND sell_cost IS NOT NULL
+                  AND buy_cost IS NOT NULL
+                  AND (
+                    COALESCE(user_sell_strike, sell_strike) IS NOT NULL
+                    AND COALESCE(user_buy_strike, buy_strike) IS NOT NULL
+                  )
                   AND remarks IS DISTINCT FROM :remarks
                   AND COALESCE(remarks, '') NOT LIKE :expiry
                 """
@@ -2453,6 +2466,10 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
         if r.get("buy_instrument_key"):
             keys.append(str(r["buy_instrument_key"]))
     if not keys:
+        logger.info(
+            "stock_option LTP refresh: %s filled Executed rows but no option instrument keys",
+            len(rows),
+        )
         return 0
     try:
         from backend.services.market_data.reads import ltp_map_with_fallback
@@ -2467,8 +2484,8 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
         for r in rows:
             sk = str(r.get("sell_instrument_key") or "")
             bk = str(r.get("buy_instrument_key") or "")
-            sl = prices.get(sk)
-            bl = prices.get(bk)
+            sl = prices.get(sk) if sk else None
+            bl = prices.get(bk) if bk else None
             if sl is None and bl is None:
                 continue
             db.execute(

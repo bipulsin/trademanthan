@@ -309,6 +309,8 @@ def test_optional_exit_bundle():
 
 
 def test_pnl_and_hard_stop():
+    # Leg-wise: buy=(LTP−entry), sell=(entry−LTP); sum == credit − close cost.
+    assert combined_pnl(10, 4, 6, 3) == (3 - 4) + (10 - 6)
     assert combined_pnl(10, 4, 6, 3) == (10 - 4) - (6 - 3)
     assert combined_pnl(10, 4, None, 3) is None
     assert hard_stop_price(12.5) == 37.5
