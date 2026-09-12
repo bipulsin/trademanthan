@@ -164,6 +164,134 @@
 
     let smartFuturesExpanded = false;
     let smartFuturesLoadedOnce = false;
+    let menuSectionExpanded = false;
+    let menuSectionLoadedOnce = false;
+    let menuVisibilityState = {};
+
+    async function loadMenuVisibility() {
+        const list = document.getElementById('menuVisibilityList');
+        const msg = document.getElementById('menuVisibilityMsg');
+        const token = getToken();
+        if (!token) {
+            if (list) list.innerHTML = `<div style="padding:8px 2px;color:#dc2626;">Session expired. Please login again.</div>`;
+            return;
+        }
+        if (list) list.innerHTML = `<div style="padding:8px 2px;color:#64748b;">Loading menu items...</div>`;
+        try {
+            const res = await apiFetch(
+                ['/api/left-menu/visibility', '/left-menu/visibility'],
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                    cache: 'no-store',
+                }
+            );
+            const data = await res.json();
+            const items = Array.isArray(data.items) ? data.items : [];
+            menuVisibilityState = {};
+            items.forEach((it) => {
+                menuVisibilityState[it.key] = it.enabled !== false;
+            });
+            if (!items.length) {
+                if (list) list.innerHTML = `<div style="padding:8px 2px;">No menu items found.</div>`;
+                return;
+            }
+            if (list) {
+                list.innerHTML = items
+                    .map((it) => {
+                        const key = String(it.key || '').replace(/"/g, '&quot;');
+                        const label = String(it.label || it.key || '-').replace(/</g, '&lt;');
+                        const checked = it.enabled !== false ? 'checked' : '';
+                        return `<div class="menu-visibility-row" data-menu-key="${key}">
+                            <div class="menu-visibility-meta">
+                                <strong>${label}</strong>
+                                <span>${key}</span>
+                            </div>
+                            <div class="setting-toggle">
+                                <label class="switch">
+                                    <input type="checkbox" class="menu-visibility-toggle" data-key="${key}" ${checked}>
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                        </div>`;
+                    })
+                    .join('');
+                list.querySelectorAll('.menu-visibility-toggle').forEach((input) => {
+                    input.addEventListener('change', () => {
+                        const k = input.getAttribute('data-key');
+                        if (!k) return;
+                        saveMenuVisibilityItem(k, !!input.checked, input);
+                    });
+                });
+            }
+            if (msg) msg.textContent = '';
+        } catch (e) {
+            console.error('Menu visibility load failed:', e);
+            if (list) list.innerHTML = `<div style="padding:8px 2px;color:#dc2626;">Failed to load menu items.</div>`;
+        }
+    }
+
+    async function saveMenuVisibilityItem(key, enabled, inputEl) {
+        const msg = document.getElementById('menuVisibilityMsg');
+        const token = getToken();
+        if (!token) return;
+        const previous = menuVisibilityState[key] !== false;
+        menuVisibilityState[key] = enabled;
+        try {
+            const res = await apiFetch(
+                ['/api/left-menu/visibility', '/left-menu/visibility'],
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ enabled: { [key]: enabled } }),
+                }
+            );
+            const data = await res.json();
+            if (data && data.enabled && typeof data.enabled === 'object') {
+                menuVisibilityState = Object.assign({}, menuVisibilityState, data.enabled);
+            }
+            try {
+                localStorage.setItem(
+                    'tradentical_left_menu_visibility',
+                    JSON.stringify(menuVisibilityState)
+                );
+            } catch (e) { /* ignore */ }
+            try {
+                window.dispatchEvent(
+                    new CustomEvent('tradentical:left-menu-visibility', {
+                        detail: { enabled: menuVisibilityState },
+                    })
+                );
+            } catch (e) { /* ignore */ }
+            if (window.LeftMenuInstance && typeof window.LeftMenuInstance.applyMenuVisibility === 'function') {
+                window.LeftMenuInstance.applyMenuVisibility(menuVisibilityState);
+            }
+            if (msg) {
+                msg.textContent = enabled ? 'Enabled.' : 'Disabled.';
+                setTimeout(() => {
+                    if (msg) msg.textContent = '';
+                }, 2000);
+            }
+        } catch (e) {
+            console.error(e);
+            menuVisibilityState[key] = previous;
+            if (inputEl) inputEl.checked = previous;
+            if (msg) msg.textContent = 'Save failed';
+        }
+    }
+
+    function setMenuSectionExpanded(expanded) {
+        menuSectionExpanded = expanded;
+        const content = document.getElementById('menuSectionContent');
+        const icon = document.getElementById('menuSectionCollapseIcon');
+        if (content) content.classList.toggle('expanded', expanded);
+        if (icon) {
+            icon.classList.toggle('fa-chevron-down', !expanded);
+            icon.classList.toggle('fa-chevron-up', expanded);
+        }
+    }
 
     async function loadSmartFuturesConfig() {
         const msg = document.getElementById('sfAdminMsg');
@@ -276,6 +404,19 @@
         }
         const sfSave = document.getElementById('sfAdminSave');
         if (sfSave) sfSave.addEventListener('click', () => saveSmartFuturesConfig());
+
+        setMenuSectionExpanded(false);
+        const menuToggle = document.getElementById('menuSectionToggle');
+        if (menuToggle) {
+            menuToggle.addEventListener('click', async () => {
+                const next = !menuSectionExpanded;
+                setMenuSectionExpanded(next);
+                if (next && !menuSectionLoadedOnce) {
+                    menuSectionLoadedOnce = true;
+                    await loadMenuVisibility();
+                }
+            });
+        }
 
         setUserActivityExpanded(false);
         const toggle = document.getElementById('userActivityToggle');

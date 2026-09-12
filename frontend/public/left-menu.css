@@ -270,8 +270,9 @@ body[data-theme="light"] .theme-btn.active {
     font-size: 1.2rem;
 }
 
-/* Hidden from nav list but kept in markup for easy re-enable (remove .nav-item-menu-hidden) */
-.nav-item-menu-hidden {
+/* Hidden via Admin → Menu section (or legacy markup class) */
+.nav-item-menu-hidden,
+.nav-item-visibility-hidden {
     display: none !important;
 }
 

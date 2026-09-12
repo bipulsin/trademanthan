@@ -13,9 +13,10 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.42';
+const MENU_HTML_PATH = 'left-menu.html?v=3.43';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
+const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
 
 class LeftMenu {
     constructor() {
@@ -79,10 +80,13 @@ class LeftMenu {
                 this.isAuthenticated = true;
                 isAuthenticated = true;
                 await this.loadMenu();
-                // Show Admin from login payload before /auth/me returns
+                // Defaults / cache before /auth/me and visibility API return
+                this.applyMenuVisibility({});
                 this.applyAdminNavVisibility();
+                this.applyCachedMenuVisibility();
                 await this.refreshUserProfileFromApi();
                 this.applyAdminNavVisibility();
+                await this.loadAndApplyMenuVisibility();
                 this.enforceAdminOnlyPageAccess();
                 this.trackCurrentPageVisit();
                 this.injectMobileFooter();
@@ -99,6 +103,7 @@ class LeftMenu {
                 await this.setupDisclaimer();
                 await this.setupTelegramNotifyModal();
                 this.setupLogoutToolbarButton();
+                this.setupMenuVisibilityListener();
             } else {
                 const currentPath = window.location.pathname;
                 const isProtectedPage = currentPath.includes('desktop') || currentPath.includes('dashboard') || currentPath.includes('strategy') ||
@@ -213,7 +218,94 @@ class LeftMenu {
         } catch (e) {}
         const show = LeftMenu.isUserAdmin(user);
         document.querySelectorAll('.nav-item.nav-item-admin[data-page]').forEach((el) => {
+            if (el.classList.contains('nav-item-visibility-hidden')) {
+                el.style.display = 'none';
+                return;
+            }
             el.style.display = show ? 'flex' : 'none';
+        });
+    }
+
+    /** Apply admin enable/disable map; disabled items are removed from the visible sequence. */
+    applyMenuVisibility(enabledMap) {
+        const map = enabledMap && typeof enabledMap === 'object' ? enabledMap : {};
+        document.querySelectorAll('.nav-list .nav-item[data-page]').forEach((el) => {
+            const key = el.getAttribute('data-page');
+            if (!key) return;
+            const enabled = map[key] !== false;
+            if (enabled) {
+                el.classList.remove('nav-item-visibility-hidden', 'nav-item-menu-hidden');
+                el.removeAttribute('aria-hidden');
+                if (el.classList.contains('nav-item-admin')) {
+                    // Admin-only visibility is handled separately.
+                    return;
+                }
+                el.style.display = '';
+            } else {
+                el.classList.add('nav-item-visibility-hidden');
+                el.classList.remove('nav-item-menu-hidden');
+                el.setAttribute('aria-hidden', 'true');
+                el.style.display = 'none';
+            }
+        });
+        this.applyAdminNavVisibility();
+    }
+
+    applyCachedMenuVisibility() {
+        try {
+            const raw = localStorage.getItem(LEFT_MENU_VISIBILITY_STORAGE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                this.applyMenuVisibility(parsed);
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    async loadAndApplyMenuVisibility() {
+        const token = localStorage.getItem('trademanthan_token') || '';
+        if (!token || !token.includes('.')) return;
+        const b = trademanthanApiBase();
+        const paths = [b + '/api/left-menu/visibility', b + '/left-menu/visibility'];
+        for (const path of paths) {
+            try {
+                const res = await fetch(path, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    cache: 'no-store',
+                });
+                if (!res.ok) continue;
+                const data = await res.json();
+                const enabled = data && data.enabled && typeof data.enabled === 'object'
+                    ? data.enabled
+                    : {};
+                try {
+                    localStorage.setItem(LEFT_MENU_VISIBILITY_STORAGE_KEY, JSON.stringify(enabled));
+                } catch (e) { /* ignore */ }
+                this.applyMenuVisibility(enabled);
+                return;
+            } catch (err) {
+                console.warn('LeftMenu: visibility try', path, err);
+            }
+        }
+    }
+
+    setupMenuVisibilityListener() {
+        if (this._menuVisibilityListenerBound) return;
+        this._menuVisibilityListenerBound = true;
+        window.addEventListener('tradentical:left-menu-visibility', (ev) => {
+            const enabled = ev && ev.detail && ev.detail.enabled;
+            if (enabled && typeof enabled === 'object') {
+                this.applyMenuVisibility(enabled);
+            }
+        });
+        window.addEventListener('storage', (ev) => {
+            if (ev.key !== LEFT_MENU_VISIBILITY_STORAGE_KEY || !ev.newValue) return;
+            try {
+                const parsed = JSON.parse(ev.newValue);
+                if (parsed && typeof parsed === 'object') {
+                    this.applyMenuVisibility(parsed);
+                }
+            } catch (e) { /* ignore */ }
         });
     }
 
@@ -308,7 +400,7 @@ class LeftMenu {
                     <a class="nav-item-link" href="iron-condor.html"><i class="fas fa-layer-group"></i>
                     <span>Iron Condor</span></a>
                 </li>
-                <li class="nav-item nav-item-menu-hidden" data-page="pivot-breakout.html" aria-hidden="true">
+                <li class="nav-item" data-page="pivot-breakout.html">
                     <a class="nav-item-link" href="pivot-breakout.html"><i class="fas fa-bullseye"></i>
                     <span>Pivot Breakout</span></a>
                 </li>
@@ -320,11 +412,11 @@ class LeftMenu {
                     <a class="nav-item-link" href="cargpt.html"><i class="fas fa-chart-area"></i>
                     <span>Composite Avg</span></a>
                 </li>
-                <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true">
+                <li class="nav-item" data-page="broker.html">
                     <a class="nav-item-link" href="broker.html"><i class="fas fa-university"></i>
                     <span>Broker Management</span></a>
                 </li>
-                <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true">
+                <li class="nav-item" data-page="strategy.html">
                     <a class="nav-item-link" href="strategy.html"><i class="fas fa-robot"></i>
                     <span>Strategy Management</span></a>
                 </li>
@@ -988,4 +1080,6 @@ function logout() {
     LeftMenu.logout();
 }
 
-document.addEventListener('DOMContentLoaded', () => new LeftMenu());
+document.addEventListener('DOMContentLoaded', () => {
+    window.LeftMenuInstance = new LeftMenu();
+});
