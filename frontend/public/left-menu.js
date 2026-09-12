@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.31';
+const MENU_HTML_PATH = 'left-menu.html?v=3.40';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -34,11 +34,12 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|analysis/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|analysis/.test(path);
     }
 
     getCurrentPage() {
         const path = window.location.pathname;
+        if (path.includes('desktop')) return 'desktop';
         if (path.includes('dashboard')) return 'dashboard';
         if (path.includes('strategy')) return 'strategy';
         if (path.includes('broker')) return 'broker';
@@ -63,7 +64,7 @@ class LeftMenu {
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         if (path.includes('breakfast')) return 'breakfast';
         if (path.includes('analysis')) return 'analysis';
-        return 'dashboard';
+        return 'desktop';
     }
 
     async init() {
@@ -83,6 +84,7 @@ class LeftMenu {
                 this.trackCurrentPageVisit();
                 this.injectMobileFooter();
                 this.injectPanelSheetHandle();
+                this.injectWebTopBar();
                 this.setupCollapseToggle();
                 this.setupMobileMenu();
                 this.setupMobileFooterIndices();
@@ -96,7 +98,7 @@ class LeftMenu {
                 this.setupLogoutToolbarButton();
             } else {
                 const currentPath = window.location.pathname;
-                const isProtectedPage = currentPath.includes('dashboard') || currentPath.includes('strategy') ||
+                const isProtectedPage = currentPath.includes('desktop') || currentPath.includes('dashboard') || currentPath.includes('strategy') ||
                     currentPath.includes('broker') || currentPath.includes('algo') || currentPath.includes('scan') ||
                     currentPath.includes('reports') || currentPath.includes('settings') ||
                     currentPath.includes('carsetup') || currentPath.includes('cargpt') ||
@@ -221,7 +223,7 @@ class LeftMenu {
             user = JSON.parse(localStorage.getItem('trademanthan_user') || '{}');
         } catch (e) {}
         if (!LeftMenu.isUserAdmin(user)) {
-            window.location.replace('dashboard.html');
+            window.location.replace('desktop.html');
         }
     }
 
@@ -259,7 +261,7 @@ class LeftMenu {
     <aside class="left-panel" id="leftPanel">
         <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu"><i class="fas fa-angles-left" id="panelToggleIcon"></i></button>
         <div class="panel-header">
-            <a href="dashboard.html" class="logo-link">
+            <a href="desktop.html" class="logo-link">
                 <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="panel-logo">
             </a>
         </div>
@@ -273,7 +275,7 @@ class LeftMenu {
                 <button type="button" class="panel-nav-logout-btn" id="leftMenuLogoutBtn" data-tooltip="Logout" title="Logout" aria-label="Logout"><i class="fas fa-sign-out-alt" aria-hidden="true"></i></button>
             </div>
             <ul class="nav-list">
-                <li class="nav-item" data-page="dashboard.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
+                <li class="nav-item" data-page="desktop.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
                 <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
                 <li class="nav-item" data-page="stockOptions.html"><i class="fas fa-chart-line" style="color:#38bdf8;"></i><span>Stock Options</span></li>
                 <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
@@ -505,24 +507,29 @@ class LeftMenu {
             document.getElementById('mobileMenuToggle'),
             document.getElementById('leftMenuMobileToggle'),
             document.getElementById('tmFooterNavToggle'),
+            document.getElementById('tmWebHamburger'),
         ].filter(Boolean);
 
         if (!panel) return;
 
         const footerBtn = document.getElementById('tmFooterNavToggle');
+        const webBtn = document.getElementById('tmWebHamburger');
 
         const setExpanded = (open) => {
             if (footerBtn) footerBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (webBtn) webBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
         };
 
         const open = () => {
             panel.classList.add('mobile-open');
+            panel.classList.add('desktop-open');
             if (overlay) overlay.classList.add('visible');
             document.body.classList.add('left-menu-mobile-open');
             setExpanded(true);
         };
         const close = () => {
             panel.classList.remove('mobile-open');
+            panel.classList.remove('desktop-open');
             if (overlay) overlay.classList.remove('visible');
             document.body.classList.remove('left-menu-mobile-open');
             setExpanded(false);
@@ -543,6 +550,24 @@ class LeftMenu {
         document.addEventListener('keydown', (ev) => {
             if (ev.key === 'Escape' && panel.classList.contains('mobile-open')) close();
         });
+    }
+
+    injectWebTopBar() {
+        if (!document.body.classList.contains('left-menu-web-hamburger')) return;
+        if (document.getElementById('tmWebTopbar')) return;
+
+        const home = 'desktop.html';
+        const html = `
+<header id="tmWebTopbar" class="tm-web-topbar" role="banner">
+    <button type="button" id="tmWebHamburger" class="tm-web-hamburger" aria-label="Open navigation menu" aria-expanded="false" aria-controls="leftPanel">
+        <i class="fas fa-bars" aria-hidden="true"></i>
+    </button>
+    <a class="tm-web-topbar-brand-wrap" href="${home}">
+        <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="tm-web-topbar-logo">
+        <span class="tm-web-topbar-brand">TradeWithCTO</span>
+    </a>
+</header>`;
+        document.body.insertAdjacentHTML('afterbegin', html);
     }
 
     injectMobileFooter() {
@@ -784,7 +809,8 @@ class LeftMenu {
 
     getTargetPageForSection() {
         switch (this.currentPage) {
-            case 'dashboard': return 'dashboard.html';
+            case 'desktop': return 'desktop.html';
+            case 'dashboard': return 'desktop.html';
             case 'cargpt': return 'cargpt.html';
             case 'broker': return 'broker.html';
             case 'strategy': return 'strategy.html';
@@ -806,7 +832,7 @@ class LeftMenu {
             case 'analysis': return 'analysis.html';
             case 'kavachIgnitionDiag': return 'kavachIgnitionDiag.html';
             case 'rs-journey': return 'rs-journey.html';
-            default: return 'dashboard.html';
+            default: return 'desktop.html';
         }
     }
 
@@ -817,7 +843,7 @@ class LeftMenu {
     }
 
     trackCurrentPageVisit() {
-        const current = window.location.pathname.split('/').pop() || 'dashboard.html';
+        const current = window.location.pathname.split('/').pop() || 'desktop.html';
         this.trackPageVisit(current, document.title);
     }
 

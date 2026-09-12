@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Desktop - TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+    <script src="auth-check.js?v=1"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="dashboard.css?v=2.15">
+    <link rel="stylesheet" href="left-menu.css?v=3.40">
+    <link rel="stylesheet" href="theme.css?v=1.4">
+    <link rel="stylesheet" href="desktop.css?v=1.0">
+    <style>
+        .sf-watchlist-card .sf-wl-toolbar { display: flex; align-items: center; gap: 8px; }
+        .sf-watchlist-card .sf-wl-updated { font-size: 11px; color: #64748b; white-space: nowrap; }
+        .sf-watchlist-card .sf-wl-hint { margin: 0 0 8px 0; font-size: 12px; color: #475569; }
+        .sf-watchlist-card .sf-wl-msg { margin: 0 0 6px 0; font-size: 12px; color: #64748b; min-height: 1em; }
+        .sf-watchlist-card .sf-wl-empty { margin: 6px 0; font-size: 13px; color: #64748b; font-style: italic; }
+        .sf-watchlist-card .sf-wl-wrap { overflow-x: auto; }
+        .sf-watchlist-card .sf-wl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .sf-watchlist-card .sf-wl-table th,
+        .sf-watchlist-card .sf-wl-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+        .sf-watchlist-card .sf-wl-table th { background: #f8fafc; font-weight: 600; color: #334155; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .sf-watchlist-card .sf-wl-table tbody tr:hover { background: #f1f5f9; }
+        .sf-watchlist-card .sf-wl-row-today { background: #ecfdf5; }
+        .sf-watchlist-card .sf-wl-row-today:hover { background: #d1fae5; }
+        .sf-watchlist-card .sf-side-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+        .sf-watchlist-card .sf-side-long { background: #dcfce7; color: #000000 !important; }
+        .sf-watchlist-card .sf-side-short { background: #fee2e2; color: #991b1b; }
+        .rs-scanner-card .rs-checklist-link { font-size: 12px; font-weight: 700; color: #1976d2; text-decoration: none; margin-left: 10px; padding: 2px 8px; border: 1px solid #bfdbfe; border-radius: 999px; vertical-align: middle; white-space: nowrap; }
+        .rs-scanner-card .rs-checklist-link:hover { background: #eff6ff; }
+    </style>
+</head>
+<body class="desktop-page theme-page left-menu-web-hamburger" data-theme="dark">
+    <!-- Mobile Title Bar -->
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo">
+            <h1 class="mobile-title">TradeWithCTO</h1>
+        </div>
+    </div>
+    
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="content-section active">
+                <!-- Market Sentiments — above crypto -->
+                <div class="dashboard-card market-sentiment-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-gauge-high"></i> Market Sentiments</h3>
+                        <div class="market-trivia-ticker" aria-label="Market trivia">
+                            <div class="market-trivia-track">
+                                <span>Do you know! On 18 May 2009, NIFTY50 had All-time biggest gain: +17.7%, following the results of the 2009 Indian general election. Trading was halted twice due to hitting upper circuit limits. One of the rarest "upper circuit" days in index history</span>
+                                <span aria-hidden="true">Do you know! On 18 May 2009, NIFTY50 had All-time biggest gain: +17.7%, following the results of the 2009 Indian general election. Trading was halted twice due to hitting upper circuit limits. One of the rarest "upper circuit" days in index history</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="market-sentiment-dials" id="marketSentimentDials">
+                            <div class="sentiment-dials-toolbar">
+                                <div class="sentiment-basis-toggle" id="sentimentBasisToggle" role="radiogroup" aria-label="Market sentiment basis">
+                                    <button type="button" class="sentiment-basis-btn active" data-basis="yesterday" role="radio" aria-checked="true">Basis Yesterday</button>
+                                    <button type="button" class="sentiment-basis-btn" data-basis="today" role="radio" aria-checked="false">Today</button>
+                                </div>
+                                <span class="sentiment-dials-updated" id="sentimentDialsUpdated">—</span>
+                                <button type="button" class="btn-icon" id="sentimentDialsRefresh" title="Refresh indices" aria-label="Refresh market sentiment">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                            <div class="market-sentiment-dials-grid" id="marketSentimentDialsGrid" role="list"></div>
+                            <div class="sentiment-dials-scroll-hint" aria-hidden="true">
+                                <span class="sentiment-dials-scroll-hint-arrow">←</span>
+                                <span>Swipe to view more dials</span>
+                                <span class="sentiment-dials-scroll-hint-arrow">→</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-card pnl-day-card full-width">
+                    <div class="card-header compact pnl-day-header">
+                        <h3><i class="fas fa-wallet"></i> PnL of the Day</h3>
+                        <div class="pnl-day-total" id="dashboardPnlDayTotal">Total: <span class="pnl-chip pnl-chip-neutral">—</span></div>
+                    </div>
+                    <div class="card-content">
+                        <div class="pnl-day-grid" id="dashboardPnlDayGrid">
+                            <article class="pnl-day-item">
+                                <h4><span>Intraday PnL</span><span class="pnl-chip pnl-chip-neutral">—</span></h4>
+                            </article>
+                            <article class="pnl-day-item">
+                                <h4><span>Smart Futures PnL</span><span class="pnl-chip pnl-chip-neutral">—</span></h4>
+                            </article>
+                            <article class="pnl-day-item">
+                                <h4><span>Premium Futures PnL</span><span class="pnl-chip pnl-chip-neutral">—</span></h4>
+                            </article>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Top sector gainers & losers (Nifty sector indices) -->
+                <div class="dashboard-card sector-movers-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-layer-group"></i> Top Gainers &amp; Losers</h3>
+                        <div class="sector-movers-toolbar">
+                            <span class="sector-movers-updated" id="sectorMoversUpdated">—</span>
+                            <button type="button" class="btn-icon" id="sectorMoversRefresh" title="Refresh sectors" aria-label="Refresh sector movers">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <p class="sector-movers-hint">Nifty sectoral indices — movers use intraday % vs day open when data is available. Click a sector name to see top 3 stocks in that sector by the same basis.</p>
+                        <div class="sector-movers-grid" id="sectorMoversGrid">
+                            <div class="sector-movers-col sector-movers-col--gain">
+                                <h4 class="sector-movers-col-title"><i class="fas fa-arrow-trend-up"></i> Gainers</h4>
+                                <ul class="sector-movers-list" id="sectorMoversGainers" aria-label="Top gaining sectors"></ul>
+                            </div>
+                            <div class="sector-movers-col sector-movers-col--lose">
+                                <h4 class="sector-movers-col-title"><i class="fas fa-arrow-trend-down"></i> Losers</h4>
+                                <ul class="sector-movers-list" id="sectorMoversLosers" aria-label="Top losing sectors"></ul>
+                            </div>
+                        </div>
+                        <div class="sector-persistence-block" id="sectorPersistenceBlock" hidden>
+                            <h4 class="sector-persistence-title"><i class="fas fa-clock"></i> Sector persistence heatmap</h4>
+                            <p class="sector-movers-hint">Sustained sector flow — not just latest movers. SSS = Sector Stability Score (0–100).</p>
+                            <table class="sector-persistence-table" id="sectorPersistenceTable" aria-label="Sector persistence heatmap">
+                                <thead>
+                                    <tr>
+                                        <th>Sector</th>
+                                        <th>Strength</th>
+                                        <th>SSS</th>
+                                        <th>Persist</th>
+                                        <th>Breadth</th>
+                                        <th>Vol stability</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sectorPersistenceBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Relative Strength Scanner: current-month futures ranked vs NIFTY -->
+                <div class="dashboard-card rs-scanner-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-chart-line"></i> Relative Strength Scanner
+                            <a href="/dailyRSchecklist.html" class="rs-checklist-link" title="Open Daily Trade Checklist" aria-label="Open Daily Trade Checklist"><i class="fas fa-clipboard-check"></i> Checklist</a>
+                        </h3>
+                        <div class="rs-scanner-toolbar">
+                            <label class="rs-scanner-sort" for="rsScannerSort">
+                                Sort by:
+                                <select id="rsScannerSort" aria-label="Sort scanner rows">
+                                    <option value="score" selected>Score</option>
+                                    <option value="maturity">Maturity</option>
+                                </select>
+                            </label>
+                            <span class="rs-scanner-countdown" id="rsScannerCountdown" title="Next refresh">—</span>
+                            <span class="rs-scanner-updated" id="rsScannerUpdated">—</span>
+                            <button type="button" class="btn-icon" id="rsScannerRefresh" title="Refresh scanner" aria-label="Refresh relative strength scanner">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <p class="rs-scanner-subtitle">Conviction Core board (10-min stable) + Setup Radar (5-min EMA5×VWAP). Click a row to open the chart.</p>
+                        <div class="rs-live-setups" id="rsLiveSetups">
+                            <span class="rs-live-setups-label">Live setups:</span>
+                            <span class="rs-live-setups-empty" id="rsLiveSetupsEmpty">No live setups</span>
+                            <div class="rs-live-setups-chips" id="rsLiveSetupsChips"></div>
+                        </div>
+                        <div class="rs-fast-watch" id="rsFastWatch" hidden>
+                            <div class="rs-fast-watch-head">
+                                <span class="rs-fast-watch-label"><i class="fas fa-bolt"></i> Fast Watch <span class="rs-beta">beta</span></span>
+                                <span class="rs-fast-watch-hint">Unconfirmed — not on 09:25 lock · no entry authority</span>
+                                <button type="button" class="rs-fast-watch-expand" id="rsFastWatchExpand" hidden>Show all flips</button>
+                            </div>
+                            <div class="rs-fast-watch-cols" id="rsFastWatchGrid">
+                                <div class="rs-fast-watch-col rs-fast-watch-col--bull">
+                                    <div class="rs-fast-watch-stack" id="rsFastWatchBull"></div>
+                                </div>
+                                <div class="rs-fast-watch-col rs-fast-watch-col--bear">
+                                    <div class="rs-fast-watch-stack" id="rsFastWatchBear"></div>
+                                </div>
+                            </div>
+                            <div class="rs-fast-watch-all-cols" id="rsFastWatchAll" hidden>
+                                <div class="rs-fast-watch-col rs-fast-watch-col--bull">
+                                    <div class="rs-fast-watch-stack" id="rsFastWatchAllBull"></div>
+                                </div>
+                                <div class="rs-fast-watch-col rs-fast-watch-col--bear">
+                                    <div class="rs-fast-watch-stack" id="rsFastWatchAllBear"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="rs-promo-events" id="rsPromoEvents" hidden></div>
+                        <div class="rs-pending-challenges" id="rsPendingChallenges"></div>
+                        <div class="rs-scanner-grid">
+                            <div class="rs-scanner-col rs-scanner-col--bull">
+                                <h4 class="rs-scanner-col-title"><i class="fas fa-arrow-trend-up"></i> Bullish Core <span class="rs-side-count" id="rsBullCount">0/5</span></h4>
+                                <div class="rs-scanner-table-wrap" id="rsScannerBullish"></div>
+                                <details class="rs-bench-details" id="rsBullBenchWrap" hidden>
+                                    <summary>Dropped today / bench (<span id="rsBullBenchCount">0</span>)</summary>
+                                    <div class="rs-scanner-table-wrap" id="rsScannerBullBench"></div>
+                                </details>
+                            </div>
+                            <div class="rs-scanner-col rs-scanner-col--bear">
+                                <h4 class="rs-scanner-col-title"><i class="fas fa-arrow-trend-down"></i> Bearish Core <span class="rs-side-count" id="rsBearCount">0/5</span></h4>
+                                <div class="rs-scanner-table-wrap" id="rsScannerBearish"></div>
+                                <details class="rs-bench-details" id="rsBearBenchWrap" hidden>
+                                    <summary>Dropped today / bench (<span id="rsBearBenchCount">0</span>)</summary>
+                                    <div class="rs-scanner-table-wrap" id="rsScannerBearBench"></div>
+                                </details>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Smart Futures Carry-Forward Watch: late-session picks that passed score+VWAP -->
+                <div class="dashboard-card sf-watchlist-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-clipboard-list"></i> Carry-Forward Watch — Review Pre-Market Tomorrow</h3>
+                        <div class="sf-wl-toolbar">
+                            <span class="sf-wl-updated" id="sfWatchlistUpdated">—</span>
+                            <button type="button" class="btn-icon" id="sfWatchlistRefresh" title="Refresh carry-forward watchlist" aria-label="Refresh carry-forward watchlist">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <p class="sf-wl-hint">After <strong>14:30 IST</strong> this section shows that day&rsquo;s list until the next 14:30. Before 14:30, it shows the <strong>previous NSE session</strong> only (no date column). Signals: after 14:00 IST, reclaim-score (≥ 55) and VWAP gates. <strong>Cur.mth contract / LTP</strong> columns come from <code>arbitrage_master</code> for the equity underlying (today&rsquo;s serial current-month future).</p>
+                        <p class="sf-wl-msg" id="sfWatchlistMsg">Loading…</p>
+                        <div id="sfWatchlistHost"></div>
+                    </div>
+                </div>
+
+                <!-- Live OI heatmap: API ~200; table shows top 10 -->
+                <div class="dashboard-card oi-heatmap-card full-width">
+                    <div class="card-header compact">
+                        <h3 class="oi-heatmap-h3">
+                            <i class="fas fa-fire-flame-curved" aria-hidden="true"></i>
+                            <span class="oi-heatmap-title-block">
+                                <span class="oi-heatmap-title-row">
+                                    <span>OI Buildup Heatmap</span>
+                                    <span class="oi-heatmap-header-mode" id="oiHeatmapHeaderMode">(live)</span>
+                                    <span class="oi-heatmap-scan-sep" id="oiHeatmapScanSep" aria-hidden="true">·</span>
+                                    <span class="oi-heatmap-header-scan" id="oiHeatmapHeaderScan">—</span>
+                                </span>
+                            </span>
+                        </h3>
+                        <div class="oi-heatmap-toolbar">
+                            <span class="oi-heatmap-updated" id="oiHeatmapUpdated">—</span>
+                            <button type="button" class="btn-icon" id="oiHeatmapRefresh" title="Refresh OI heatmap" aria-label="Refresh OI heatmap">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <p class="oi-heatmap-msg" id="oiHeatmapMsg">Loading…</p>
+                        <div class="oi-heatmap-tabs" role="tablist" aria-label="OI signal buckets">
+                            <button type="button" class="oi-heatmap-tab is-active" data-oi-tab="LONG_BUILDUP" role="tab" aria-selected="true">Long Buildup</button>
+                            <button type="button" class="oi-heatmap-tab" data-oi-tab="SHORT_BUILDUP" role="tab" aria-selected="false">Short Buildup</button>
+                            <button type="button" class="oi-heatmap-tab" data-oi-tab="LONG_UNWINDING" role="tab" aria-selected="false">Long Unwinding</button>
+                            <button type="button" class="oi-heatmap-tab" data-oi-tab="SHORT_COVERING" role="tab" aria-selected="false">Short Covering</button>
+                        </div>
+                        <div class="oi-heatmap-wrap" id="oiHeatmapHost"></div>
+                        <div class="oi-heatmap-more-row">
+                            <button type="button" class="oi-heatmap-more-link" id="oiHeatmapMoreBtn" style="display:none;">More...</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Crypto Prices Card - Full Width -->
+                <div class="dashboard-card crypto-card full-width">
+                    <div class="card-header compact">
+                        <h3><i class="fas fa-coins"></i> Live Crypto Prices</h3>
+                        <div class="crypto-controls">
+                            <span class="last-updated" id="lastUpdated">Last updated: --</span>
+                            <button class="btn-icon" onclick="refreshCryptoPrices()" title="Refresh prices">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                            <button class="btn-icon force-refresh" onclick="forceRefreshCryptoPrices()" title="Force refresh (clear cache)">
+                                <i class="fas fa-redo"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="crypto-container">
+                            <!-- Debug Info (temporary) -->
+                            <div id="cryptoDebug" style="background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; font-size: 12px; display: none;">
+                                <strong>Crypto Debug Info:</strong>
+                                <div id="cryptoStatus">Initializing...</div>
+                                <div id="cryptoElements">Checking elements...</div>
+                                <div id="cryptoErrors">No errors</div>
+                                <button onclick="toggleCryptoDebug()" style="margin-top: 5px; padding: 5px 10px; font-size: 10px;">Toggle Debug</button>
+                            </div>
+                            
+                            <div class="crypto-grid" id="cryptoGrid">
+                                <div class="crypto-item" data-symbol="BTCUSDT">
+                                    <div class="crypto-symbol">₿</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Bitcoin</div>
+                                        <div class="crypto-price" id="BTCUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="BTCUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="ETHUSDT">
+                                    <div class="crypto-symbol">Ξ</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Ethereum</div>
+                                        <div class="crypto-price" id="ETHUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="ETHUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="BNBUSDT">
+                                    <div class="crypto-symbol">BNB</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Binance Coin</div>
+                                        <div class="crypto-price" id="BNBUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="BNBUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="ADAUSDT">
+                                    <div class="crypto-symbol">ADA</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Cardano</div>
+                                        <div class="crypto-price" id="ADAUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="ADAUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="SOLUSDT">
+                                    <div class="crypto-symbol">SOL</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Solana</div>
+                                        <div class="crypto-price" id="SOLUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="SOLUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="DOTUSDT">
+                                    <div class="crypto-symbol">DOT</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Polkadot</div>
+                                        <div class="crypto-price" id="DOTUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="DOTUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="MATICUSDT">
+                                    <div class="crypto-symbol">MATIC</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Polygon</div>
+                                        <div class="crypto-price" id="MATICUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="MATICUSDT-change">--</div>
+                                    </div>
+                                </div>
+                                <div class="crypto-item" data-symbol="LINKUSDT">
+                                    <div class="crypto-symbol">LINK</div>
+                                    <div class="crypto-content">
+                                        <div class="crypto-name">Chainlink</div>
+                                        <div class="crypto-price" id="LINKUSDT-price">Loading...</div>
+                                        <div class="crypto-change" id="LINKUSDT-change">--</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="crypto-scroll-indicator">
+                                <span class="scroll-text">← Scroll for more coins →</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Broker Management Section -->
+            <section id="broker" class="content-section">
+                <div class="broker-content">
+                    <div class="add-broker-section">
+                        <button class="btn btn-primary" onclick="showAddBrokerForm()">
+                            <i class="fas fa-plus"></i> Add New Broker
+                        </button>
+                    </div>
+                    
+                    <div class="broker-list" id="brokerList">
+                        <div class="dashboard-placeholder">
+                            <i class="fas fa-university"></i>
+                            <h4>Broker Management</h4>
+                            <p>Loading broker connections...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Strategy Management Section -->
+            <section id="strategy" class="content-section">
+                <div class="strategy-content">
+                    <div class="add-strategy-section">
+                        <button class="btn btn-primary" onclick="showAddStrategyForm()">
+                            <i class="fas fa-plus"></i> Add New Strategy
+                        </button>
+                    </div>
+                    
+                    <div class="strategy-list" id="strategyList">
+                        <div class="dashboard-placeholder">
+                            <i class="fas fa-robot"></i>
+                            <h4>Strategy Management</h4>
+                            <p>Loading trading strategies...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Settings Section -->
+            <section id="settings" class="content-section">
+                <div class="settings-content">
+                    <div class="settings-grid">
+                        <div class="setting-card">
+                            <h3><i class="fas fa-bell"></i> Notifications</h3>
+                            <p>Configure your notification preferences</p>
+                            <div class="setting-status">
+                                <span class="status-badge active">Active</span>
+                                <span class="status-text">Email & Telegram enabled</span>
+                            </div>
+                        </div>
+                        <div class="setting-card">
+                            <h3><i class="fas fa-shield-alt"></i> Security</h3>
+                            <p>Manage your account security settings</p>
+                            <div class="setting-status">
+                                <span class="status-badge active">Secure</span>
+                                <span class="status-text">2FA & OAuth enabled</span>
+                            </div>
+                        </div>
+                        <div class="setting-card">
+                            <h3><i class="fas fa-palette"></i> Appearance</h3>
+                            <p>Customize the platform appearance</p>
+                            <div class="setting-status">
+                                <span class="status-badge">Default</span>
+                                <span class="status-text">Light theme active</span>
+                    </div>
+                    </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Reports Section -->
+            <section id="reports" class="content-section">
+                <div class="reports-content">
+                    <div class="reports-grid">
+                        <div class="report-card">
+                            <h3><i class="fas fa-chart-line"></i> Performance Report</h3>
+                            <p>View your trading performance metrics</p>
+                            <div class="report-status">
+                                <span class="status-badge">Ready</span>
+                                <span class="status-text">Last updated: Today</span>
+                            </div>
+                        </div>
+                        <div class="report-card">
+                            <h3><i class="fas fa-chart-bar"></i> Risk Analysis</h3>
+                            <p>Analyze your portfolio risk exposure</p>
+                            <div class="report-status">
+                                <span class="status-badge">Ready</span>
+                                <span class="status-text">Last updated: Today</span>
+                    </div>
+                    </div>
+                        <div class="report-card">
+                            <h3><i class="fas fa-file-alt"></i> Trade History</h3>
+                        <p>Review your complete trade history</p>
+                            <div class="report-status">
+                                <span class="status-badge">Ready</span>
+                                <span class="status-text">Last updated: Today</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div class="oi-heatmap-modal-overlay" id="oiHeatmapModal" role="dialog" aria-modal="true" aria-label="Full OI Buildup Heatmap" hidden>
+        <div class="oi-heatmap-modal-dialog">
+            <div class="oi-heatmap-modal-head">
+                <h3><i class="fas fa-fire-flame-curved" aria-hidden="true"></i> OI Buildup Heatmap - Full List</h3>
+                <button type="button" class="oi-heatmap-modal-close" id="oiHeatmapModalClose" aria-label="Close">&times;</button>
+            </div>
+            <div class="oi-heatmap-modal-tabs oi-heatmap-tabs" role="tablist" aria-label="OI signal buckets (full list)">
+                <button type="button" class="oi-heatmap-tab is-active" data-oi-tab="LONG_BUILDUP" role="tab" aria-selected="true">Long Buildup</button>
+                <button type="button" class="oi-heatmap-tab" data-oi-tab="SHORT_BUILDUP" role="tab" aria-selected="false">Short Buildup</button>
+                <button type="button" class="oi-heatmap-tab" data-oi-tab="LONG_UNWINDING" role="tab" aria-selected="false">Long Unwinding</button>
+                <button type="button" class="oi-heatmap-tab" data-oi-tab="SHORT_COVERING" role="tab" aria-selected="false">Short Covering</button>
+            </div>
+            <div class="oi-heatmap-modal-controls">
+                <label for="oiHeatmapSortKey">Sort by</label>
+                <select id="oiHeatmapSortKey">
+                    <option value="ranking">Tab ranking</option>
+                    <option value="symbol">Symbol</option>
+                    <option value="score">Score</option>
+                    <option value="oi_signal">OI Signal</option>
+                    <option value="prev_oi_signal">Previous OI</option>
+                    <option value="htf_oi_signal">HTF-OI</option>
+                </select>
+                <button type="button" class="btn-icon oi-heatmap-sort-dir" id="oiHeatmapSortDir" title="Toggle sort direction" aria-label="Toggle sort direction">↑</button>
+            </div>
+            <div class="oi-heatmap-modal-body" id="oiHeatmapModalBody">
+                <p class="oi-heatmap-empty">No heatmap data yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="left-menu.js?v=3.40"></script>
+    <script src="dashboard-pnl-day.js?v=1"></script>
+    <script src="dashboard.js?v=1.2"></script>
+    <script src="market-sentiment-dials.js?v=1.6"></script>
+    <script src="dashboard-sector-movers.js?v=1.4"></script>
+    <script src="dashboard-relative-strength.js?v=10"></script>
+    <script src="dashboard-sf-watchlist.js?v=1.3"></script>
+    <script src="dashboard-oi-heatmap.js?v=3.7"></script>
+    <script src="crypto-prices.js?v=1.4"></script>
+    <script src="version.js?v=1.0"></script>
+    <script src="cache-manager.js?v=1.1"></script>
+    
+    <script>
+        // Debug functions
+        function toggleCryptoDebug() {
+            const debugDiv = document.getElementById('cryptoDebug');
+            if (debugDiv) {
+                debugDiv.style.display = debugDiv.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+        
+        // Show debug info by default in development
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            document.addEventListener('DOMContentLoaded', () => {
+                const debugDiv = document.getElementById('cryptoDebug');
+                if (debugDiv) {
+                    debugDiv.style.display = 'block';
+                }
+            });
+        }
+    </script>
+</body>
+</html>
