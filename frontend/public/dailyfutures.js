@@ -139,9 +139,9 @@
     const m = parts.find(function (p) { return p.type === 'minute'; });
     return (h ? h.value : '00') + ':' + (m ? m.value : '00');
   }
-  function isAfter1400Ist() {
+  function isAfter1410Ist() {
     const hm = istHmNow();
-    return hm >= '14:00';
+    return hm >= '14:10';
   }
 
   function fmtIso(iso) {
@@ -910,9 +910,7 @@
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
           sectorMoverBadgeHtml(r, badgeKind) +
-          '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
-          esc(r.underlying) +
-          '</div></td><td class="num">' +
+          '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td class="num">' +
           esc(r.scan_count) +
@@ -969,18 +967,12 @@
     if (bearBtn) bearBtn.hidden = !(open && bear.length > 0);
   }
 
-  function isTvWebhookPick(r) {
-    return !!(r && (r.tv_webhook === true || r.source === 'tradingview_webhook'));
-  }
-
-  function enterCellHtml(eligible, reason, enterBtn, row) {
-    var tvBadge = isTvWebhookPick(row) ? '<span class="df-tv-badge">TV</span> ' : '';
+  function enterCellHtml(eligible, reason, enterBtn) {
     if (eligible) {
-      return '<div class="df-enter-cell">' + tvBadge + enterBtn + '</div>';
+      return '<div class="df-enter-cell">' + enterBtn + '</div>';
     }
     return (
       '<div class="df-enter-cell">' +
-      tvBadge +
       enterBtn +
       '<div class="df-enter-block-reason" role="status">' +
       esc(reason) +
@@ -1068,14 +1060,12 @@
           '<button type="button" class="df-btn df-btn-order" data-sid="' +
           r.screening_id +
           '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
-        const enterCell = enterCellHtml(eligible, reason, enterBtn, r);
+        const enterCell = enterCellHtml(eligible, reason, enterBtn);
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
           sectorMoverBadgeHtml(r, 'bull') +
-          '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
-          esc(r.underlying) +
-          '</div></td><td class="num">' +
+          '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td class="num">' +
           esc(r.scan_count) +
@@ -1167,14 +1157,12 @@
           '<button type="button" class="df-btn df-btn-order" data-bear="1" data-sid="' +
           r.screening_id +
           '"' + (eligible ? '' : ' disabled') + '>Enter</button>';
-        const enterCell = enterCellHtml(eligible, reason, enterBtn, r);
+        const enterCell = enterCellHtml(eligible, reason, enterBtn);
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
           sectorMoverBadgeHtml(r, 'bear') +
-          '</strong><div style="font-size:0.75rem;color:var(--theme-muted);">' +
-          esc(r.underlying) +
-          '</div></td><td class="num">' +
+          '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td class="num">' +
           esc(r.scan_count) +
@@ -1874,9 +1862,12 @@
             'Session date (IST): ' +
             (liteData.trade_date || '—') +
             ' · Data for this IST session only · Loading advanced sections…';
-          if (isAfter1400Ist()) {
+          if (liteData.entries_closed || isAfter1410Ist()) {
             b.textContent =
-              '⚠ After 14:00 IST — no new entries allowed. Managing existing positions only. · Session date (IST): ' +
+              '⚠ ' +
+              (liteData.entries_closed_message ||
+                'After 14:10 IST — no new entries allowed') +
+              '. Managing existing positions only. · Session date (IST): ' +
               (liteData.trade_date || '—');
           }
         }
@@ -1911,9 +1902,12 @@
                 'Session date (IST): ' +
                 (liteData.trade_date || '—') +
                 ' · Data for this IST session only · Auto-refresh every 120 s';
-              if (isAfter1400Ist()) {
+              if (liteData.entries_closed || isAfter1410Ist()) {
                 b.textContent =
-                  '⚠ After 14:00 IST — no new entries allowed. Managing existing positions only. · Session date (IST): ' +
+                  '⚠ ' +
+                  (liteData.entries_closed_message ||
+                    'After 14:10 IST — no new entries allowed') +
+                  '. Managing existing positions only. · Session date (IST): ' +
                   (liteData.trade_date || '—');
               }
             }

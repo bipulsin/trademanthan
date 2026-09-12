@@ -1790,6 +1790,24 @@ def _is_trading_day(d: date) -> bool:
     return not _is_holiday_date(d)
 
 
+# New entries (Enter) close at 14:10 IST on trading days; blocked all day on weekends/holidays.
+_DF_ENTRY_CUTOFF_IST = dt_time(14, 10)
+
+
+def _new_entries_blocked_reason(now: Optional[datetime] = None) -> Optional[str]:
+    """Return a user-facing block reason, or None if Enter is still allowed by calendar/time."""
+    dt = now or datetime.now(IST)
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    else:
+        dt = dt.astimezone(IST)
+    if not _is_trading_day(dt.date()):
+        return "Non-trading day — no new entries allowed"
+    if dt.time() >= _DF_ENTRY_CUTOFF_IST:
+        return "After 14:10 IST — no new entries allowed"
+    return None
+
+
 def _prev_trading_day(d: date) -> date:
     x = d - timedelta(days=1)
     for _ in range(15):
@@ -1866,6 +1884,7 @@ def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: boo
         "Daily Futures shows only the current IST session from 09:00 onward. "
         "Sections stay empty before 09:00 IST."
     )
+    entry_block = _new_entries_blocked_reason()
     return {
         "trade_date": str(trade_date),
         "session_before_open": session_before_open,
@@ -1898,6 +1917,8 @@ def _empty_daily_futures_workspace(trade_date: date, *, session_before_open: boo
             "losses": 0,
             "win_rate_pct": None,
         },
+        "entries_closed": bool(entry_block),
+        "entries_closed_message": entry_block,
     }
 
 
@@ -4253,6 +4274,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         if is_tv:
             p["tv_webhook"] = True
             p["source"] = "tradingview_webhook"
+        entry_block = _new_entries_blocked_reason(now_ist)
+        if entry_block:
+            reasons.append(entry_block)
         # V2 shadow audit logs (no behavior change while flag remains OFF).
         if not _df_v2_mode_enabled():
             raw_conv = _safe_float(p.get("conviction_score"))
@@ -4264,7 +4288,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 rs_pass_v2 = (stock_chg <= nifty_chg) if dtp == "SHORT" else (stock_chg >= nifty_chg)
             cig = p.get("candle_is_green")
             candle_pass_v2 = (cig is False) if dtp == "SHORT" else (cig is True)
-            cutoff_pass_v2 = now_ist.time() < dt_time(14, 0)
+            cutoff_pass_v2 = entry_block is None
             _log_decision(td, und_u, "GATE_CONVICTION", "PASS" if conv_pass_v2 else "BLOCK", {"conviction_score": raw_conv})
             _log_decision(
                 td,
@@ -4280,7 +4304,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "PASS" if candle_pass_v2 else "BLOCK",
                 {"candle_is_green": bool(cig) if cig is not None else None, "direction_type": dtp},
             )
-            _log_decision(td, und_u, "CUTOFF_1400_BLOCK", "PASS" if cutoff_pass_v2 else "BLOCK", {"now_ist": now_ist.isoformat()})
+            _log_decision(td, und_u, "CUTOFF_1410_BLOCK", "PASS" if cutoff_pass_v2 else "BLOCK", {"now_ist": now_ist.isoformat(), "reason": entry_block})
         sold_ts = sold_latest_by_underlying.get(und_u)
         if sold_ts is not None:
             last_hit_dt = _parse_iso_ist(p.get("last_hit_at"))
@@ -4327,8 +4351,6 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 rs_ok = (float(sp) <= float(np)) if dtp == "SHORT" else (float(sp) >= float(np))
                 if not rs_ok:
                     reasons.append("Relative strength gate not satisfied")
-            if now_ist.time() >= dt_time(14, 0):
-                reasons.append("After 14:00 IST — no new entries allowed")
 
             ik = str(p.get("instrument_key") or "").strip()
             first_hit_dt = _parse_iso_ist(p.get("first_hit_at"))
@@ -4389,7 +4411,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                                         hit = float(ltp_now) <= (float(pullback_target) + tol)
                                 if pullback_expires is not None and now_ist >= pullback_expires:
                                     pullback_status = "EXPIRED"
-                                elif now_ist.time() >= dt_time(14, 0):
+                                elif now_ist.time() >= _DF_ENTRY_CUTOFF_IST:
                                     pullback_status = "EXPIRED"
                                 elif hit:
                                     pullback_status = "HIT"
@@ -4508,10 +4530,13 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     except Exception as e:
         logger.warning("daily_futures: TradingView picks merge skipped: %s", e)
 
+    entry_block = _new_entries_blocked_reason(now_ist)
     return {
         "trade_date": str(td),
         "session_before_open": False,
         "session_message": None,
+        "entries_closed": bool(entry_block),
+        "entries_closed_message": entry_block,
         "picks": picks_bull,
         "picks_mixed": picks_mixed,
         "picks_bearish": picks_bearish,
@@ -4603,6 +4628,9 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     ensure_daily_futures_tables()
     if not is_daily_futures_session_open_ist():
         raise ValueError("Daily Futures session opens at 09:00 IST. Orders are not accepted before that.")
+    entry_block = _new_entries_blocked_reason()
+    if entry_block:
+        raise ValueError(entry_block)
     row = db.execute(
         text(
             """
@@ -4643,8 +4671,6 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
         if datetime.now(IST) < (ss_dt + timedelta(minutes=5)):
             raise ValueError("Wait 5 minutes after qualifying scan")
     else:
-        if datetime.now(IST).time() >= dt_time(14, 0):
-            raise ValueError("After 14:00 IST — no new entries allowed")
         if not bool(row[11]):
             raise ValueError("First-scan 5m candle confirmation pending")
         pstat = str(row[12] or "").strip().upper()
