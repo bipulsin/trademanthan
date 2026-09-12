@@ -892,6 +892,50 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     line-height: 1.1;
 }
 
+.tm-topbar-vix {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    padding: 0.2rem 0.15rem;
+    line-height: 1;
+}
+
+.tm-topbar-vix-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #86efac;
+    font-family: inherit;
+    opacity: 0.9;
+}
+
+.tm-topbar-vix-value {
+    font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: #86efac;
+    line-height: 1.1;
+}
+
+.tm-topbar-vix-value.tm-vix-green {
+    color: #86efac;
+}
+
+.tm-topbar-vix-value.tm-vix-red {
+    color: #ef4444;
+}
+
+.tm-topbar-vix-value.tm-vix-blink {
+    animation: tm-vix-blink 1s step-end infinite;
+}
+
+@keyframes tm-vix-blink {
+    50% { opacity: 0; }
+}
+
 @media (min-width: 1025px) {
     body.left-menu-web-hamburger .tm-web-topbar {
         display: flex;

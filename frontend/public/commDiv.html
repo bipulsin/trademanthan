@@ -14,9 +14,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
     <link rel="stylesheet" href="settings.css?v=2" />
-    <link rel="stylesheet" href="left-menu.css?v=3.42" />
+    <link rel="stylesheet" href="left-menu.css?v=3.45" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=3" />
+    <link rel="stylesheet" href="commDiv.css?v=4" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -47,31 +47,35 @@
                     <h2 class="cd-section-title">Active</h2>
                     <div class="cd-card" id="cdActivePanel">
                         <p class="cd-empty" id="cdActiveEmpty">No active signal. Waiting for DIV webhook.</p>
-                        <div class="cd-active-row" id="cdActiveRow" hidden></div>
+                        <div class="cd-active-desktop" id="cdActiveRow" hidden></div>
+                        <div class="cd-mobile-cards" id="cdActiveMobile" hidden></div>
                     </div>
                 </section>
 
                 <section class="cd-section" aria-label="History">
                     <h2 class="cd-section-title">History</h2>
                     <div class="cd-card">
-                        <div class="cd-table-wrap">
-                            <table class="cd-table" id="cdHistoryTable">
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Dir</th>
-                                        <th>DIV</th>
-                                        <th>GO</th>
-                                        <th>Entry</th>
-                                        <th>Entry time</th>
-                                        <th>Exit</th>
-                                        <th>Exit time</th>
-                                        <th>trade_log</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="cdHistoryBody"></tbody>
-                            </table>
+                        <div class="cd-desktop-table">
+                            <div class="cd-table-wrap">
+                                <table class="cd-table" id="cdHistoryTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Symbol</th>
+                                            <th>Dir</th>
+                                            <th>DIV</th>
+                                            <th>GO</th>
+                                            <th>Entry</th>
+                                            <th>Entry time</th>
+                                            <th>Exit</th>
+                                            <th>Exit time</th>
+                                            <th>trade_log</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="cdHistoryBody"></tbody>
+                                </table>
+                            </div>
                         </div>
+                        <div class="cd-mobile-cards" id="cdHistoryMobile"></div>
                         <p class="cd-empty" id="cdHistoryEmpty">No completed trades yet.</p>
                     </div>
                 </section>
@@ -117,7 +121,7 @@
         </div>
     </div>
 
-    <script src="left-menu.js?v=3.44"></script>
-    <script src="commDiv.js?v=3"></script>
+    <script src="left-menu.js?v=3.45"></script>
+    <script src="commDiv.js?v=4"></script>
 </body>
 </html>

@@ -93,6 +93,13 @@ class LeftMenu {
                 this.injectMobileFooter();
                 this.injectPanelSheetHandle();
                 this.injectWebTopBar();
+                // Stock Options mobile VIX (no web topbar ≤1024): still poll dials API.
+                if (
+                    document.body.classList.contains('stock-options-page') &&
+                    !this._vixPollStarted
+                ) {
+                    this.startIndiaVixPoll();
+                }
                 this.setupCollapseToggle();
                 this.setupMobileMenu();
                 this.setupMobileFooterIndices();
@@ -750,8 +757,71 @@ class LeftMenu {
         <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="tm-web-topbar-logo">
         <span class="tm-web-topbar-brand">TradeWithCTO</span>
     </a>
+    <div class="tm-topbar-vix" id="tmTopbarVix" aria-live="polite" title="India VIX">
+        <span class="tm-topbar-vix-label">Vx</span>
+        <span class="tm-topbar-vix-value" id="tmTopbarVixValue">—</span>
+    </div>
 </header>`;
         document.body.insertAdjacentHTML('afterbegin', html);
+        this.startIndiaVixPoll();
+    }
+
+    applyIndiaVixDisplay(vix) {
+        const targets = [
+            document.getElementById('tmTopbarVixValue'),
+            document.getElementById('soMobileVixValue'),
+            document.getElementById('soPageVixValue'),
+        ];
+        const warnEl = document.getElementById('soVixWarn');
+        const setOne = (el) => {
+            if (!el) return;
+            el.classList.remove('tm-vix-green', 'tm-vix-red', 'tm-vix-blink', 'so-vix-green', 'so-vix-red', 'so-vix-blink');
+            if (vix == null || !Number.isFinite(vix)) {
+                el.textContent = '—';
+                return;
+            }
+            el.textContent = vix.toFixed(1);
+            if (vix < 20.01) {
+                el.classList.add('tm-vix-green', 'so-vix-green');
+            } else {
+                el.classList.add('tm-vix-red', 'so-vix-red');
+                if (vix > 23) el.classList.add('tm-vix-blink', 'so-vix-blink');
+            }
+        };
+        targets.forEach(setOne);
+        if (warnEl) warnEl.hidden = !(vix != null && Number.isFinite(vix) && vix > 22.7);
+    }
+
+    async loadIndiaVix() {
+        try {
+            const url = '/scan/market-sentiment-dials?basis=today&_=' + Date.now();
+            const res = await fetch(url, { cache: 'no-store', credentials: 'same-origin' });
+            const data = await res.json();
+            let vix = null;
+            if (data && data.success && Array.isArray(data.indices)) {
+                const row = data.indices.find((r) => String(r.id || '').toLowerCase() === 'indiavix');
+                if (row) {
+                    const raw = row.vix_value != null ? row.vix_value : row.last;
+                    const n = Number(raw);
+                    if (Number.isFinite(n)) vix = n;
+                }
+            }
+            this.applyIndiaVixDisplay(vix);
+        } catch (e) {
+            console.warn('LeftMenu india vix:', e);
+            this.applyIndiaVixDisplay(null);
+        }
+    }
+
+    startIndiaVixPoll() {
+        if (this._vixPollStarted) return;
+        this._vixPollStarted = true;
+        const pollMs = 5 * 60 * 1000;
+        this.loadIndiaVix();
+        setInterval(() => this.loadIndiaVix(), pollMs);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') this.loadIndiaVix();
+        });
     }
 
     injectMobileFooter() {

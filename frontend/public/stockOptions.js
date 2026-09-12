@@ -157,6 +157,13 @@
     );
   }
 
+  /** Compact side chip for mobile card summary (no nested tip / tabindex). */
+  function sideChipPlain(side) {
+    if (!side) return esc("—");
+    const cls = side === "BEAR CALL" ? "so-chip-bear" : "so-chip-bull";
+    return '<span class="so-chip ' + cls + '">' + esc(side) + "</span>";
+  }
+
   let floatTipChip = null;
 
   function ensureFloatTip() {
@@ -407,6 +414,55 @@
     return MONTH_NAMES[m - 1] + " " + d + ", " + y;
   }
 
+  /** Date key YYYY-MM-DD from a datetime / date string. */
+  function dateKeyFrom(v) {
+    return dateOnly(v) || "—";
+  }
+
+  /** Hour-only label for 2h cadence (minutes always :15). */
+  function hourOnlyLabel(dt) {
+    const m = String(dt || "").match(/(\d{1,2}):(\d{2})/);
+    if (!m) return "—";
+    return String(Number(m[1])) + "h";
+  }
+
+  function detailRow(label, html) {
+    return (
+      '<div class="so-mcard-field">' +
+      '<span class="so-mcard-field-label">' + label + "</span>" +
+      '<span class="so-mcard-field-val">' + html + "</span></div>"
+    );
+  }
+
+  function mobileGroupSection(titleHtml, metaHtml, cardsHtml) {
+    return (
+      '<section class="so-mgroup">' +
+      '<header class="so-mgroup-head">' +
+      '<span class="so-mgroup-title">' + titleHtml + "</span>" +
+      (metaHtml ? '<span class="so-mgroup-meta">' + metaHtml + "</span>" : "") +
+      "</header>" +
+      '<div class="so-mgroup-cards">' + cardsHtml + "</div></section>"
+    );
+  }
+
+  function mobileCard(summaryHtml, bodyHtml, extraClass) {
+    return (
+      '<article class="so-mcard' + (extraClass ? " " + extraClass : "") + '">' +
+      '<button type="button" class="so-mcard-summary" aria-expanded="false">' +
+      summaryHtml +
+      '<i class="fas fa-chevron-down so-mcard-chev" aria-hidden="true"></i>' +
+      "</button>" +
+      '<div class="so-mcard-body" hidden>' + bodyHtml + "</div></article>"
+    );
+  }
+
+  function wrapDesktopMobile(tableHtml, cardsHtml) {
+    return (
+      '<div class="so-desktop-table">' + tableHtml + "</div>" +
+      '<div class="so-mobile-cards">' + cardsHtml + "</div>"
+    );
+  }
+
   function pnlInrValue(r) {
     const lot = Number(r && r.lot_size);
     const inr = r && r.combined_pnl_inr;
@@ -582,8 +638,29 @@
         <td>${esc(r.status)}</td>
         <td>${sideChip(r.side)}</td>
       </tr>`).join("");
-    return `<div class="so-table-wrap"><table class="so-table">
+    const table = `<div class="so-table-wrap"><table class="so-table">
       <thead><tr>${headerHtml("radar")}</tr></thead><tbody>${body}</tbody></table></div>`;
+
+    const groups = groupRowsBy("radar", workspace.radar || [], (r) => dateKeyFrom(r.trigger_at), "trigger_at");
+    const cards = groups.map((g) => {
+      const title = esc(formatTradeDateLabel(g.key));
+      const meta = g.rows.length + (g.rows.length === 1 ? " signal" : " signals");
+      const list = g.rows.map((r) => {
+        const summary =
+          '<span class="so-mcard-time">' + hourOnlyLabel(r.trigger_at) + "</span>" +
+          '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
+          '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>";
+        const details =
+          detailRow("Trigger", esc(r.trigger_at || "—")) +
+          detailRow("EMA9", emaCell(r, "ema9")) +
+          detailRow("EMA30", emaCell(r, "ema30")) +
+          detailRow("EMA100", emaCell(r, "ema100")) +
+          detailRow("Status", esc(r.status || "—"));
+        return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
+      }).join("");
+      return mobileGroupSection(title, meta, list);
+    }).join("");
+    return wrapDesktopMobile(table, cards);
   }
 
   function renderActive() {
@@ -605,8 +682,34 @@
         <td><button type="button" class="button-41" role="button" data-trade="${r.id}"><span class="text">Trade</span></button></td>
       </tr>`;
     }).join("");
-    return `<div class="so-table-wrap"><table class="so-table">
+    const table = `<div class="so-table-wrap"><table class="so-table">
       <thead><tr>${headerHtml("active")}</tr></thead><tbody>${body}</tbody></table></div>`;
+
+    const groups = groupRowsBy("active", workspace.active || [], (r) => dateKeyFrom(r.armed_at), "armed_at");
+    const cards = groups.map((g) => {
+      const title = esc(formatTradeDateLabel(g.key));
+      const meta = g.rows.length + (g.rows.length === 1 ? " arm" : " arms");
+      const list = g.rows.map((r) => {
+        const spread = [r.spread_sell, r.spread_buy].filter(Boolean).map(esc).join("<br>") || "—";
+        const summary =
+          '<span class="so-mcard-time">' + hourOnlyLabel(r.armed_at) + "</span>" +
+          '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
+          '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>";
+        const details =
+          detailRow("Armed", esc(r.armed_at || "—")) +
+          detailRow("EMA9", emaCell(r, "ema9")) +
+          detailRow("EMA30", emaCell(r, "ema30")) +
+          detailRow("EMA100", emaCell(r, "ema100")) +
+          detailRow("Status", esc(r.status || "—")) +
+          detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
+          detailRow("Spread", '<span class="so-spread">' + spread + "</span>") +
+          '<div class="so-mcard-actions"><button type="button" class="button-41" role="button" data-trade="' +
+          r.id + '"><span class="text">Trade</span></button></div>';
+        return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
+      }).join("");
+      return mobileGroupSection(title, meta, list);
+    }).join("");
+    return wrapDesktopMobile(table, cards);
   }
 
   const PNL_BLINK_INR = 1100;
@@ -661,6 +764,29 @@
       </tr>`;
   }
 
+  function executedCardHtml(r) {
+    const pnl = pnlDisplay(r, { blink: true });
+    const hsBlank = r.hard_stop == null || r.hard_stop === "";
+    const checked = r.hard_stop_placed ? "checked" : "";
+    const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
+    const when = r.date_traded || r.armed_at || "";
+    const summary =
+      '<span class="so-mcard-time">' + hourOnlyLabel(when) + "</span>" +
+      '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
+      '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>";
+    const details =
+      detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
+      detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
+      detailRow("Costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
+      detailRow("LTP", "Sell " + num(r.sell_ltp) + "<br>Buy " + num(r.buy_ltp)) +
+      detailRow("P&amp;L ₹", '<span class="' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>") +
+      detailRow("Hard stop", '<span class="so-hs-cell">' + num(r.hard_stop) + hsBox + "</span>") +
+      '<div class="so-mcard-actions so-row-actions">' +
+      '<button type="button" class="so-edit-btn" data-edit="' + r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button>' +
+      '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button></div>';
+    return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
+  }
+
   function renderExecuted() {
     const all = workspace.executed || [];
     if (!all.length) return '<p class="so-empty">No Executed symbols.</p>';
@@ -671,8 +797,14 @@
       const meta = g.rows.length + (g.rows.length === 1 ? " trade" : " trades");
       return groupHeaderRow(colCount, title, meta) + g.rows.map(executedRowHtml).join("");
     }).join("");
-    return `<div class="so-table-wrap"><table class="so-table so-table-executed">
+    const table = `<div class="so-table-wrap"><table class="so-table so-table-executed">
       <thead><tr>${headerHtml("executed")}</tr></thead><tbody>${body}</tbody></table></div>`;
+    const cards = groups.map((g) => {
+      const title = esc(formatTradeDateLabel(g.key));
+      const meta = g.rows.length + (g.rows.length === 1 ? " trade" : " trades");
+      return mobileGroupSection(title, meta, g.rows.map(executedCardHtml).join(""));
+    }).join("");
+    return wrapDesktopMobile(table, cards);
   }
 
   function reportRowHtml(r) {
@@ -692,6 +824,24 @@
       </tr>`;
   }
 
+  function reportCardHtml(r) {
+    const pnl = pnlDisplay(r);
+    const summary =
+      '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
+      '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>" +
+      '<span class="so-mcard-pnl ' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>";
+    const details =
+      detailRow("Entry date", esc(r.date_traded || r.armed_at || "—")) +
+      detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
+      detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
+      detailRow("Entry costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
+      detailRow("Exit prices", "Sell " + num(r.sell_exit_price) + "<br>Buy " + num(r.buy_exit_price)) +
+      detailRow("Exit date", esc(r.exit_date || "—")) +
+      '<div class="so-mcard-actions"><button type="button" class="so-edit-btn" data-edit="' +
+      r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></div>';
+    return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
+  }
+
   function renderReport() {
     const all = workspace.completed || [];
     if (!all.length) return '<p class="so-empty">No completed trades.</p>';
@@ -702,8 +852,14 @@
       const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
       return groupHeaderRow(colCount, title, monthly) + g.rows.map(reportRowHtml).join("");
     }).join("");
-    return `<div class="so-table-wrap"><table class="so-table so-table-report">
+    const table = `<div class="so-table-wrap"><table class="so-table so-table-report">
       <thead><tr>${headerHtml("report")}</tr></thead><tbody>${body}</tbody></table></div>`;
+    const cards = groups.map((g) => {
+      const title = esc(g.key === "—" ? "Unknown month" : formatMonthLabel(g.key));
+      const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
+      return mobileGroupSection(title, monthly, g.rows.map(reportCardHtml).join(""));
+    }).join("");
+    return wrapDesktopMobile(table, cards);
   }
 
   function render() {
@@ -1073,6 +1229,18 @@
     });
     const panel = document.getElementById("soPanel");
     panel.addEventListener("click", (ev) => {
+      const summary = ev.target.closest(".so-mcard-summary");
+      if (summary && panel.contains(summary)) {
+        if (ev.target.closest(".so-chip-tip")) return;
+        const card = summary.closest(".so-mcard");
+        if (!card) return;
+        const body = card.querySelector(".so-mcard-body");
+        const open = summary.getAttribute("aria-expanded") === "true";
+        summary.setAttribute("aria-expanded", open ? "false" : "true");
+        card.classList.toggle("so-mcard-open", !open);
+        if (body) body.hidden = open;
+        return;
+      }
       const th = ev.target.closest("th[data-sort]");
       if (th) {
         toggleSort(th.dataset.sortTab, th.dataset.sort);
@@ -1142,54 +1310,5 @@
     document.addEventListener("keydown", unlockOnce, true);
     load();
     setInterval(load, 60000);
-    loadIndiaVix();
-    setInterval(loadIndiaVix, VIX_POLL_MS);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") loadIndiaVix();
-    });
   });
-
-  const VIX_API = "/scan/market-sentiment-dials";
-  const VIX_POLL_MS = 5 * 60 * 1000;
-
-  function applyVixDisplay(vix) {
-    const valEl = document.getElementById("soVixValue");
-    const warnEl = document.getElementById("soVixWarn");
-    if (!valEl) return;
-    valEl.classList.remove("so-vix-green", "so-vix-red", "so-vix-blink");
-    if (vix == null || !Number.isFinite(vix)) {
-      valEl.textContent = "—";
-      if (warnEl) warnEl.hidden = true;
-      return;
-    }
-    valEl.textContent = vix.toFixed(2);
-    if (vix < 20.01) {
-      valEl.classList.add("so-vix-green");
-    } else {
-      valEl.classList.add("so-vix-red");
-      if (vix > 23) valEl.classList.add("so-vix-blink");
-    }
-    if (warnEl) warnEl.hidden = !(vix > 22.7);
-  }
-
-  async function loadIndiaVix() {
-    try {
-      const url = VIX_API + "?basis=today&_=" + Date.now();
-      const res = await fetch(url, { cache: "no-store", credentials: "same-origin" });
-      const data = await res.json();
-      let vix = null;
-      if (data && data.success && Array.isArray(data.indices)) {
-        const row = data.indices.find((r) => String(r.id || "").toLowerCase() === "indiavix");
-        if (row) {
-          const raw = row.vix_value != null ? row.vix_value : row.last;
-          const n = Number(raw);
-          if (Number.isFinite(n)) vix = n;
-        }
-      }
-      applyVixDisplay(vix);
-    } catch (e) {
-      console.warn("stockOptions india vix:", e);
-      applyVixDisplay(null);
-    }
-  }
 })();
