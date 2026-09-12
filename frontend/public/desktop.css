@@ -533,19 +533,30 @@ body.desktop-page .tm-web-topbar {
   background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(12px);
+  height: 72px;
 }
 
 body.desktop-page .tm-web-topbar-brand {
   font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
+  font-size: clamp(1.65rem, 3.2vw, 2.35rem);
+  letter-spacing: -0.03em;
+  color: #e7f0ea;
+  line-height: 1.1;
+}
+
+body.desktop-page .tm-web-topbar-logo {
+  height: 44px;
+  max-width: 180px;
 }
 
 body.desktop-page .tm-web-hamburger {
+  width: 52px;
+  height: 52px;
   background: var(--bg2);
   border: 1px solid var(--line);
   color: var(--accent);
+  font-size: 1.45rem;
 }
 
 body.desktop-page .tm-web-hamburger:hover,
@@ -554,22 +565,184 @@ body.desktop-page .tm-web-hamburger[aria-expanded="true"] {
   border-color: rgba(61, 186, 122, 0.45);
 }
 
-/* Light theme */
+/* Light theme — redefine ALL tokens so dark-text-on-light wins */
 body.desktop-page[data-theme="light"] {
+  --bg0: #f4f7f5;
+  --bg1: #eef3f0;
+  --bg2: #e4ebe6;
+  --line: rgba(40, 70, 55, 0.18);
+  --text: #14201a;
+  --muted: #3d5248;
+  --accent: #1f7a4d;
+  --accent-dim: #2a8f5c;
+  --card: rgba(255, 255, 255, 0.98);
+  --card-inner: #f0f4f1;
   --theme-bg: #f4f7f5;
-  --theme-card: rgba(255, 255, 255, 0.95);
-  --theme-card-alt: #eef3f0;
-  --theme-border: rgba(40, 70, 55, 0.15);
+  --theme-card: var(--card);
+  --theme-card-alt: var(--card-inner);
+  --theme-border: var(--line);
   --theme-text: #14201a;
-  --theme-muted: #5a6e63;
-  --theme-accent: #2a8f5c;
-  --card: rgba(255, 255, 255, 0.95);
-  --card-inner: #eef3f0;
+  --theme-muted: #3d5248;
+  --theme-accent: #1f7a4d;
+  --theme-accent-hover: #2a8f5c;
   --left-menu-bg: rgba(255, 255, 255, 0.98);
   --left-menu-text: #14201a;
-  --left-menu-muted: #5a6e63;
-  --left-menu-accent: #2a8f5c;
+  --left-menu-muted: #3d5248;
+  --left-menu-accent: #1f7a4d;
+  --left-menu-border: rgba(40, 70, 55, 0.18);
   background-color: #f4f7f5 !important;
   background-image: none !important;
-  color: var(--theme-text) !important;
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .dashboard-card,
+body.desktop-page[data-theme="light"] .crypto-card,
+body.desktop-page[data-theme="light"] .panel,
+body.desktop-page[data-theme="light"] .market-sentiment-card,
+body.desktop-page[data-theme="light"] .pnl-day-card,
+body.desktop-page[data-theme="light"] .sector-movers-card {
+  background: #ffffff !important;
+  border-color: rgba(40, 70, 55, 0.16) !important;
+  color: #14201a !important;
+  box-shadow: 0 6px 20px rgba(20, 40, 30, 0.08);
+}
+
+body.desktop-page[data-theme="light"] .dashboard-card h3,
+body.desktop-page[data-theme="light"] .card-header h3,
+body.desktop-page[data-theme="light"] .card-content,
+body.desktop-page[data-theme="light"] .last-updated {
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .card-header h3 i,
+body.desktop-page[data-theme="light"] .dashboard-card h3 i {
+  color: #1f7a4d !important;
+}
+
+body.desktop-page[data-theme="light"] .market-trivia-ticker {
+  background: #e8eee9 !important;
+  border: 1px solid rgba(40, 70, 55, 0.2) !important;
+  color: #0d1612 !important;
+}
+
+body.desktop-page[data-theme="light"] .market-trivia-track span {
+  color: #0d1612 !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-dial,
+body.desktop-page[data-theme="light"] .market-sentiment-item,
+body.desktop-page[data-theme="light"] .pnl-day-item,
+body.desktop-page[data-theme="light"] .sector-movers-list {
+  background: #f3f7f4 !important;
+  border-color: rgba(40, 70, 55, 0.16) !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-dial-name,
+body.desktop-page[data-theme="light"] .sentiment-dial-src,
+body.desktop-page[data-theme="light"] .sentiment-dial-meta,
+body.desktop-page[data-theme="light"] .sentiment-dials-updated,
+body.desktop-page[data-theme="light"] .market-sentiment-label,
+body.desktop-page[data-theme="light"] .market-sentiment-intro,
+body.desktop-page[data-theme="light"] .pnl-day-item p,
+body.desktop-page[data-theme="light"] .sector-movers-hint,
+body.desktop-page[data-theme="light"] .sector-movers-updated,
+body.desktop-page[data-theme="light"] .sf-wl-updated,
+body.desktop-page[data-theme="light"] .sf-wl-hint,
+body.desktop-page[data-theme="light"] .sf-wl-msg,
+body.desktop-page[data-theme="light"] .sf-wl-empty {
+  color: #3d5248 !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-dial-pct,
+body.desktop-page[data-theme="light"] .market-sentiment-value,
+body.desktop-page[data-theme="light"] .pnl-day-item h4,
+body.desktop-page[data-theme="light"] .sector-movers-name,
+body.desktop-page[data-theme="light"] .sector-movers-toggle,
+body.desktop-page[data-theme="light"] .sector-persistence-title {
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-dial--positive .sentiment-dial-pct,
+body.desktop-page[data-theme="light"] .sentiment-dial--vix-low .sentiment-dial-pct {
+  color: #157a3f !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-dial--negative .sentiment-dial-pct,
+body.desktop-page[data-theme="light"] .sentiment-dial--vix-high .sentiment-dial-pct {
+  color: #b91c1c !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-dial--medium .sentiment-dial-pct,
+body.desktop-page[data-theme="light"] .sentiment-dial--vix-mid .sentiment-dial-pct {
+  color: #b45309 !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-basis-toggle {
+  background: #e8eee9 !important;
+  border-color: rgba(40, 70, 55, 0.2) !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-basis-btn {
+  color: #3d5248 !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-basis-btn.active {
+  background: #3dba7a !important;
+  color: #062015 !important;
+}
+
+body.desktop-page[data-theme="light"] .sentiment-basis-btn:not(.active) {
+  background: transparent !important;
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .pnl-day-total,
+body.desktop-page[data-theme="light"] .pnl-total-pill,
+body.desktop-page[data-theme="light"] .status-pill {
+  background: #e8eee9 !important;
+  border: 1px solid rgba(40, 70, 55, 0.25) !important;
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .pnl-day-total .pnl-chip {
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .pnl-chip-neutral {
+  background: #dde5e0 !important;
+  color: #14201a !important;
+}
+
+body.desktop-page[data-theme="light"] .btn-icon {
+  background: #e8eee9 !important;
+  border-color: rgba(40, 70, 55, 0.2) !important;
+  color: #1f7a4d !important;
+}
+
+body.desktop-page[data-theme="light"] .tm-web-topbar {
+  background: linear-gradient(180deg, #122018, #0c1210);
+}
+
+body.desktop-page[data-theme="light"] .tm-web-topbar-brand {
+  color: #e7f0ea;
+}
+
+body.desktop-page[data-theme="light"] .dashboard-placeholder,
+body.desktop-page[data-theme="light"] .dashboard-placeholder h4,
+body.desktop-page[data-theme="light"] .dashboard-placeholder p {
+  color: #3d5248 !important;
+}
+
+body.desktop-page[data-theme="light"] .sf-watchlist-card .sf-wl-table th {
+  background: #e8eee9 !important;
+  color: #3d5248 !important;
+}
+
+body.desktop-page[data-theme="light"] .sf-watchlist-card .sf-wl-table td {
+  color: #14201a !important;
+}
+
+/* Dial SVG tick labels readable in light theme */
+body.desktop-page[data-theme="light"] .sentiment-dial-svg text {
+  fill: #3d5248 !important;
 }

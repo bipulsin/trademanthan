@@ -91,7 +91,6 @@
         const pMed = arcPath(phiM1, phiM2);
         const pBull = arcPath(phiM2, phiR);
         const pInner = arcFillPath(phiL, phiR);
-        const innerOpacity = isDark ? "0.88" : "0.6";
         const needleTint = !has
             ? "#64748b"
             : p < -3
@@ -112,12 +111,8 @@
       <stop offset="65%" stop-color="#fde68a"/>
       <stop offset="100%" stop-color="#bbf7d0"/>
     </linearGradient>
-    <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" stop-color="#1a2621" stop-opacity="${innerOpacity}"/>
-      <stop offset="100%" stop-color="#0c1210" stop-opacity="${innerOpacity}"/>
-    </linearGradient>
   </defs>
-  <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
+  <path d="${pInner}" fill="none"/>
   <path d="${pBear}" fill="none" stroke="#dc2626" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
   <path d="${pMed}" fill="none" stroke="#f59e0b" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
   <path d="${pBull}" fill="none" stroke="#16a34a" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
@@ -142,7 +137,6 @@
         const phiL = Math.PI;
         const phiR = 0;
         const pInner = arcFillPath(phiL, phiR);
-        const innerOpacity = isDark ? "0.88" : "0.6";
         const needleTint =
             v == null ? "#64748b" : v < 12 ? "#15803d" : v < 22 ? "#d97706" : "#b91c1c";
 
@@ -157,12 +151,8 @@
       <stop offset="45%" stop-color="#fbbf24"/>
       <stop offset="100%" stop-color="#ef4444"/>
     </linearGradient>
-    <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" stop-color="#1a2621" stop-opacity="${innerOpacity}"/>
-      <stop offset="100%" stop-color="#0c1210" stop-opacity="${innerOpacity}"/>
-    </linearGradient>
   </defs>
-  <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
+  <path d="${pInner}" fill="none"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="url(#vixArc_${gid})" stroke-width="14" stroke-linecap="round"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(12,18,16,0.35)" stroke-width="1"/>
