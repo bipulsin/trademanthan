@@ -1,4 +1,4 @@
-/* Daily RS Checklist — theme-aware, compact toolbar, readable chips in dark mode */
+/* Daily RS Checklist — charcoal / green-black theme (matches dailyfutures + stockOptions) */
 
 :root {
     --go-bg: #d1fae5; --go-ink: #065f46; --go-bd: #6ee7b7;
@@ -6,21 +6,190 @@
     --out-bg: #fee2e2; --out-ink: #991b1b; --out-bd: #fca5a5;
 }
 
+body.daily-rs-checklist-page,
+body.daily-rs-checklist-page[data-theme="dark"],
+body.daily-rs-checklist-page.theme-page {
+    --bg0: #0c1210;
+    --bg1: #121a17;
+    --bg2: #1a2621;
+    --line: rgba(180, 210, 190, 0.14);
+    --text: #e7f0ea;
+    --muted: #8fa398;
+    --accent: #3dba7a;
+    --accent-dim: #2a8f5c;
+    --danger: #e06b6b;
+    --warn: #d4a017;
+    --card: rgba(22, 34, 29, 0.92);
+    --card-inner: #121a17;
+    --font-display: "Syne", sans-serif;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --theme-bg: transparent;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: var(--text);
+    --theme-muted: var(--muted);
+    --theme-accent: var(--accent);
+    --theme-accent-hover: #4fd48c;
+    --theme-success: var(--accent);
+    --theme-danger: var(--danger);
+    --theme-link: var(--accent);
+
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: var(--line);
+    --left-menu-accent: var(--accent);
+    --left-menu-text: var(--text);
+    --left-menu-muted: var(--muted);
+
+    margin: 0;
+    min-height: 100%;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    background-color: var(--bg0) !important;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent,
+            transparent 12px,
+            rgba(143, 163, 152, 0.045) 12px,
+            rgba(143, 163, 152, 0.045) 13px
+        ),
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+        linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
+}
+
+body.daily-rs-checklist-page .main-content-area,
+body.daily-rs-checklist-page .right-panel {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    flex: 1;
+    min-width: 0;
+}
+
+body.daily-rs-checklist-page .dc-page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+body.daily-rs-checklist-page .settings-header,
+body.daily-rs-checklist-page .dc-page-header {
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    padding: 0 0 8px;
+}
+
+body.daily-rs-checklist-page .settings-title,
+body.daily-rs-checklist-page .dc-page-title {
+    font-family: var(--font-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px !important;
+}
+
+body.daily-rs-checklist-page .settings-title i,
+body.daily-rs-checklist-page .dc-page-title i {
+    color: var(--accent) !important;
+}
+
+body.daily-rs-checklist-page .settings-subtitle {
+    color: var(--muted) !important;
+    font-family: var(--font-body) !important;
+    font-size: 0.95rem !important;
+    line-height: 1.4;
+    margin: 0 !important;
+    max-width: none;
+}
+
+body.daily-rs-checklist-page .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+    height: 72px;
+}
+
+body.daily-rs-checklist-page .tm-web-topbar-brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.65rem, 3.2vw, 2.35rem);
+    letter-spacing: -0.03em;
+    color: #e7f0ea;
+    line-height: 1.1;
+}
+
+body.daily-rs-checklist-page .tm-web-topbar-logo {
+    height: 44px;
+    max-width: 180px;
+}
+
+body.daily-rs-checklist-page .tm-web-hamburger {
+    width: 52px;
+    height: 52px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 1.45rem;
+}
+
+body.daily-rs-checklist-page .tm-web-hamburger:hover,
+body.daily-rs-checklist-page .tm-web-hamburger[aria-expanded="true"] {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.45);
+}
+
+body.daily-rs-checklist-page .mobile-title-bar {
+    background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+    border-bottom: 1px solid var(--line);
+}
+
+body.daily-rs-checklist-page .mobile-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text) !important;
+}
+
+body.daily-rs-checklist-page .mobile-logo {
+    height: 28px;
+    width: auto;
+}
+
+@media (max-width: 768px) {
+    body.daily-rs-checklist-page .dc-page {
+        padding: 16px 14px 40px;
+    }
+    body.daily-rs-checklist-page .settings-header,
+    body.daily-rs-checklist-page .dc-page-header {
+        padding: 0 0 4px;
+    }
+}
+
 /* Scope page font to checklist content only — never override Font Awesome (i / .fa-*). */
 .dc-wrap,
 .dc-wrap *:not(i):not([class*="fa-"]) {
-    font-family: Arial, Verdana, Calibri, sans-serif;
+    font-family: var(--font-body, "DM Sans", sans-serif);
 }
 
-.dc-wrap { max-width: 1200px; margin: 0 auto; padding: 0 0 32px; }
+.dc-wrap { max-width: none; margin: 0; padding: 0 0 32px; }
 
 .dc-card {
     background: var(--theme-card, #fff);
     border: 1px solid var(--theme-border, #e2e8f0);
-    border-radius: 10px;
+    border-radius: 14px;
     padding: 10px 12px;
     margin-bottom: 10px;
     color: var(--theme-text, #0f172a);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
 }
 
 /* ---- compact toolbar (2 lines) ---- */
@@ -74,10 +243,11 @@
     border-color: #cbd5e1 !important;
     font-weight: 600;
 }
-body[data-theme="dark"] .dc-pill--gate {
-    background: #334155 !important;
-    color: #e2e8f0 !important;
-    border-color: #475569 !important;
+body[data-theme="dark"] .dc-pill--gate,
+body.daily-rs-checklist-page:not([data-theme="light"]) .dc-pill--gate {
+    background: #1a2621 !important;
+    color: #e7f0ea !important;
+    border-color: rgba(61, 186, 122, 0.35) !important;
 }
 .dc-decision--NONE {
     background: #e2e8f0 !important; color: #475569 !important; border-color: #cbd5e1 !important;
@@ -95,8 +265,12 @@ body[data-theme="dark"] .dc-decision--NONE {
     white-space: nowrap;
 }
 .dc-btn i { font-size: 12px; pointer-events: none; }
-.dc-btn:hover { border-color: var(--theme-accent, #2563eb); }
-.dc-btn--primary { background: var(--theme-accent, #2563eb); color: #fff !important; border-color: var(--theme-accent, #2563eb); }
+.dc-btn:hover { border-color: var(--theme-accent, #3dba7a); }
+.dc-btn--primary {
+    background: var(--theme-accent, #3dba7a);
+    color: #062015 !important;
+    border-color: var(--theme-accent, #3dba7a);
+}
 .dc-btn--danger { border-color: var(--out-bd); color: var(--out-ink) !important; }
 
 .dc-select, .dc-num, .dc-time {
@@ -168,11 +342,11 @@ button.dc-card:hover, .dc-card[role="button"]:hover { box-shadow: 0 2px 8px rgba
 .dc-open-trades {
     margin: 0 0 16px;
     padding: 14px 16px;
-    border-radius: 12px;
-    background: linear-gradient(160deg, #0f172a 0%, #1e293b 55%, #334155 100%);
-    color: #f8fafc;
-    border: 1px solid #475569;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+    border-radius: 14px;
+    background: linear-gradient(160deg, #0e1613 0%, #121a17 55%, #1a2621 100%);
+    color: #e7f0ea;
+    border: 1px solid rgba(61, 186, 122, 0.28);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
 }
 .dc-open-trades-head {
     display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
@@ -411,7 +585,7 @@ body[data-theme="dark"] .dc-rs--neg { color: #f87171 !important; }
 .dc-face-center { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .dc-face-right { flex-shrink: 0; }
 .dc-setup { font-size: 10px; font-weight: 700; color: var(--theme-muted, #64748b); }
-.dc-setup--converging { color: #2563eb; }
+.dc-setup--converging { color: var(--theme-accent, #3dba7a); }
 .dc-setup--triggered { color: #059669; }
 .dc-setup--triggered-chop, .dc-setup--late { color: #d97706; }
 .dc-grade-lock { font-size: 14px; cursor: help; }
@@ -845,22 +1019,24 @@ body[data-theme="dark"] .dc-eligibility-note { color: #fdba74; }
 /* modal — wide 2-column on desktop */
 .dc-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-end; justify-content: center; }
 .dc-modal[hidden] { display: none !important; }
-.dc-modal-backdrop { position: absolute; inset: 0; background: #0f172a; opacity: 1; }
+.dc-modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); opacity: 1; }
 .dc-modal-panel {
     position: relative; z-index: 1; width: 100%; max-width: 520px; max-height: 92vh;
     background: #ffffff; border-radius: 14px 14px 0 0;
     border: 1px solid var(--theme-border, #e2e8f0); color: var(--theme-text, #0f172a);
     display: flex; flex-direction: column; overflow: hidden;
     opacity: 1;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
 body[data-theme="dark"] .dc-modal-panel,
-body.theme-page:not([data-theme="light"]) .dc-modal-panel {
-    background: #1e293b !important;
-    color: #f1f5f9 !important;
+body.theme-page:not([data-theme="light"]) .dc-modal-panel,
+body.daily-rs-checklist-page:not([data-theme="light"]) .dc-modal-panel {
+    background: #121a17 !important;
+    color: #e7f0ea !important;
 }
 body[data-theme="light"] .dc-modal-panel {
     background: #ffffff !important;
-    color: #1e293b !important;
+    color: #14201a !important;
 }
 @media (min-width: 768px) {
     .dc-modal { align-items: center; padding: 12px; }
@@ -909,7 +1085,7 @@ body[data-theme="light"] .dc-modal-panel {
 .dc-item-hint--bad { color: #b91c1c !important; }
 .dc-sys-badge {
     font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 1px 5px; border-radius: 3px; background: #2563eb; color: #fff !important;
+    padding: 1px 5px; border-radius: 3px; background: #3dba7a; color: #062015 !important;
 }
 
 .dc-auto-val {
@@ -947,7 +1123,8 @@ body[data-theme="light"] .dc-modal-panel {
 
 .dc-toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    background: #1e293b; color: #f8fafc; padding: 10px 16px; border-radius: 8px;
+    background: #121a17; color: #e7f0ea; padding: 10px 16px; border-radius: 8px;
+    border: 1px solid rgba(61, 186, 122, 0.35);
     font-size: 13px; font-weight: 600; z-index: 300; opacity: 0; pointer-events: none;
     transition: opacity 0.25s;
 }
@@ -1028,7 +1205,13 @@ body[data-theme="dark"] .dc-rotation--chop {
     align-items: center;
     gap: 4px;
     margin-right: 8px;
-    color: var(--text-muted, #64748b);
+    color: var(--theme-muted, #8fa398);
+    cursor: pointer;
+    user-select: none;
+}
+.dc-go-alert-toggle input {
+    margin: 0;
+    accent-color: var(--theme-accent, #3dba7a);
 }
 .dc-fast-watch-section {
     margin: 6px 0 8px;
@@ -1092,7 +1275,7 @@ body[data-theme="dark"] .dc-beta { background: rgba(251, 191, 36, 0.25); color: 
 .dc-fw-momentum--flat { color: var(--theme-muted, #64748b); }
 .dc-fast-watch-expand {
     margin-left: auto;
-    font-size: 11px; font-weight: 700; color: var(--theme-link, #2563eb);
+    font-size: 11px; font-weight: 700; color: var(--theme-link, #3dba7a);
     background: none; border: none; cursor: pointer; padding: 0;
     white-space: nowrap;
 }
@@ -1409,17 +1592,17 @@ body[data-theme="dark"] .dc-vol-grade--high { color: #fca5a5; background: rgba(2
 .dc-ready-crash--2 { color: #67e8f9; background: rgba(6, 182, 212, 0.16); }
 .dc-ready-crash--3 { color: #22d3ee; background: rgba(8, 145, 178, 0.22); }
 .dc-ready-crash--4 { color: #ecfeff; background: #0e7490; }
-.dc-ready-gates, .dc-watch-gates, .dc-gates-btn {
-    font-size: 11px; font-weight: 700;
-    padding: 6px 10px; border-radius: 8px; border: 1px solid #475569;
-    background: #334155; color: #e2e8f0 !important; cursor: pointer;
-}
 .dc-ready-take {
     font-size: 12px; font-weight: 800;
     padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer;
-    background: #16a34a; color: #fff !important;
+    background: #3dba7a; color: #062015 !important;
 }
-.dc-ready-take:disabled { background: #475569; cursor: not-allowed; opacity: 0.7; }
+.dc-ready-take:disabled { background: #1a2621; color: #8fa398 !important; cursor: not-allowed; opacity: 0.7; }
+.dc-ready-gates, .dc-watch-gates, .dc-gates-btn {
+    font-size: 11px; font-weight: 700;
+    padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(180, 210, 190, 0.2);
+    background: #1a2621; color: #e7f0ea !important; cursor: pointer;
+}
 .dc-gates-btn {
     padding: 4px 8px; min-width: 28px;
 }
@@ -1737,4 +1920,100 @@ body[data-theme="dark"] .dc-garuda-card {
     line-height: 1.4;
 }
 .dc-garuda-parts b { color: var(--theme-text, #334155); font-weight: 700; }
+
+/* Light theme — readable contrast (mirrors dailyfutures / stockOptions) */
+body.daily-rs-checklist-page[data-theme="light"] {
+    --bg0: #f4f7f5;
+    --bg1: #eef3f0;
+    --bg2: #e4ebe6;
+    --line: rgba(40, 70, 55, 0.18);
+    --text: #14201a;
+    --muted: #3d5248;
+    --accent: #1f7a4d;
+    --accent-dim: #2a8f5c;
+    --card: rgba(255, 255, 255, 0.98);
+    --card-inner: #f0f4f1;
+    --theme-bg: #f4f7f5;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: #14201a;
+    --theme-muted: #3d5248;
+    --theme-accent: #1f7a4d;
+    --theme-accent-hover: #2a8f5c;
+    --theme-link: #1f7a4d;
+    --left-menu-bg: rgba(255, 255, 255, 0.98);
+    --left-menu-text: #14201a;
+    --left-menu-muted: #3d5248;
+    --left-menu-accent: #1f7a4d;
+    --left-menu-border: rgba(40, 70, 55, 0.18);
+    background-color: #f4f7f5 !important;
+    background-image: none !important;
+    color: #14201a !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .settings-title,
+body.daily-rs-checklist-page[data-theme="light"] .dc-page-title {
+    color: var(--accent) !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-card {
+    background: var(--card);
+    box-shadow: 0 4px 16px rgba(20, 40, 30, 0.08);
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-btn--primary {
+    color: #fff !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-ready-take {
+    background: #1f7a4d;
+    color: #fff !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-ready-gates,
+body.daily-rs-checklist-page[data-theme="light"] .dc-watch-gates,
+body.daily-rs-checklist-page[data-theme="light"] .dc-gates-btn {
+    background: #e4ebe6;
+    border-color: rgba(40, 70, 55, 0.22);
+    color: #14201a !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 245, 0.95));
+    border-bottom: 1px solid var(--line);
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .tm-web-topbar-brand {
+    color: #14201a;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .tm-web-hamburger {
+    background: #e4ebe6;
+    color: #1f7a4d;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .mobile-title-bar {
+    background: #eef3f0 !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .mobile-title {
+    color: #14201a !important;
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-toast {
+    background: #14201a;
+    color: #f4f7f5;
+    border-color: rgba(31, 122, 77, 0.35);
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-tier3-body {
+    background: rgba(31, 122, 77, 0.04);
+    border-color: rgba(40, 70, 55, 0.22);
+}
+
+body.daily-rs-checklist-page[data-theme="light"] .dc-sys-badge {
+    background: #1f7a4d;
+    color: #fff !important;
+}
 
