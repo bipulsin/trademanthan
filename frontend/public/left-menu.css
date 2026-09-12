@@ -170,29 +170,30 @@
 }
 
 .theme-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    border: 1px solid var(--left-menu-border);
-    background: rgba(148, 163, 184, 0.15);
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid rgba(134, 239, 172, 0.22);
+    background: rgba(14, 28, 22, 0.55);
     color: var(--left-menu-muted);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     transition: all 0.2s;
 }
 
 .theme-btn:hover {
-    background: rgba(59, 130, 246, 0.2);
-    color: var(--left-menu-accent);
+    background: rgba(61, 186, 122, 0.18);
+    color: #86efac;
+    border-color: rgba(134, 239, 172, 0.4);
 }
 
 .theme-btn.active {
-    background: rgba(59, 130, 246, 0.25);
-    color: var(--left-menu-accent);
-    border-color: var(--left-menu-accent);
+    background: rgba(61, 186, 122, 0.28);
+    color: #bbf7d0;
+    border-color: rgba(134, 239, 172, 0.55);
 }
 
 .theme-btn i {
@@ -201,35 +202,35 @@
 
 /* Improve toggle icon visibility in both themes */
 body[data-theme="dark"] .theme-btn {
-    background: rgba(148, 163, 184, 0.24);
-    color: #cbd5e1;
-    border-color: rgba(148, 163, 184, 0.55);
+    background: rgba(14, 28, 22, 0.72);
+    color: #a7f3d0;
+    border-color: rgba(134, 239, 172, 0.28);
 }
 
 body[data-theme="dark"] .theme-btn.active {
-    background: #3b82f6;
-    color: #ffffff;
-    border-color: #60a5fa;
+    background: rgba(61, 186, 122, 0.32);
+    color: #ecfdf5;
+    border-color: rgba(134, 239, 172, 0.55);
 }
 
 /* In dark mode, keep a clear "button" outline on the light-mode option */
 body[data-theme="dark"] .theme-btn[data-theme="light"] {
-    border-width: 2px;
+    border-width: 1px;
     border-style: solid;
-    border-color: rgba(226, 232, 240, 0.8);
-    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.25);
+    border-color: rgba(148, 163, 184, 0.45);
+    box-shadow: none;
 }
 
 body[data-theme="light"] .theme-btn {
-    background: rgba(15, 23, 42, 0.08);
+    background: rgba(15, 23, 42, 0.06);
     color: #334155;
-    border-color: rgba(100, 116, 139, 0.45);
+    border-color: rgba(100, 116, 139, 0.35);
 }
 
 body[data-theme="light"] .theme-btn.active {
-    background: #2563eb;
-    color: #ffffff;
-    border-color: #1d4ed8;
+    background: rgba(22, 101, 52, 0.14);
+    color: #166534;
+    border-color: rgba(22, 101, 52, 0.4);
 }
 
 .left-panel.collapsed .theme-toggle {
@@ -238,8 +239,8 @@ body[data-theme="light"] .theme-btn.active {
 }
 
 .left-panel.collapsed .theme-btn {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
 }
 
 .left-panel.collapsed .panel-nav-toolbar {
@@ -249,25 +250,25 @@ body[data-theme="light"] .theme-btn.active {
 }
 
 .left-panel.collapsed .panel-nav-telegram-btn {
-    width: 40px;
-    height: 40px;
-    min-width: 40px;
-    min-height: 40px;
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
 }
 
 .left-panel.collapsed .panel-nav-telegram-btn i {
-    font-size: 1.38rem;
+    font-size: 1rem;
 }
 
 .left-panel.collapsed .panel-nav-logout-btn {
-    width: 40px;
-    height: 40px;
-    min-width: 40px;
-    min-height: 40px;
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
 }
 
 .left-panel.collapsed .panel-nav-logout-btn i {
-    font-size: 1.2rem;
+    font-size: 0.9rem;
 }
 
 /* Hidden via Admin → Menu section (or legacy markup class) */
@@ -395,97 +396,112 @@ body[data-theme="light"] .theme-btn.active {
     text-align: center;
 }
 
-/* Telegram — circular button, larger plane icon vs square theme chips */
+/* Telegram — circular button, charcoal/green sheet (mobile menu) */
 .panel-nav-telegram-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 46px;
-    height: 46px;
-    min-width: 46px;
-    min-height: 46px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
     padding: 0;
     box-sizing: border-box;
     border-radius: 50%;
     aspect-ratio: 1;
-    background: linear-gradient(135deg, #229ed9 0%, #0088cc 100%);
-    color: #fff;
+    background: rgba(14, 28, 22, 0.72);
+    color: #86efac;
     cursor: pointer;
     flex-shrink: 0;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-    box-shadow:
-        0 2px 10px rgba(34, 158, 217, 0.4),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.22);
-    border: 1px solid rgba(255, 255, 255, 0.28);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(134, 239, 172, 0.28);
 }
 
 .panel-nav-telegram-btn i {
-    font-size: 1.55rem;
+    font-size: 1.05rem;
     line-height: 1;
 }
 
 .panel-nav-telegram-btn:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(34, 158, 217, 0.5);
+    transform: scale(1.04);
+    background: rgba(61, 186, 122, 0.2);
+    border-color: rgba(134, 239, 172, 0.5);
+    color: #bbf7d0;
+    box-shadow: 0 2px 10px rgba(61, 186, 122, 0.22);
 }
 
 .panel-nav-telegram-btn:focus-visible {
-    outline: 2px solid var(--left-menu-accent, #3b82f6);
+    outline: 2px solid rgba(134, 239, 172, 0.65);
     outline-offset: 2px;
 }
 
-/* Logout — toolbar icon (same footprint as Telegram circle) */
+/* Logout — toolbar icon (same footprint as Support circle) */
 .panel-nav-logout-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 46px;
-    height: 46px;
-    min-width: 46px;
-    min-height: 46px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
     padding: 0;
     box-sizing: border-box;
     border-radius: 50%;
     aspect-ratio: 1;
-    background: rgba(148, 163, 184, 0.2);
-    color: var(--left-menu-muted);
+    background: rgba(14, 28, 22, 0.72);
+    color: #a7f3d0;
     cursor: pointer;
     flex-shrink: 0;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease;
-    border: 1px solid var(--left-menu-border);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    border: 1px solid rgba(134, 239, 172, 0.28);
 }
 
 .panel-nav-logout-btn i {
-    font-size: 1.25rem;
+    font-size: 0.95rem;
     line-height: 1;
 }
 
 .panel-nav-logout-btn:hover {
-    transform: scale(1.05);
-    background: rgba(239, 68, 68, 0.18);
-    color: #ef4444;
-    border-color: rgba(239, 68, 68, 0.35);
+    transform: scale(1.04);
+    background: rgba(239, 68, 68, 0.16);
+    color: #fca5a5;
+    border-color: rgba(248, 113, 113, 0.4);
 }
 
 .panel-nav-logout-btn:focus-visible {
-    outline: 2px solid var(--left-menu-accent, #3b82f6);
+    outline: 2px solid rgba(134, 239, 172, 0.65);
     outline-offset: 2px;
 }
 
 body[data-theme="dark"] .panel-nav-logout-btn {
-    background: rgba(148, 163, 184, 0.14);
-    color: #cbd5e1;
-    border-color: rgba(148, 163, 184, 0.45);
+    background: rgba(14, 28, 22, 0.72);
+    color: #a7f3d0;
+    border-color: rgba(134, 239, 172, 0.28);
 }
 
 body[data-theme="dark"] .panel-nav-logout-btn:hover {
-    background: rgba(239, 68, 68, 0.22);
+    background: rgba(239, 68, 68, 0.2);
     color: #fca5a5;
     border-color: rgba(248, 113, 113, 0.45);
 }
 
+body[data-theme="light"] .panel-nav-telegram-btn,
+body[data-theme="light"] .panel-nav-logout-btn {
+    background: rgba(15, 23, 42, 0.05);
+    color: #166534;
+    border-color: rgba(22, 101, 52, 0.28);
+}
+
+body[data-theme="light"] .panel-nav-telegram-btn:hover {
+    background: rgba(22, 101, 52, 0.1);
+    color: #14532d;
+    border-color: rgba(22, 101, 52, 0.45);
+}
+
 /* Desktop / fine pointer: visible tooltips (below buttons — stays inside panel; avoids overflow clip) */
 .panel-nav-toolbar .theme-btn,
+.tm-web-topbar-actions .theme-btn,
 .panel-nav-telegram-btn,
 .panel-nav-logout-btn {
     position: relative;
@@ -493,6 +509,7 @@ body[data-theme="dark"] .panel-nav-logout-btn:hover {
 
 @media (hover: hover) and (pointer: fine) {
     .panel-nav-toolbar .theme-btn[data-tooltip]::after,
+    .tm-web-topbar-actions .theme-btn[data-tooltip]::after,
     .panel-nav-telegram-btn[data-tooltip]::after,
     .panel-nav-logout-btn[data-tooltip]::after {
         content: attr(data-tooltip);
@@ -521,6 +538,7 @@ body[data-theme="dark"] .panel-nav-logout-btn:hover {
     }
 
     body[data-theme="light"] .panel-nav-toolbar .theme-btn[data-tooltip]::after,
+    body[data-theme="light"] .tm-web-topbar-actions .theme-btn[data-tooltip]::after,
     body[data-theme="light"] .panel-nav-telegram-btn[data-tooltip]::after,
     body[data-theme="light"] .panel-nav-logout-btn[data-tooltip]::after {
         background: #0f172a;
@@ -530,6 +548,8 @@ body[data-theme="dark"] .panel-nav-logout-btn:hover {
 
     .panel-nav-toolbar .theme-btn[data-tooltip]:hover::after,
     .panel-nav-toolbar .theme-btn[data-tooltip]:focus-visible::after,
+    .tm-web-topbar-actions .theme-btn[data-tooltip]:hover::after,
+    .tm-web-topbar-actions .theme-btn[data-tooltip]:focus-visible::after,
     .panel-nav-telegram-btn[data-tooltip]:hover::after,
     .panel-nav-telegram-btn[data-tooltip]:focus-visible::after,
     .panel-nav-logout-btn[data-tooltip]:hover::after,
@@ -893,14 +913,13 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 }
 
 .tm-topbar-vix {
-    margin-left: auto;
-    /* Inset from the hard right so it sits visually between brand and edge */
-    margin-right: clamp(1.25rem, 7vw, 5.5rem);
+    margin-left: 0;
+    margin-right: 0;
     display: inline-flex;
     align-items: baseline;
     gap: 0.4rem;
     flex-shrink: 0;
-    padding: 0.38rem 0.85rem;
+    padding: 0.32rem 0.7rem;
     line-height: 1;
     border-radius: 8px;
     border: 1px solid rgba(134, 239, 172, 0.28);
@@ -944,9 +963,56 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     50% { opacity: 0; }
 }
 
+.tm-web-topbar-right {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.7rem;
+    flex-shrink: 0;
+}
+
+.tm-web-topbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.tm-web-topbar-actions .theme-toggle {
+    padding: 0;
+    gap: 6px;
+}
+
+.tm-web-topbar-actions .theme-btn {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+}
+
+.tm-web-topbar-actions .panel-nav-telegram-btn,
+.tm-web-topbar-actions .panel-nav-logout-btn {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+}
+
+.tm-web-topbar-actions .panel-nav-telegram-btn i {
+    font-size: 0.95rem;
+}
+
+.tm-web-topbar-actions .panel-nav-logout-btn i {
+    font-size: 0.85rem;
+}
+
 @media (min-width: 1025px) {
     body.left-menu-web-hamburger .tm-web-topbar {
         display: flex;
+    }
+
+    /* Theme / support / logout live in the web topbar only */
+    body.left-menu-web-hamburger .left-panel .panel-nav-toolbar {
+        display: none !important;
     }
 
     body.left-menu-web-hamburger .app-with-left-menu {

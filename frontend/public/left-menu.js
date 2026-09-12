@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.44';
+const MENU_HTML_PATH = 'left-menu.html?v=3.47';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
@@ -345,6 +345,8 @@ class LeftMenu {
         this.updateThemeButtons(theme);
 
         document.querySelectorAll('.theme-btn').forEach(btn => {
+            if (btn.dataset.tmThemeBound === '1') return;
+            btn.dataset.tmThemeBound = '1';
             btn.addEventListener('click', () => {
                 const t = btn.dataset.theme;
                 localStorage.setItem('tradentical_theme', t);
@@ -406,6 +408,10 @@ class LeftMenu {
                     <a class="nav-item-link" href="stockOptions.html"><i class="fas fa-chart-line" style="color:#38bdf8;"></i>
                     <span>Stock Options</span></a>
                 </li>
+                <li class="nav-item" data-page="commDiv.html">
+                    <a class="nav-item-link" href="commDiv.html"><i class="fas fa-oil-can" style="color:#fbbf24;"></i>
+                    <span>Commodities Div</span></a>
+                </li>
                 <li class="nav-item" data-page="dailyfutures.html">
                     <a class="nav-item-link" href="dailyfutures.html"><i class="fas fa-calendar-day"></i>
                     <span>Premium Futures</span></a>
@@ -454,17 +460,9 @@ class LeftMenu {
                     <a class="nav-item-link" href="breakfast.html"><i class="fas fa-mug-hot" style="color:#f59e0b;"></i>
                     <span>Breakfast Strategy</span></a>
                 </li>
-                <li class="nav-item" data-page="commDiv.html">
-                    <a class="nav-item-link" href="commDiv.html"><i class="fas fa-oil-can" style="color:#fbbf24;"></i>
-                    <span>Commodities Div</span></a>
-                </li>
                 <li class="nav-item" data-page="havwap.html">
                     <a class="nav-item-link" href="havwap.html"><i class="fas fa-chart-area" style="color:#34d399;"></i>
                     <span>HA-VWAP Backtest</span></a>
-                </li>
-                <li class="nav-item" data-page="divtest.html">
-                    <a class="nav-item-link" href="divtest.html"><i class="fas fa-wave-square" style="color:#3dba7a;"></i>
-                    <span>MACD Div Backtest</span></a>
                 </li>
                 <li class="nav-item" data-page="analysis.html">
                     <a class="nav-item-link" href="analysis.html"><i class="fas fa-table" style="color:#60a5fa;"></i>
@@ -581,13 +579,13 @@ class LeftMenu {
             console.warn('LeftMenu: notify script', e);
         }
         this.injectTelegramNotifyModal();
-        const btn = document.getElementById('leftMenuTelegramBtn');
+        const supportBtns = document.querySelectorAll('.panel-nav-telegram-btn');
         const modal = document.getElementById('tmTelegramNotifyModal');
         const closeBtn = document.getElementById('tmTelegramNotifyClose');
         const notifyBtn = document.getElementById('tmTelegramNotifySend');
         const textarea = document.getElementById('tmTelegramNotifyText');
         const statusEl = document.getElementById('tmTelegramNotifyStatus');
-        if (!btn || !modal) return;
+        if (!supportBtns.length || !modal) return;
 
         const close = () => {
             modal.classList.remove('show');
@@ -602,9 +600,13 @@ class LeftMenu {
             setTimeout(() => textarea?.focus(), 50);
         };
 
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            open();
+        supportBtns.forEach((btn) => {
+            if (btn.dataset.tmSupportBound === '1') return;
+            btn.dataset.tmSupportBound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                open();
+            });
         });
 
         closeBtn?.addEventListener('click', close);
@@ -638,11 +640,13 @@ class LeftMenu {
     }
 
     setupLogoutToolbarButton() {
-        const btn = document.getElementById('leftMenuLogoutBtn');
-        if (!btn) return;
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            LeftMenu.logout();
+        document.querySelectorAll('.panel-nav-logout-btn').forEach((btn) => {
+            if (btn.dataset.tmLogoutBound === '1') return;
+            btn.dataset.tmLogoutBound = '1';
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                LeftMenu.logout();
+            });
         });
     }
 
@@ -757,12 +761,27 @@ class LeftMenu {
         <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="tm-web-topbar-logo">
         <span class="tm-web-topbar-brand">TradeWithCTO</span>
     </a>
-    <div class="tm-topbar-vix" id="tmTopbarVix" aria-live="polite" title="India VIX">
-        <span class="tm-topbar-vix-label">India Vix:</span>
-        <span class="tm-topbar-vix-value" id="tmTopbarVixValue">—</span>
+    <div class="tm-web-topbar-right">
+        <div class="tm-topbar-vix" id="tmTopbarVix" aria-live="polite" title="India VIX">
+            <span class="tm-topbar-vix-label">India Vix:</span>
+            <span class="tm-topbar-vix-value" id="tmTopbarVixValue">—</span>
+        </div>
+        <div class="tm-web-topbar-actions" role="group" aria-label="Theme and account">
+            <div class="theme-toggle" id="tmTopbarThemeToggle">
+                <button type="button" class="theme-btn" data-theme="light" data-tooltip="Light Theme" title="Light Theme" aria-label="Light Theme"><i class="fas fa-sun"></i></button>
+                <button type="button" class="theme-btn active" data-theme="dark" data-tooltip="Dark Theme" title="Dark Theme" aria-label="Dark Theme"><i class="fas fa-moon"></i></button>
+            </div>
+            <button type="button" class="panel-nav-telegram-btn" id="tmTopbarTelegramBtn" data-tooltip="Support" title="Support" aria-label="Support">
+                <i class="fab fa-telegram" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="panel-nav-logout-btn" id="tmTopbarLogoutBtn" data-tooltip="Logout" title="Logout" aria-label="Logout">
+                <i class="fas fa-sign-out-alt" aria-hidden="true"></i>
+            </button>
+        </div>
     </div>
 </header>`;
         document.body.insertAdjacentHTML('afterbegin', html);
+        this.setupThemeToggle();
         this.startIndiaVixPoll();
     }
 
