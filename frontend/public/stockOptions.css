@@ -65,9 +65,18 @@ body.stock-options-page .right-panel {
     min-width: 0;
 }
 
+/* Centered column — same pattern as divtest .page */
+body.stock-options-page .so-page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
 body.stock-options-page .settings-content {
-    max-width: 1280px;
-    padding: 0 20px 48px;
+    max-width: none;
+    padding: 0;
 }
 
 body.stock-options-page .settings-header,
@@ -76,7 +85,7 @@ body.stock-options-page .so-page-header {
     gap: 1rem;
     flex-wrap: wrap;
     margin-bottom: 1.25rem;
-    padding: 16px 20px 8px;
+    padding: 0 0 8px;
 }
 
 body.stock-options-page .settings-title,
@@ -243,12 +252,15 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
     .so-vix-value {
         font-size: 1.5rem;
     }
+    body.stock-options-page .so-page {
+        padding: 16px 14px 40px;
+    }
     body.stock-options-page .settings-header,
     body.stock-options-page .so-page-header {
-        padding: 16px 14px 4px;
+        padding: 0 0 4px;
     }
     body.stock-options-page .settings-content {
-        padding: 0 14px 40px;
+        padding: 0;
     }
     body.stock-options-page .so-subtitle-oneline {
         font-size: 0.82rem !important;
