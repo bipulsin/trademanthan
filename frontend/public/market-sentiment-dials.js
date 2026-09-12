@@ -68,14 +68,14 @@
     }
 
     function pointerGroup(rotationDeg, gid, needleFill) {
-        const f = needleFill || "#0f172a";
+        const f = needleFill || "#0c1210";
         /* Double-pointed needle (kite): sharp tip toward the arc, smaller tip toward the hub */
         const needlePath =
             "M 0 -56 L 5.5 -6 L 0 9 L -5.5 -6 Z";
         return `
   <g transform="translate(${CX},${CY}) rotate(${rotationDeg})" filter="url(#ptrShadow_${gid})">
-    <path d="${needlePath}" fill="${f}" stroke="#ffffff" stroke-width="1.15" stroke-linejoin="round"/>
-    <circle cx="0" cy="0" r="6" fill="#1e293b" stroke="#94a3b8" stroke-width="1"/>
+    <path d="${needlePath}" fill="${f}" stroke="#e7f0ea" stroke-width="1.15" stroke-linejoin="round"/>
+    <circle cx="0" cy="0" r="6" fill="#1a2621" stroke="#8fa398" stroke-width="1"/>
   </g>`;
     }
 
@@ -113,8 +113,8 @@
       <stop offset="100%" stop-color="#bbf7d0"/>
     </linearGradient>
     <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" stop-color="#93c5fd" stop-opacity="${innerOpacity}"/>
-      <stop offset="100%" stop-color="#020617" stop-opacity="${innerOpacity}"/>
+      <stop offset="0%" stop-color="#1a2621" stop-opacity="${innerOpacity}"/>
+      <stop offset="100%" stop-color="#0c1210" stop-opacity="${innerOpacity}"/>
     </linearGradient>
   </defs>
   <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
@@ -122,13 +122,13 @@
   <path d="${pMed}" fill="none" stroke="#f59e0b" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
   <path d="${pBull}" fill="none" stroke="#16a34a" stroke-width="14" stroke-linecap="round" opacity="0.95"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="url(#trackGlow_${gid})" stroke-width="4" stroke-linecap="round" opacity="0.45"/>
-  <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(15,23,42,0.35)" stroke-width="1"/>
-  <g font-size="8.5" font-weight="700" fill="#475569" text-anchor="middle">
+  <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(12,18,16,0.45)" stroke-width="1"/>
+  <g font-size="8.5" font-weight="700" fill="#8fa398" text-anchor="middle">
     <text x="24" y="118">-10%</text>
     <text x="100" y="122">0%</text>
     <text x="176" y="118">+10%</text>
   </g>
-  <g font-size="7" fill="#94a3b8" text-anchor="middle">
+  <g font-size="7" fill="#8fa398" text-anchor="middle">
     <text x="${pt(phiFromPct(-3)).x.toFixed(0)}" y="${pt(phiFromPct(-3)).y + 14}">-3</text>
     <text x="${pt(phiFromPct(3)).x.toFixed(0)}" y="${pt(phiFromPct(3)).y + 14}">+3</text>
   </g>
@@ -158,15 +158,15 @@
       <stop offset="100%" stop-color="#ef4444"/>
     </linearGradient>
     <linearGradient id="innerGlow_${gid}" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" stop-color="#93c5fd" stop-opacity="${innerOpacity}"/>
-      <stop offset="100%" stop-color="#020617" stop-opacity="${innerOpacity}"/>
+      <stop offset="0%" stop-color="#1a2621" stop-opacity="${innerOpacity}"/>
+      <stop offset="100%" stop-color="#0c1210" stop-opacity="${innerOpacity}"/>
     </linearGradient>
   </defs>
   <path d="${pInner}" fill="url(#innerGlow_${gid})"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="url(#vixArc_${gid})" stroke-width="14" stroke-linecap="round"/>
   <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
-  <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(15,23,42,0.25)" stroke-width="1"/>
-  <g font-size="8.5" font-weight="700" fill="#475569" text-anchor="middle">
+  <path d="${arcPath(phiL, phiR)}" fill="none" stroke="rgba(12,18,16,0.35)" stroke-width="1"/>
+  <g font-size="8.5" font-weight="700" fill="#8fa398" text-anchor="middle">
     <text x="22" y="118">0</text>
     <text x="100" y="122">17.5</text>
     <text x="178" y="118">35</text>

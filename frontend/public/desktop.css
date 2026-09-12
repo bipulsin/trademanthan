@@ -1,9 +1,11 @@
 /**
- * Desktop shell — match divtest.html (TradeWithCTO green night theme)
- * Used by desktop.html; pairs with left-menu web-hamburger mode.
+ * Desktop shell — full divtest palette (charcoal / green-black / lime)
+ * Beats dashboard.css + theme.css slate/navy nested fills via higher specificity.
  */
 
-body.desktop-page {
+body.desktop-page,
+body.desktop-page[data-theme="dark"],
+body.desktop-page.theme-page {
   --bg0: #0c1210;
   --bg1: #121a17;
   --bg2: #1a2621;
@@ -14,15 +16,16 @@ body.desktop-page {
   --accent-dim: #2a8f5c;
   --danger: #e06b6b;
   --warn: #d4a017;
-  --card: rgba(22, 34, 29, 0.85);
+  --card: rgba(22, 34, 29, 0.92);
+  --card-inner: #121a17;
   --font-display: "Syne", sans-serif;
   --font-body: "DM Sans", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
 
-  /* Override theme.css slate/blue dark tokens */
+  /* Override theme.css slate/blue tokens (higher specificity) */
   --theme-bg: transparent;
   --theme-card: var(--card);
-  --theme-card-alt: rgba(18, 26, 23, 0.9);
+  --theme-card-alt: var(--card-inner);
   --theme-border: var(--line);
   --theme-text: var(--text);
   --theme-muted: var(--muted);
@@ -55,18 +58,29 @@ body.desktop-page {
     linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
 }
 
+/* ── Layout shells ─────────────────────────────────────────────── */
 body.desktop-page .main-content-area,
-body.desktop-page .right-panel {
+body.desktop-page .right-panel,
+body.desktop-page .content-section,
+body.desktop-page #dashboard {
   background: transparent !important;
   color: var(--theme-text) !important;
   font-family: var(--font-body);
 }
 
+/* ── Outer section cards (Market Sentiments / PnL / Gainers / …) ─ */
 body.desktop-page .dashboard-card,
 body.desktop-page .crypto-card,
-body.desktop-page .panel {
-  background: var(--theme-card) !important;
-  border: 1px solid var(--theme-border) !important;
+body.desktop-page .panel,
+body.desktop-page .market-sentiment-card,
+body.desktop-page .pnl-day-card,
+body.desktop-page .sector-movers-card,
+body.desktop-page .rs-scanner-card,
+body.desktop-page .sf-watchlist-card,
+body.desktop-page .oi-heatmap-card {
+  background: var(--card) !important;
+  background-image: none !important;
+  border: 1px solid var(--line) !important;
   border-radius: 14px !important;
   backdrop-filter: blur(8px);
   color: var(--theme-text) !important;
@@ -74,8 +88,11 @@ body.desktop-page .panel {
 }
 
 body.desktop-page .dashboard-card .card-header,
-body.desktop-page .crypto-card .card-header {
-  border-color: var(--theme-border) !important;
+body.desktop-page .crypto-card .card-header,
+body.desktop-page .card-content {
+  background: transparent !important;
+  border-color: var(--line) !important;
+  color: var(--theme-text) !important;
 }
 
 body.desktop-page .dashboard-card h3,
@@ -96,16 +113,283 @@ body.desktop-page .dashboard-card h3 i {
 
 body.desktop-page .last-updated,
 body.desktop-page .crypto-name,
-body.desktop-page .crypto-price,
+body.desktop-page .crypto-price {
+  color: var(--theme-muted) !important;
+}
+
+body.desktop-page .dashboard-placeholder,
+body.desktop-page .dashboard-placeholder h4,
+body.desktop-page .dashboard-placeholder p {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .dashboard-placeholder i {
+  color: var(--accent) !important;
+}
+
+/* ── Market Sentiments — trivia ticker (was blue) ──────────────── */
+body.desktop-page .market-trivia-ticker,
+body.desktop-page[data-theme="dark"] .market-trivia-ticker {
+  background: rgba(18, 26, 23, 0.95) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--muted) !important;
+}
+
+body.desktop-page .market-trivia-track span,
+body.desktop-page[data-theme="dark"] .market-trivia-track span {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .market-sentiment-intro,
+body.desktop-page[data-theme="dark"] .market-sentiment-intro {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .market-sentiment-item,
+body.desktop-page[data-theme="dark"] .market-sentiment-item {
+  background: var(--card-inner) !important;
+  border: 1px solid var(--line) !important;
+}
+
+body.desktop-page .market-sentiment-label,
+body.desktop-page[data-theme="dark"] .market-sentiment-label {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .market-sentiment-value,
+body.desktop-page[data-theme="dark"] .market-sentiment-value {
+  color: var(--text) !important;
+}
+
+/* Gauge / dial tiles (were slate rgba(30,41,59)) */
+body.desktop-page .sentiment-dial,
+body.desktop-page[data-theme="dark"] .sentiment-dial {
+  background: var(--card-inner) !important;
+  border: 1px solid var(--line) !important;
+}
+
+body.desktop-page .sentiment-dial-name,
+body.desktop-page[data-theme="dark"] .sentiment-dial-name {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .sentiment-dial-src,
+body.desktop-page .sentiment-dial-meta,
+body.desktop-page .sentiment-dials-updated,
+body.desktop-page[data-theme="dark"] .sentiment-dials-updated {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .sentiment-dial-pct,
+body.desktop-page[data-theme="dark"] .sentiment-dial-pct {
+  color: var(--text) !important;
+}
+
+body.desktop-page .sentiment-dial--positive .sentiment-dial-pct,
+body.desktop-page[data-theme="dark"] .sentiment-dial--positive .sentiment-dial-pct,
+body.desktop-page .sentiment-dial--vix-low .sentiment-dial-pct,
+body.desktop-page[data-theme="dark"] .sentiment-dial--vix-low .sentiment-dial-pct {
+  color: var(--accent) !important;
+}
+
+body.desktop-page .sentiment-basis-toggle,
+body.desktop-page[data-theme="dark"] .sentiment-basis-toggle {
+  background: var(--bg1) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+body.desktop-page .sentiment-basis-btn,
+body.desktop-page[data-theme="dark"] .sentiment-basis-btn {
+  background: transparent !important;
+  color: var(--muted) !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  font-family: var(--font-body);
+  font-weight: 600;
+}
+
+body.desktop-page .sentiment-basis-btn.active,
+body.desktop-page[data-theme="dark"] .sentiment-basis-btn.active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #062015 !important;
+}
+
+body.desktop-page .sentiment-basis-btn:not(.active):hover {
+  border-color: rgba(61, 186, 122, 0.45) !important;
+  color: var(--text) !important;
+}
+
+body.desktop-page .sentiment-dials-scroll-hint,
+body.desktop-page[data-theme="dark"] .sentiment-dials-scroll-hint {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .sentiment-dials-scroll-hint-arrow,
+body.desktop-page[data-theme="dark"] .sentiment-dials-scroll-hint-arrow {
+  color: var(--accent) !important;
+}
+
+/* ── PnL of the Day — inner rows (were slate) ──────────────────── */
+body.desktop-page .pnl-day-item,
+body.desktop-page[data-theme="dark"] .pnl-day-item {
+  background: var(--card-inner) !important;
+  border: 1px solid var(--line) !important;
+}
+
+body.desktop-page .pnl-day-item h4,
+body.desktop-page[data-theme="dark"] .pnl-day-item h4 {
+  color: var(--text) !important;
+}
+
+body.desktop-page .pnl-day-item p,
+body.desktop-page[data-theme="dark"] .pnl-day-item p {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .pnl-day-total,
+body.desktop-page[data-theme="dark"] .pnl-day-total {
+  color: var(--muted) !important;
+  background: var(--bg2) !important;
+  border: 1px solid rgba(61, 186, 122, 0.45) !important;
+  border-radius: 999px;
+  padding: 0.28rem 0.75rem;
+}
+
+body.desktop-page .pnl-day-total .pnl-chip {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text) !important;
+}
+
+body.desktop-page .pnl-chip-positive,
+body.desktop-page[data-theme="dark"] .pnl-chip-positive {
+  background: rgba(61, 186, 122, 0.22) !important;
+  color: #b8f5d0 !important;
+}
+
+body.desktop-page .pnl-chip-negative,
+body.desktop-page[data-theme="dark"] .pnl-chip-negative {
+  background: rgba(224, 107, 107, 0.22) !important;
+  color: #f5c0c0 !important;
+}
+
+body.desktop-page .pnl-chip-neutral,
+body.desktop-page[data-theme="dark"] .pnl-chip-neutral {
+  background: rgba(143, 163, 152, 0.18) !important;
+  color: var(--muted) !important;
+}
+
+body.desktop-page .pnl-total-pill,
+body.desktop-page .status-pill,
+body.desktop-page .pill {
+  border-color: rgba(61, 186, 122, 0.45) !important;
+  color: var(--text) !important;
+  background: var(--bg2) !important;
+}
+
+/* ── Top Gainers & Losers — lists / panels (were slate) ────────── */
+body.desktop-page .sector-movers-list,
+body.desktop-page[data-theme="dark"] .sector-movers-list {
+  background: var(--card-inner) !important;
+  border: 1px solid var(--line) !important;
+}
+
+body.desktop-page .sector-movers-list li {
+  border-bottom-color: var(--line) !important;
+}
+
+body.desktop-page .sector-movers-name,
+body.desktop-page[data-theme="dark"] .sector-movers-name,
+body.desktop-page .sector-movers-toggle,
+body.desktop-page[data-theme="dark"] .sector-movers-toggle {
+  color: var(--text) !important;
+}
+
+body.desktop-page .sector-movers-toggle:hover,
+body.desktop-page[data-theme="dark"] .sector-movers-toggle:hover {
+  color: var(--accent) !important;
+}
+
+body.desktop-page .sector-movers-toggle:focus-visible {
+  outline-color: var(--accent) !important;
+}
+
+body.desktop-page .sector-movers-updated,
+body.desktop-page .sector-movers-hint,
+body.desktop-page .sector-movers-empty,
+body.desktop-page[data-theme="dark"] .sector-movers-updated,
+body.desktop-page[data-theme="dark"] .sector-movers-hint {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .sector-movers-panel,
+body.desktop-page[data-theme="dark"] .sector-movers-panel {
+  background: rgba(12, 18, 16, 0.65) !important;
+  border-top-color: var(--line) !important;
+}
+
+body.desktop-page .sector-movers-panel-placeholder,
+body.desktop-page .sector-movers-panel-msg,
+body.desktop-page .sector-movers-panel-subtitle,
+body.desktop-page[data-theme="dark"] .sector-movers-panel-placeholder,
+body.desktop-page[data-theme="dark"] .sector-movers-panel-msg,
+body.desktop-page[data-theme="dark"] .sector-movers-panel-subtitle {
+  color: var(--muted) !important;
+}
+
+body.desktop-page .sector-movers-panel-title,
+body.desktop-page .sector-movers-stock-sym,
+body.desktop-page .sector-movers-stock-ltp,
+body.desktop-page[data-theme="dark"] .sector-movers-panel-title,
+body.desktop-page[data-theme="dark"] .sector-movers-stock-sym,
+body.desktop-page[data-theme="dark"] .sector-movers-stock-ltp {
+  color: var(--text) !important;
+}
+
+body.desktop-page .sector-persistence-block {
+  border-top-color: var(--line) !important;
+}
+
+body.desktop-page .sector-persistence-title,
+body.desktop-page[data-theme="dark"] .sector-persistence-title {
+  color: var(--text) !important;
+}
+
+body.desktop-page .sector-persistence-table th,
+body.desktop-page .sector-persistence-table td {
+  border-bottom-color: var(--line) !important;
+  color: var(--text) !important;
+}
+
+body.desktop-page .gainers-losers-tabs button.active,
+body.desktop-page .tab.active,
+body.desktop-page .filter-tab.active {
+  background: var(--accent) !important;
+  color: #062015 !important;
+  border-color: var(--accent) !important;
+}
+
+body.desktop-page .gainers-losers-tabs button:not(.active),
+body.desktop-page .tab:not(.active),
+body.desktop-page .filter-tab:not(.active) {
+  background: var(--bg2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line) !important;
+}
+
+/* ── Tables / watchlists / RS scanner ──────────────────────────── */
 body.desktop-page .sf-watchlist-card .sf-wl-updated,
 body.desktop-page .sf-watchlist-card .sf-wl-hint,
 body.desktop-page .sf-watchlist-card .sf-wl-msg,
 body.desktop-page .sf-watchlist-card .sf-wl-empty {
-  color: var(--theme-muted) !important;
+  color: var(--muted) !important;
 }
 
 body.desktop-page .sf-watchlist-card .sf-wl-table th {
-  background: rgba(26, 38, 33, 0.9) !important;
+  background: var(--bg2) !important;
   color: var(--muted) !important;
   border-bottom-color: var(--line) !important;
 }
@@ -146,53 +430,19 @@ body.desktop-page .rs-scanner-card .rs-checklist-link:hover {
   background: rgba(61, 186, 122, 0.12) !important;
 }
 
-body.desktop-page .mobile-title-bar {
-  background: linear-gradient(135deg, #0e1613, #1a2621) !important;
-  border-bottom: 1px solid var(--line);
+/* Catch-all for remaining slate/navy nested boxes inside dashboard */
+body.desktop-page .dashboard-card [class*="item"],
+body.desktop-page .dashboard-card [class*="tile"],
+body.desktop-page .dashboard-card [class*="box"],
+body.desktop-page .dashboard-card [class*="panel"]:not(.left-panel),
+body.desktop-page .dashboard-card [class*="row-card"] {
+  border-color: var(--line);
 }
 
-body.desktop-page .mobile-title {
-  font-family: var(--font-display);
-  font-weight: 700;
-}
-
-/* Sentiment / toggle buttons — lime primary like divtest */
-body.desktop-page .sentiment-basis-toggle {
-  background: var(--bg1) !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 10px;
-  padding: 3px;
-}
-
-body.desktop-page .sentiment-basis-btn {
-  background: transparent !important;
-  color: var(--muted) !important;
-  border: 1px solid transparent !important;
-  border-radius: 8px !important;
-  font-family: var(--font-body);
-  font-weight: 600;
-}
-
-body.desktop-page .sentiment-basis-btn.active {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: #062015 !important;
-}
-
-body.desktop-page .sentiment-basis-btn:not(.active):hover {
-  border-color: rgba(61, 186, 122, 0.45) !important;
-  color: var(--text) !important;
-}
-
-body.desktop-page .btn-icon,
-body.desktop-page .btn-primary,
-body.desktop-page button.btn {
-  font-family: var(--font-body);
-}
-
+/* ── Buttons / icons ───────────────────────────────────────────── */
 body.desktop-page .btn-icon {
   color: var(--accent) !important;
-  background: rgba(26, 38, 33, 0.9) !important;
+  background: var(--bg2) !important;
   border: 1px solid var(--line) !important;
   border-radius: 8px !important;
 }
@@ -216,38 +466,60 @@ body.desktop-page button.primary:hover {
   background: #4fd190 !important;
 }
 
-body.desktop-page .market-trivia-ticker {
-  background: rgba(18, 26, 23, 0.95) !important;
+/* ── Crypto strip (was blue gradient) ──────────────────────────── */
+body.desktop-page .crypto-item {
+  background: var(--card-inner) !important;
+  background-image: none !important;
   border: 1px solid var(--line) !important;
-  color: var(--muted) !important;
-  border-radius: 8px;
+  box-shadow: none !important;
 }
 
-body.desktop-page .pnl-total-pill,
-body.desktop-page .status-pill,
-body.desktop-page .pill {
-  border-color: rgba(61, 186, 122, 0.45) !important;
+body.desktop-page .crypto-item::before {
+  display: none !important;
+}
+
+body.desktop-page .crypto-symbol {
+  background: none !important;
+  -webkit-text-fill-color: var(--accent) !important;
+  color: var(--accent) !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+body.desktop-page .crypto-grid::-webkit-scrollbar-thumb {
+  background: rgba(61, 186, 122, 0.35) !important;
+}
+
+/* ── OI heatmap / misc cards ───────────────────────────────────── */
+body.desktop-page .oi-heatmap-modal,
+body.desktop-page .oi-heatmap-modal-body,
+body.desktop-page .form-popup {
+  background: var(--card) !important;
+  border-color: var(--line) !important;
   color: var(--text) !important;
-  background: rgba(26, 38, 33, 0.9) !important;
 }
 
-body.desktop-page .gainers-losers-tabs button.active,
-body.desktop-page .tab.active,
-body.desktop-page .filter-tab.active {
-  background: var(--accent) !important;
-  color: #062015 !important;
-  border-color: var(--accent) !important;
-}
-
-body.desktop-page .gainers-losers-tabs button:not(.active),
-body.desktop-page .tab:not(.active),
-body.desktop-page .filter-tab:not(.active) {
+body.desktop-page .status-badge {
   background: var(--bg2) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--line) !important;
+  color: var(--muted) !important;
 }
 
-/* Floating refresh FAB */
+body.desktop-page .status-badge.active {
+  background: rgba(61, 186, 122, 0.25) !important;
+  color: var(--accent) !important;
+}
+
+/* ── Mobile bar + FAB + web topbar ─────────────────────────────── */
+body.desktop-page .mobile-title-bar {
+  background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+  border-bottom: 1px solid var(--line);
+}
+
+body.desktop-page .mobile-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
 body.desktop-page .cache-fab,
 body.desktop-page .floating-refresh,
 body.desktop-page #cacheManagerFab {
@@ -257,10 +529,8 @@ body.desktop-page #cacheManagerFab {
   box-shadow: 0 8px 24px rgba(61, 186, 122, 0.35);
 }
 
-/* Web top bar (hamburger) — shown ≥1025px via left-menu web-hamburger */
 body.desktop-page .tm-web-topbar {
-  background:
-    linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+  background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(12px);
 }
@@ -273,7 +543,7 @@ body.desktop-page .tm-web-topbar-brand {
 }
 
 body.desktop-page .tm-web-hamburger {
-  background: rgba(26, 38, 33, 0.9);
+  background: var(--bg2);
   border: 1px solid var(--line);
   color: var(--accent);
 }
@@ -284,7 +554,7 @@ body.desktop-page .tm-web-hamburger[aria-expanded="true"] {
   border-color: rgba(61, 186, 122, 0.45);
 }
 
-/* Light theme still available via toggle */
+/* Light theme */
 body.desktop-page[data-theme="light"] {
   --theme-bg: #f4f7f5;
   --theme-card: rgba(255, 255, 255, 0.95);
@@ -293,6 +563,8 @@ body.desktop-page[data-theme="light"] {
   --theme-text: #14201a;
   --theme-muted: #5a6e63;
   --theme-accent: #2a8f5c;
+  --card: rgba(255, 255, 255, 0.95);
+  --card-inner: #eef3f0;
   --left-menu-bg: rgba(255, 255, 255, 0.98);
   --left-menu-text: #14201a;
   --left-menu-muted: #5a6e63;
