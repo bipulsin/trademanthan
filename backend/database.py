@@ -2581,6 +2581,35 @@ def _run_startup_schema_migrations(db_engine):
                     "ON rocket_crash_event_log (symbol, timeframe, event_timestamp DESC)"
                 )
             )
+            # Site-wide admin key/value settings (survives container rebuilds via Postgres).
+            if "app_settings" not in table_names:
+                if db_engine.dialect.name == "postgresql":
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE app_settings (
+                                key TEXT PRIMARY KEY,
+                                value TEXT NOT NULL,
+                                updated_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created app_settings (PostgreSQL)")
+                else:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE app_settings (
+                                key TEXT PRIMARY KEY,
+                                value TEXT NOT NULL,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                            """
+                        )
+                    )
+                    print("Applied migration: created app_settings")
+
             # Retired: Rocket ML/Layer10f replay tables and Sambhav research tables.
             # Keep rocket_live_state / rocket_crash_event_log (Kavach scoring).
             conn.execute(

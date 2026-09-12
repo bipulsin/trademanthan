@@ -80,10 +80,10 @@ class LeftMenu {
                 this.isAuthenticated = true;
                 isAuthenticated = true;
                 await this.loadMenu();
-                // Defaults / cache before /auth/me and visibility API return
-                this.applyMenuVisibility({});
-                this.applyAdminNavVisibility();
+                // Prefer last-known server state from localStorage; never flash all-on.
+                // Server GET remains source of truth when it succeeds.
                 this.applyCachedMenuVisibility();
+                this.applyAdminNavVisibility();
                 await this.refreshUserProfileFromApi();
                 this.applyAdminNavVisibility();
                 await this.loadAndApplyMenuVisibility();
@@ -264,7 +264,10 @@ class LeftMenu {
 
     async loadAndApplyMenuVisibility() {
         const token = localStorage.getItem('trademanthan_token') || '';
-        if (!token || !token.includes('.')) return;
+        if (!token || !token.includes('.')) {
+            this.applyCachedMenuVisibility();
+            return;
+        }
         const b = trademanthanApiBase();
         const paths = [b + '/api/left-menu/visibility', b + '/left-menu/visibility'];
         for (const path of paths) {
@@ -277,7 +280,12 @@ class LeftMenu {
                 const data = await res.json();
                 const enabled = data && data.enabled && typeof data.enabled === 'object'
                     ? data.enabled
-                    : {};
+                    : null;
+                // Empty/missing enabled map: keep last-known cache (do not reset to all-on).
+                if (!enabled || !Object.keys(enabled).length) {
+                    this.applyCachedMenuVisibility();
+                    return;
+                }
                 try {
                     localStorage.setItem(LEFT_MENU_VISIBILITY_STORAGE_KEY, JSON.stringify(enabled));
                 } catch (e) { /* ignore */ }
@@ -287,6 +295,8 @@ class LeftMenu {
                 console.warn('LeftMenu: visibility try', path, err);
             }
         }
+        // Transient API failure: keep last-known server state from cache.
+        this.applyCachedMenuVisibility();
     }
 
     setupMenuVisibilityListener() {
