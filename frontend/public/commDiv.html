@@ -4,7 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <title>Commodities Div | TradeWithCTO</title>
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Commodities Div - TradeWithCTO</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
     <script src="auth-check.js?v=1"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -14,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.42" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=1" />
+    <link rel="stylesheet" href="commDiv.css?v=2" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -28,16 +30,16 @@
         <div id="left-menu-container"></div>
         <main class="right-panel main-content-area">
             <div class="cd-page">
-                <header class="cd-header">
-                    <div>
-                        <h1 class="cd-title"><i class="fas fa-oil-can" aria-hidden="true"></i> Commodities Div</h1>
-                        <p class="cd-lede">Single-active MACD divergence desk for MCX commodities. Webhook → Divergence → Activated → In-Trade → Exit Trade → History.</p>
+                <div class="cd-page-header">
+                    <div class="cd-title-section">
+                        <h1 class="cd-page-title"><i class="fas fa-oil-can" aria-hidden="true"></i> Commodities Div</h1>
+                        <p class="cd-subtitle">Single-active MACD divergence desk for MCX commodities. Webhook → Divergence → Activated → In-Trade → Exit Trade → History.</p>
                     </div>
-                    <div class="cd-header-actions">
+                    <div class="cd-header-aside">
                         <span class="cd-server-time" id="cdServerTime">—</span>
                         <button type="button" class="cd-btn cd-btn-ghost" id="cdReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
                     </div>
-                </header>
+                </div>
 
                 <p class="cd-banner" id="cdBanner" hidden></p>
 
@@ -137,6 +139,6 @@
     </div>
 
     <script src="left-menu.js?v=3.44"></script>
-    <script src="commDiv.js?v=1"></script>
+    <script src="commDiv.js?v=2"></script>
 </body>
 </html>

@@ -66,7 +66,7 @@
     }
     el.hidden = false;
     el.textContent = msg;
-    el.style.borderColor = isErr ? "rgba(248,113,113,0.45)" : "";
+    el.setAttribute("data-error", isErr ? "1" : "0");
   }
 
   function playTrade() {
