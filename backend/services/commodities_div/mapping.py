@@ -2,6 +2,7 @@
 
 No user mapping table required. Allowed underlyings:
   CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI
+Plus test-only (no Upstox / no LTP): BTCUSD, ETHUSD
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 _EXCHANGE_PREFIX = re.compile(
-    r"^(NSE|BSE|NFO|MCX|BINANCE|BYBIT|COINBASE|NYSE|NASDAQ|AMEX)\s*:\s*",
+    r"^(NSE|BSE|NFO|MCX|BINANCE|BYBIT|COINBASE|CRYPTO|NYSE|NASDAQ|AMEX)\s*:\s*",
     re.I,
 )
 _CONT_FUT = re.compile(r"\d+!$")
@@ -22,14 +23,24 @@ _LETTER_YEAR = re.compile(r"[A-Z]\d{4}$")
 # Also accept letter + 2-digit year: Z26
 _LETTER_YY = re.compile(r"[A-Z]\d{2}$")
 
-# Canonical desk names (longest first for prefix match).
+# UI/webhook test symbols — lifecycle only; never resolve MCX or fetch LTP.
+TEST_ONLY_UNDERLYINGS: Tuple[str, ...] = (
+    "BTCUSD",
+    "ETHUSD",
+)
+
+# Canonical desk names (longest first for prefix match) + test-only.
 ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
     "NATURALGAS",
     "SILVERMINI",
     "GOLDPETAL",
     "CRUDEOIL",
     "COPPER",
-)
+) + TEST_ONLY_UNDERLYINGS
+
+
+def is_test_only_underlying(name: Optional[str]) -> bool:
+    return bool(name) and str(name).strip().upper() in TEST_ONLY_UNDERLYINGS
 
 # Lookup keys tried against Upstox master (SILVERMINI → SILVERM on Upstox).
 UPSTOX_RESOLVE_ALIASES: Dict[str, List[str]] = {
@@ -185,7 +196,8 @@ def attach_instrument_fields(symbol_raw: str) -> Dict[str, Any]:
     """
     Parse TV symbol → fixed underlying + front-month MCX FUT.
 
-    underlying_matched=False when symbol is not one of the five allowed names.
+    underlying_matched=False when symbol is not allowed.
+    Test-only (BTCUSD/ETHUSD): matched, no Upstox resolve.
     """
     underlying = parse_underlying(symbol_raw)
     out: Dict[str, Any] = {
@@ -197,10 +209,16 @@ def attach_instrument_fields(symbol_raw: str) -> Dict[str, Any]:
         "lot_size": None,
         "exchange": "MCX",
         "resolved_as": None,
+        "test_only": False,
     }
     if not underlying:
         return out
     out["symbol_mapped"] = underlying
+    if is_test_only_underlying(underlying):
+        out["test_only"] = True
+        out["exchange"] = None
+        out["contract"] = underlying  # display name only; not an Upstox trading_symbol
+        return out
     inst = resolve_underlying_instrument(underlying)
     if not inst:
         return out

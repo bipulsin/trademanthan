@@ -10,7 +10,11 @@ import pytz
 from sqlalchemy import text
 
 from backend.database import SessionLocal
-from backend.services.commodities_div.mapping import attach_instrument_fields, normalize_tv_ticker
+from backend.services.commodities_div.mapping import (
+    ALLOWED_UNDERLYINGS,
+    attach_instrument_fields,
+    normalize_tv_ticker,
+)
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.ist_datetime import naive_ist
 
@@ -275,13 +279,7 @@ def process_webhook(
                 "log_id": log_id,
                 "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "reason": "unknown_underlying",
-                "allowed": [
-                    "CRUDEOIL",
-                    "NATURALGAS",
-                    "COPPER",
-                    "GOLDPETAL",
-                    "SILVERMINI",
-                ],
+                "allowed": list(ALLOWED_UNDERLYINGS),
             }
 
         # --- DIV ---

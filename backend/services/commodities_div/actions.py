@@ -10,7 +10,10 @@ import pytz
 from sqlalchemy import text
 
 from backend.database import SessionLocal
-from backend.services.commodities_div.mapping import attach_instrument_fields
+from backend.services.commodities_div.mapping import (
+    attach_instrument_fields,
+    is_test_only_underlying,
+)
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import (
     STATUS_ACTIVATED,
@@ -152,9 +155,13 @@ def take_trade(*, signal_id: int, entry_price: float) -> Dict[str, Any]:
         ).mappings().first()
         out = serialize_signal(dict(updated))
         out["play_trade_audio"] = True
-        out["mapping_warning"] = None if ik else (
-            "Upstox front-month FUT not resolved yet — LTP will retry on the 10-min sidecar"
-        )
+        mapped = str(updated.get("symbol_mapped") or "")
+        if is_test_only_underlying(mapped):
+            out["mapping_warning"] = None  # test symbols: no Upstox / LTP by design
+        else:
+            out["mapping_warning"] = None if ik else (
+                "Upstox front-month FUT not resolved yet — LTP will retry on the 10-min sidecar"
+            )
         return out
     except Exception:
         db.rollback()

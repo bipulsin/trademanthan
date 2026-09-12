@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from backend.services.commodities_div.mapping import (
+    attach_instrument_fields,
     normalize_tv_ticker,
     parse_underlying,
 )
@@ -32,6 +33,19 @@ def test_parse_underlying_allowed_forms():
     assert parse_underlying("GOLDPETAL1!") == "GOLDPETAL"
     assert parse_underlying("SILVERMINI1!") == "SILVERMINI"
     assert parse_underlying("SILVERMINIZ2026") == "SILVERMINI"
+
+
+def test_parse_underlying_test_only_crypto():
+    assert parse_underlying("BTCUSD") == "BTCUSD"
+    assert parse_underlying("ETHUSD") == "ETHUSD"
+    assert parse_underlying("BTCUSD1!") == "BTCUSD"
+    assert parse_underlying("BINANCE:ETHUSD") == "ETHUSD"
+    assert parse_underlying("CRYPTO:BTCUSD1!") == "BTCUSD"
+    inst = attach_instrument_fields("BTCUSD")
+    assert inst["underlying_matched"] is True
+    assert inst["test_only"] is True
+    assert inst["instrument_key"] is None
+    assert inst["symbol_mapped"] == "BTCUSD"
 
 
 def test_parse_underlying_rejects_unknown():
