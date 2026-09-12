@@ -832,15 +832,18 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     top: 0;
     left: 0;
     right: 0;
-    z-index: 1002;
+    z-index: 1100;
     height: 56px;
     padding: 0 14px;
     align-items: center;
     gap: 12px;
     box-sizing: border-box;
+    pointer-events: auto;
 }
 
 .tm-web-hamburger {
+    position: relative;
+    z-index: 1101;
     width: 42px;
     height: 42px;
     border-radius: 10px;
@@ -850,6 +853,8 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
     cursor: pointer;
     font-size: 1.15rem;
     transition: background 0.2s, border-color 0.2s;
+    pointer-events: auto;
+    flex-shrink: 0;
 }
 
 .tm-web-topbar-brand-wrap {
