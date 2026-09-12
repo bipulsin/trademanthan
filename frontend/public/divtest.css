@@ -32,6 +32,76 @@ body {
     linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%);
 }
 
+/* Left-menu shell integration */
+body.divtest-page {
+  --left-menu-bg: rgba(12, 18, 16, 0.96);
+  --left-menu-border: var(--line);
+  --left-menu-accent: var(--accent);
+  --left-menu-text: var(--text);
+  --left-menu-muted: var(--muted);
+}
+
+body.divtest-page .main-content-area,
+body.divtest-page .right-panel {
+  background: transparent !important;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+
+body.divtest-page .tm-web-topbar {
+  background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+}
+
+body.divtest-page .tm-web-topbar-brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+body.divtest-page .tm-web-hamburger {
+  background: rgba(26, 38, 33, 0.9);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+
+body.divtest-page .tm-web-hamburger:hover,
+body.divtest-page .tm-web-hamburger[aria-expanded="true"] {
+  background: rgba(61, 186, 122, 0.18);
+  border-color: rgba(61, 186, 122, 0.45);
+}
+
+body.divtest-page .mobile-title-bar {
+  display: none;
+  background: linear-gradient(135deg, #0e1613, #1a2621);
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+body.divtest-page .mobile-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 0;
+  color: var(--text);
+}
+
+body.divtest-page .mobile-logo {
+  height: 28px;
+  width: auto;
+}
+
+@media (max-width: 1024px) {
+  body.divtest-page .mobile-title-bar {
+    display: flex;
+  }
+}
+
 .page {
   max-width: 1180px;
   margin: 0 auto;

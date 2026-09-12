@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.40';
+const MENU_HTML_PATH = 'left-menu.html?v=3.41';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 
@@ -34,7 +34,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|analysis/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|havwap|divtest|analysis|iron-condor/.test(path);
     }
 
     getCurrentPage() {
@@ -63,7 +63,10 @@ class LeftMenu {
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         if (path.includes('breakfast')) return 'breakfast';
+        if (path.includes('havwap')) return 'havwap';
+        if (path.includes('divtest')) return 'divtest';
         if (path.includes('analysis')) return 'analysis';
+        if (path.includes('iron-condor')) return 'iron-condor';
         return 'desktop';
     }
 
@@ -259,7 +262,9 @@ class LeftMenu {
         return `
 <div class="left-menu-wrapper">
     <aside class="left-panel" id="leftPanel">
-        <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu"><i class="fas fa-angles-left" id="panelToggleIcon"></i></button>
+        <button class="panel-toggle" id="panelToggle" aria-label="Toggle menu">
+            <i class="fas fa-angles-left" id="panelToggleIcon"></i>
+        </button>
         <div class="panel-header">
             <a href="desktop.html" class="logo-link">
                 <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="panel-logo">
@@ -271,39 +276,108 @@ class LeftMenu {
                     <button type="button" class="theme-btn" data-theme="light" data-tooltip="Light Theme" title="Light Theme" aria-label="Light Theme"><i class="fas fa-sun"></i></button>
                     <button type="button" class="theme-btn active" data-theme="dark" data-tooltip="Dark Theme" title="Dark Theme" aria-label="Dark Theme"><i class="fas fa-moon"></i></button>
                 </div>
-                <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" data-tooltip="Support" title="Support" aria-label="Support"><i class="fab fa-telegram" aria-hidden="true"></i></button>
-                <button type="button" class="panel-nav-logout-btn" id="leftMenuLogoutBtn" data-tooltip="Logout" title="Logout" aria-label="Logout"><i class="fas fa-sign-out-alt" aria-hidden="true"></i></button>
+                <button type="button" class="panel-nav-telegram-btn" id="leftMenuTelegramBtn" data-tooltip="Support" title="Support" aria-label="Support">
+                    <i class="fab fa-telegram" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="panel-nav-logout-btn" id="leftMenuLogoutBtn" data-tooltip="Logout" title="Logout" aria-label="Logout">
+                    <i class="fas fa-sign-out-alt" aria-hidden="true"></i>
+                </button>
             </div>
             <ul class="nav-list">
-                <li class="nav-item" data-page="desktop.html"><i class="fas fa-chart-line"></i><span>Dashboard</span></li>
-                <li class="nav-item" data-page="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" /><span>Intraday Option</span></li>
-                <li class="nav-item" data-page="stockOptions.html"><i class="fas fa-chart-line" style="color:#38bdf8;"></i><span>Stock Options</span></li>
-                <li class="nav-item" data-page="dailyfutures.html"><i class="fas fa-calendar-day"></i><span>Premium Futures</span></li>
-                <li class="nav-item" data-page="volumemismatchfutures.html"><i class="fas fa-chart-bar" style="color:#7c3aed;"></i><span>Volume Mismatch Futures</span></li>
-                <li class="nav-item" data-page="iron-condor.html"><i class="fas fa-layer-group"></i><span>Iron Condor</span></li>
-                <li class="nav-item nav-item-menu-hidden" data-page="pivot-breakout.html" aria-hidden="true"><i class="fas fa-bullseye"></i><span>Pivot Breakout</span></li>
-                <li class="nav-item" data-page="arbitrage.html"><i class="fas fa-shuffle"></i><span>Arbitrage Selection</span></li>
-                <li class="nav-item" data-page="cargpt.html"><i class="fas fa-chart-area"></i><span>Composite Avg</span></li>
-                <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true"><i class="fas fa-university"></i><span>Broker Management</span></li>
-                <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true"><i class="fas fa-robot"></i><span>Strategy Management</span></li>
-                <li class="nav-item" data-page="reports.html"><i class="fas fa-chart-bar"></i><span>Reports</span></li>
-                <li class="nav-item" data-page="tradelog.html"><i class="fas fa-book"></i><span>Trade Log</span></li>
-                <li class="nav-item nav-item-admin" data-page="kavach-bt-checkpoint.html" style="display: none;" title="Administrator only"><i class="fas fa-flask"></i><span>Kavach BT Checkpoint</span></li>
-                <li class="nav-item" data-page="future_screener.html"><i class="fas fa-filter"></i><span>Future Screener</span></li>
-                <li class="nav-item" data-page="breakfast.html"><i class="fas fa-mug-hot" style="color:#f59e0b;"></i><span>Breakfast Strategy</span></li>
-                <li class="nav-item" data-page="havwap.html"><i class="fas fa-chart-area" style="color:#34d399;"></i><span>HA-VWAP Backtest</span></li>
-                <li class="nav-item" data-page="analysis.html"><i class="fas fa-table" style="color:#60a5fa;"></i><span>Analysis</span></li>
-                <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only"><i class="fas fa-cog"></i><span>Settings</span></li>
-                <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only"><i class="fas fa-user-shield"></i><span>Admin</span></li>
-                <li class="nav-item nav-item-admin" data-page="kavachIgnitionDiag.html" style="display: none;" title="Administrator only"><i class="fas fa-bolt"></i><span>Ignition Diag</span></li>
-                <li class="nav-item nav-item-admin" data-page="rs-journey.html" style="display: none;" title="Administrator only"><i class="fas fa-route"></i><span>RS Journey</span></li>
-                <li class="nav-item nav-item-admin" data-page="candle-warm-deny.html" style="display: none;" title="Administrator only"><i class="fas fa-chart-area"></i><span>Candle Deny</span></li>
+                <li class="nav-item" data-page="desktop.html">
+                    <a class="nav-item-link" href="desktop.html"><i class="fas fa-chart-line"></i>
+                    <span>Dashboard</span></a>
+                </li>
+                <li class="nav-item" data-page="intraoption.html">
+                    <a class="nav-item-link" href="intraoption.html"><img src="icons/intraday-option.png?v=1" alt="" class="nav-item-icon-img" width="33" height="33" />
+                    <span>Intraday Option</span></a>
+                </li>
+                <li class="nav-item" data-page="stockOptions.html">
+                    <a class="nav-item-link" href="stockOptions.html"><i class="fas fa-chart-line" style="color:#38bdf8;"></i>
+                    <span>Stock Options</span></a>
+                </li>
+                <li class="nav-item" data-page="dailyfutures.html">
+                    <a class="nav-item-link" href="dailyfutures.html"><i class="fas fa-calendar-day"></i>
+                    <span>Premium Futures</span></a>
+                </li>
+                <li class="nav-item" data-page="volumemismatchfutures.html">
+                    <a class="nav-item-link" href="volumemismatchfutures.html"><i class="fas fa-chart-bar" style="color:#7c3aed;"></i>
+                    <span>Volume Mismatch Futures</span></a>
+                </li>
+                <li class="nav-item" data-page="iron-condor.html">
+                    <a class="nav-item-link" href="iron-condor.html"><i class="fas fa-layer-group"></i>
+                    <span>Iron Condor</span></a>
+                </li>
+                <li class="nav-item nav-item-menu-hidden" data-page="pivot-breakout.html" aria-hidden="true">
+                    <a class="nav-item-link" href="pivot-breakout.html"><i class="fas fa-bullseye"></i>
+                    <span>Pivot Breakout</span></a>
+                </li>
+                <li class="nav-item" data-page="arbitrage.html">
+                    <a class="nav-item-link" href="arbitrage.html"><i class="fas fa-shuffle"></i>
+                    <span>Arbitrage Selection</span></a>
+                </li>
+                <li class="nav-item" data-page="cargpt.html">
+                    <a class="nav-item-link" href="cargpt.html"><i class="fas fa-chart-area"></i>
+                    <span>Composite Avg</span></a>
+                </li>
+                <li class="nav-item nav-item-menu-hidden" data-page="broker.html" aria-hidden="true">
+                    <a class="nav-item-link" href="broker.html"><i class="fas fa-university"></i>
+                    <span>Broker Management</span></a>
+                </li>
+                <li class="nav-item nav-item-menu-hidden" data-page="strategy.html" aria-hidden="true">
+                    <a class="nav-item-link" href="strategy.html"><i class="fas fa-robot"></i>
+                    <span>Strategy Management</span></a>
+                </li>
+                <li class="nav-item" data-page="reports.html">
+                    <a class="nav-item-link" href="reports.html"><i class="fas fa-chart-bar"></i>
+                    <span>Reports</span></a>
+                </li>
+                <li class="nav-item" data-page="tradelog.html">
+                    <a class="nav-item-link" href="tradelog.html"><i class="fas fa-book"></i>
+                    <span>Trade Log</span></a>
+                </li>
+                <li class="nav-item" data-page="future_screener.html">
+                    <a class="nav-item-link" href="future_screener.html"><i class="fas fa-filter"></i>
+                    <span>Future Screener</span></a>
+                </li>
+                <li class="nav-item" data-page="breakfast.html">
+                    <a class="nav-item-link" href="breakfast.html"><i class="fas fa-mug-hot" style="color:#f59e0b;"></i>
+                    <span>Breakfast Strategy</span></a>
+                </li>
+                <li class="nav-item" data-page="havwap.html">
+                    <a class="nav-item-link" href="havwap.html"><i class="fas fa-chart-area" style="color:#34d399;"></i>
+                    <span>HA-VWAP Backtest</span></a>
+                </li>
+                <li class="nav-item" data-page="divtest.html">
+                    <a class="nav-item-link" href="divtest.html"><i class="fas fa-wave-square" style="color:#3dba7a;"></i>
+                    <span>MACD Div Backtest</span></a>
+                </li>
+                <li class="nav-item" data-page="analysis.html">
+                    <a class="nav-item-link" href="analysis.html"><i class="fas fa-table" style="color:#60a5fa;"></i>
+                    <span>Analysis</span></a>
+                </li>
+                <li class="nav-item nav-item-admin" data-page="settings.html" style="display: none;" title="Administrator only">
+                    <a class="nav-item-link" href="settings.html"><i class="fas fa-cog"></i>
+                    <span>Settings</span></a>
+                </li>
+                <li class="nav-item nav-item-admin" data-page="admintwc.html" style="display: none;" title="Administrator only">
+                    <a class="nav-item-link" href="admintwc.html"><i class="fas fa-user-shield"></i>
+                    <span>Admin</span></a>
+                </li>
+                <li class="nav-item nav-item-admin" data-page="rs-journey.html" style="display: none;" title="Administrator only">
+                    <a class="nav-item-link" href="rs-journey.html"><i class="fas fa-route"></i>
+                    <span>RS Journey</span></a>
+                </li>
             </ul>
         </nav>
         <div class="panel-footer">
             <div class="user-info">
                 <img src="https://via.placeholder.com/40" alt="User" class="user-avatar" id="userAvatar">
-                <div class="user-details"><span class="user-name" id="userName">User</span><span class="user-meta" id="userMetaLine" hidden></span><span class="user-datetime" id="userDateTime">--</span></div>
+                <div class="user-details">
+                    <span class="user-name" id="userName">User</span>
+                    <span class="user-meta" id="userMetaLine" hidden></span>
+                    <span class="user-datetime" id="userDateTime">--</span>
+                </div>
             </div>
             <div class="panel-footer-links">
                 <a href="#" class="disclaimer-link">Disclaimer</a>
@@ -311,7 +385,10 @@ class LeftMenu {
         </div>
     </aside>
 </div>
-<button class="mobile-menu-toggle" id="leftMenuMobileToggle" aria-label="Open menu"><i class="fas fa-bars"></i></button>
+<!-- Mobile Hamburger -->
+<button class="mobile-menu-toggle" id="leftMenuMobileToggle" aria-label="Open menu">
+    <i class="fas fa-bars"></i>
+</button>
 <div class="mobile-menu-overlay" id="mobileMenuOverlay"></div>`;
     }
 
@@ -786,13 +863,30 @@ class LeftMenu {
 
     setupNavigation() {
         document.querySelectorAll('.nav-item[data-page]').forEach(item => {
-            item.addEventListener('click', () => {
-                const page = item.dataset.page;
-                if (page) {
-                    this.trackPageVisit(page, document.title).finally(() => {
-                        window.location.replace(page);
-                    });
-                }
+            const page = item.dataset.page;
+            if (!page) return;
+
+            // Ensure a real href so links work even if JS handlers fail / overlay races
+            let link = item.querySelector('a.nav-item-link');
+            if (!link) {
+                link = document.createElement('a');
+                link.className = 'nav-item-link';
+                link.href = page;
+                while (item.firstChild) link.appendChild(item.firstChild);
+                item.appendChild(link);
+            } else if (link.getAttribute('href') !== page) {
+                link.setAttribute('href', page);
+            }
+
+            item.addEventListener('click', (e) => {
+                // Allow modified clicks (new tab) via native anchor
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
+                e.preventDefault();
+                // Track in background; navigate immediately (do not wait on API)
+                try {
+                    this.trackPageVisit(page, document.title);
+                } catch (_) { /* ignore */ }
+                window.location.assign(page);
             });
         });
         document.querySelectorAll('.nav-item[data-action="logout"]').forEach(item => {
@@ -829,6 +923,9 @@ class LeftMenu {
             case 'admin': return 'admintwc.html';
             case 'future_screener': return 'future_screener.html';
             case 'breakfast': return 'breakfast.html';
+            case 'havwap': return 'havwap.html';
+            case 'divtest': return 'divtest.html';
+            case 'iron-condor': return 'iron-condor.html';
             case 'analysis': return 'analysis.html';
             case 'kavachIgnitionDiag': return 'kavachIgnitionDiag.html';
             case 'rs-journey': return 'rs-journey.html';

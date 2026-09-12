@@ -1,5 +1,5 @@
 /**
- * Desktop shell — divtest skin (TradeWithCTO green night theme)
+ * Desktop shell — match divtest.html (TradeWithCTO green night theme)
  * Used by desktop.html; pairs with left-menu web-hamburger mode.
  */
 
@@ -19,10 +19,8 @@ body.desktop-page {
   --font-body: "DM Sans", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
 
-  --theme-bg:
-    radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
-    radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
-    linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%);
+  /* Override theme.css slate/blue dark tokens */
+  --theme-bg: transparent;
   --theme-card: var(--card);
   --theme-card-alt: rgba(18, 26, 23, 0.9);
   --theme-border: var(--line);
@@ -41,15 +39,27 @@ body.desktop-page {
 
   margin: 0;
   min-height: 100%;
-  background: var(--theme-bg) !important;
   color: var(--theme-text) !important;
   font-family: var(--font-body);
+  background-color: var(--bg0) !important;
+  background-image:
+    repeating-linear-gradient(
+      -18deg,
+      transparent,
+      transparent 12px,
+      rgba(143, 163, 152, 0.045) 12px,
+      rgba(143, 163, 152, 0.045) 13px
+    ),
+    radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+    linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
 }
 
 body.desktop-page .main-content-area,
 body.desktop-page .right-panel {
   background: transparent !important;
   color: var(--theme-text) !important;
+  font-family: var(--font-body);
 }
 
 body.desktop-page .dashboard-card,
@@ -60,6 +70,7 @@ body.desktop-page .panel {
   border-radius: 14px !important;
   backdrop-filter: blur(8px);
   color: var(--theme-text) !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
 }
 
 body.desktop-page .dashboard-card .card-header,
@@ -69,9 +80,18 @@ body.desktop-page .crypto-card .card-header {
 
 body.desktop-page .dashboard-card h3,
 body.desktop-page .crypto-card h3,
-body.desktop-page .card-header h3 {
+body.desktop-page .card-header h3,
+body.desktop-page .section-header h1,
+body.desktop-page .section-header h2 {
   font-family: var(--font-display);
+  font-weight: 700;
   color: var(--theme-text) !important;
+  letter-spacing: -0.02em;
+}
+
+body.desktop-page .card-header h3 i,
+body.desktop-page .dashboard-card h3 i {
+  color: var(--accent) !important;
 }
 
 body.desktop-page .last-updated,
@@ -136,14 +156,105 @@ body.desktop-page .mobile-title {
   font-weight: 700;
 }
 
+/* Sentiment / toggle buttons — lime primary like divtest */
+body.desktop-page .sentiment-basis-toggle {
+  background: var(--bg1) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+body.desktop-page .sentiment-basis-btn {
+  background: transparent !important;
+  color: var(--muted) !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  font-family: var(--font-body);
+  font-weight: 600;
+}
+
 body.desktop-page .sentiment-basis-btn.active {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
-  color: #0c1210 !important;
+  color: #062015 !important;
+}
+
+body.desktop-page .sentiment-basis-btn:not(.active):hover {
+  border-color: rgba(61, 186, 122, 0.45) !important;
+  color: var(--text) !important;
+}
+
+body.desktop-page .btn-icon,
+body.desktop-page .btn-primary,
+body.desktop-page button.btn {
+  font-family: var(--font-body);
 }
 
 body.desktop-page .btn-icon {
   color: var(--accent) !important;
+  background: rgba(26, 38, 33, 0.9) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 8px !important;
+}
+
+body.desktop-page .btn-icon:hover {
+  background: rgba(61, 186, 122, 0.18) !important;
+  border-color: rgba(61, 186, 122, 0.45) !important;
+}
+
+body.desktop-page .btn-primary,
+body.desktop-page button.primary {
+  background: var(--accent) !important;
+  color: #062015 !important;
+  border: none !important;
+  border-radius: 8px !important;
+  font-weight: 600;
+}
+
+body.desktop-page .btn-primary:hover,
+body.desktop-page button.primary:hover {
+  background: #4fd190 !important;
+}
+
+body.desktop-page .market-trivia-ticker {
+  background: rgba(18, 26, 23, 0.95) !important;
+  border: 1px solid var(--line) !important;
+  color: var(--muted) !important;
+  border-radius: 8px;
+}
+
+body.desktop-page .pnl-total-pill,
+body.desktop-page .status-pill,
+body.desktop-page .pill {
+  border-color: rgba(61, 186, 122, 0.45) !important;
+  color: var(--text) !important;
+  background: rgba(26, 38, 33, 0.9) !important;
+}
+
+body.desktop-page .gainers-losers-tabs button.active,
+body.desktop-page .tab.active,
+body.desktop-page .filter-tab.active {
+  background: var(--accent) !important;
+  color: #062015 !important;
+  border-color: var(--accent) !important;
+}
+
+body.desktop-page .gainers-losers-tabs button:not(.active),
+body.desktop-page .tab:not(.active),
+body.desktop-page .filter-tab:not(.active) {
+  background: var(--bg2) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line) !important;
+}
+
+/* Floating refresh FAB */
+body.desktop-page .cache-fab,
+body.desktop-page .floating-refresh,
+body.desktop-page #cacheManagerFab {
+  background: var(--accent) !important;
+  color: #062015 !important;
+  border: none !important;
+  box-shadow: 0 8px 24px rgba(61, 186, 122, 0.35);
 }
 
 /* Web top bar (hamburger) — shown ≥1025px via left-menu web-hamburger */
@@ -186,6 +297,7 @@ body.desktop-page[data-theme="light"] {
   --left-menu-text: #14201a;
   --left-menu-muted: #5a6e63;
   --left-menu-accent: #2a8f5c;
-  background: var(--theme-bg) !important;
+  background-color: #f4f7f5 !important;
+  background-image: none !important;
   color: var(--theme-text) !important;
 }

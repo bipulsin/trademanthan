@@ -5,147 +5,165 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <title>divtest — MACD Divergence Backtest | TradeWithCTO</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+  <script src="auth-check.js?v=1"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="divtest.css?v=2" />
-  <script src="auth-check.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="left-menu.css?v=3.41" />
+  <link rel="stylesheet" href="divtest.css?v=3" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
-<body>
-    <div class="page">
-    <header class="hero">
-      <div class="hero-bg" aria-hidden="true"></div>
-      <p class="brand">TradeWithCTO</p>
-      <h1 class="title">divtest</h1>
-      <p class="tagline">MACD divergence + histogram flip backtester powered by Upstox historical candles.</p>
-    </header>
-
-    <section class="panel run-panel">
-      <h2>Run backtest</h2>
-      <form id="runForm" class="run-form">
-        <label>
-          Instrument(s)
-          <input id="instruments" type="text" placeholder="RELIANCE, NIFTY, CRUDEOIL" required />
-        </label>
-        <label>
-          Period
-          <select id="period">
-            <option value="6">6 months</option>
-            <option value="12">12 months</option>
-          </select>
-        </label>
-        <label class="check">
-          <input id="forceRefresh" type="checkbox" />
-          Force Refresh
-        </label>
-        <button type="submit" id="btnRun" class="btn-primary">Run Backtest</button>
-      </form>
-      <div id="progressWrap" class="progress-wrap hidden">
-        <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
-        <p id="progressText" class="progress-text">Idle</p>
-      </div>
-    </section>
-
-    <section class="panel settings-panel">
-      <details>
-        <summary>Strategy settings</summary>
-        <div class="settings-grid" id="settingsGrid">
-          <label>MACD fast <input type="number" data-key="macdFast" /></label>
-          <label>MACD slow <input type="number" data-key="macdSlow" /></label>
-          <label>MACD signal <input type="number" data-key="macdSignal" /></label>
-          <label>Divergence lookback <input type="number" data-key="divergenceLookback" /></label>
-          <label>Flip window (bars) <input type="number" data-key="histogramFlipWindow" /></label>
-          <label>Entry mode
-            <select data-key="entryMode">
-              <option value="next_open">Next candle open</option>
-              <option value="same_close">Same candle close</option>
-            </select>
-          </label>
-          <label>ATR period <input type="number" data-key="atrPeriod" /></label>
-          <label>ATR stop × <input type="number" step="0.1" data-key="atrStopMultiplier" /></label>
-          <label>ATR target × <input type="number" step="0.1" data-key="atrTargetMultiplier" /></label>
-          <label>Max holding bars <input type="number" data-key="maxHoldingBars" /></label>
-          <label>Brokerage / side (₹) <input type="number" data-key="brokeragePerSide" /></label>
-          <label>Equity default qty <input type="number" data-key="equityDefaultQty" /></label>
-          <label class="check"><input type="checkbox" data-key="brokerageEnabled" /> Brokerage on</label>
-          <label class="check"><input type="checkbox" data-key="exitOppositeFlip" /> Exit: opposite flip</label>
-          <label class="check"><input type="checkbox" data-key="exitStopLoss" /> Exit: ATR stop/target</label>
-          <label class="check"><input type="checkbox" data-key="exitTimeBased" /> Exit: time-based</label>
-        </div>
-        <div class="settings-actions">
-          <button type="button" id="btnSaveSettings" class="btn-secondary">Save settings</button>
-          <span id="settingsStatus" class="muted"></span>
-        </div>
-      </details>
-    </section>
-
-    <section class="panel filters-panel">
-      <div class="filters">
-        <label>
-          Instrument
-          <select id="filterInstrument"><option value="All">All Instruments</option></select>
-        </label>
-        <div class="tabs" id="tfTabs" role="tablist">
-          <button type="button" class="tab active" data-tf="All">All</button>
-          <button type="button" class="tab" data-tf="10min">10min</button>
-          <button type="button" class="tab" data-tf="15min">15min</button>
-          <button type="button" class="tab" data-tf="1hr">1hr</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel summary-panel">
-      <h2>Summary</h2>
-      <div class="cards" id="summaryCards"></div>
-      <div class="chart-wrap">
-        <canvas id="equityChart" height="110"></canvas>
-      </div>
-      <div class="tf-breakdown" id="tfBreakdown"></div>
-    </section>
-
-    <section class="panel table-panel">
-      <div class="table-head">
-        <h2>Trade log</h2>
-        <div class="pager">
-          <button type="button" id="prevPage" class="btn-secondary">Prev</button>
-          <span id="pageInfo">—</span>
-          <button type="button" id="nextPage" class="btn-secondary">Next</button>
-        </div>
-      </div>
-      <div class="table-scroll">
-        <table id="tradesTable">
-          <thead>
-            <tr>
-              <th data-sort="instrument">Instrument</th>
-              <th data-sort="timeframe">TF</th>
-              <th data-sort="entry_datetime">Entry</th>
-              <th data-sort="entry_price">Entry ₹</th>
-              <th data-sort="side">Side</th>
-              <th data-sort="exit_datetime">Exit</th>
-              <th data-sort="exit_price">Exit ₹</th>
-              <th data-sort="qty_per_lot">Qty</th>
-              <th data-sort="pnl_inr">PnL ₹</th>
-              <th data-sort="divergence_type">Div</th>
-              <th data-sort="exit_reason">Exit reason</th>
-            </tr>
-          </thead>
-          <tbody id="tradesBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel log-panel">
-      <h2>Live console</h2>
-      <pre id="consoleLog" class="console"></pre>
-    </section>
-
-    <footer class="footer">
-      <span id="tokenStatus">Upstox: —</span>
-      <span class="sep">·</span>
-      <span>divtest for TradeWithCTO.com</span>
-    </footer>
+<body class="divtest-page theme-page left-menu-web-hamburger" data-theme="dark">
+  <div class="mobile-title-bar">
+    <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+    <div class="mobile-title-content">
+      <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
+      <h1 class="mobile-title">divtest</h1>
+    </div>
   </div>
+
+  <div class="app-container app-with-left-menu">
+    <div id="left-menu-container"></div>
+    <main class="right-panel main-content-area">
+      <div class="page">
+        <header class="hero">
+          <div class="hero-bg" aria-hidden="true"></div>
+          <p class="brand">TradeWithCTO</p>
+          <h1 class="title">divtest</h1>
+          <p class="tagline">MACD divergence + histogram flip backtester powered by Upstox historical candles.</p>
+        </header>
+
+        <section class="panel run-panel">
+          <h2>Run backtest</h2>
+          <form id="runForm" class="run-form">
+            <label>
+              Instrument(s)
+              <input id="instruments" type="text" placeholder="RELIANCE, NIFTY, CRUDEOIL" required />
+            </label>
+            <label>
+              Period
+              <select id="period">
+                <option value="6">6 months</option>
+                <option value="12">12 months</option>
+              </select>
+            </label>
+            <label class="check">
+              <input id="forceRefresh" type="checkbox" />
+              Force Refresh
+            </label>
+            <button type="submit" id="btnRun" class="btn-primary">Run Backtest</button>
+          </form>
+          <div id="progressWrap" class="progress-wrap hidden">
+            <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+            <p id="progressText" class="progress-text">Idle</p>
+          </div>
+        </section>
+
+        <section class="panel settings-panel">
+          <details>
+            <summary>Strategy settings</summary>
+            <div class="settings-grid" id="settingsGrid">
+              <label>MACD fast <input type="number" data-key="macdFast" /></label>
+              <label>MACD slow <input type="number" data-key="macdSlow" /></label>
+              <label>MACD signal <input type="number" data-key="macdSignal" /></label>
+              <label>Divergence lookback <input type="number" data-key="divergenceLookback" /></label>
+              <label>Flip window (bars) <input type="number" data-key="histogramFlipWindow" /></label>
+              <label>Entry mode
+                <select data-key="entryMode">
+                  <option value="next_open">Next candle open</option>
+                  <option value="same_close">Same candle close</option>
+                </select>
+              </label>
+              <label>ATR period <input type="number" data-key="atrPeriod" /></label>
+              <label>ATR stop × <input type="number" step="0.1" data-key="atrStopMultiplier" /></label>
+              <label>ATR target × <input type="number" step="0.1" data-key="atrTargetMultiplier" /></label>
+              <label>Max holding bars <input type="number" data-key="maxHoldingBars" /></label>
+              <label>Brokerage / side (₹) <input type="number" data-key="brokeragePerSide" /></label>
+              <label>Equity default qty <input type="number" data-key="equityDefaultQty" /></label>
+              <label class="check"><input type="checkbox" data-key="brokerageEnabled" /> Brokerage on</label>
+              <label class="check"><input type="checkbox" data-key="exitOppositeFlip" /> Exit: opposite flip</label>
+              <label class="check"><input type="checkbox" data-key="exitStopLoss" /> Exit: ATR stop/target</label>
+              <label class="check"><input type="checkbox" data-key="exitTimeBased" /> Exit: time-based</label>
+            </div>
+            <div class="settings-actions">
+              <button type="button" id="btnSaveSettings" class="btn-secondary">Save settings</button>
+              <span id="settingsStatus" class="muted"></span>
+            </div>
+          </details>
+        </section>
+
+        <section class="panel filters-panel">
+          <div class="filters">
+            <label>
+              Instrument
+              <select id="filterInstrument"><option value="All">All Instruments</option></select>
+            </label>
+            <div class="tabs" id="tfTabs" role="tablist">
+              <button type="button" class="tab active" data-tf="All">All</button>
+              <button type="button" class="tab" data-tf="10min">10min</button>
+              <button type="button" class="tab" data-tf="15min">15min</button>
+              <button type="button" class="tab" data-tf="1hr">1hr</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel summary-panel">
+          <h2>Summary</h2>
+          <div class="cards" id="summaryCards"></div>
+          <div class="chart-wrap">
+            <canvas id="equityChart" height="110"></canvas>
+          </div>
+          <div class="tf-breakdown" id="tfBreakdown"></div>
+        </section>
+
+        <section class="panel table-panel">
+          <div class="table-head">
+            <h2>Trade log</h2>
+            <div class="pager">
+              <button type="button" id="prevPage" class="btn-secondary">Prev</button>
+              <span id="pageInfo">—</span>
+              <button type="button" id="nextPage" class="btn-secondary">Next</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table id="tradesTable">
+              <thead>
+                <tr>
+                  <th data-sort="instrument">Instrument</th>
+                  <th data-sort="timeframe">TF</th>
+                  <th data-sort="entry_datetime">Entry</th>
+                  <th data-sort="entry_price">Entry ₹</th>
+                  <th data-sort="side">Side</th>
+                  <th data-sort="exit_datetime">Exit</th>
+                  <th data-sort="exit_price">Exit ₹</th>
+                  <th data-sort="qty_per_lot">Qty</th>
+                  <th data-sort="pnl_inr">PnL ₹</th>
+                  <th data-sort="divergence_type">Div</th>
+                  <th data-sort="exit_reason">Exit reason</th>
+                </tr>
+              </thead>
+              <tbody id="tradesBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel log-panel">
+          <h2>Live console</h2>
+          <pre id="consoleLog" class="console"></pre>
+        </section>
+
+        <footer class="footer">
+          <span id="tokenStatus">Upstox: —</span>
+          <span class="sep">·</span>
+          <span>divtest for TradeWithCTO.com</span>
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <script src="left-menu.js?v=3.41"></script>
   <script src="divtest.js?v=2"></script>
 </body>
 </html>
