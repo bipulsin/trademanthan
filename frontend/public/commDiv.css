@@ -235,10 +235,16 @@ body.comm-div-page .mobile-logo {
 
 .cd-active-row,
 .cd-active-desktop {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 0.85rem 1.1rem;
-    align-items: end;
+    display: block;
+}
+
+.cd-active-table-wrap {
+    margin: -4px -2px 0;
+}
+
+.cd-active-table th,
+.cd-active-table td {
+    vertical-align: middle;
 }
 
 .cd-field-label {

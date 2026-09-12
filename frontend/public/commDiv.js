@@ -221,36 +221,50 @@
     var displaySym = row.symbol_raw || row.symbol_mapped || "—";
 
     panel.innerHTML =
-      '<div><span class="cd-field-label">Symbol</span><div class="cd-field-val">' +
+      '<div class="cd-table-wrap cd-active-table-wrap">' +
+      '<table class="cd-table cd-active-table">' +
+      "<thead><tr>" +
+      "<th>Symbol</th>" +
+      "<th>Direction</th>" +
+      "<th>Status</th>" +
+      "<th>DIV received</th>" +
+      "<th>GO received</th>" +
+      "<th>Entry</th>" +
+      "<th>LTP</th>" +
+      "<th>Action</th>" +
+      "</tr></thead>" +
+      "<tbody><tr>" +
+      "<td class=\"cd-field-val\">" +
       fmt(displaySym) +
-      "</div></div>" +
-      '<div><span class="cd-field-label">Direction</span><div class="cd-field-val ' +
+      "</td>" +
+      '<td class="cd-field-val ' +
       dirClass +
       '">' +
       fmt(row.direction) +
-      "</div></div>" +
-      '<div><span class="cd-field-label">Status</span><div><span class="' +
+      "</td>" +
+      "<td><span class=\"" +
       statusClass +
       '">' +
       fmt(row.status) +
-      "</span></div></div>" +
-      '<div><span class="cd-field-label">DIV received</span><div class="cd-field-val">' +
+      "</span></td>" +
+      '<td class="cd-field-val">' +
       fmt(row.div_received_at) +
-      "</div></div>" +
-      '<div><span class="cd-field-label">GO received</span><div class="cd-field-val">' +
+      "</td>" +
+      '<td class="cd-field-val">' +
       fmt(row.go_received_at) +
-      "</div></div>" +
-      '<div><span class="cd-field-label">Entry</span><div class="cd-field-val">' +
+      "</td>" +
+      '<td class="cd-field-val">' +
       fmt(row.entry_price) +
       (row.trade_taken_at ? " @ " + fmt(row.trade_taken_at) : "") +
-      "</div></div>" +
-      '<div><span class="cd-field-label">LTP</span><div class="cd-field-val">' +
+      "</td>" +
+      '<td class="cd-field-val">' +
       fmt(row.ltp) +
       (row.ltp_updated_at ? ' <span class="cd-muted">' + fmt(row.ltp_updated_at) + "</span>" : "") +
-      "</div></div>" +
-      '<div><span class="cd-field-label">Action</span><div>' +
+      "</td>" +
+      "<td>" +
       activeActionHtml(row, "") +
-      "</div></div>" +
+      "</td>" +
+      "</tr></tbody></table></div>" +
       mapWarn;
 
     var timeSrc = row.go_received_at || row.div_received_at || row.trade_taken_at || "";
