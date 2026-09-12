@@ -758,7 +758,7 @@ class LeftMenu {
         <span class="tm-web-topbar-brand">TradeWithCTO</span>
     </a>
     <div class="tm-topbar-vix" id="tmTopbarVix" aria-live="polite" title="India VIX">
-        <span class="tm-topbar-vix-label">Vx</span>
+        <span class="tm-topbar-vix-label">India Vix:</span>
         <span class="tm-topbar-vix-value" id="tmTopbarVixValue">—</span>
     </div>
 </header>`;
@@ -767,20 +767,20 @@ class LeftMenu {
     }
 
     applyIndiaVixDisplay(vix) {
-        const targets = [
-            document.getElementById('tmTopbarVixValue'),
+        const webEl = document.getElementById('tmTopbarVixValue');
+        const mobileEls = [
             document.getElementById('soMobileVixValue'),
             document.getElementById('soPageVixValue'),
         ];
         const warnEl = document.getElementById('soVixWarn');
-        const setOne = (el) => {
+        const paint = (el, decimals) => {
             if (!el) return;
             el.classList.remove('tm-vix-green', 'tm-vix-red', 'tm-vix-blink', 'so-vix-green', 'so-vix-red', 'so-vix-blink');
             if (vix == null || !Number.isFinite(vix)) {
                 el.textContent = '—';
                 return;
             }
-            el.textContent = vix.toFixed(1);
+            el.textContent = vix.toFixed(decimals);
             if (vix < 20.01) {
                 el.classList.add('tm-vix-green', 'so-vix-green');
             } else {
@@ -788,7 +788,8 @@ class LeftMenu {
                 if (vix > 23) el.classList.add('tm-vix-blink', 'so-vix-blink');
             }
         };
-        targets.forEach(setOne);
+        paint(webEl, 2);
+        mobileEls.forEach((el) => paint(el, 1));
         if (warnEl) warnEl.hidden = !(vix != null && Number.isFinite(vix) && vix > 22.7);
     }
 
@@ -1000,7 +1001,14 @@ class LeftMenu {
             admin: 'Admin',
         };
 
-        mobileTitle.textContent = pageTitles[this.currentPage] || 'Tradentical';
+        const title = pageTitles[this.currentPage] || 'Tradentical';
+        // Preserve inline widgets (e.g. Stock Options India VIX) inside .mobile-title
+        const keep = mobileTitle.querySelector('#soMobileVix, .so-inline-vix');
+        if (keep) {
+            mobileTitle.replaceChildren(document.createTextNode(title + ' '), keep);
+        } else {
+            mobileTitle.textContent = title;
+        }
     }
 
     loadUserData() {

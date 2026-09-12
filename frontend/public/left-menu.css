@@ -894,30 +894,38 @@ body[data-theme="light"] .tm-telegram-modal__textarea {
 
 .tm-topbar-vix {
     margin-left: auto;
+    /* Inset from the hard right so it sits visually between brand and edge */
+    margin-right: clamp(1.25rem, 7vw, 5.5rem);
     display: inline-flex;
     align-items: baseline;
-    gap: 0.35rem;
+    gap: 0.4rem;
     flex-shrink: 0;
-    padding: 0.2rem 0.15rem;
+    padding: 0.38rem 0.85rem;
     line-height: 1;
+    border-radius: 8px;
+    border: 1px solid rgba(134, 239, 172, 0.28);
+    background: rgba(14, 28, 22, 0.72);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .tm-topbar-vix-label {
-    font-size: 0.78rem;
+    font-size: 0.82rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     color: #86efac;
     font-family: inherit;
-    opacity: 0.9;
+    white-space: nowrap;
+    opacity: 0.95;
 }
 
 .tm-topbar-vix-value {
-    font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+    font-size: clamp(1.05rem, 1.7vw, 1.28rem);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     color: #86efac;
     line-height: 1.1;
+    white-space: nowrap;
 }
 
 .tm-topbar-vix-value.tm-vix-green {
