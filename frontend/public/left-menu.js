@@ -28,13 +28,9 @@ class LeftMenu {
 
     applyThemeImmediate() {
         let theme = localStorage.getItem('tradentical_theme') || 'dark';
-        // Desktop shell is designed around the divtest green night skin; keep dark by default.
-        if (window.location.pathname.includes('desktop') && theme !== 'light' && theme !== 'dark') {
+        // Keep desktop on the divtest green night skin unless the user explicitly chose light.
+        if (window.location.pathname.includes('desktop') && theme !== 'light') {
             theme = 'dark';
-        }
-        if (window.location.pathname.includes('desktop') && !localStorage.getItem('tradentical_theme')) {
-            theme = 'dark';
-            localStorage.setItem('tradentical_theme', 'dark');
         }
         document.body.setAttribute('data-theme', theme);
         if (this.isThemePage()) document.body.classList.add('theme-page');
