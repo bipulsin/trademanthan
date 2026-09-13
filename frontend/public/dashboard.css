@@ -1926,17 +1926,25 @@ body[data-theme="dark"] .sector-persistence-title {
 }
 .sector-persistence-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 0.78rem;
 }
 .sector-persistence-table th,
 .sector-persistence-table td {
     padding: 0.35rem 0.5rem;
-    text-align: left;
     border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    vertical-align: middle;
 }
-.sector-persistence-table .num {
-    text-align: right;
+.sector-persistence-table th:first-child,
+.sector-persistence-table td:first-child,
+.sector-persistence-table .txt {
+    text-align: left;
+    width: 34%;
+}
+.sector-persistence-table th.num,
+.sector-persistence-table td.num {
+    text-align: center;
     font-variant-numeric: tabular-nums;
 }
 .sector-movers-empty {
@@ -2583,6 +2591,7 @@ body[data-theme="dark"] .oi-heatmap-more-link {
 
 .rs-scanner-table {
     width: 100%;
+    table-layout: auto;
     border-collapse: collapse;
     font-size: 12.5px;
 }
@@ -2593,6 +2602,7 @@ body[data-theme="dark"] .oi-heatmap-more-link {
     text-align: left;
     border-bottom: 1px solid var(--theme-border, rgba(148, 163, 184, 0.2));
     white-space: nowrap;
+    vertical-align: middle;
 }
 
 .rs-scanner-table th {
@@ -2603,14 +2613,35 @@ body[data-theme="dark"] .oi-heatmap-more-link {
     letter-spacing: 0.02em;
 }
 
+/* Numeric columns: header + cell both centered */
+.rs-scanner-table th.num,
 .rs-scanner-table td.num {
-    text-align: right;
+    text-align: center;
     font-variant-numeric: tabular-nums;
 }
 
-.rs-scanner-table .rs-rank {
+.rs-scanner-table th.rs-rank,
+.rs-scanner-table td.rs-rank {
+    text-align: center;
     color: var(--theme-muted, #64748b);
     width: 28px;
+}
+
+.rs-scanner-table th.rs-setup-col,
+.rs-scanner-table td.rs-setup-col {
+    text-align: center;
+}
+
+/* Text / chip columns: header + cell both left */
+.rs-scanner-table th.txt,
+.rs-scanner-table td.txt,
+.rs-scanner-table th.rs-sym,
+.rs-scanner-table td.rs-sym,
+.rs-scanner-table th.rs-chip-col,
+.rs-scanner-table td.rs-chip-col,
+.rs-scanner-table th.rs-maturity-col,
+.rs-scanner-table td.rs-maturity-col {
+    text-align: left;
 }
 
 .rs-scanner-table .rs-sym {

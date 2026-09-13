@@ -209,7 +209,7 @@
             .map(function (r) {
                 return (
                     "<tr>" +
-                    "<td>" +
+                    '<td class="txt">' +
                     escapeHtml(r.sector || "—") +
                     "</td>" +
                     '<td class="num">' +

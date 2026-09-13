@@ -236,22 +236,22 @@
             ` data-instrument-key="${escapeAttr(r.instrument_key)}"` +
             ` data-label="${escapeAttr(displaySym(r))}"` +
             ` title="Open chart for ${escapeAttr(displaySym(r))}">` +
-            `<td class="rs-rank">${escapeHtml(r.rank)}</td>` +
-            `<td class="rs-sym">${escapeHtml(displaySym(r))} ${convictionChips(r)}</td>` +
+            `<td class="num rs-rank">${escapeHtml(r.rank)}</td>` +
+            `<td class="txt rs-sym">${escapeHtml(displaySym(r))} ${convictionChips(r)}</td>` +
             `<td class="num rs-conv">${conv}</td>` +
             `<td class="num ${rsCls}">${fmtSignedPct(r.rs_percent)}</td>` +
             `<td class="num"><span class="rs-score ${tradeScoreClass(r.trade_score)}">${escapeHtml(r.trade_score)}</span></td>` +
-            `<td class="rs-setup-col">${setupBadge(r)}</td>` +
+            `<td class="num rs-setup-col">${setupBadge(r)}</td>` +
             (rsCfg.show_ema10_passive !== false
                 ? `<td class="num rs-ema10">${r.ema10_10m != null ? fmtNum(r.ema10_10m, 2) : "—"}</td>`
                 : "") +
             `<td class="num">${fmtNum(r.volume_ratio, 2)}</td>` +
             `<td class="num ${vwapCls}">${fmtNum(r.vwap, 2)}</td>` +
-            `<td>${dirBadge(r.supertrend_bullish, "Bull", "Bear")}</td>` +
-            `<td>${dirBadge(r.macd_bullish, "Bull", "Bear")}</td>` +
+            `<td class="txt rs-chip-col">${dirBadge(r.supertrend_bullish, "Bull", "Bear")}</td>` +
+            `<td class="txt rs-chip-col">${dirBadge(r.macd_bullish, "Bull", "Bear")}</td>` +
             `<td class="num">${fmtNum(r.adx, 1)}</td>` +
-            `<td>${kavachBadge(r.kavach_state)}</td>` +
-            `<td class="rs-maturity-col">${maturityBadge(matTag, days)}</td>` +
+            `<td class="txt rs-chip-col">${kavachBadge(r.kavach_state)}</td>` +
+            `<td class="txt rs-maturity-col">${maturityBadge(matTag, days)}</td>` +
             `</tr>`
         );
     }
@@ -259,10 +259,10 @@
     function benchRowHtml(r) {
         return (
             `<tr class="rs-scanner-row rs-scanner-row--bench">` +
-            `<td class="rs-sym">${escapeHtml(displaySym(r))}</td>` +
+            `<td class="txt rs-sym">${escapeHtml(displaySym(r))}</td>` +
             `<td class="num">${fmtNum(r.conviction_score, 0)}</td>` +
             `<td class="num">${fmtNum(r.persistence_credit, 0)}</td>` +
-            `<td>${setupBadge(r)}</td>` +
+            `<td class="num rs-setup-col">${setupBadge(r)}</td>` +
             `</tr>`
         );
     }
@@ -280,16 +280,30 @@
             host.innerHTML = '<p class="rs-scanner-empty">No data yet — scanner runs every 5 min during market hours.</p>';
             return;
         }
-        const columns = ["Rank", "Symbol", "Conv", "RS %", "Score", "Setup"];
-        if (rsCfg.show_ema10_passive !== false) columns.push("EMA10");
-        columns.push("Vol×", "VWAP", "ST", "MACD", "ADX", "Kavach", "Maturity");
+        // num = center; txt = left (symbol + chip/label cols)
+        const columns = [
+            { label: "Rank", cls: "num rs-rank" },
+            { label: "Symbol", cls: "txt rs-sym" },
+            { label: "Conv", cls: "num" },
+            { label: "RS %", cls: "num" },
+            { label: "Score", cls: "num" },
+            { label: "Setup", cls: "num rs-setup-col" },
+        ];
+        if (rsCfg.show_ema10_passive !== false) columns.push({ label: "EMA10", cls: "num" });
+        columns.push(
+            { label: "Vol×", cls: "num" },
+            { label: "VWAP", cls: "num" },
+            { label: "ST", cls: "txt rs-chip-col" },
+            { label: "MACD", cls: "txt rs-chip-col" },
+            { label: "ADX", cls: "num" },
+            { label: "Kavach", cls: "txt rs-chip-col" },
+            { label: "Maturity", cls: "txt rs-maturity-col" }
+        );
         host.innerHTML =
             '<table class="rs-scanner-table"><thead><tr>' +
             columns.map(function (c) {
-                if (c === "Maturity") {
-                    return '<th class="rs-maturity-col">' + maturityHeaderHtml() + "</th>";
-                }
-                return "<th>" + c + "</th>";
+                const label = c.label === "Maturity" ? maturityHeaderHtml() : c.label;
+                return '<th class="' + c.cls + '">' + label + "</th>";
             }).join("") +
             "</tr></thead><tbody>" +
             sorted.map(rowHtml).join("") +
@@ -380,7 +394,7 @@
         }
         host.innerHTML =
             '<table class="rs-scanner-table rs-scanner-table--bench"><thead><tr>' +
-            "<th>Symbol</th><th>Conv</th><th>Persist</th><th>Setup</th></tr></thead><tbody>" +
+            '<th class="txt rs-sym">Symbol</th><th class="num">Conv</th><th class="num">Persist</th><th class="num rs-setup-col">Setup</th></tr></thead><tbody>' +
             rows.map(benchRowHtml).join("") +
             "</tbody></table>";
     }
