@@ -1,6 +1,212 @@
+/**
+ * Breakfast Strategy — charcoal / green theme (aligned with stockOptions)
+ * Wider page for live grid + trade sheets.
+ */
+
+body.breakfast-page,
+body.breakfast-page[data-theme="dark"],
+body.breakfast-page.theme-page {
+    --bg0: #0c1210;
+    --bg1: #121a17;
+    --bg2: #1a2621;
+    --line: rgba(180, 210, 190, 0.14);
+    --text: #e7f0ea;
+    --muted: #8fa398;
+    --accent: #3dba7a;
+    --accent-dim: #2a8f5c;
+    --danger: #e06b6b;
+    --warn: #d4a017;
+    --card: rgba(22, 34, 29, 0.92);
+    --card-inner: #121a17;
+    --font-display: "Syne", sans-serif;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --theme-bg: transparent;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: var(--text);
+    --theme-muted: var(--muted);
+    --theme-accent: var(--accent);
+
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: var(--line);
+    --left-menu-accent: var(--accent);
+    --left-menu-text: var(--text);
+    --left-menu-muted: var(--muted);
+
+    margin: 0;
+    min-height: 100%;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    background-color: var(--bg0) !important;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent,
+            transparent 12px,
+            rgba(143, 163, 152, 0.045) 12px,
+            rgba(143, 163, 152, 0.045) 13px
+        ),
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+        linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
+}
+
+body.breakfast-page .main-content-area,
+body.breakfast-page .right-panel {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    flex: 1;
+    min-width: 0;
+}
+
+body.breakfast-page .bf-page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 28px 20px 40px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+body.breakfast-page .vmb-wrap {
+    max-width: none;
+    margin: 0;
+    padding: 0 0 40px;
+}
+
+body.breakfast-page .bf-page-title,
+body.breakfast-page .vmb-header h1 {
+    font-family: var(--font-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px !important;
+}
+
+body.breakfast-page .bf-page-title i,
+body.breakfast-page .vmb-header h1 i {
+    color: var(--accent) !important;
+}
+
+body.breakfast-page .vmb-lede a {
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+}
+body.breakfast-page .vmb-lede a:hover { text-decoration: underline; }
+
+body.breakfast-page .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+    height: 72px;
+}
+body.breakfast-page .tm-web-topbar-brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.65rem, 3.2vw, 2.35rem);
+    letter-spacing: -0.03em;
+    color: #e7f0ea;
+    line-height: 1.1;
+}
+body.breakfast-page .tm-web-topbar-logo { height: 44px; max-width: 180px; }
+body.breakfast-page .tm-web-hamburger {
+    width: 52px; height: 52px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 1.45rem;
+}
+body.breakfast-page .tm-web-hamburger:hover,
+body.breakfast-page .tm-web-hamburger[aria-expanded="true"] {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.45);
+}
+body.breakfast-page .mobile-title-bar {
+    background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+    border-bottom: 1px solid var(--line);
+}
+body.breakfast-page .mobile-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text) !important;
+}
+body.breakfast-page .mobile-logo { height: 28px; width: auto; }
+
+body.breakfast-page .vmb-theme-btn {
+    border-color: var(--line);
+    background: var(--bg2);
+    color: var(--accent);
+}
+body.breakfast-page .vmb-theme-btn:hover {
+    background: rgba(61, 186, 122, 0.18);
+}
+body.breakfast-page .vmb-stat {
+    background: var(--card);
+    border-color: var(--line);
+}
+body.breakfast-page .vmb-table-wrap {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow-x: auto;
+}
+body.breakfast-page table.vmb-table th {
+    background: var(--bg1);
+    color: var(--muted);
+}
+body.breakfast-page .vmb-callout {
+    border-radius: 10px;
+}
+
+/* Light theme */
+body.breakfast-page[data-theme="light"] {
+    --bg0: #f4f7f5;
+    --bg1: #eef3f0;
+    --bg2: #e4ebe6;
+    --line: rgba(40, 70, 55, 0.18);
+    --text: #14201a;
+    --muted: #3d5248;
+    --accent: #1f7a4d;
+    --accent-dim: #2a8f5c;
+    --card: rgba(255, 255, 255, 0.98);
+    --card-inner: #f0f4f1;
+    --theme-bg: #f4f7f5;
+    --theme-card: var(--card);
+    --theme-text: #14201a;
+    --theme-muted: #3d5248;
+    --theme-accent: #1f7a4d;
+    --left-menu-bg: rgba(255, 255, 255, 0.98);
+    --left-menu-text: #14201a;
+    --left-menu-muted: #3d5248;
+    --left-menu-accent: #1f7a4d;
+    --left-menu-border: rgba(40, 70, 55, 0.18);
+    background-color: #f4f7f5 !important;
+    background-image: none !important;
+    color: #14201a !important;
+}
+body.breakfast-page[data-theme="light"] .bf-page-title,
+body.breakfast-page[data-theme="light"] .vmb-header h1 { color: var(--accent) !important; }
+body.breakfast-page[data-theme="light"] .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 245, 0.95));
+}
+body.breakfast-page[data-theme="light"] .tm-web-topbar-brand { color: #14201a; }
+body.breakfast-page[data-theme="light"] .tm-web-hamburger { background: #e4ebe6; color: #1f7a4d; }
+body.breakfast-page[data-theme="light"] .mobile-title-bar { background: #eef3f0 !important; }
+body.breakfast-page[data-theme="light"] .mobile-title { color: #14201a !important; }
+body.breakfast-page[data-theme="light"] table.vmb-table th { background: #eef3f0; }
+
+@media (max-width: 768px) {
+    body.breakfast-page .bf-page { padding: 16px 14px 32px; }
+}
+
 /* Breakfast Strategy — TWCTO template fonts + P&L cell styling */
 .bf-caveat {
-    border-color: #f59e0b !important;
+    border-color: var(--accent, #3dba7a) !important;
     color: #fde68a !important;
     background: rgba(245, 158, 11, 0.12);
     margin-bottom: 0.75rem;
@@ -35,7 +241,7 @@
 .bf-toggle input {
     width: 1rem;
     height: 1rem;
-    accent-color: #f59e0b;
+    accent-color: var(--accent, #3dba7a);
     cursor: pointer;
 }
 
@@ -56,7 +262,7 @@
     font-size: 0.82rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #f59e0b;
+    color: var(--accent, #3dba7a);
 }
 .bf-rule ul { margin: 0; padding-left: 1.1rem; font-size: 0.86rem; line-height: 1.45; opacity: 0.92; }
 .bf-section-title { margin: 1.25rem 0 0.5rem; font-size: 1rem; color: var(--theme-text, #f1f5f9); }
@@ -67,22 +273,23 @@
     flex-wrap: wrap;
 }
 .bf-tab {
-    border: 1px solid rgba(255,255,255,0.12);
-    background: var(--theme-card, #1a1a2e);
+    border: 1px solid var(--line, rgba(255,255,255,0.12));
+    background: var(--card-inner, #1a1a2e);
     color: var(--theme-text, #f1f5f9);
     padding: 0.45rem 0.9rem;
-    border-radius: 6px;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 0.88rem;
+    font-family: var(--font-body, inherit);
 }
 .bf-tab.bf-tab-exp {
-    border-color: rgba(245, 158, 11, 0.45);
-    color: #fde68a;
+    border-color: rgba(61, 186, 122, 0.45);
+    color: #bbf7d0;
 }
 .bf-tab.active {
-    border-color: #f59e0b;
-    background: rgba(245, 158, 11, 0.15);
-    color: #fde68a;
+    border-color: var(--accent, #3dba7a);
+    background: rgba(61, 186, 122, 0.15);
+    color: #bbf7d0;
 }
 .bf-raw-details summary { cursor: pointer; color: #93c5fd; }
 .bf-raw-pre {
@@ -105,8 +312,8 @@
 .bf-hist-sub { font-weight: normal; font-size: 0.78rem; }
 #bfHistMonthTable tbody tr { cursor: pointer; }
 #bfHistMonthTable tbody tr.bf-hist-selected {
-    outline: 1px solid #f59e0b;
-    background: rgba(245, 158, 11, 0.08);
+    outline: 1px solid var(--accent, #3dba7a);
+    background: rgba(61, 186, 122, 0.08);
 }
 .bf-status-failed { color: #f87171; }
 .bf-status-running { color: #fbbf24; }
@@ -118,7 +325,7 @@
     margin-bottom: 0.75rem;
 }
 .bf-live-banner.bf-banner-forming {
-    border-color: #f59e0b !important;
+    border-color: var(--accent, #3dba7a) !important;
     color: #fde68a !important;
     background: rgba(245, 158, 11, 0.14);
 }
@@ -352,9 +559,9 @@
 .bf-modal-box {
     position: relative;
     width: min(420px, 100%);
-    background: var(--theme-card, #1a1a2e);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 12px;
+    background: var(--card, #1a1a2e);
+    border: 1px solid var(--line, rgba(255,255,255,0.12));
+    border-radius: 14px;
     padding: 1rem 1.1rem 1.15rem;
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
 }
@@ -412,8 +619,8 @@
     border: 1px solid transparent;
 }
 .bf-btn-primary {
-    background: #2563eb;
-    color: #fff;
+    background: var(--accent, #3dba7a);
+    color: #062015;
 }
 .bf-btn-secondary {
     background: transparent;

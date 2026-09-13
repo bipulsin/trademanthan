@@ -1,103 +1,295 @@
-.tl-wrap { max-width: 1100px; margin: 0 auto; padding: 0 0 40px; }
+/**
+ * Trade Log — charcoal / green theme (aligned with stockOptions)
+ */
+
+body.tradelog-page,
+body.tradelog-page[data-theme="dark"],
+body.tradelog-page.theme-page {
+    --bg0: #0c1210;
+    --bg1: #121a17;
+    --bg2: #1a2621;
+    --line: rgba(180, 210, 190, 0.14);
+    --text: #e7f0ea;
+    --muted: #8fa398;
+    --accent: #3dba7a;
+    --accent-dim: #2a8f5c;
+    --danger: #e06b6b;
+    --card: rgba(22, 34, 29, 0.92);
+    --card-inner: #121a17;
+    --font-display: "Syne", sans-serif;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --theme-bg: transparent;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: var(--text);
+    --theme-muted: var(--muted);
+    --theme-accent: var(--accent);
+    --theme-accent-hover: #4fd48c;
+    --theme-input: var(--card-inner);
+    --theme-code: rgba(0, 0, 0, 0.28);
+
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: var(--line);
+    --left-menu-accent: var(--accent);
+    --left-menu-text: var(--text);
+    --left-menu-muted: var(--muted);
+
+    margin: 0;
+    min-height: 100%;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    background-color: var(--bg0) !important;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent,
+            transparent 12px,
+            rgba(143, 163, 152, 0.045) 12px,
+            rgba(143, 163, 152, 0.045) 13px
+        ),
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+        linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
+}
+
+body.tradelog-page .main-content-area,
+body.tradelog-page .right-panel {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    flex: 1;
+    min-width: 0;
+}
+
+body.tradelog-page .tl-page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+body.tradelog-page .tl-page-header {
+    margin-bottom: 1.25rem;
+    padding: 0 0 8px;
+}
+
+body.tradelog-page .tl-page-title {
+    font-family: var(--font-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px !important;
+}
+
+body.tradelog-page .tl-page-title i {
+    color: var(--accent) !important;
+    margin-right: 0.25rem;
+}
+
+body.tradelog-page .tl-subtitle {
+    color: var(--muted) !important;
+    font-family: var(--font-body) !important;
+    font-size: 0.95rem !important;
+    line-height: 1.4;
+    margin: 0 !important;
+    max-width: 48rem;
+}
+
+body.tradelog-page .tl-subtitle code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--accent);
+}
+
+body.tradelog-page .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+    height: 72px;
+}
+
+body.tradelog-page .tm-web-topbar-brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.65rem, 3.2vw, 2.35rem);
+    letter-spacing: -0.03em;
+    color: #e7f0ea;
+    line-height: 1.1;
+}
+
+body.tradelog-page .tm-web-topbar-logo { height: 44px; max-width: 180px; }
+
+body.tradelog-page .tm-web-hamburger {
+    width: 52px;
+    height: 52px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 1.45rem;
+}
+
+body.tradelog-page .tm-web-hamburger:hover,
+body.tradelog-page .tm-web-hamburger[aria-expanded="true"] {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.45);
+}
+
+body.tradelog-page .mobile-title-bar {
+    background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+    border-bottom: 1px solid var(--line);
+}
+
+body.tradelog-page .mobile-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text) !important;
+}
+
+body.tradelog-page .mobile-logo { height: 28px; width: auto; }
+
+.tl-wrap { max-width: none; margin: 0; padding: 0 0 40px; }
+
 .tl-tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 8px;
 }
+
 .tl-tab {
-    border: 1px solid var(--theme-border, #cbd5e1);
-    background: transparent;
-    color: var(--theme-text, #0f172a);
-    border-radius: 8px 8px 0 0;
+    border: 1px solid var(--line);
+    background: var(--card-inner);
+    color: var(--text);
+    border-radius: 10px;
     padding: 9px 14px;
     cursor: pointer;
-    font-weight: 700;
+    font-weight: 600;
     font-size: 0.9rem;
+    font-family: var(--font-body);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
+
 .tl-tab[aria-selected="true"] {
-    background: #0f766e;
-    border-color: #0f766e;
-    color: #fff;
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.55);
+    color: #bbf7d0;
 }
+
 .tl-card {
-    background: var(--theme-card, #fff);
-    border: 1px solid var(--theme-border, #e2e8f0);
-    border-radius: 12px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
     padding: 16px 18px;
     margin-bottom: 16px;
-    color: var(--theme-text, #0f172a);
+    color: var(--text);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
 }
-.tl-card h2 { margin: 0 0 6px; font-size: 1.05rem; }
-.tl-hint { margin: 0 0 10px; font-size: 0.88rem; color: var(--theme-muted, #64748b); }
+
+.tl-card h2 { margin: 0 0 6px; font-size: 1.05rem; font-family: var(--font-display); }
+.tl-hint { margin: 0 0 10px; font-size: 0.88rem; color: var(--muted); }
+
 .tl-card textarea, .tl-card input, .tl-card select {
     width: 100%;
     box-sizing: border-box;
-    border: 1px solid var(--theme-border, #cbd5e1);
-    background: var(--theme-input, #fff);
-    color: var(--theme-text, #0f172a);
+    border: 1px solid var(--line);
+    background: var(--card-inner);
+    color: var(--text);
     border-radius: 8px;
     padding: 8px 10px;
     font: inherit;
 }
+
 .tl-form {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px 14px;
 }
+
 .tl-form label, .tl-list-filters label {
     display: flex; flex-direction: column; gap: 4px;
-    font-size: 0.78rem; font-weight: 600; color: var(--theme-muted, #64748b);
+    font-size: 0.78rem; font-weight: 600; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.02em;
 }
+
 .tl-span2 { grid-column: 1 / -1; }
 .tl-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
 .tl-btn {
-    border: 1px solid var(--theme-border, #cbd5e1);
-    background: transparent;
-    color: var(--theme-text, #0f172a);
-    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    border-radius: 10px;
     padding: 8px 12px;
     cursor: pointer;
     font-weight: 600;
+    font-family: var(--font-body);
 }
+
+.tl-btn:hover {
+    border-color: rgba(61, 186, 122, 0.45);
+}
+
 .tl-btn-primary {
-    background: #0f766e;
-    border-color: #0f766e;
-    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent-dim);
+    color: #062015;
 }
+
+.tl-btn-primary:hover {
+    background: var(--theme-accent-hover);
+}
+
 .tl-preview {
     margin-top: 12px;
     padding: 10px;
     border-radius: 8px;
-    background: var(--theme-code, rgba(15, 23, 42, 0.06));
+    background: var(--theme-code);
     font-size: 12px;
+    font-family: var(--font-mono);
     overflow: auto;
     max-height: 240px;
+    color: var(--text);
 }
-.tl-status { min-height: 1.4em; margin: 10px 0 0; font-size: 0.9rem; }
-.tl-status.ok { color: #047857; }
-.tl-status.err { color: #b91c1c; }
+
+.tl-status { min-height: 1.4em; margin: 10px 0 0; font-size: 0.9rem; color: var(--muted); }
+.tl-status.ok { color: var(--accent); }
+.tl-status.err { color: var(--danger); }
+
 .tl-list-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
 .tl-list-filters label { min-width: 140px; }
-.tl-table-wrap { overflow-x: auto; }
+.tl-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card-inner); }
+
 .tl-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 .tl-table th, .tl-table td {
-    border-bottom: 1px solid var(--theme-border, #e2e8f0);
+    border-bottom: 1px solid var(--line);
     padding: 8px 6px;
     text-align: left;
     white-space: nowrap;
-    color: var(--theme-text, #0f172a);
+    color: var(--text);
+}
+.tl-table thead th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--bg1);
 }
 .tl-table tbody tr { cursor: pointer; }
-.tl-table tbody tr:hover { background: rgba(15, 118, 110, 0.08); }
-.tl-table tbody tr.active { outline: 2px solid #0f766e; }
+.tl-table tbody tr:hover { background: rgba(61, 186, 122, 0.08); }
+.tl-table tbody tr.active { outline: 2px solid var(--accent); }
 .tl-th-actions { width: 2.5rem; text-align: center !important; }
 .tl-td-actions { text-align: center; cursor: default; }
+
 .tl-del-btn {
     border: none;
     background: transparent;
-    color: var(--theme-muted, #94a3b8);
+    color: var(--muted);
     cursor: pointer;
     padding: 4px 8px;
     border-radius: 6px;
@@ -106,13 +298,63 @@
 }
 .tl-del-btn:hover { color: #ef4444; background: rgba(239, 68, 68, 0.12); }
 .tl-del-btn:disabled { opacity: 0.45; cursor: wait; }
-.tl-pnl-pos { color: #047857; font-weight: 700; }
-.tl-pnl-neg { color: #b91c1c; font-weight: 700; }
+.tl-pnl-pos { color: var(--accent); font-weight: 700; }
+.tl-pnl-neg { color: var(--danger); font-weight: 700; }
+
 .tl-header-link {
     display: inline-flex; align-items: center; gap: 6px;
     text-decoration: none; font-weight: 700; font-size: 0.88rem;
-    color: #0f766e;
+    color: var(--accent);
+}
+
+@media (max-width: 768px) {
+    body.tradelog-page .tl-page { padding: 16px 14px 40px; }
 }
 @media (max-width: 720px) {
     .tl-form { grid-template-columns: 1fr; }
 }
+
+body.tradelog-page[data-theme="light"] {
+    --bg0: #f4f7f5;
+    --bg1: #eef3f0;
+    --bg2: #e4ebe6;
+    --line: rgba(40, 70, 55, 0.18);
+    --text: #14201a;
+    --muted: #3d5248;
+    --accent: #1f7a4d;
+    --accent-dim: #2a8f5c;
+    --card: rgba(255, 255, 255, 0.98);
+    --card-inner: #f0f4f1;
+    --theme-bg: #f4f7f5;
+    --theme-card: var(--card);
+    --theme-text: #14201a;
+    --theme-muted: #3d5248;
+    --theme-accent: #1f7a4d;
+    --theme-accent-hover: #2a8f5c;
+    --theme-input: #fff;
+    --theme-code: rgba(15, 23, 42, 0.06);
+    --left-menu-bg: rgba(255, 255, 255, 0.98);
+    --left-menu-text: #14201a;
+    --left-menu-muted: #3d5248;
+    --left-menu-accent: #1f7a4d;
+    --left-menu-border: rgba(40, 70, 55, 0.18);
+    background-color: #f4f7f5 !important;
+    background-image: none !important;
+    color: #14201a !important;
+}
+
+body.tradelog-page[data-theme="light"] .tl-page-title { color: var(--accent) !important; }
+body.tradelog-page[data-theme="light"] .tl-btn-primary { color: #fff; }
+body.tradelog-page[data-theme="light"] .tl-tab[aria-selected="true"] {
+    background: rgba(31, 122, 77, 0.12);
+    border-color: rgba(31, 122, 77, 0.4);
+    color: #14532d;
+}
+body.tradelog-page[data-theme="light"] .tl-table thead th { background: #eef3f0; }
+body.tradelog-page[data-theme="light"] .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 245, 0.95));
+}
+body.tradelog-page[data-theme="light"] .tm-web-topbar-brand { color: #14201a; }
+body.tradelog-page[data-theme="light"] .tm-web-hamburger { background: #e4ebe6; color: #1f7a4d; }
+body.tradelog-page[data-theme="light"] .mobile-title-bar { background: #eef3f0 !important; }
+body.tradelog-page[data-theme="light"] .mobile-title { color: #14201a !important; }

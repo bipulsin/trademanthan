@@ -1,79 +1,232 @@
-/* Match base typography/layout with broker/reports pages */
-html, body {
+/**
+ * Arbitrage — charcoal / green theme (aligned with stockOptions)
+ */
+
+body.arbitrage-page,
+body.arbitrage-page[data-theme="dark"],
+body.arbitrage-page.theme-page {
+    --bg0: #0c1210;
+    --bg1: #121a17;
+    --bg2: #1a2621;
+    --line: rgba(180, 210, 190, 0.14);
+    --text: #e7f0ea;
+    --muted: #8fa398;
+    --accent: #3dba7a;
+    --accent-dim: #2a8f5c;
+    --danger: #e06b6b;
+    --warn: #d4a017;
+    --card: rgba(22, 34, 29, 0.92);
+    --card-inner: #121a17;
+    --font-display: "Syne", sans-serif;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --theme-bg: transparent;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: var(--text);
+    --theme-muted: var(--muted);
+    --theme-accent: var(--accent);
+    --theme-accent-hover: #4fd48c;
+    --theme-success: var(--accent);
+    --theme-danger: var(--danger);
+
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: var(--line);
+    --left-menu-accent: var(--accent);
+    --left-menu-text: var(--text);
+    --left-menu-muted: var(--muted);
+
     margin: 0;
-    padding: 0;
     min-height: 100%;
-    overflow-x: hidden;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    background-color: var(--bg0) !important;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent,
+            transparent 12px,
+            rgba(143, 163, 152, 0.045) 12px,
+            rgba(143, 163, 152, 0.045) 13px
+        ),
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+        linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
 }
 
-* {
+* { box-sizing: border-box; }
+
+body.arbitrage-page .main-content-area,
+body.arbitrage-page .right-panel {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+}
+
+body.arbitrage-page .arb-page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    width: 100%;
     box-sizing: border-box;
 }
 
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    line-height: 1.6;
-}
-
-.right-panel {
-    padding: 1.5rem;
-}
-
-.arbitrage-header {
+body.arbitrage-page .arb-page-header {
     display: flex;
-    justify-content: space-between;
     align-items: flex-start;
+    justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    padding: 0 0 8px;
 }
 
-.arbitrage-title {
-    margin: 0;
-    font-size: 1.8rem;
+body.arbitrage-page .arb-page-title {
+    font-family: var(--font-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px !important;
 }
 
-.arbitrage-subtitle {
-    margin: 0 0 0.6rem;
-    color: var(--theme-muted, #94a3b8);
-    font-size: 0.95rem;
+body.arbitrage-page .arb-page-title i {
+    color: var(--accent) !important;
+    margin-right: 0.25rem;
 }
 
-.btn-refresh {
-    border: 1px solid var(--theme-border, #334155);
-    background: var(--theme-card, #1e293b);
-    color: var(--theme-text, #f1f5f9);
-    border-radius: 8px;
-    padding: 0.55rem 0.85rem;
-    cursor: pointer;
+body.arbitrage-page .arb-subtitle {
+    color: var(--muted) !important;
+    font-family: var(--font-body) !important;
+    font-size: 0.95rem !important;
+    line-height: 1.4;
+    margin: 0 !important;
+    max-width: 48rem;
+}
+
+body.arbitrage-page .arb-section {
+    margin-top: 1.5rem;
+}
+
+body.arbitrage-page .arb-section-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.12rem;
+    color: var(--text);
+    margin: 0 0 0.75rem;
+}
+
+body.arbitrage-page .arb-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 16px 18px;
+    margin-bottom: 18px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+
+body.arbitrage-page .arb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 10px;
+    padding: 0.55rem 0.9rem;
+    font-family: var(--font-body);
     font-weight: 600;
+    font-size: 0.88rem;
+    cursor: pointer;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.btn-refresh:hover {
-    opacity: 0.9;
+body.arbitrage-page .arb-btn-primary {
+    background: var(--accent);
+    border-color: var(--accent-dim);
+    color: #062015;
+}
+
+body.arbitrage-page .arb-btn-primary:hover {
+    background: var(--theme-accent-hover);
+}
+
+/* Web hamburger topbar */
+body.arbitrage-page .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+    height: 72px;
+}
+
+body.arbitrage-page .tm-web-topbar-brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.65rem, 3.2vw, 2.35rem);
+    letter-spacing: -0.03em;
+    color: #e7f0ea;
+    line-height: 1.1;
+}
+
+body.arbitrage-page .tm-web-topbar-logo {
+    height: 44px;
+    max-width: 180px;
+}
+
+body.arbitrage-page .tm-web-hamburger {
+    width: 52px;
+    height: 52px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 1.45rem;
+}
+
+body.arbitrage-page .tm-web-hamburger:hover,
+body.arbitrage-page .tm-web-hamburger[aria-expanded="true"] {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.45);
+}
+
+body.arbitrage-page .mobile-title-bar {
+    background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+    border-bottom: 1px solid var(--line);
+    color: var(--text);
+}
+
+body.arbitrage-page .mobile-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text) !important;
+}
+
+body.arbitrage-page .mobile-logo {
+    height: 28px;
+    width: auto;
+}
+
+body.arbitrage-page .mobile-menu-toggle {
+    color: var(--accent);
 }
 
 .arbitrage-summary {
     margin-bottom: 1rem;
     font-size: 0.92rem;
-    color: var(--theme-muted, #94a3b8);
+    color: var(--muted);
+    font-family: var(--font-mono);
 }
 
 .arbitrage-table-wrap {
-    border: 1px solid var(--theme-border, #334155);
+    border: 1px solid var(--line);
     border-radius: 10px;
     overflow: auto;
-    background: var(--theme-card, #1e293b);
-}
-
-.arbitrage-report-section {
-    margin-top: 1.4rem;
-}
-
-.arbitrage-report-title {
-    margin: 0 0 0.6rem;
-    font-size: 1.2rem;
-    font-weight: 700;
-    color: var(--theme-text, #f1f5f9);
+    background: var(--card-inner);
 }
 
 .arbitrage-cards {
@@ -81,8 +234,8 @@ body {
 }
 
 .arbitrage-card {
-    background: var(--theme-card, #1e293b);
-    border: 1px solid var(--theme-border, #334155);
+    background: var(--card-inner);
+    border: 1px solid var(--line);
     border-radius: 10px;
     padding: 0.7rem 0.75rem;
     margin-bottom: 0.65rem;
@@ -100,40 +253,40 @@ body {
     margin: 0;
     font-size: 0.98rem;
     font-weight: 700;
-    color: var(--theme-text, #f1f5f9);
+    color: var(--text);
 }
 
 .arbitrage-card-subtitle {
     margin: 0;
     font-size: 0.76rem;
-    color: var(--theme-muted, #94a3b8);
+    color: var(--muted);
 }
 
 .arbitrage-card-compact-line {
     margin: 0.18rem 0;
     font-size: 0.82rem;
-    color: var(--theme-text, #f1f5f9);
+    color: var(--text);
 }
 
 .arbitrage-card-line {
     margin: 0.15rem 0;
     font-size: 0.83rem;
-    color: var(--theme-text, #f1f5f9);
+    color: var(--text);
     display: grid;
     grid-template-columns: 98px 1fr;
     gap: 0.35rem;
 }
 
 .arbitrage-card-line .label {
-    color: var(--theme-muted, #94a3b8);
+    color: var(--muted);
 }
 
 .arbitrage-card-state {
-    border: 1px dashed var(--theme-border, #334155);
+    border: 1px dashed var(--line);
     border-radius: 10px;
     padding: 0.9rem;
     text-align: center;
-    color: var(--theme-muted, #94a3b8);
+    color: var(--muted);
     font-size: 0.9rem;
 }
 
@@ -141,31 +294,39 @@ body {
     width: 100%;
     border-collapse: collapse;
     min-width: 980px;
+    font-family: var(--font-body);
 }
 
 .arbitrage-table th,
 .arbitrage-table td {
     padding: 0.75rem 0.7rem;
-    border-bottom: 1px solid var(--theme-border, #334155);
+    border-bottom: 1px solid var(--line);
     text-align: left;
     white-space: nowrap;
+    color: var(--text);
 }
 
 .arbitrage-table thead th {
     position: sticky;
     top: 0;
-    background: var(--theme-bg, #0f172a);
+    background: var(--bg1);
     z-index: 1;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
 .state-cell {
     text-align: center !important;
-    color: var(--theme-muted, #94a3b8);
+    color: var(--muted);
 }
 
 .num {
     text-align: right !important;
     font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
 }
 
 .order-cell {
@@ -173,19 +334,20 @@ body {
 }
 
 .btn-order {
-    border: 1px solid #16a34a;
-    background: #16a34a;
-    color: #ffffff;
+    border: 1px solid var(--accent-dim);
+    background: var(--accent);
+    color: #062015;
     border-radius: 8px;
     padding: 0.36rem 0.72rem;
     font-size: 0.84rem;
     font-weight: 700;
     cursor: pointer;
+    font-family: var(--font-body);
 }
 
 .btn-order:hover {
-    background: #15803d;
-    border-color: #15803d;
+    background: var(--theme-accent-hover);
+    border-color: var(--theme-accent-hover);
 }
 
 .btn-order:disabled {
@@ -196,19 +358,20 @@ body {
 }
 
 .btn-exit {
-    border: 1px solid #dc2626;
-    background: #dc2626;
+    border: 1px solid #b91c1c;
+    background: var(--danger);
     color: #ffffff;
     border-radius: 8px;
     padding: 0.36rem 0.72rem;
     font-size: 0.84rem;
     font-weight: 700;
     cursor: pointer;
+    font-family: var(--font-body);
 }
 
 .btn-exit:hover {
-    background: #b91c1c;
-    border-color: #b91c1c;
+    background: #c45a5a;
+    border-color: #c45a5a;
 }
 
 .btn-exit:disabled {
@@ -218,103 +381,6 @@ body {
     cursor: not-allowed;
 }
 
-/* Mobile title bar style consistent with other pages */
-.mobile-title-bar {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
-    background: linear-gradient(135deg, #1e3c72, #2a5298);
-    color: white;
-    padding: 0.75rem 1rem;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-}
-
-.mobile-menu-toggle {
-    display: none;
-    position: absolute;
-    top: 50%;
-    left: 1rem;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    color: white;
-    font-size: 1.25rem;
-    cursor: pointer;
-    padding: 0.5rem;
-    border-radius: 4px;
-    transition: background-color 0.3s ease;
-}
-
-.mobile-menu-toggle:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.mobile-title-content {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    gap: 0.75rem;
-}
-
-.mobile-logo {
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-}
-
-.mobile-title {
-    font-size: 1.25rem;
-    font-weight: 600;
-    margin: 0;
-    font-family: 'Montserrat', sans-serif;
-}
-
-@media (min-width: 769px) {
-    .mobile-title-bar {
-        display: none !important;
-    }
-
-    .app-container {
-        margin-top: 0;
-    }
-}
-
-@media (max-width: 768px) {
-    .mobile-title-bar {
-        display: block !important;
-    }
-
-    .app-container {
-        margin-top: 60px;
-    }
-
-    .right-panel {
-        padding: 1rem;
-    }
-
-    .arbitrage-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-
-    .btn-refresh {
-        align-self: flex-end;
-    }
-
-    .arbitrage-table-wrap {
-        display: none;
-    }
-
-    .arbitrage-cards {
-        display: block;
-    }
-}
-
-/* Golden star when |Stock LTP − Curr Mth Future LTP| > 4 */
 .arbitrage-ltp-star {
     display: inline-block;
     color: #d4af37;
@@ -327,4 +393,99 @@ body {
 
 .arbitrage-stock-cell {
     white-space: nowrap;
+}
+
+
+@media (min-width: 769px) {
+    body.arbitrage-page .mobile-title-bar {
+        display: none !important;
+    }
+}
+
+@media (max-width: 768px) {
+    body.arbitrage-page .arb-page {
+        padding: 16px 14px 40px;
+    }
+
+    body.arbitrage-page .arb-page-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .arbitrage-table-wrap {
+        display: none;
+    }
+
+    .arbitrage-cards {
+        display: block;
+    }
+}
+
+/* Light theme */
+body.arbitrage-page[data-theme="light"] {
+    --bg0: #f4f7f5;
+    --bg1: #eef3f0;
+    --bg2: #e4ebe6;
+    --line: rgba(40, 70, 55, 0.18);
+    --text: #14201a;
+    --muted: #3d5248;
+    --accent: #1f7a4d;
+    --accent-dim: #2a8f5c;
+    --card: rgba(255, 255, 255, 0.98);
+    --card-inner: #f0f4f1;
+    --theme-bg: #f4f7f5;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: #14201a;
+    --theme-muted: #3d5248;
+    --theme-accent: #1f7a4d;
+    --theme-accent-hover: #2a8f5c;
+    --left-menu-bg: rgba(255, 255, 255, 0.98);
+    --left-menu-text: #14201a;
+    --left-menu-muted: #3d5248;
+    --left-menu-accent: #1f7a4d;
+    --left-menu-border: rgba(40, 70, 55, 0.18);
+    background-color: #f4f7f5 !important;
+    background-image: none !important;
+    color: #14201a !important;
+}
+
+body.arbitrage-page[data-theme="light"] .arb-page-title {
+    color: var(--accent) !important;
+}
+
+body.arbitrage-page[data-theme="light"] .arb-card {
+    box-shadow: 0 4px 16px rgba(20, 40, 30, 0.08);
+}
+
+body.arbitrage-page[data-theme="light"] .arb-btn-primary,
+body.arbitrage-page[data-theme="light"] .btn-order {
+    color: #fff;
+}
+
+body.arbitrage-page[data-theme="light"] .arbitrage-table thead th {
+    background: #eef3f0;
+}
+
+body.arbitrage-page[data-theme="light"] .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 247, 245, 0.95));
+    border-bottom: 1px solid var(--line);
+}
+
+body.arbitrage-page[data-theme="light"] .tm-web-topbar-brand {
+    color: #14201a;
+}
+
+body.arbitrage-page[data-theme="light"] .tm-web-hamburger {
+    background: #e4ebe6;
+    color: #1f7a4d;
+}
+
+body.arbitrage-page[data-theme="light"] .mobile-title-bar {
+    background: #eef3f0 !important;
+}
+
+body.arbitrage-page[data-theme="light"] .mobile-title {
+    color: #14201a !important;
 }
