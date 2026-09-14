@@ -2,7 +2,6 @@
 
 No user mapping table required. Allowed underlyings:
   CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI
-Plus test-only (no Upstox / no LTP): BTCUSD, ETHUSD
 """
 from __future__ import annotations
 
@@ -23,24 +22,14 @@ _LETTER_YEAR = re.compile(r"[A-Z]\d{4}$")
 # Also accept letter + 2-digit year: Z26
 _LETTER_YY = re.compile(r"[A-Z]\d{2}$")
 
-# UI/webhook test symbols — lifecycle only; never resolve MCX or fetch LTP.
-TEST_ONLY_UNDERLYINGS: Tuple[str, ...] = (
-    "BTCUSD",
-    "ETHUSD",
-)
-
-# Canonical desk names (longest first for prefix match) + test-only.
+# Canonical desk names (longest first for prefix match).
 ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
     "NATURALGAS",
     "SILVERMINI",
     "GOLDPETAL",
     "CRUDEOIL",
     "COPPER",
-) + TEST_ONLY_UNDERLYINGS
-
-
-def is_test_only_underlying(name: Optional[str]) -> bool:
-    return bool(name) and str(name).strip().upper() in TEST_ONLY_UNDERLYINGS
+)
 
 # Lookup keys tried against Upstox master (SILVERMINI → SILVERM on Upstox).
 UPSTOX_RESOLVE_ALIASES: Dict[str, List[str]] = {
@@ -97,7 +86,6 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
 
     Accepts:
       CRUDEOIL1!, MCX:CRUDEOIL1!, CRUDEOILZ2026, CRUDEOIL, NATURALGAS1!, …
-      Test-only: BTCUSD, BTCUSDT25U2026, ETHUSD1!, BINANCE:ETHUSDT, …
     """
     core = _strip_to_core(symbol_raw)
     if not core:
@@ -105,13 +93,7 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
     core = _CONT_FUT.sub("", core).replace("!", "").strip()
     if core in ALLOWED_UNDERLYINGS:
         return core
-    # Test crypto: BTCUSD / ETHUSD prefix (covers BTCUSDT dated futures like BTCUSDT25U2026).
-    for u in TEST_ONLY_UNDERLYINGS:
-        if core == u or core.startswith(u):
-            return u
     for u in ALLOWED_UNDERLYINGS:
-        if u in TEST_ONLY_UNDERLYINGS:
-            continue
         if not core.startswith(u):
             continue
         rest = core[len(u) :]
@@ -129,7 +111,6 @@ def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optiona
     sym = (upstox_symbol or "").strip().upper()
     if not sym:
         return None
-    # Map alias key → preferred underlying filter (canonical desk names also work).
     prefer_und = PREFERRED_UNDERLYING_SYMBOL.get(sym, sym)
     try:
         from backend.services.divtest.instruments import _parse_expiry_ms, ensure_instrument_master
@@ -183,7 +164,6 @@ def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optiona
 
 def resolve_underlying_instrument(canonical: str) -> Optional[Dict[str, Any]]:
     """Resolve desk canonical name → front-month MCX FUT."""
-    # Prefer PREFERRED_UNDERLYING_SYMBOL path first.
     prefer = PREFERRED_UNDERLYING_SYMBOL.get(canonical, canonical)
     inst = resolve_mcx_instrument(prefer)
     if inst and inst.get("instrument_key"):
@@ -203,8 +183,7 @@ def attach_instrument_fields(symbol_raw: str) -> Dict[str, Any]:
     """
     Parse TV symbol → fixed underlying + front-month MCX FUT.
 
-    underlying_matched=False when symbol is not allowed.
-    Test-only (BTCUSD/ETHUSD): matched, no Upstox resolve.
+    underlying_matched=False when symbol is not one of the five allowed names.
     """
     underlying = parse_underlying(symbol_raw)
     out: Dict[str, Any] = {
@@ -216,16 +195,10 @@ def attach_instrument_fields(symbol_raw: str) -> Dict[str, Any]:
         "lot_size": None,
         "exchange": "MCX",
         "resolved_as": None,
-        "test_only": False,
     }
     if not underlying:
         return out
     out["symbol_mapped"] = underlying
-    if is_test_only_underlying(underlying):
-        out["test_only"] = True
-        out["exchange"] = None
-        out["contract"] = underlying  # display name only; not an Upstox trading_symbol
-        return out
     inst = resolve_underlying_instrument(underlying)
     if not inst:
         return out

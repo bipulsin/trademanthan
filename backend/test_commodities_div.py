@@ -19,17 +19,9 @@ def test_symbols_match_same_underlying_variants():
     active = {"symbol_raw": "CRUDEOIL1!", "symbol_mapped": "CRUDEOIL"}
     assert _symbols_match(active, "CRUDEOILZ2026", "CRUDEOIL")
     assert _symbols_match(active, "MCX:CRUDEOIL1!", "CRUDEOIL")
-    assert not _symbols_match(active, "BTCUSD", "BTCUSD")
-    assert not _symbols_match(active, "BTCUSDT25U2026", "BTCUSD")
     assert not _symbols_match(active, "NATURALGAS1!", "NATURALGAS")
-
-
-def test_symbols_match_btc_usdt_futures():
-    active = {"symbol_raw": "BTCUSDT25U2026", "symbol_mapped": "BTCUSD"}
-    assert _symbols_match(active, "BTCUSD", "BTCUSD")
-    assert _symbols_match(active, "BTCUSD1!", "BTCUSD")
-    assert not _symbols_match(active, "ETHUSD", "ETHUSD")
-    assert not _symbols_match(active, "CRUDEOIL1!", "CRUDEOIL")
+    assert not _symbols_match(active, "BTCUSD", "BTCUSD")
+    assert not _symbols_match(active, "ETHUSDU2026", "ETHUSD")
 
 
 def test_normalize_tv_ticker_strips_exchange_and_continuous():
@@ -53,28 +45,18 @@ def test_parse_underlying_allowed_forms():
     assert parse_underlying("SILVERMINIZ2026") == "SILVERMINI"
 
 
-def test_parse_underlying_test_only_crypto():
-    assert parse_underlying("BTCUSD") == "BTCUSD"
-    assert parse_underlying("ETHUSD") == "ETHUSD"
-    assert parse_underlying("BTCUSD1!") == "BTCUSD"
-    assert parse_underlying("BINANCE:ETHUSD") == "ETHUSD"
-    assert parse_underlying("CRYPTO:BTCUSD1!") == "BTCUSD"
-    # Binance dated USDT perpetual/futures tickers from the chart
-    assert parse_underlying("BTCUSDT25U2026") == "BTCUSD"
-    assert parse_underlying("BINANCE:BTCUSDT25U2026") == "BTCUSD"
-    assert parse_underlying("ETHUSDT") == "ETHUSD"
-    inst = attach_instrument_fields("BTCUSDT25U2026")
-    assert inst["underlying_matched"] is True
-    assert inst["test_only"] is True
-    assert inst["instrument_key"] is None
-    assert inst["symbol_mapped"] == "BTCUSD"
-
-
-def test_parse_underlying_rejects_unknown():
+def test_parse_underlying_rejects_crypto_and_unknown():
+    assert parse_underlying("BTCUSD") is None
+    assert parse_underlying("ETHUSD") is None
+    assert parse_underlying("BTCUSDT25U2026") is None
+    assert parse_underlying("ETHUSDU2026") is None
+    assert parse_underlying("BINANCE:ETHUSD") is None
     assert parse_underlying("GOLD1!") is None
     assert parse_underlying("NIFTY1!") is None
     assert parse_underlying("CDTEST1!") is None
     assert parse_underlying("") is None
+    inst = attach_instrument_fields("ETHUSDU2026")
+    assert inst["underlying_matched"] is False
 
 
 def test_decode_text_plain_json_body():

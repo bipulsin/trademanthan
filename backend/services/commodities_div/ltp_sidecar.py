@@ -8,11 +8,7 @@ from sqlalchemy import text
 
 from backend.config import settings
 from backend.database import SessionLocal
-from backend.services.commodities_div.mapping import (
-    attach_instrument_fields,
-    is_test_only_underlying,
-    parse_underlying,
-)
+from backend.services.commodities_div.mapping import attach_instrument_fields
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import now_ist_second
 
@@ -41,28 +37,9 @@ def refresh_in_trade_ltp() -> Dict[str, Any]:
         if not row:
             return {"ok": True, "updated": False, "reason": "no_in_trade"}
 
-        mapped = str(row.get("symbol_mapped") or "").strip().upper()
-        raw_u = parse_underlying(str(row.get("symbol_raw") or ""))
-        if is_test_only_underlying(mapped) or is_test_only_underlying(raw_u):
-            return {
-                "ok": True,
-                "updated": False,
-                "reason": "test_only_skip_ltp",
-                "signal_id": int(row["id"]),
-                "symbol": mapped or raw_u or row.get("symbol_raw"),
-            }
-
         ik = (row.get("instrument_key") or "").strip()
         if not ik:
             inst = attach_instrument_fields(str(row["symbol_raw"]))
-            if inst.get("test_only"):
-                return {
-                    "ok": True,
-                    "updated": False,
-                    "reason": "test_only_skip_ltp",
-                    "signal_id": int(row["id"]),
-                    "symbol": inst.get("symbol_mapped"),
-                }
             ik = (inst.get("instrument_key") or "").strip()
             if ik:
                 db.execute(
@@ -109,7 +86,6 @@ def refresh_in_trade_ltp() -> Dict[str, Any]:
             quotes = upstox.get_market_quotes_batch_by_keys([ik]) or {}
             raw = quotes.get(ik)
             if raw is None:
-                # fuzzy key match
                 for k, v in quotes.items():
                     if str(k).replace("|", "").endswith(ik.split("|")[-1]):
                         raw = v
