@@ -710,6 +710,171 @@ def legs_from_chain(chain: Any, call: bool) -> List[Dict[str, Any]]:
     return out
 
 
+def instrument_key_at_strike(chain: Any, side: Optional[str], strike: Any) -> Optional[str]:
+    """Exact-strike instrument_key from option chain (no greeks required)."""
+    target = _as_float(strike)
+    if target is None or side not in (SIDE_BEAR, SIDE_BULL):
+        return None
+    node_key = "call_options" if side == SIDE_BEAR else "put_options"
+    for row in iter_chain_strikes(chain):
+        s = _as_float(row.get("strike_price") or row.get("strike"))
+        if s is None or abs(s - target) > 1e-6:
+            continue
+        node = row.get(node_key)
+        if isinstance(node, list):
+            node = node[0] if node and isinstance(node[0], dict) else None
+        if not isinstance(node, dict):
+            return None
+        ik = node.get("instrument_key")
+        if ik:
+            return str(ik).strip()
+        return None
+    return None
+
+
+def ensure_executed_option_instrument_keys(
+    signal_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Resolve sell/buy instrument keys for filled Executed rows from user strikes.
+
+    Re-fetches the option chain when keys are missing or when user strikes differ
+    from the algo-suggested strikes (whose keys were stored at arm time).
+    """
+    ensure_stock_option_tables()
+    db = SessionLocal()
+    try:
+        params: Dict[str, Any] = {
+            "executed": STATUS_EXECUTED,
+            "remarks": INVALIDATE_REMARKS,
+        }
+        id_clause = ""
+        if signal_id is not None:
+            id_clause = "AND id = :id"
+            params["id"] = int(signal_id)
+        rows = db.execute(
+            text(
+                f"""
+                SELECT id, symbol, side,
+                       sell_strike, buy_strike,
+                       user_sell_strike, user_buy_strike,
+                       sell_instrument_key, buy_instrument_key,
+                       remarks
+                FROM stock_option_signals
+                WHERE status = :executed
+                  AND date_traded IS NOT NULL
+                  AND sell_cost IS NOT NULL
+                  AND buy_cost IS NOT NULL
+                  AND COALESCE(user_sell_strike, sell_strike) IS NOT NULL
+                  AND COALESCE(user_buy_strike, buy_strike) IS NOT NULL
+                  AND remarks IS DISTINCT FROM :remarks
+                  {id_clause}
+                ORDER BY id
+                """
+            ),
+            params,
+        ).mappings().all()
+    finally:
+        db.close()
+
+    updated = 0
+    cleared_remarks = 0
+    for row in rows:
+        sell_s = _as_float(row.get("user_sell_strike"))
+        if sell_s is None:
+            sell_s = _as_float(row.get("sell_strike"))
+        buy_s = _as_float(row.get("user_buy_strike"))
+        if buy_s is None:
+            buy_s = _as_float(row.get("buy_strike"))
+        if sell_s is None or buy_s is None:
+            continue
+
+        algo_sell = _as_float(row.get("sell_strike"))
+        algo_buy = _as_float(row.get("buy_strike"))
+        sell_key = str(row.get("sell_instrument_key") or "").strip() or None
+        buy_key = str(row.get("buy_instrument_key") or "").strip() or None
+        sell_mismatch = (
+            algo_sell is not None and abs(algo_sell - sell_s) > 1e-6
+        ) or not sell_key
+        buy_mismatch = (
+            algo_buy is not None and abs(algo_buy - buy_s) > 1e-6
+        ) or not buy_key
+        # Keep keys when user strikes match algo and keys already present.
+        need_chain = sell_mismatch or buy_mismatch
+        note = str(row.get("remarks") or "")
+        clear_expiry = EXPIRY_REMARKS in note
+
+        new_sell, new_buy = sell_key, buy_key
+        if need_chain:
+            try:
+                chain = _option_chain_for_symbol(str(row.get("symbol") or ""))
+            except Exception as e:
+                logger.info(
+                    "stock_option key resolve chain failed id=%s %s: %s",
+                    row.get("id"),
+                    row.get("symbol"),
+                    e,
+                )
+                chain = None
+            if chain is not None:
+                if sell_mismatch:
+                    resolved = instrument_key_at_strike(chain, row.get("side"), sell_s)
+                    if resolved:
+                        new_sell = resolved
+                if buy_mismatch:
+                    resolved = instrument_key_at_strike(chain, row.get("side"), buy_s)
+                    if resolved:
+                        new_buy = resolved
+
+        if (
+            new_sell == sell_key
+            and new_buy == buy_key
+            and not clear_expiry
+        ):
+            continue
+
+        db = SessionLocal()
+        try:
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET sell_instrument_key = COALESCE(:sell_ik, sell_instrument_key),
+                        buy_instrument_key = COALESCE(:buy_ik, buy_instrument_key),
+                        remarks = CASE
+                            WHEN remarks LIKE :expiry_like THEN NULL
+                            ELSE remarks
+                        END,
+                        updated_at = :ts
+                    WHERE id = :id AND status = :executed
+                    """
+                ),
+                {
+                    "sell_ik": new_sell,
+                    "buy_ik": new_buy,
+                    "expiry_like": f"%{EXPIRY_REMARKS}%",
+                    "ts": now_ist_second(),
+                    "id": int(row["id"]),
+                    "executed": STATUS_EXECUTED,
+                },
+            )
+            db.commit()
+            updated += 1
+            if clear_expiry:
+                cleared_remarks += 1
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "stock_option key persist failed id=%s", row.get("id")
+            )
+        finally:
+            db.close()
+
+    out = {"ok": True, "rows": len(rows), "updated": updated, "cleared_expiry_remarks": cleared_remarks}
+    if updated:
+        logger.info("stock_option ensure option keys: %s", out)
+    return out
+
+
 def pick_nearest_delta(legs: Sequence[Dict[str, Any]], target: float, exclude_strike: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Nearest |delta| to target. If several are within 2 points, prefer higher volume."""
     pool: List[Tuple[float, float, Dict[str, Any]]] = []
@@ -2438,9 +2603,16 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
     Called at the end of ``run_ema_tick`` (after EMA / WR work). Prefer WS cache via
     ``ltp_map_with_fallback``; REST batch quotes fill gaps. Live ticks also push LTPs
     via ``stock_option_ws_ltp`` between 2h cycles.
+
+    Includes auto-expired Executed rows the user later filled; excludes only
+    invalidate remarks.
     """
     ensure_stock_option_tables()
     now_naive = now_ist_second() if now is None else naive_ist(now)
+    try:
+        ensure_executed_option_instrument_keys()
+    except Exception:
+        logger.debug("stock_option key ensure before LTP refresh failed", exc_info=True)
     try:
         from backend.services.stock_option_ws_ltp import list_executed_option_ltp_rows
 
@@ -2462,13 +2634,11 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
                         AND COALESCE(user_buy_strike, buy_strike) IS NOT NULL
                       )
                       AND remarks IS DISTINCT FROM :remarks
-                      AND COALESCE(remarks, '') NOT LIKE :expiry
                     """
                 ),
                 {
                     "executed": STATUS_EXECUTED,
                     "remarks": INVALIDATE_REMARKS,
-                    "expiry": f"%{EXPIRY_REMARKS}%",
                 },
             ).mappings().all()
         finally:
@@ -2502,6 +2672,12 @@ def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
             bk = str(r.get("buy_instrument_key") or "")
             sl = prices.get(sk) if sk else None
             bl = prices.get(bk) if bk else None
+            if sl is None and bl is None:
+                # Try colon/pipe variants used by Upstox / WS normalize.
+                if sk and sl is None:
+                    sl = prices.get(sk.replace("|", ":")) or prices.get(sk.replace(":", "|"))
+                if bk and bl is None:
+                    bl = prices.get(bk.replace("|", ":")) or prices.get(bk.replace(":", "|"))
             if sl is None and bl is None:
                 continue
             db.execute(
@@ -2744,6 +2920,10 @@ def submit_trade(
         raise
     finally:
         db.close()
+    try:
+        ensure_executed_option_instrument_keys(signal_id)
+    except Exception:
+        logger.debug("stock_option key resolve after submit failed", exc_info=True)
     _sync_executed_ws_ltp_subscriptions()
     return {"ok": True, "id": signal_id, "status": STATUS_EXECUTED}
 
@@ -3065,6 +3245,11 @@ def update_trade(
                     sell_exit_price = :sell_exit,
                     buy_exit_price = :buy_exit,
                     realized_pnl = :pnl,
+                    remarks = CASE
+                        WHEN status = :executed_status
+                             AND remarks LIKE :expiry_like THEN NULL
+                        ELSE remarks
+                    END,
                     updated_at = :ts
                 WHERE id = :id AND status = :status
                 """
@@ -3082,10 +3267,17 @@ def update_trade(
                 "ts": now,
                 "id": signal_id,
                 "status": status_const,
+                "executed_status": STATUS_EXECUTED,
+                "expiry_like": f"%{EXPIRY_REMARKS}%",
             },
         )
         db.commit()
-        _sync_executed_ws_ltp_subscriptions()
+        if st == "executed":
+            try:
+                ensure_executed_option_instrument_keys(signal_id)
+            except Exception:
+                logger.debug("stock_option key resolve after update failed", exc_info=True)
+            _sync_executed_ws_ltp_subscriptions()
         return {
             "ok": True,
             "id": signal_id,

@@ -5,8 +5,9 @@ Reuses ``upstox_market_feed`` (no second connection). Sidecar provider
 replace-mode restarts do not drop option keys.
 
 Breakfast exclusivity: ``set_feed_provider_keys`` / ``ensure_market_feed_running``
-skip non-owner starts during 09:10–lock/09:25; this module defers sync the same
-way. The 2h ``refresh_executed_ltps`` REST path remains the fallback.
+skip non-owner starts during 09:10–lock/09:25. Scheduler only runs WS sync from
+**09:30 IST** (after Breakfast) through the cash session. The 2h
+``refresh_executed_ltps`` REST path remains the fallback.
 """
 from __future__ import annotations
 
@@ -22,7 +23,6 @@ from sqlalchemy import text
 from backend.database import SessionLocal
 from backend.services.ist_datetime import naive_ist
 from backend.services.stock_option_signals import (
-    EXPIRY_REMARKS,
     INVALIDATE_REMARKS,
     STATUS_EXECUTED,
     ensure_stock_option_tables,
@@ -53,14 +53,21 @@ def _now_naive(now: Optional[datetime] = None) -> datetime:
 
 
 def list_executed_option_ltp_rows() -> List[Dict[str, Any]]:
-    """Executed rows with both legs filled (same filter as ``refresh_executed_ltps``)."""
+    """Executed rows with both legs filled (same filter as ``refresh_executed_ltps``).
+
+    Includes auto-expired rows that the user later filled with costs/strikes.
+    Excludes only explicit invalidate remarks (\"Trade not executed…\").
+    """
     ensure_stock_option_tables()
     db = SessionLocal()
     try:
         rows = db.execute(
             text(
                 """
-                SELECT id, sell_instrument_key, buy_instrument_key
+                SELECT id, symbol, side,
+                       sell_strike, buy_strike,
+                       user_sell_strike, user_buy_strike,
+                       sell_instrument_key, buy_instrument_key
                 FROM stock_option_signals
                 WHERE status = :executed
                   AND date_traded IS NOT NULL
@@ -71,13 +78,11 @@ def list_executed_option_ltp_rows() -> List[Dict[str, Any]]:
                     AND COALESCE(user_buy_strike, buy_strike) IS NOT NULL
                   )
                   AND remarks IS DISTINCT FROM :remarks
-                  AND COALESCE(remarks, '') NOT LIKE :expiry
                 """
             ),
             {
                 "executed": STATUS_EXECUTED,
                 "remarks": INVALIDATE_REMARKS,
-                "expiry": f"%{EXPIRY_REMARKS}%",
             },
         ).mappings().all()
         return [dict(r) for r in rows]
@@ -136,6 +141,13 @@ def sync_executed_option_subscriptions(*, force: bool = False) -> Dict[str, Any]
             return {"ok": True, "skipped": "breakfast_exclusivity"}
     except Exception as e:
         logger.exception("breakfast_exclusivity: check_failed error=%s", e)
+
+    try:
+        from backend.services.stock_option_signals import ensure_executed_option_instrument_keys
+
+        ensure_executed_option_instrument_keys()
+    except Exception as e:
+        logger.info("stock_option_ws_ltp: key ensure failed: %s", e)
 
     try:
         rows = list_executed_option_ltp_rows()
