@@ -316,6 +316,103 @@
     return String(v).slice(0, 10);
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  /** Split stored datetime into date + hh:mm + AM/PM (12h). Midnight → 12:00 AM. */
+  function splitDateTimeParts(v) {
+    const s = String(v || "").trim();
+    const date = dateOnly(s);
+    const m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!date || !m) {
+      return { date: date, time: "", ampm: "AM" };
+    }
+    let h = Number(m[1]);
+    const min = Number(m[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(min)) {
+      return { date: date, time: "", ampm: "AM" };
+    }
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h === 0) h = 12;
+    return { date: date, time: pad2(h) + ":" + pad2(min), ampm: ampm };
+  }
+
+  /** Combine date + hh:mm + AM/PM → "YYYY-MM-DD HH:MM:00" (24h). Blank time → midnight. */
+  function combineDateTime(dateStr, timeStr, ampm) {
+    const d = dateOnly(dateStr);
+    if (!d) return "";
+    const raw = String(timeStr || "").trim();
+    if (!raw) return d + " 00:00:00";
+    const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    let h = Number(m[1]);
+    const min = Number(m[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(min) || h < 1 || h > 12 || min < 0 || min > 59) {
+      return null;
+    }
+    const ap = String(ampm || "AM").toUpperCase() === "PM" ? "PM" : "AM";
+    if (ap === "AM") {
+      if (h === 12) h = 0;
+    } else if (h !== 12) {
+      h += 12;
+    }
+    return d + " " + pad2(h) + ":" + pad2(min) + ":00";
+  }
+
+  /** Display datetime as "YYYY-MM-DD hh:mm AM/PM"; date-only when no meaningful time. */
+  function formatDateTimeAmPm(v) {
+    if (!v) return "—";
+    const s = String(v);
+    const parts = splitDateTimeParts(s);
+    if (!parts.date) return "—";
+    if (!/\d{1,2}:\d{2}/.test(s)) return parts.date;
+    // Legacy DATE→timestamp midnight: show date only until a real time is set.
+    if (/[ T]00:00(:00)?/.test(s) && parts.time === "12:00" && parts.ampm === "AM") {
+      return parts.date;
+    }
+    return parts.date + " " + parts.time + " " + parts.ampm;
+  }
+
+  function normalizeTradeMode(v) {
+    return String(v || "").trim().toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+  }
+
+  function modeChip(v) {
+    const mode = normalizeTradeMode(v);
+    const cls = mode === "LIVE" ? "so-mode-live" : "so-mode-paper";
+    return '<span class="so-mode-chip ' + cls + '">' + mode + "</span>";
+  }
+
+  function setDateTimeFields(dateId, timeId, ampmId, value) {
+    const parts = splitDateTimeParts(value);
+    const dateEl = document.getElementById(dateId);
+    const timeEl = document.getElementById(timeId);
+    const ampmEl = document.getElementById(ampmId);
+    if (dateEl) dateEl.value = parts.date || "";
+    if (timeEl) {
+      const s = String(value || "");
+      const hasRealTime =
+        /\d{1,2}:\d{2}/.test(s) && !(/[ T]00:00(:00)?/.test(s) && parts.time === "12:00" && parts.ampm === "AM");
+      timeEl.value = hasRealTime ? parts.time : "";
+    }
+    if (ampmEl) ampmEl.value = parts.ampm || "AM";
+  }
+
+  function readDateTimeField(dateId, timeId, ampmId) {
+    const dateEl = document.getElementById(dateId);
+    const timeEl = document.getElementById(timeId);
+    const ampmEl = document.getElementById(ampmId);
+    const dateVal = dateEl ? dateEl.value : "";
+    if (!dateVal) return { value: "", error: null };
+    const combined = combineDateTime(dateVal, timeEl ? timeEl.value : "", ampmEl ? ampmEl.value : "AM");
+    if (combined === null) {
+      return { value: null, error: "Time must be hh:mm (1–12) with AM/PM." };
+    }
+    return { value: combined, error: null };
+  }
+
   function emptyVal(v) {
     return v == null || v === "";
   }
@@ -745,11 +842,11 @@
     const hsBlank = r.hard_stop == null || r.hard_stop === "";
     const checked = r.hard_stop_placed ? "checked" : "";
     const hsBox = hsBlank ? "" : `<input type="checkbox" data-hs="${r.id}" ${checked} aria-label="Hard stop placed">`;
-    const when = r.date_traded || r.armed_at || "—";
+    const when = formatDateTimeAmPm(r.date_traded || r.armed_at);
     return `
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${esc(when)}</td>
-        <td>${symbolCell(r)}</td>
+        <td>${symbolCell(r)} ${modeChip(r.trade_mode)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
@@ -773,8 +870,10 @@
     const summary =
       '<span class="so-mcard-time">' + hourOnlyLabel(when) + "</span>" +
       '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
+      modeChip(r.trade_mode) +
       '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>";
     const details =
+      detailRow("Date traded", esc(formatDateTimeAmPm(when))) +
       detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
       detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
       detailRow("Costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
@@ -811,14 +910,14 @@
     const pnl = pnlDisplay(r);
     return `
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
-        <td>${esc(r.date_traded || r.armed_at || "—")}</td>
+        <td>${esc(formatDateTimeAmPm(r.date_traded || r.armed_at))}</td>
         <td>${symbolCell(r)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
         <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
         <td class="so-exit-px">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
-        <td class="so-exit-date">${esc(r.exit_date || "—")}</td>
+        <td class="so-exit-date">${esc(formatDateTimeAmPm(r.exit_date))}</td>
         <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-exit-cell"><button type="button" class="so-edit-btn" data-edit="${r.id}" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></td>
       </tr>`;
@@ -828,38 +927,71 @@
     const pnl = pnlDisplay(r);
     const summary =
       '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
+      modeChip(r.trade_mode) +
       '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>" +
       '<span class="so-mcard-pnl ' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>";
     const details =
-      detailRow("Entry date", esc(r.date_traded || r.armed_at || "—")) +
+      detailRow("Entry date", esc(formatDateTimeAmPm(r.date_traded || r.armed_at))) +
       detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
       detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
       detailRow("Entry costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
       detailRow("Exit prices", "Sell " + num(r.sell_exit_price) + "<br>Buy " + num(r.buy_exit_price)) +
-      detailRow("Exit date", esc(r.exit_date || "—")) +
+      detailRow("Exit date", esc(formatDateTimeAmPm(r.exit_date))) +
       '<div class="so-mcard-actions"><button type="button" class="so-edit-btn" data-edit="' +
       r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></div>';
     return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
   }
 
+  function renderReportModeBlock(mode, title, rows) {
+    const colCount = (COLUMNS.report || []).length;
+    const heading =
+      '<div class="so-report-mode-head">' +
+      '<h3 class="so-report-mode-title">' + esc(title) + "</h3>" +
+      modeChip(mode) +
+      "</div>";
+    if (!rows.length) {
+      const empty = '<p class="so-empty so-empty-mode">No ' + esc(title.toLowerCase()) + "s.</p>";
+      return (
+        '<section class="so-report-mode" data-mode="' + mode + '">' +
+        heading +
+        '<div class="so-desktop-table">' + empty + "</div>" +
+        '<div class="so-mobile-cards">' + empty + "</div>" +
+        "</section>"
+      );
+    }
+    const groups = groupRowsBy("report", rows, (r) => exitMonthKey(r) || "—", "exit_date");
+    const body = groups.map((g) => {
+      const monthTitle = esc(g.key === "—" ? "Unknown month" : formatMonthLabel(g.key));
+      const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
+      return groupHeaderRow(colCount, monthTitle, monthly) + g.rows.map(reportRowHtml).join("");
+    }).join("");
+    const table =
+      '<div class="so-table-wrap"><table class="so-table so-table-report">' +
+      "<thead><tr>" + headerHtml("report") + "</tr></thead><tbody>" + body + "</tbody></table></div>";
+    const cards = groups.map((g) => {
+      const monthTitle = esc(g.key === "—" ? "Unknown month" : formatMonthLabel(g.key));
+      const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
+      return mobileGroupSection(monthTitle, monthly, g.rows.map(reportCardHtml).join(""));
+    }).join("");
+    return (
+      '<section class="so-report-mode" data-mode="' + mode + '">' +
+      heading +
+      wrapDesktopMobile(table, cards) +
+      "</section>"
+    );
+  }
+
   function renderReport() {
     const all = workspace.completed || [];
     if (!all.length) return '<p class="so-empty">No completed trades.</p>';
-    const groups = groupRowsBy("report", all, (r) => exitMonthKey(r) || "—", "exit_date");
-    const colCount = (COLUMNS.report || []).length;
-    const body = groups.map((g) => {
-      const title = esc(g.key === "—" ? "Unknown month" : formatMonthLabel(g.key));
-      const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
-      return groupHeaderRow(colCount, title, monthly) + g.rows.map(reportRowHtml).join("");
-    }).join("");
-    const table = `<div class="so-table-wrap"><table class="so-table so-table-report">
-      <thead><tr>${headerHtml("report")}</tr></thead><tbody>${body}</tbody></table></div>`;
-    const cards = groups.map((g) => {
-      const title = esc(g.key === "—" ? "Unknown month" : formatMonthLabel(g.key));
-      const monthly = formatMonthlyPnlMeta(sumGroupPnlInr(g.rows));
-      return mobileGroupSection(title, monthly, g.rows.map(reportCardHtml).join(""));
-    }).join("");
-    return wrapDesktopMobile(table, cards);
+    const live = all.filter((r) => normalizeTradeMode(r.trade_mode) === "LIVE");
+    const paper = all.filter((r) => normalizeTradeMode(r.trade_mode) !== "LIVE");
+    return (
+      '<div class="so-report-split">' +
+      renderReportModeBlock("LIVE", "Live Trade", live) +
+      renderReportModeBlock("PAPER", "Paper Trade", paper) +
+      "</div>"
+    );
   }
 
   function render() {
@@ -1009,11 +1141,13 @@
     const gen = ++exitQuoteGen;
     document.getElementById("soExitSymbol").textContent = row.symbol + " · " + (row.side || "");
     setStrikeLabels(row.side, "soExitBuyStrikeLbl", "soExitSellStrikeLbl");
-    document.getElementById("soExitEntryDate").value = dateOnly(row.date_traded || row.armed_at);
+    setDateTimeFields("soExitEntryDate", "soExitEntryTime", "soExitEntryAmPm", row.date_traded || row.armed_at);
     document.getElementById("soExitBuyStrike").value = row.user_buy_strike != null ? row.user_buy_strike : "";
     document.getElementById("soExitBuyEntry").value = row.buy_cost != null ? row.buy_cost : "";
     document.getElementById("soExitSellStrike").value = row.user_sell_strike != null ? row.user_sell_strike : "";
     document.getElementById("soExitSellEntry").value = row.sell_cost != null ? row.sell_cost : "";
+    const modeEl = document.getElementById("soTradeMode");
+    if (modeEl) modeEl.value = normalizeTradeMode(row.trade_mode);
 
     const hasExitDate = !!dateOnly(row.exit_date);
     const hasSellExit = row.sell_exit_price != null && row.sell_exit_price !== "";
@@ -1021,15 +1155,15 @@
 
     if (forEdit) {
       // Edit: only show stored values — blank means "leave unchanged" on Save.
-      document.getElementById("soExitDate").value = hasExitDate ? dateOnly(row.exit_date) : "";
+      setDateTimeFields("soExitDate", "soExitTime", "soExitAmPm", hasExitDate ? row.exit_date : "");
       document.getElementById("soExitSellPx").value = hasSellExit ? row.sell_exit_price : "";
       document.getElementById("soExitBuyPx").value = hasBuyExit ? row.buy_exit_price : "";
     } else if (preferStoredExit && (hasExitDate || hasSellExit || hasBuyExit)) {
-      document.getElementById("soExitDate").value = hasExitDate ? dateOnly(row.exit_date) : todayIso();
+      setDateTimeFields("soExitDate", "soExitTime", "soExitAmPm", hasExitDate ? row.exit_date : todayIso());
       document.getElementById("soExitSellPx").value = hasSellExit ? row.sell_exit_price : (row.sell_ltp != null ? row.sell_ltp : "");
       document.getElementById("soExitBuyPx").value = hasBuyExit ? row.buy_exit_price : (row.buy_ltp != null ? row.buy_ltp : "");
     } else {
-      document.getElementById("soExitDate").value = hasExitDate ? dateOnly(row.exit_date) : todayIso();
+      setDateTimeFields("soExitDate", "soExitTime", "soExitAmPm", hasExitDate ? row.exit_date : todayIso());
       document.getElementById("soExitSellPx").value = hasSellExit
         ? row.sell_exit_price
         : (row.sell_ltp != null ? row.sell_ltp : "");
@@ -1084,26 +1218,38 @@
   }
 
   function readExitFormBody() {
-    const exitDate = document.getElementById("soExitDate").value;
+    const entryDt = readDateTimeField("soExitEntryDate", "soExitEntryTime", "soExitEntryAmPm");
+    const exitDt = readDateTimeField("soExitDate", "soExitTime", "soExitAmPm");
     const sellExitRaw = document.getElementById("soExitSellPx").value;
     const buyExitRaw = document.getElementById("soExitBuyPx").value;
+    const modeEl = document.getElementById("soTradeMode");
     const body = {
-      date_traded: document.getElementById("soExitEntryDate").value,
+      date_traded: entryDt.value || "",
       buy_strike: Number(document.getElementById("soExitBuyStrike").value),
       buy_cost: Number(document.getElementById("soExitBuyEntry").value),
       sell_strike: Number(document.getElementById("soExitSellStrike").value),
       sell_cost: Number(document.getElementById("soExitSellEntry").value),
+      trade_mode: normalizeTradeMode(modeEl ? modeEl.value : "PAPER"),
     };
     const sellExit = sellExitRaw === "" ? null : Number(sellExitRaw);
     const buyExit = buyExitRaw === "" ? null : Number(buyExitRaw);
-    const anyExit = !!(exitDate || sellExitRaw !== "" || buyExitRaw !== "");
-    return { body, exitDate, sellExit, buyExit, anyExit };
+    const anyExit = !!(exitDt.value || sellExitRaw !== "" || buyExitRaw !== "");
+    return {
+      body: body,
+      exitDate: exitDt.value || "",
+      sellExit: sellExit,
+      buyExit: buyExit,
+      anyExit: anyExit,
+      entryError: entryDt.error,
+      exitError: exitDt.error,
+    };
   }
 
   function readPartialUpdateBody() {
     const body = {};
-    const dateTraded = document.getElementById("soExitEntryDate").value;
-    if (dateTraded) body.date_traded = dateTraded;
+    const entryDt = readDateTimeField("soExitEntryDate", "soExitEntryTime", "soExitEntryAmPm");
+    if (entryDt.error) return { error: entryDt.error, body: null };
+    if (entryDt.value) body.date_traded = entryDt.value;
     const buyStrike = readNumField("soExitBuyStrike");
     if (buyStrike != null) body.buy_strike = buyStrike;
     const buyCost = readNumField("soExitBuyEntry");
@@ -1112,13 +1258,16 @@
     if (sellStrike != null) body.sell_strike = sellStrike;
     const sellCost = readNumField("soExitSellEntry");
     if (sellCost != null) body.sell_cost = sellCost;
-    const exitDate = document.getElementById("soExitDate").value;
-    if (exitDate) body.exit_date = exitDate;
+    const exitDt = readDateTimeField("soExitDate", "soExitTime", "soExitAmPm");
+    if (exitDt.error) return { error: exitDt.error, body: null };
+    if (exitDt.value) body.exit_date = exitDt.value;
     const sellExit = readNumField("soExitSellPx");
     if (sellExit != null) body.sell_exit = sellExit;
     const buyExit = readNumField("soExitBuyPx");
     if (buyExit != null) body.buy_exit = buyExit;
-    return body;
+    const modeEl = document.getElementById("soTradeMode");
+    if (modeEl && modeEl.value) body.trade_mode = normalizeTradeMode(modeEl.value);
+    return { error: null, body: body };
   }
 
   async function submitExit(ev) {
@@ -1127,7 +1276,12 @@
     const err = document.getElementById("soExitErr");
 
     if (exitModalMode === "edit") {
-      const body = readPartialUpdateBody();
+      const parsed = readPartialUpdateBody();
+      if (parsed.error) {
+        err.textContent = parsed.error;
+        return;
+      }
+      const body = parsed.body || {};
       if (!Object.keys(body).length) {
         err.textContent = "Fill at least one field to save.";
         return;
@@ -1179,6 +1333,15 @@
 
     const parsed = readExitFormBody();
     const body = parsed.body;
+
+    if (parsed.entryError) {
+      err.textContent = parsed.entryError;
+      return;
+    }
+    if (parsed.exitError) {
+      err.textContent = parsed.exitError;
+      return;
+    }
 
     if (!body.date_traded || !(body.buy_strike > 0) || !(body.sell_strike > 0)
       || !Number.isFinite(body.buy_cost) || !Number.isFinite(body.sell_cost)) {

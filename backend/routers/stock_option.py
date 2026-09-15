@@ -58,26 +58,28 @@ class HardStopBody(BaseModel):
 
 
 class ExitBody(BaseModel):
-    date_traded: str = Field(..., min_length=8, max_length=10)
+    date_traded: str = Field(..., min_length=8, max_length=32)
     buy_strike: float = Field(..., gt=0)
     buy_cost: float = Field(..., ge=0)
     sell_strike: float = Field(..., gt=0)
     sell_cost: float = Field(..., ge=0)
-    exit_date: str = Field(..., min_length=8, max_length=10)
+    exit_date: str = Field(..., min_length=8, max_length=32)
     sell_exit: float = Field(..., ge=0)
     buy_exit: float = Field(..., ge=0)
+    trade_mode: Optional[str] = Field(None, max_length=16)
 
 
 class UpdateBody(BaseModel):
     """Edit Executed/Completed fields; status unchanged. All fields optional (partial update)."""
-    date_traded: Optional[str] = Field(None, max_length=10)
+    date_traded: Optional[str] = Field(None, max_length=32)
     buy_strike: Optional[float] = Field(None, gt=0)
     buy_cost: Optional[float] = Field(None, ge=0)
     sell_strike: Optional[float] = Field(None, gt=0)
     sell_cost: Optional[float] = Field(None, ge=0)
-    exit_date: Optional[str] = Field(None, max_length=10)
+    exit_date: Optional[str] = Field(None, max_length=32)
     sell_exit: Optional[float] = Field(None, ge=0)
     buy_exit: Optional[float] = Field(None, ge=0)
+    trade_mode: Optional[str] = Field(None, max_length=16)
 
 
 async def _ingest(request: Request) -> JSONResponse:
@@ -226,6 +228,7 @@ async def stock_option_exit(
             exit_date=body.exit_date,
             sell_exit=body.sell_exit,
             buy_exit=body.buy_exit,
+            trade_mode=body.trade_mode,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -252,6 +255,7 @@ async def stock_option_update(
             exit_date=body.exit_date,
             sell_exit=body.sell_exit,
             buy_exit=body.buy_exit,
+            trade_mode=body.trade_mode,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

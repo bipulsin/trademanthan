@@ -25,6 +25,9 @@ _MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "add_stock_opt
 _CONTRACT_MIGRATION = (
     Path(__file__).resolve().parents[1] / "migrations" / "add_stock_option_contract_mmm_yyyy.sql"
 )
+_TRADE_MODE_MIGRATION = (
+    Path(__file__).resolve().parents[1] / "migrations" / "add_stock_option_trade_mode_datetime.sql"
+)
 _ENSURED = False
 
 STATUS_RADAR = "Radar"
@@ -34,6 +37,8 @@ STATUS_COMPLETED = "Completed"
 STATUS_REJECTED = "Rejected"
 SIDE_BEAR = "BEAR CALL"
 SIDE_BULL = "BULL PUT"
+TRADE_MODE_PAPER = "PAPER"
+TRADE_MODE_LIVE = "LIVE"
 INVALIDATE_REMARKS = "Trade not executed for this symbol"
 ACTIVE_MAX_HOURS = 72
 EXPIRY_REMARKS = "Auto-expired after 72 hours from armed time"
@@ -90,19 +95,30 @@ def ensure_stock_option_tables() -> None:
     with engine.begin() as conn:
         conn.execute(text(sql))
         for stmt in (
-            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS exit_date DATE",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS exit_date TIMESTAMP WITHOUT TIME ZONE",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS sell_exit_price DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS buy_exit_price DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS realized_pnl DOUBLE PRECISION",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS contract_mmm_yyyy TEXT",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS ema_fetch_ok BOOLEAN",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER'",
         ):
             conn.execute(text(stmt))
         if _CONTRACT_MIGRATION.is_file():
             conn.execute(text(_CONTRACT_MIGRATION.read_text(encoding="utf-8")))
+        if _TRADE_MODE_MIGRATION.is_file():
+            conn.execute(text(_TRADE_MODE_MIGRATION.read_text(encoding="utf-8")))
     backfill_contract_mmm_yyyy()
     _ENSURED = True
     logger.info("stock_option tables ensured")
+
+
+def normalize_trade_mode(value: Any) -> str:
+    """PAPER|LIVE. Untagged / unknown / historical → PAPER."""
+    s = str(value or "").strip().upper()
+    if s == TRADE_MODE_LIVE:
+        return TRADE_MODE_LIVE
+    return TRADE_MODE_PAPER
 
 
 def format_contract_mmm_yyyy(expiry: date) -> str:
@@ -2843,6 +2859,7 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "exit_date": _fmt_ts(r.get("exit_date")),
         "sell_exit_price": r.get("sell_exit_price"),
         "buy_exit_price": r.get("buy_exit_price"),
+        "trade_mode": normalize_trade_mode(r.get("trade_mode")),
         "combined_pnl": pnl,
         "hard_stop": hs,
         "hard_stop_placed": bool(r.get("hard_stop_placed")),
@@ -2881,7 +2898,8 @@ def list_workspace() -> Dict[str, Any]:
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,
                        remarks, sell_ltp, buy_ltp, sell_instrument_key,
-                       exit_date, sell_exit_price, buy_exit_price, realized_pnl
+                       exit_date, sell_exit_price, buy_exit_price, realized_pnl,
+                       trade_mode
                 FROM stock_option_signals
                 WHERE status IS DISTINCT FROM :rejected
                 ORDER BY id DESC
@@ -3023,10 +3041,37 @@ def set_hard_stop_placed(signal_id: int, placed: bool) -> Dict[str, Any]:
 
 
 def _parse_iso_date(value: Any, field: str) -> date:
+    """Date-only helper (YYYY-MM-DD). Prefer ``_parse_iso_datetime`` for trade fields."""
+    return _parse_iso_datetime(value, field).date()
+
+
+def _parse_iso_datetime(value: Any, field: str) -> datetime:
+    """Parse YYYY-MM-DD or YYYY-MM-DD[ T]HH:MM[:SS] as naive IST datetime.
+
+    Date-only values become midnight (legacy DATE rows / date-only clients).
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError(f"{field} must be YYYY-MM-DD or YYYY-MM-DD HH:MM")
+    s = raw.replace("T", " ", 1)
+    if s.endswith("Z") or s.endswith("z"):
+        s = s[:-1].strip()
+    # Drop trailing timezone offset (+05:30 / -04:00) after the time portion.
+    if len(s) > 10:
+        tail = s[10:]
+        for i, ch in enumerate(tail):
+            if ch in "+-" and i > 0:
+                s = (s[:10] + tail[:i]).strip()
+                break
+    s = " ".join(s.split())
     try:
-        return date.fromisoformat(str(value or "").strip()[:10])
-    except (ValueError, TypeError) as e:
-        raise ValueError(f"{field} must be YYYY-MM-DD") from e
+        if len(s) >= 19 and s[10] == " ":
+            return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+        if len(s) >= 16 and s[10] == " ":
+            return datetime.strptime(s[:16], "%Y-%m-%d %H:%M")
+        return datetime.strptime(s[:10], "%Y-%m-%d")
+    except ValueError as e:
+        raise ValueError(f"{field} must be YYYY-MM-DD or YYYY-MM-DD HH:MM") from e
 
 
 def quote_exit_ltps(signal_id: int) -> Dict[str, Any]:
@@ -3113,11 +3158,13 @@ def submit_exit(
     exit_date: str,
     sell_exit: float,
     buy_exit: float,
+    trade_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Complete an Executed trade. Does not change status unless this Submit runs."""
     ensure_stock_option_tables()
-    traded = _parse_iso_date(date_traded, "date_traded")
-    exited = _parse_iso_date(exit_date, "exit_date")
+    traded = _parse_iso_datetime(date_traded, "date_traded")
+    exited = _parse_iso_datetime(exit_date, "exit_date")
+    mode = normalize_trade_mode(trade_mode) if trade_mode is not None else TRADE_MODE_PAPER
     pnl = realized_credit_pnl(sell_cost, buy_cost, sell_exit, buy_exit)
     if pnl is None:
         raise ValueError("entry and exit prices are required")
@@ -3127,7 +3174,7 @@ def submit_exit(
         row = db.execute(
             text(
                 """
-                SELECT id, status, date_traded, sell_cost, buy_cost
+                SELECT id, status, date_traded, sell_cost, buy_cost, trade_mode
                 FROM stock_option_signals
                 WHERE id = :id
                 """
@@ -3138,6 +3185,8 @@ def submit_exit(
             raise LookupError("signal not found")
         if (row.get("status") or "").strip().lower() != "executed":
             raise ValueError("only Executed rows can be completed")
+        if trade_mode is None:
+            mode = normalize_trade_mode(row.get("trade_mode"))
         db.execute(
             text(
                 """
@@ -3152,6 +3201,7 @@ def submit_exit(
                     sell_exit_price = :sell_exit,
                     buy_exit_price = :buy_exit,
                     realized_pnl = :pnl,
+                    trade_mode = :trade_mode,
                     updated_at = :ts
                 WHERE id = :id AND status = :executed
                 """
@@ -3167,6 +3217,7 @@ def submit_exit(
                 "sell_exit": float(sell_exit),
                 "buy_exit": float(buy_exit),
                 "pnl": float(pnl),
+                "trade_mode": mode,
                 "ts": now,
                 "id": signal_id,
                 "executed": STATUS_EXECUTED,
@@ -3184,6 +3235,7 @@ def submit_exit(
         "id": signal_id,
         "status": STATUS_COMPLETED,
         "combined_pnl": pnl,
+        "trade_mode": mode,
         "hard_stop": hard_stop_price(sell_cost),
     }
 
@@ -3192,7 +3244,7 @@ def _optional_exit_bundle(
     exit_date: Any,
     sell_exit: Any,
     buy_exit: Any,
-) -> Optional[Tuple[date, float, float]]:
+) -> Optional[Tuple[datetime, float, float]]:
     """All-or-nothing optional exit fields. Empty trio → None; partial → ValueError."""
     date_raw = str(exit_date or "").strip()
     sell_f = _as_float(sell_exit)
@@ -3204,7 +3256,7 @@ def _optional_exit_bundle(
         raise ValueError("exit date and both exit prices are required together")
     if sell_f < 0 or buy_f < 0:
         raise ValueError("exit prices must be >= 0")
-    return (_parse_iso_date(date_raw, "exit_date"), float(sell_f), float(buy_f))
+    return (_parse_iso_datetime(date_raw, "exit_date"), float(sell_f), float(buy_f))
 
 
 def update_trade(
@@ -3218,6 +3270,7 @@ def update_trade(
     exit_date: Optional[str] = None,
     sell_exit: Optional[float] = None,
     buy_exit: Optional[float] = None,
+    trade_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Edit Executed/Completed fields without changing status. Partial updates OK.
 
@@ -3234,6 +3287,7 @@ def update_trade(
         "exit_date": exit_date,
         "sell_exit": sell_exit,
         "buy_exit": buy_exit,
+        "trade_mode": trade_mode,
     }
     if all(v is None or (isinstance(v, str) and not str(v).strip()) for v in provided.values()):
         raise ValueError("provide at least one field to update")
@@ -3246,7 +3300,7 @@ def update_trade(
                 """
                 SELECT id, status, date_traded, user_buy_strike, user_sell_strike,
                        buy_cost, sell_cost, exit_date, sell_exit_price, buy_exit_price,
-                       realized_pnl
+                       realized_pnl, trade_mode
                 FROM stock_option_signals
                 WHERE id = :id
                 """
@@ -3262,11 +3316,11 @@ def update_trade(
         # Merge: provided wins; blank string for exit_date treated as omit.
         date_raw = date_traded if date_traded is not None and str(date_traded).strip() else None
         if date_raw is not None:
-            traded = _parse_iso_date(date_raw, "date_traded")
+            traded = _parse_iso_datetime(date_raw, "date_traded")
         else:
             traded = row.get("date_traded")
-            if isinstance(traded, datetime):
-                traded = traded.date()
+            if isinstance(traded, date) and not isinstance(traded, datetime):
+                traded = datetime.combine(traded, dt_time(0, 0, 0))
             if traded is None:
                 raise ValueError("date_traded is required")
 
@@ -3282,11 +3336,11 @@ def update_trade(
 
         exit_date_raw = exit_date if exit_date is not None and str(exit_date).strip() else None
         if exit_date_raw is not None:
-            exited = _parse_iso_date(exit_date_raw, "exit_date")
+            exited = _parse_iso_datetime(exit_date_raw, "exit_date")
         else:
             exited = row.get("exit_date")
-            if isinstance(exited, datetime):
-                exited = exited.date()
+            if isinstance(exited, date) and not isinstance(exited, datetime):
+                exited = datetime.combine(exited, dt_time(0, 0, 0))
 
         sell_x = float(sell_exit) if sell_exit is not None else _as_float(row.get("sell_exit_price"))
         buy_x = float(buy_exit) if buy_exit is not None else _as_float(row.get("buy_exit_price"))
@@ -3294,6 +3348,11 @@ def update_trade(
             raise ValueError("exit prices must be >= 0")
         if buy_exit is not None and buy_exit < 0:
             raise ValueError("exit prices must be >= 0")
+
+        if trade_mode is not None and str(trade_mode).strip():
+            mode = normalize_trade_mode(trade_mode)
+        else:
+            mode = normalize_trade_mode(row.get("trade_mode"))
 
         pnl = realized_credit_pnl(sell_c, buy_c, sell_x, buy_x)
         if pnl is None:
@@ -3313,6 +3372,7 @@ def update_trade(
                     sell_exit_price = :sell_exit,
                     buy_exit_price = :buy_exit,
                     realized_pnl = :pnl,
+                    trade_mode = :trade_mode,
                     remarks = CASE
                         WHEN status = :executed_status
                              AND remarks LIKE :expiry_like THEN NULL
@@ -3332,6 +3392,7 @@ def update_trade(
                 "sell_exit": float(sell_x) if sell_x is not None else None,
                 "buy_exit": float(buy_x) if buy_x is not None else None,
                 "pnl": float(pnl) if pnl is not None else None,
+                "trade_mode": mode,
                 "ts": now,
                 "id": signal_id,
                 "status": status_const,
@@ -3351,6 +3412,7 @@ def update_trade(
             "id": signal_id,
             "status": status_const,
             "combined_pnl": float(pnl) if pnl is not None else None,
+            "trade_mode": mode,
             "hard_stop": hard_stop_price(sell_c),
         }
     except Exception:

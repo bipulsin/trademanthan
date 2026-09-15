@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="stockOptions.css?v=22" />
+    <link rel="stylesheet" href="stockOptions.css?v=23" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -69,7 +69,7 @@
                     </nav>
                     <div class="so-card">
                         <p class="so-note" id="soExecutedNote" hidden>Grouped by date traded. Ensure GTT order at this price for SELL leg. LTP/P&amp;L refresh after each 2h EMA cycle; P&amp;L blinks when &gt; ₹1100.</p>
-                        <p class="so-note" id="soReportNote" hidden>Grouped by exit-date month. Monthly PnL sums row P&amp;L ₹. Row P&amp;L ₹ = ((sell entry − buy entry) − (sell exit − buy exit)) × lot size. Hard stop stays 3 × sell entry.</p>
+                        <p class="so-note" id="soReportNote" hidden>Live Trade on top, Paper Trade below. Grouped by exit-date month within each mode. Monthly PnL sums row P&amp;L ₹. Row P&amp;L ₹ = ((sell entry − buy entry) − (sell exit − buy exit)) × lot size. Hard stop stays 3 × sell entry.</p>
                         <div id="soPanel"></div>
                     </div>
                 </div>
@@ -117,9 +117,16 @@
             <p id="soExitSymbol" class="so-note"></p>
             <p class="so-modal-msg" id="soExitHint">First Exit SELL leg then the BUY leg</p>
             <form id="soExitForm" class="so-form-grid">
-                <div class="so-field so-field-inline so-field-full">
+                <div class="so-field so-field-inline so-field-full so-field-datetime">
                     <label for="soExitEntryDate">Entry date</label>
-                    <input id="soExitEntryDate" type="date" required />
+                    <div class="so-datetime">
+                        <input id="soExitEntryDate" type="date" required />
+                        <input id="soExitEntryTime" type="text" inputmode="numeric" placeholder="hh:mm" maxlength="5" aria-label="Entry time" />
+                        <select id="soExitEntryAmPm" aria-label="Entry AM/PM">
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="so-field so-field-inline">
                     <label for="soExitBuyStrike" id="soExitBuyStrikeLbl">Buy Strike</label>
@@ -137,9 +144,21 @@
                     <label for="soExitSellEntry">Entry price</label>
                     <input id="soExitSellEntry" type="number" step="0.05" min="0" required />
                 </div>
-                <div class="so-field so-field-inline so-field-full">
+                <div class="so-field so-field-inline so-field-full so-exit-date-mode-row">
                     <label for="soExitDate">Exit date</label>
-                    <input id="soExitDate" type="date" />
+                    <div class="so-datetime">
+                        <input id="soExitDate" type="date" />
+                        <input id="soExitTime" type="text" inputmode="numeric" placeholder="hh:mm" maxlength="5" aria-label="Exit time" />
+                        <select id="soExitAmPm" aria-label="Exit AM/PM">
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                        </select>
+                    </div>
+                    <label for="soTradeMode" class="so-mode-label">Mode</label>
+                    <select id="soTradeMode" aria-label="PAPER or LIVE">
+                        <option value="PAPER">PAPER</option>
+                        <option value="LIVE">LIVE</option>
+                    </select>
                 </div>
                 <div class="so-field so-field-inline">
                     <label for="soExitSellPx">Sell exit price</label>
@@ -158,6 +177,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.48"></script>
-    <script src="stockOptions.js?v=20"></script>
+    <script src="stockOptions.js?v=21"></script>
 </body>
 </html>

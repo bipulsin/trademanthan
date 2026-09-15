@@ -821,6 +821,107 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
     width: 100%;
 }
 
+.so-field-inline select {
+    flex: 0 0 auto;
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+}
+
+.so-datetime {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.so-datetime input[type="date"] {
+    flex: 1 1 9.5rem;
+    min-width: 0;
+}
+
+.so-datetime input[type="text"] {
+    flex: 0 0 4.5rem;
+    width: 4.5rem;
+    text-align: center;
+}
+
+.so-datetime select {
+    flex: 0 0 auto;
+    min-width: 4.25rem;
+}
+
+.so-exit-date-mode-row {
+    flex-wrap: wrap;
+}
+
+.so-exit-date-mode-row .so-mode-label {
+    margin-left: 4px;
+    min-width: auto;
+}
+
+.so-exit-date-mode-row > select#soTradeMode {
+    flex: 0 0 auto;
+    min-width: 6.5rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.so-mode-chip {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    line-height: 1.35;
+}
+
+.so-mode-paper {
+    color: #9db7c9;
+    background: rgba(120, 150, 170, 0.18);
+    border: 1px solid rgba(120, 150, 170, 0.35);
+}
+
+.so-mode-live {
+    color: #b8f5d0;
+    background: rgba(61, 186, 122, 0.18);
+    border: 1px solid rgba(61, 186, 122, 0.4);
+}
+
+.so-report-split {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+.so-report-mode-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 0 10px;
+}
+
+.so-report-mode-title {
+    margin: 0;
+    font-family: Syne, sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text);
+}
+
+.so-empty-mode {
+    margin: 0 0 8px;
+}
+
 .so-form-grid > .so-modal-msg {
     margin: 4px 0 0;
 }
@@ -1116,6 +1217,23 @@ body.stock-options-page[data-theme="light"] .so-vix-value.so-vix-green {
 body.stock-options-page[data-theme="light"] .so-field input {
     background: #fff;
     color: var(--text);
+}
+
+body.stock-options-page[data-theme="light"] .so-field select,
+body.stock-options-page[data-theme="light"] .so-field-inline select,
+body.stock-options-page[data-theme="light"] .so-datetime select {
+    background: #fff;
+    color: var(--text);
+}
+
+body.stock-options-page[data-theme="light"] .so-mode-paper {
+    color: #3d5a6c;
+    background: rgba(100, 130, 150, 0.12);
+}
+
+body.stock-options-page[data-theme="light"] .so-mode-live {
+    color: #1f7a4d;
+    background: rgba(61, 186, 122, 0.14);
 }
 
 body.stock-options-page[data-theme="light"] .so-modal-btn.primary {

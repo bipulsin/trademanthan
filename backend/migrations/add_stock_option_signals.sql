@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS stock_option_signals (
     buy_strike DOUBLE PRECISION,
     buy_delta DOUBLE PRECISION,
     buy_instrument_key TEXT,
-    date_traded DATE,
+    date_traded TIMESTAMP WITHOUT TIME ZONE,
     sell_cost DOUBLE PRECISION,
     buy_cost DOUBLE PRECISION,
     user_sell_strike DOUBLE PRECISION,
@@ -44,10 +44,11 @@ CREATE TABLE IF NOT EXISTS stock_option_signals (
     sell_ltp DOUBLE PRECISION,
     buy_ltp DOUBLE PRECISION,
     ltp_updated_at TIMESTAMP WITHOUT TIME ZONE,
-    exit_date DATE,
+    exit_date TIMESTAMP WITHOUT TIME ZONE,
     sell_exit_price DOUBLE PRECISION,
     buy_exit_price DOUBLE PRECISION,
     realized_pnl DOUBLE PRECISION,
+    trade_mode TEXT NOT NULL DEFAULT 'PAPER',
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
 );
@@ -56,7 +57,8 @@ CREATE INDEX IF NOT EXISTS ix_stock_option_signals_symbol
 CREATE INDEX IF NOT EXISTS ix_stock_option_signals_status
     ON stock_option_signals (status, id DESC);
 
-ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS exit_date DATE;
+ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS exit_date TIMESTAMP WITHOUT TIME ZONE;
 ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS sell_exit_price DOUBLE PRECISION;
 ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS buy_exit_price DOUBLE PRECISION;
 ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS realized_pnl DOUBLE PRECISION;
+ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER';
