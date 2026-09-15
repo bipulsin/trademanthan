@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS commodities_div_signals (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- At most one non-History (active cycle) row.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active
-    ON commodities_div_signals ((TRUE))
+-- At most one non-History cycle per underlying (different symbols may coexist).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol
+    ON commodities_div_signals (symbol_mapped)
     WHERE status <> 'History';

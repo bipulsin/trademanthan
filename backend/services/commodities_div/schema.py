@@ -48,5 +48,16 @@ def ensure_commodities_div_tables() -> None:
                 """
             )
         )
+        # Migrate global one-active → one active cycle per symbol_mapped.
+        conn.execute(text("DROP INDEX IF EXISTS uq_commodities_div_one_active"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol
+                    ON commodities_div_signals (symbol_mapped)
+                    WHERE status <> 'History'
+                """
+            )
+        )
     _ENSURED = True
     logger.info("commodities_div tables ensured")
