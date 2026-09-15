@@ -607,10 +607,10 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
 .so-pnl-pts { color: var(--muted); font-weight: 600; }
 .so-pnl-unit { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; }
 
-/* Executed tab: P&L stands out (2× table/card body size). */
+/* Executed tab: P&L stands out (1.4× table/card body size). */
 .so-table-executed .so-executed-pnl,
 .so-mcard .so-executed-pnl {
-    font-size: 2em;
+    font-size: 1.4em;
     font-weight: 700;
     line-height: 1.15;
 }
