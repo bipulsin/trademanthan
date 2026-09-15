@@ -851,8 +851,8 @@
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
         <td class="so-tight">Sell ${num(r.sell_cost)}<br>Buy ${num(r.buy_cost)}</td>
-        <td class="so-tight">Sell ${num(r.sell_ltp)}<br>Buy ${num(r.buy_ltp)}</td>
-        <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
+        <td class="so-tight">${num(r.sell_ltp)}<br>${num(r.buy_ltp)}</td>
+        <td class="so-tight so-executed-pnl ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-hs"><span class="so-hs-cell">${num(r.hard_stop)}${hsBox}</span></td>
         <td class="so-exit-cell"><span class="so-row-actions">
           <button type="button" class="so-edit-btn" data-edit="${r.id}" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button>
@@ -877,8 +877,8 @@
       detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
       detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
       detailRow("Costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
-      detailRow("LTP", "Sell " + num(r.sell_ltp) + "<br>Buy " + num(r.buy_ltp)) +
-      detailRow("P&amp;L ₹", '<span class="' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>") +
+      detailRow("LTP", num(r.sell_ltp) + "<br>" + num(r.buy_ltp)) +
+      detailRow("P&amp;L ₹", '<span class="so-executed-pnl ' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>") +
       detailRow("Hard stop", '<span class="so-hs-cell">' + num(r.hard_stop) + hsBox + "</span>") +
       '<div class="so-mcard-actions so-row-actions">' +
       '<button type="button" class="so-edit-btn" data-edit="' + r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button>' +
