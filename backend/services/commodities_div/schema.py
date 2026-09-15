@@ -22,6 +22,8 @@ def ensure_commodities_div_tables() -> None:
         raise FileNotFoundError(f"migration missing: {_MIGRATION}")
     sql = _MIGRATION.read_text(encoding="utf-8")
     with engine.begin() as conn:
+        # Drop legacy global one-active index before migration SQL (may recreate per-symbol).
+        conn.execute(text("DROP INDEX IF EXISTS uq_commodities_div_one_active"))
         conn.execute(text(sql))
         # Widen disposition CHECK for Section 4a (existing DBs keep old constraint otherwise).
         conn.execute(
@@ -48,8 +50,7 @@ def ensure_commodities_div_tables() -> None:
                 """
             )
         )
-        # Migrate global one-active → one active cycle per symbol_mapped.
-        conn.execute(text("DROP INDEX IF EXISTS uq_commodities_div_one_active"))
+        # Ensure per-symbol unique (idempotent if migration already created it).
         conn.execute(
             text(
                 """
