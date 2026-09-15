@@ -144,45 +144,22 @@
     );
   }
 
-  function bindActiveActions(row) {
-    var takeBtn = $("cdTakeBtn");
-    if (takeBtn) {
-      takeBtn.addEventListener("click", function () {
-        openTake(row);
-      });
-    }
-    var exitBtn = $("cdExitBtn");
-    if (exitBtn) {
-      exitBtn.addEventListener("click", function () {
-        openExit(row);
-      });
-    }
-    var takeBtnM = $("cdTakeBtnM");
-    if (takeBtnM) {
-      takeBtnM.addEventListener("click", function () {
-        openTake(row);
-      });
-    }
-    var exitBtnM = $("cdExitBtnM");
-    if (exitBtnM) {
-      exitBtnM.addEventListener("click", function () {
-        openExit(row);
-      });
-    }
-  }
-
   function activeActionHtml(row, idSuffix) {
     var suffix = idSuffix || "";
     if (row.status === "Activated") {
       return (
-        '<button type="button" class="cd-btn cd-btn-primary" id="cdTakeBtn' +
+        '<button type="button" class="cd-btn cd-btn-primary" data-cd-action="take" data-cd-id="' +
+        row.id +
+        '" id="cdTakeBtn' +
         suffix +
         '">Take Trade</button>'
       );
     }
     if (row.status === "Exit Trade") {
       return (
-        '<button type="button" class="cd-btn cd-btn-danger" id="cdExitBtn' +
+        '<button type="button" class="cd-btn cd-btn-danger" data-cd-action="exit" data-cd-id="' +
+        row.id +
+        '" id="cdExitBtn' +
         suffix +
         '">Exit</button>'
       );
@@ -194,11 +171,25 @@
     );
   }
 
-  function renderActive(row) {
+  function bindActiveRowActions(container, rowsById) {
+    if (!container) return;
+    container.querySelectorAll("[data-cd-action]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = Number(btn.getAttribute("data-cd-id"));
+        var row = rowsById[id];
+        if (!row) return;
+        if (btn.getAttribute("data-cd-action") === "take") openTake(row);
+        else if (btn.getAttribute("data-cd-action") === "exit") openExit(row);
+      });
+    });
+  }
+
+  function renderActive(rows) {
     var empty = $("cdActiveEmpty");
     var panel = $("cdActiveRow");
     var mobile = $("cdActiveMobile");
-    if (!row) {
+    var list = Array.isArray(rows) ? rows : rows ? [rows] : [];
+    if (!list.length) {
       empty.hidden = false;
       panel.hidden = true;
       panel.innerHTML = "";
@@ -211,14 +202,59 @@
     empty.hidden = true;
     panel.hidden = false;
     if (mobile) mobile.hidden = false;
-    var statusClass = "cd-status";
-    if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
-    var dirClass = row.direction === "BEAR" ? "cd-dir-bear" : "cd-dir-bull";
-    var mapWarn =
-      row.status === "In-Trade" && !row.instrument_key
-        ? '<p class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</p>'
-        : "";
-    var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+
+    var rowsById = {};
+    list.forEach(function (r) {
+      rowsById[r.id] = r;
+    });
+
+    var bodyHtml = list
+      .map(function (row) {
+        var statusClass = "cd-status";
+        if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
+        var dirClass = row.direction === "BEAR" ? "cd-dir-bear" : "cd-dir-bull";
+        var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+        var mapWarn =
+          row.status === "In-Trade" && !row.instrument_key
+            ? '<div class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</div>'
+            : "";
+        return (
+          "<tr>" +
+          '<td class="cd-field-val">' +
+          fmt(displaySym) +
+          "</td>" +
+          '<td class="cd-field-val ' +
+          dirClass +
+          '">' +
+          fmt(row.direction) +
+          "</td>" +
+          "<td><span class=\"" +
+          statusClass +
+          '">' +
+          fmt(row.status) +
+          "</span></td>" +
+          '<td class="cd-field-val">' +
+          fmt(row.div_received_at) +
+          "</td>" +
+          '<td class="cd-field-val">' +
+          fmt(row.go_received_at) +
+          "</td>" +
+          '<td class="cd-field-val">' +
+          fmt(row.entry_price) +
+          (row.trade_taken_at ? " @ " + fmt(row.trade_taken_at) : "") +
+          "</td>" +
+          '<td class="cd-field-val">' +
+          fmt(row.ltp) +
+          (row.ltp_updated_at ? ' <span class="cd-muted">' + fmt(row.ltp_updated_at) + "</span>" : "") +
+          "</td>" +
+          "<td>" +
+          activeActionHtml(row, String(row.id)) +
+          mapWarn +
+          "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
 
     panel.innerHTML =
       '<div class="cd-table-wrap cd-active-table-wrap">' +
@@ -233,81 +269,66 @@
       "<th>LTP</th>" +
       "<th>Action</th>" +
       "</tr></thead>" +
-      "<tbody><tr>" +
-      "<td class=\"cd-field-val\">" +
-      fmt(displaySym) +
-      "</td>" +
-      '<td class="cd-field-val ' +
-      dirClass +
-      '">' +
-      fmt(row.direction) +
-      "</td>" +
-      "<td><span class=\"" +
-      statusClass +
-      '">' +
-      fmt(row.status) +
-      "</span></td>" +
-      '<td class="cd-field-val">' +
-      fmt(row.div_received_at) +
-      "</td>" +
-      '<td class="cd-field-val">' +
-      fmt(row.go_received_at) +
-      "</td>" +
-      '<td class="cd-field-val">' +
-      fmt(row.entry_price) +
-      (row.trade_taken_at ? " @ " + fmt(row.trade_taken_at) : "") +
-      "</td>" +
-      '<td class="cd-field-val">' +
-      fmt(row.ltp) +
-      (row.ltp_updated_at ? ' <span class="cd-muted">' + fmt(row.ltp_updated_at) + "</span>" : "") +
-      "</td>" +
-      "<td>" +
-      activeActionHtml(row, "") +
-      "</td>" +
-      "</tr></tbody></table></div>" +
-      mapWarn;
+      "<tbody>" +
+      bodyHtml +
+      "</tbody></table></div>";
 
-    var timeSrc = row.go_received_at || row.div_received_at || row.trade_taken_at || "";
     if (mobile) {
-      mobile.innerHTML =
-        '<article class="cd-mcard">' +
-        '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
-        '<span class="cd-mcard-time">' +
-        esc(cardTimeLabel(timeSrc)) +
-        "</span>" +
-        '<span class="cd-mcard-sym">' +
-        esc(displaySym) +
-        "</span>" +
-        '<span class="cd-mcard-side">' +
-        dirChip(row.direction) +
-        "</span>" +
-        '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
-        "</button>" +
-        '<div class="cd-mcard-body" hidden>' +
-        fieldHtml("Status", '<span class="' + statusClass + '">' + esc(row.status) + "</span>") +
-        fieldHtml("DIV", esc(fmt(row.div_received_at))) +
-        fieldHtml("GO", esc(fmt(row.go_received_at))) +
-        fieldHtml(
-          "Entry",
-          esc(fmt(row.entry_price)) +
-            (row.trade_taken_at ? " @ " + esc(fmt(row.trade_taken_at)) : "")
-        ) +
-        fieldHtml(
-          "LTP",
-          esc(fmt(row.ltp)) +
-            (row.ltp_updated_at
-              ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>"
-              : "")
-        ) +
-        '<div class="cd-mcard-actions">' +
-        activeActionHtml(row, "M") +
-        "</div>" +
-        mapWarn +
-        "</div></article>";
+      mobile.innerHTML = list
+        .map(function (row) {
+          var statusClass = "cd-status";
+          if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
+          var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+          var timeSrc = row.go_received_at || row.div_received_at || row.trade_taken_at || "";
+          var mapWarn =
+            row.status === "In-Trade" && !row.instrument_key
+              ? '<p class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</p>'
+              : "";
+          return (
+            '<article class="cd-mcard">' +
+            '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
+            '<span class="cd-mcard-time">' +
+            esc(cardTimeLabel(timeSrc)) +
+            "</span>" +
+            '<span class="cd-mcard-sym">' +
+            esc(displaySym) +
+            "</span>" +
+            '<span class="cd-mcard-side">' +
+            dirChip(row.direction) +
+            "</span>" +
+            '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
+            "</button>" +
+            '<div class="cd-mcard-body" hidden>' +
+            fieldHtml("Status", '<span class="' + statusClass + '">' + esc(row.status) + "</span>") +
+            fieldHtml("DIV", esc(fmt(row.div_received_at))) +
+            fieldHtml("GO", esc(fmt(row.go_received_at))) +
+            fieldHtml(
+              "Entry",
+              esc(fmt(row.entry_price)) +
+                (row.trade_taken_at ? " @ " + esc(fmt(row.trade_taken_at)) : "")
+            ) +
+            fieldHtml(
+              "LTP",
+              esc(fmt(row.ltp)) +
+                (row.ltp_updated_at
+                  ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>"
+                  : "")
+            ) +
+            '<div class="cd-mcard-actions">' +
+            activeActionHtml(row, "M" + row.id) +
+            "</div>" +
+            mapWarn +
+            "</div></article>"
+          );
+        })
+        .join("");
     }
 
-    bindActiveActions(row);
-    if (row.status === "Exit Trade") playExit(row.id);
+    bindActiveRowActions(panel, rowsById);
+    bindActiveRowActions(mobile, rowsById);
+    list.forEach(function (row) {
+      if (row.status === "Exit Trade") playExit(row.id);
+    });
   }
 
   function renderHistory(rows) {
@@ -465,7 +486,8 @@
     try {
       var data = await api("/workspace");
       if (data.server_time_ist) $("cdServerTime").textContent = data.server_time_ist;
-      renderActive(data.active);
+      var actives = data.actives || data.active;
+      renderActive(actives);
       renderHistory(data.history || []);
       showBanner("");
     } catch (e) {

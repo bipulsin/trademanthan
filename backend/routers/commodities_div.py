@@ -13,7 +13,7 @@ from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.commodities_div.actions import (
     exit_submit,
-    get_active_signal,
+    list_active_signals,
     list_history,
     take_trade,
     workspace_payload,
@@ -65,7 +65,8 @@ def commodities_div_workspace(user: User = Depends(_auth_user)) -> Dict[str, Any
 
 @router.get("/active")
 def commodities_div_active(user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    return {"ok": True, "active": get_active_signal()}
+    actives = list_active_signals()
+    return {"ok": True, "active": actives, "actives": actives}
 
 
 @router.get("/history")

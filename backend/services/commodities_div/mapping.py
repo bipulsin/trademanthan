@@ -31,6 +31,11 @@ ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
     "COPPER",
 )
 
+# TV / MCX short cores → desk canonical (SILVERMX2026 → SILVERM → SILVERMINI).
+TV_CORE_ALIASES: Dict[str, str] = {
+    "SILVERM": "SILVERMINI",
+}
+
 # Lookup keys tried against Upstox master (SILVERMINI → SILVERM on Upstox).
 UPSTOX_RESOLVE_ALIASES: Dict[str, List[str]] = {
     "CRUDEOIL": ["CRUDEOIL"],
@@ -80,19 +85,15 @@ def normalize_tv_ticker(raw: Optional[str]) -> Optional[str]:
     return s or None
 
 
-def parse_underlying(symbol_raw: str) -> Optional[str]:
-    """
-    Map TradingView symbol to one of ALLOWED_UNDERLYINGS, else None.
-
-    Accepts:
-      CRUDEOIL1!, MCX:CRUDEOIL1!, CRUDEOILZ2026, CRUDEOIL, NATURALGAS1!, …
-    """
-    core = _strip_to_core(symbol_raw)
+def _canonicalize_core(core: str) -> Optional[str]:
+    """Map a stripped ticker core to an allowed underlying (incl. SILVERM alias)."""
     if not core:
         return None
-    core = _CONT_FUT.sub("", core).replace("!", "").strip()
     if core in ALLOWED_UNDERLYINGS:
         return core
+    alias = TV_CORE_ALIASES.get(core)
+    if alias and alias in ALLOWED_UNDERLYINGS:
+        return alias
     for u in ALLOWED_UNDERLYINGS:
         if not core.startswith(u):
             continue
@@ -103,7 +104,30 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
             return u
         if re.fullmatch(r"[A-Z]", rest):
             return u
+    # SILVERMX2026 / SILVERMZ26 → strip month code → SILVERM → SILVERMINI
+    stripped = core
+    if _LETTER_YEAR.search(stripped):
+        stripped = _LETTER_YEAR.sub("", stripped)
+    elif _LETTER_YY.search(stripped) and len(stripped) > 3:
+        stripped = _LETTER_YY.sub("", stripped)
+    if stripped != core:
+        return _canonicalize_core(stripped)
     return None
+
+
+def parse_underlying(symbol_raw: str) -> Optional[str]:
+    """
+    Map TradingView symbol to one of ALLOWED_UNDERLYINGS, else None.
+
+    Accepts:
+      CRUDEOIL1!, MCX:CRUDEOIL1!, CRUDEOILZ2026, CRUDEOIL, NATURALGAS1!, …
+      SILVERMX2026, SILVERM (→ SILVERMINI / Upstox SILVERM)
+    """
+    core = _strip_to_core(symbol_raw)
+    if not core:
+        return None
+    core = _CONT_FUT.sub("", core).replace("!", "").strip()
+    return _canonicalize_core(core)
 
 
 def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optional[Dict[str, Any]]:

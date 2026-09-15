@@ -108,18 +108,23 @@ def parse_flag_fields(parsed: Any) -> Tuple[str, Optional[Dict[str, Any]]]:
     }
 
 
-def _get_active(db) -> Optional[Dict[str, Any]]:
-    row = db.execute(
+def _get_active_for_symbol(
+    db, symbol_raw: str, symbol_mapped: str
+) -> Optional[Dict[str, Any]]:
+    """Non-History cycle for this underlying only (one active cycle per symbol)."""
+    rows = db.execute(
         text(
             """
             SELECT * FROM commodities_div_signals
             WHERE status <> 'History'
             ORDER BY id DESC
-            LIMIT 1
             """
         )
-    ).mappings().first()
-    return dict(row) if row else None
+    ).mappings().all()
+    for row in rows:
+        if _symbols_match(dict(row), symbol_raw, symbol_mapped):
+            return dict(row)
+    return None
 
 
 def _insert_log(
@@ -168,18 +173,28 @@ def _insert_log(
     return int(rid)
 
 
-def _delete_active_pre_trade(db) -> Optional[int]:
-    """Delete Divergence/Activated active row. Returns deleted id."""
-    row = db.execute(
+def _delete_pre_trade_for_symbol(
+    db, symbol_raw: str, symbol_mapped: str
+) -> Optional[int]:
+    """Delete Divergence/Activated row for this underlying only. Returns deleted id."""
+    rows = db.execute(
         text(
             """
-            DELETE FROM commodities_div_signals
+            SELECT id, symbol_raw, symbol_mapped, status FROM commodities_div_signals
             WHERE status IN ('Divergence', 'Activated')
-            RETURNING id
+            ORDER BY id DESC
             """
         )
-    ).first()
-    return int(row[0]) if row else None
+    ).mappings().all()
+    for row in rows:
+        if _symbols_match(dict(row), symbol_raw, symbol_mapped):
+            rid = int(row["id"])
+            db.execute(
+                text("DELETE FROM commodities_div_signals WHERE id = :id"),
+                {"id": rid},
+            )
+            return rid
+    return None
 
 
 def _create_divergence(
@@ -254,7 +269,6 @@ def process_webhook(
 
         inst = attach_instrument_fields(fields["symbol_raw"])
         symbol_mapped = inst["symbol_mapped"]
-        active = _get_active(db)
         kind = fields["signal_kind"]
         direction = fields["direction"]
 
@@ -268,7 +282,7 @@ def process_webhook(
                 raw_payload=raw_payload,
                 parse_status="unmatched",
                 disposition="unmatched",
-                active_signal_id=int(active["id"]) if active else None,
+                active_signal_id=None,
                 symbol_mapped=symbol_mapped or None,
             )
             db.commit()
@@ -283,31 +297,8 @@ def process_webhook(
                 "allowed": list(ALLOWED_UNDERLYINGS),
             }
 
-        # Different underlying than the single active cycle → never replace / mutate.
-        if active and not _symbols_match(active, fields["symbol_raw"], symbol_mapped):
-            log_id = _insert_log(
-                db,
-                received_at=received_at,
-                source_ip=source_ip,
-                fields=fields,
-                raw_payload=raw_payload,
-                parse_status="unmatched",
-                disposition="blocked_different_symbol_active",
-                active_signal_id=int(active["id"]),
-                symbol_mapped=symbol_mapped,
-            )
-            db.commit()
-            return {
-                "ok": True,
-                "stored": True,
-                "parse_status": "unmatched",
-                "disposition": "blocked_different_symbol_active",
-                "log_id": log_id,
-                "active_id": int(active["id"]),
-                "active_symbol": active.get("symbol_raw") or active.get("symbol_mapped"),
-                "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "underlying_matched": True,
-            }
+        # Per-symbol active cycle only — other underlyings may coexist.
+        active = _get_active_for_symbol(db, fields["symbol_raw"], symbol_mapped)
 
         # --- DIV ---
         if kind == "DIV":
@@ -316,7 +307,7 @@ def process_webhook(
             )
 
             if active and active["status"] in BLOCKING_STATUSES:
-                # Same symbol (checked above); In-Trade / Exit Trade blocks new DIV.
+                # Same symbol In-Trade / Exit Trade blocks new DIV.
                 log_id = _insert_log(
                     db,
                     received_at=received_at,
@@ -367,7 +358,7 @@ def process_webhook(
 
             disposition = "applied"
             if active and active["status"] in ACTIVE_PRE_TRADE and same_direction:
-                _delete_active_pre_trade(db)
+                _delete_pre_trade_for_symbol(db, fields["symbol_raw"], symbol_mapped)
                 disposition = "replaced_prior"
 
             log_id = _insert_log(

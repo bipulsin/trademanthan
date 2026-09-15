@@ -22,6 +22,10 @@ def test_symbols_match_same_underlying_variants():
     assert not _symbols_match(active, "NATURALGAS1!", "NATURALGAS")
     assert not _symbols_match(active, "BTCUSD", "BTCUSD")
     assert not _symbols_match(active, "ETHUSDU2026", "ETHUSD")
+    silver = {"symbol_raw": "SILVERMX2026", "symbol_mapped": "SILVERMINI"}
+    assert _symbols_match(silver, "SILVERM", "SILVERMINI")
+    assert _symbols_match(silver, "SILVERMINI1!", "SILVERMINI")
+    assert not _symbols_match(silver, "COPPERU2026", "COPPER")
 
 
 def test_normalize_tv_ticker_strips_exchange_and_continuous():
@@ -40,9 +44,13 @@ def test_parse_underlying_allowed_forms():
     assert parse_underlying("NATURALGAS1!") == "NATURALGAS"
     assert parse_underlying("NATURALGASM2026") == "NATURALGAS"
     assert parse_underlying("COPPER") == "COPPER"
+    assert parse_underlying("COPPERU2026") == "COPPER"
     assert parse_underlying("GOLDPETAL1!") == "GOLDPETAL"
     assert parse_underlying("SILVERMINI1!") == "SILVERMINI"
     assert parse_underlying("SILVERMINIZ2026") == "SILVERMINI"
+    assert parse_underlying("SILVERMX2026") == "SILVERMINI"
+    assert parse_underlying("SILVERM") == "SILVERMINI"
+    assert parse_underlying("MCX:SILVERMX2026") == "SILVERMINI"
 
 
 def test_parse_underlying_rejects_crypto_and_unknown():

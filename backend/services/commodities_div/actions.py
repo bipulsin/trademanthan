@@ -59,19 +59,26 @@ def serialize_signal(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_active_signal() -> Optional[Dict[str, Any]]:
+    """Most recent non-History row (compat). Prefer list_active_signals()."""
+    rows = list_active_signals()
+    return rows[0] if rows else None
+
+
+def list_active_signals() -> List[Dict[str, Any]]:
+    """All non-History cycles (one per symbol may coexist)."""
     ensure_commodities_div_tables()
     db = SessionLocal()
     try:
-        row = db.execute(
+        rows = db.execute(
             text(
                 """
                 SELECT * FROM commodities_div_signals
                 WHERE status <> 'History'
-                ORDER BY id DESC LIMIT 1
+                ORDER BY id DESC
                 """
             )
-        ).mappings().first()
-        return serialize_signal(dict(row)) if row else None
+        ).mappings().all()
+        return [serialize_signal(dict(r)) for r in rows]
     finally:
         db.close()
 
@@ -280,10 +287,11 @@ def exit_submit(
 
 
 def workspace_payload() -> Dict[str, Any]:
-    active = get_active_signal()
+    actives = list_active_signals()
     return {
         "ok": True,
-        "active": active,
+        "active": actives,
+        "actives": actives,
         "history": list_history(100),
         "server_time_ist": now_ist_second().strftime("%Y-%m-%d %H:%M:%S"),
         "mappings": None,  # filled by router when needed
