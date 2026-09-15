@@ -294,6 +294,76 @@ def test_aggregate_2h_from_1h_aligned_0915():
     assert bars[0]["high"] == 13
 
 
+def test_session_includes_1515_final_bar():
+    from backend.services.stock_option_signals import (
+        completed_2h_bars,
+        session_2h_bucket_end,
+        session_2h_bucket_start,
+    )
+
+    ts = IST.localize(datetime(2026, 9, 11, 15, 15))
+    bucket = session_2h_bucket_start(ts)
+    assert bucket is not None
+    assert (bucket.hour, bucket.minute) == (15, 15)
+    assert session_2h_bucket_end(bucket) == IST.localize(datetime(2026, 9, 11, 15, 30))
+
+    candles = [
+        {"timestamp": "2026-09-11T13:15:00+05:30", "open": 1, "high": 2, "low": 1, "close": 100.0, "volume": 1},
+        {"timestamp": "2026-09-11T15:15:00+05:30", "open": 1, "high": 2, "low": 1, "close": 105.0, "volume": 1},
+    ]
+    before_close = completed_2h_bars(candles, now=IST.localize(datetime(2026, 9, 11, 15, 15)))
+    assert [b["close"] for b in before_close] == [100.0]
+    after_close = completed_2h_bars(candles, now=IST.localize(datetime(2026, 9, 11, 15, 30)))
+    assert [b["close"] for b in after_close] == [100.0, 105.0]
+
+
+def test_fetch_2h_closes_overlays_hours1_when_hours2_stale(monkeypatch):
+    """hours/2 with ≥100 bars must still pick up today's hours/1 buckets."""
+    from backend.services import stock_option_signals as sos
+
+    class _FakeUpstox:
+        def __init__(self, *a, **k):
+            pass
+
+    monkeypatch.setattr("backend.services.upstox_service.UpstoxService", _FakeUpstox)
+
+    h2 = []
+    d0 = date(2026, 7, 1)
+    for i in range(120):
+        day = d0 + timedelta(days=i // 4)
+        hh = [9, 11, 13, 15][i % 4]
+        h2.append(
+            {
+                "timestamp": f"{day.isoformat()}T{hh:02d}:15:00+05:30",
+                "open": 1,
+                "high": 2,
+                "low": 1,
+                "close": float(1000 + i),
+                "volume": 1,
+            }
+        )
+
+    def fake_retry(u, ik, *, interval, days_back, range_end_date=None):
+        if interval == "hours/2":
+            return h2
+        if interval == "hours/1":
+            return [
+                {"timestamp": "2026-09-15T09:15:00+05:30", "open": 1, "high": 2, "low": 1, "close": 4893.0, "volume": 1},
+                {"timestamp": "2026-09-15T10:15:00+05:30", "open": 1, "high": 2, "low": 1, "close": 4893.0, "volume": 1},
+                {"timestamp": "2026-09-15T11:15:00+05:30", "open": 1, "high": 2, "low": 1, "close": 4886.0, "volume": 1},
+                {"timestamp": "2026-09-15T12:15:00+05:30", "open": 1, "high": 2, "low": 1, "close": 4891.5, "volume": 1},
+            ]
+        return []
+
+    monkeypatch.setattr(sos, "_upstox_candles_with_retry", fake_retry)
+    monkeypatch.setattr(sos, "_fetch_2h_closes_from_10m_fallback", lambda *a, **k: [])
+    now = IST.localize(datetime(2026, 9, 15, 13, 15))
+    closes = sos._fetch_2h_closes("NSE_EQ|TITAN", now=now)
+    assert len(closes) >= 100
+    assert closes[-1] == 4891.5
+    assert closes[-2] == 4893.0
+
+
 def test_optional_exit_bundle():
     assert _optional_exit_bundle(None, None, None) is None
     assert _optional_exit_bundle("", "", "") is None

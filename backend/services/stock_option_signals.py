@@ -1212,18 +1212,31 @@ def _parse_candle_ts(ts: Any) -> Optional[datetime]:
 
 
 def session_2h_bucket_start(ts: datetime) -> Optional[datetime]:
-    """2h bucket start aligned to 09:15 IST. None outside the cash session buckets."""
+    """2h bucket start aligned to 09:15 IST (Upstox hours/2).
+
+    Four cash-session buckets: 09:15, 11:15, 13:15, and the short final
+    15:15–15:30 bar. None outside 09:15–15:30 IST.
+    """
     local = ts.astimezone(IST) if ts.tzinfo else IST.localize(ts)
     start = local.replace(hour=9, minute=15, second=0, microsecond=0)
     if local < start:
         return None
     elapsed_min = (local - start).total_seconds() / 60.0
-    if elapsed_min >= 6 * 60:
+    # Session ends 15:30 = 6h15m after 09:15.
+    if elapsed_min >= 6 * 60 + 15:
         return None
     idx = int(elapsed_min // BAR_MINUTES)
-    if idx < 0 or idx > 2:
+    if idx < 0 or idx > 3:
         return None
     return start + timedelta(minutes=idx * BAR_MINUTES)
+
+
+def session_2h_bucket_end(bucket: datetime) -> datetime:
+    """Bucket close time: +120m, except the final 15:15 bar which ends at 15:30."""
+    local = bucket.astimezone(IST) if bucket.tzinfo else IST.localize(bucket)
+    if (local.hour, local.minute) == (15, 15):
+        return local.replace(hour=15, minute=30, second=0, microsecond=0)
+    return local + timedelta(minutes=BAR_MINUTES)
 
 
 def completed_2h_bars(candles: Sequence[Dict[str, Any]], now: Optional[datetime] = None) -> List[Dict[str, Any]]:
@@ -1242,8 +1255,7 @@ def completed_2h_bars(candles: Sequence[Dict[str, Any]], now: Optional[datetime]
         bucket = session_2h_bucket_start(ts)
         if bucket is None:
             continue
-        bucket_end = bucket + timedelta(minutes=BAR_MINUTES)
-        if now_ist < bucket_end:
+        if now_ist < session_2h_bucket_end(bucket):
             continue
         rec = grouped.get(bucket)
         if rec is None or ts >= rec["_ts"]:
@@ -1280,7 +1292,7 @@ def aggregate_intraday_to_2h(candles: Sequence[Dict[str, Any]], now: Optional[da
         bucket = session_2h_bucket_start(ts)
         if bucket is None:
             continue
-        if now_ist < bucket + timedelta(minutes=BAR_MINUTES):
+        if now_ist < session_2h_bucket_end(bucket):
             continue
         buckets.setdefault(bucket, []).append(
             {
@@ -1313,7 +1325,7 @@ def aggregate_intraday_to_2h(candles: Sequence[Dict[str, Any]], now: Optional[da
 
 
 def completed_2h_ohlc(raw: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Completed 2h candles as {end, high, low, close}. end = bucket start + 120m."""
+    """Completed 2h candles as {end, high, low, close}. end = bucket close (15:30 for 15:15)."""
     out: List[Dict[str, Any]] = []
     for bar in raw or []:
         ts = _parse_candle_ts(bar.get("timestamp"))
@@ -1326,7 +1338,7 @@ def completed_2h_ohlc(raw: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             h, lo, c = float(high), float(low), float(close)
         except (TypeError, ValueError):
             continue
-        out.append({"end": naive_ist(ts + timedelta(minutes=BAR_MINUTES)), "high": h, "low": lo, "close": c})
+        out.append({"end": naive_ist(session_2h_bucket_end(ts)), "high": h, "low": lo, "close": c})
     out.sort(key=lambda b: b["end"])
     dedup: Dict[datetime, Dict[str, Any]] = {}
     for b in out:
@@ -2058,11 +2070,40 @@ def _fetch_2h_closes_from_10m_fallback(
     return closes
 
 
-def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
-    """REST historical only. Prefer hours/2; else hours/1, minutes/15, then 10m/5m.
+def _merge_2h_bar_dicts(
+    primary: Sequence[Dict[str, Any]],
+    overlay: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Union 2h bars by bucket timestamp. Keep primary on conflict; add missing overlay.
 
-    Always try Kavach 10m/5m when EMA100 history is still short — do not early-return
-    on a mid-length hours/1 series that skips the finer fallbacks.
+    Bars without a timestamp are appended in overlay order after keyed bars (test /
+    degenerate paths) so mid-length series are not dropped before the 10m fallback.
+    """
+    by_ts: Dict[str, Dict[str, Any]] = {}
+    unkeyed: List[Dict[str, Any]] = []
+    for b in primary or []:
+        key = str(b.get("timestamp") or "")
+        if key:
+            by_ts[key] = b
+        else:
+            unkeyed.append(b)
+    for b in overlay or []:
+        key = str(b.get("timestamp") or "")
+        if not key:
+            unkeyed.append(b)
+        elif key not in by_ts:
+            by_ts[key] = b
+    return [by_ts[k] for k in sorted(by_ts)] + unkeyed
+
+
+def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
+    """REST historical 2h closes for EMA.
+
+    Prefer native hours/2 (includes Upstox 15:15 final bar) but always overlay
+    hours/1 aggregates for buckets hours/2 historical is missing — hours/2 is
+    not merged with the intraday V3 feed, so it often lags the current session
+    even when it already has ≥100 bars (which previously caused a stale
+    early-return and frozen EMAs).
     """
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
@@ -2073,18 +2114,15 @@ def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> Lis
     native = _upstox_candles_with_retry(
         u, instrument_key, interval="hours/2", days_back=120
     )
-    bars = completed_2h_bars(native, now=now)
-    closes = [float(b["close"]) for b in bars]
-    if _ema_closes_ready(closes):
-        return closes
-    if len(closes) > len(best):
-        best = closes
+    bars_h2 = completed_2h_bars(native, now=now)
 
     one = _upstox_candles_with_retry(
         u, instrument_key, interval="hours/1", days_back=60
     )
-    agg = aggregate_intraday_to_2h(one, now=now)
-    closes = [float(b["close"]) for b in agg]
+    bars_h1 = aggregate_intraday_to_2h(one, now=now)
+
+    merged = _merge_2h_bar_dicts(bars_h2, bars_h1)
+    closes = [float(b["close"]) for b in merged]
     if _ema_closes_ready(closes):
         return closes
     if len(closes) > len(best):
@@ -2093,8 +2131,9 @@ def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> Lis
     fifteen = _upstox_candles_with_retry(
         u, instrument_key, interval="minutes/15", days_back=60
     )
-    agg15 = aggregate_intraday_to_2h(fifteen, now=now)
-    closes = [float(b["close"]) for b in agg15]
+    bars_15 = aggregate_intraday_to_2h(fifteen, now=now)
+    merged15 = _merge_2h_bar_dicts(merged, bars_15)
+    closes = [float(b["close"]) for b in merged15]
     if _ema_closes_ready(closes):
         return closes
     if len(closes) > len(best):
