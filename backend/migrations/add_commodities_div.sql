@@ -68,9 +68,15 @@ CREATE TABLE IF NOT EXISTS commodities_div_signals (
     exit_price DOUBLE PRECISION,
     exit_at TIMESTAMP WITHOUT TIME ZONE,
     trade_log_id BIGINT,
+    trade_mode TEXT NOT NULL DEFAULT 'PAPER'
+        CHECK (trade_mode IN ('PAPER', 'LIVE')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Existing DBs: add trade_mode if missing (CREATE TABLE IF NOT EXISTS skips new cols).
+ALTER TABLE commodities_div_signals
+    ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER';
 
 -- At most one non-History cycle per underlying (different symbols may coexist).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol

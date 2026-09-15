@@ -60,5 +60,23 @@ def ensure_commodities_div_tables() -> None:
                 """
             )
         )
+        # Discretionary edit: PAPER | LIVE (default PAPER).
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_signals
+                    ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER'
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE commodities_div_signals
+                SET trade_mode = 'PAPER'
+                WHERE trade_mode IS NULL OR trade_mode NOT IN ('PAPER', 'LIVE')
+                """
+            )
+        )
     _ENSURED = True
     logger.info("commodities_div tables ensured")

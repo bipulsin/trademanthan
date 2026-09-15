@@ -227,6 +227,135 @@ body.comm-div-page .mobile-logo {
     color: var(--accent);
 }
 
+/* Tabs — match stockOptions bf-tabs (charcoal / green) */
+.cd-tabs.bf-tabs,
+.bf-tabs.cd-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+    flex-wrap: wrap;
+}
+
+.cd-tab.bf-tab,
+.bf-tab.cd-tab {
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    padding: 0.45rem 0.95rem;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-family: var(--font-body);
+    font-weight: 600;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cd-tab.bf-tab:hover,
+.bf-tab.cd-tab:hover {
+    background: rgba(61, 186, 122, 0.12);
+    border-color: rgba(61, 186, 122, 0.35);
+}
+
+.cd-tab.bf-tab.active,
+.bf-tab.cd-tab.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #062015;
+}
+
+.cd-tab-panel[hidden] {
+    display: none !important;
+}
+
+/* Direction chips — BULL blue / BEAR red (all tabs, desktop + mobile) */
+.cd-chip {
+    display: inline-block;
+    padding: 0.16rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    font-family: var(--font-body);
+}
+
+.cd-chip-bull {
+    background: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.5);
+}
+
+.cd-chip-bear {
+    background: rgba(224, 107, 107, 0.2);
+    color: #f0b4b4;
+    border: 1px solid rgba(224, 107, 107, 0.5);
+}
+
+.cd-pnl {
+    font-family: var(--font-mono);
+    font-size: 1.15rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+}
+
+.cd-pnl-pos { color: #4fd48c; }
+.cd-pnl-neg { color: #f0b4b4; }
+.cd-pnl-na {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--muted);
+}
+
+.cd-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.cd-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.cd-icon-btn:hover {
+    background: rgba(61, 186, 122, 0.15);
+    border-color: rgba(61, 186, 122, 0.4);
+    color: var(--accent);
+}
+
+.cd-icon-btn.cd-icon-danger:hover {
+    background: rgba(224, 107, 107, 0.2);
+    border-color: rgba(224, 107, 107, 0.5);
+    color: #f0b4b4;
+}
+
+.cd-btn-sm {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.8rem;
+}
+
+.cd-modal-card-wide {
+    width: min(560px, 100%);
+}
+
+.cd-modal-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 0.75rem;
+}
+
 .cd-muted {
     color: var(--muted);
     font-weight: 500;
@@ -300,7 +429,7 @@ body.comm-div-page .mobile-logo {
     font-variant-numeric: tabular-nums;
 }
 
-.cd-dir-bull { color: var(--accent); font-weight: 700; }
+.cd-dir-bull { color: #93c5fd; font-weight: 700; }
 .cd-dir-bear { color: var(--danger); font-weight: 700; }
 
 .cd-status {
@@ -433,7 +562,8 @@ body.comm-div-page .mobile-logo {
 }
 
 .cd-map-form input,
-.cd-modal input {
+.cd-modal input,
+.cd-modal select {
     background: var(--card-inner);
     border: 1px solid var(--line);
     border-radius: 8px;
@@ -442,10 +572,13 @@ body.comm-div-page .mobile-logo {
     font-family: var(--font-mono);
     min-width: 8.5rem;
     font-size: 0.9rem;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .cd-map-form input:focus,
-.cd-modal input:focus {
+.cd-modal input:focus,
+.cd-modal select:focus {
     outline: none;
     border-color: rgba(61, 186, 122, 0.55);
     box-shadow: 0 0 0 2px rgba(61, 186, 122, 0.15);
@@ -524,6 +657,20 @@ body.comm-div-page .mobile-logo {
     body.comm-div-page .cd-subtitle {
         font-size: 0.85rem !important;
     }
+    body.comm-div-page .cd-tabs.bf-tabs {
+        flex-wrap: nowrap;
+        gap: 0.28rem;
+    }
+    body.comm-div-page .cd-tab.bf-tab {
+        flex: 1 1 0;
+        text-align: center;
+        padding: 0.4rem 0.45rem;
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
+    .cd-modal-grid {
+        grid-template-columns: 1fr;
+    }
     .cd-desktop-table,
     .cd-active-desktop {
         display: none !important;
@@ -600,24 +747,12 @@ body.comm-div-page .mobile-logo {
     .cd-mcard-side {
         flex: 0 0 auto;
     }
-    .cd-chip {
-        display: inline-block;
-        padding: 0.16rem 0.42rem;
-        border-radius: 999px;
-        font-size: 0.68rem;
-        font-weight: 700;
-        letter-spacing: 0.02em;
-        white-space: nowrap;
+    .cd-mcard-pnl {
+        flex: 0 0 auto;
+        margin-left: 0.15rem;
     }
-    .cd-chip-bull {
-        background: rgba(61, 186, 122, 0.18);
-        color: var(--accent);
-        border: 1px solid rgba(61, 186, 122, 0.4);
-    }
-    .cd-chip-bear {
-        background: rgba(224, 107, 107, 0.18);
-        color: #f0b4b4;
-        border: 1px solid rgba(224, 107, 107, 0.4);
+    .cd-mcard-pnl .cd-pnl {
+        font-size: 0.95rem;
     }
     .cd-mcard-chev {
         flex: 0 0 auto;
@@ -722,9 +857,29 @@ body.comm-div-page[data-theme="light"] .cd-btn-danger {
 }
 
 body.comm-div-page[data-theme="light"] .cd-map-form input,
-body.comm-div-page[data-theme="light"] .cd-modal input {
+body.comm-div-page[data-theme="light"] .cd-modal input,
+body.comm-div-page[data-theme="light"] .cd-modal select {
     background: #fff;
     color: var(--text);
+}
+
+body.comm-div-page[data-theme="light"] .cd-chip-bull {
+    background: rgba(37, 99, 235, 0.12);
+    color: #1d4ed8;
+    border-color: rgba(37, 99, 235, 0.4);
+}
+
+body.comm-div-page[data-theme="light"] .cd-chip-bear {
+    background: rgba(220, 38, 38, 0.12);
+    color: #b91c1c;
+    border-color: rgba(185, 28, 28, 0.4);
+}
+
+body.comm-div-page[data-theme="light"] .cd-pnl-pos { color: #15803d; }
+body.comm-div-page[data-theme="light"] .cd-pnl-neg { color: #b91c1c; }
+
+body.comm-div-page[data-theme="light"] .cd-tab.bf-tab.active {
+    color: #fff;
 }
 
 body.comm-div-page[data-theme="light"] .cd-table th {

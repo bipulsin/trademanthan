@@ -50,7 +50,10 @@
   var lastExitAudioForId = null;
   var pollTimer = null;
   var takeSignalId = null;
-  var exitSignalId = null;
+  var editSignalId = null;
+  var editMode = "edit"; // "edit" | "exit"
+  var currentTab = "active";
+  var inTradeById = {};
 
   function $(id) {
     return document.getElementById(id);
@@ -128,10 +131,20 @@
     return months[m - 1] + " " + d + ", " + parts[0];
   }
 
+  /** BULL = blue chip, BEAR = red chip (all tabs) */
   function dirChip(direction) {
     var dir = String(direction || "").toUpperCase();
     var cls = dir === "BEAR" ? "cd-chip cd-chip-bear" : "cd-chip cd-chip-bull";
     return '<span class="' + cls + '">' + esc(dir || "—") + "</span>";
+  }
+
+  function pnlHtml(pnl) {
+    if (pnl == null || pnl === "") return '<span class="cd-pnl cd-pnl-na">—</span>';
+    var n = Number(pnl);
+    if (isNaN(n)) return '<span class="cd-pnl cd-pnl-na">—</span>';
+    var cls = n > 0 ? "cd-pnl cd-pnl-pos" : n < 0 ? "cd-pnl cd-pnl-neg" : "cd-pnl";
+    var sign = n > 0 ? "+" : "";
+    return '<span class="' + cls + '">' + sign + n.toFixed(2) + "</span>";
   }
 
   function fieldHtml(label, html) {
@@ -142,6 +155,55 @@
       html +
       "</span></div>"
     );
+  }
+
+  function splitIst(dt) {
+    var s = String(dt || "").trim().replace("T", " ");
+    if (s.length >= 16) {
+      return { date: s.slice(0, 10), time: s.slice(11, 19) };
+    }
+    return { date: "", time: "" };
+  }
+
+  function combineIst(dateEl, timeEl) {
+    var d = (dateEl && dateEl.value) || "";
+    var t = (timeEl && timeEl.value) || "";
+    if (!d) return "";
+    if (!t) t = "00:00:00";
+    if (t.length === 5) t += ":00";
+    return d + " " + t.slice(0, 8);
+  }
+
+  function toDatetimeLocalValue(serverIst) {
+    if (!serverIst || serverIst.length < 16) {
+      var d = new Date();
+      var pad = function (n) {
+        return n < 10 ? "0" + n : "" + n;
+      };
+      return {
+        date:
+          d.getFullYear() +
+          "-" +
+          pad(d.getMonth() + 1) +
+          "-" +
+          pad(d.getDate()),
+        time: pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":00",
+      };
+    }
+    return splitIst(serverIst);
+  }
+
+  function setTab(name) {
+    currentTab = name;
+    document.querySelectorAll(".cd-tab").forEach(function (btn) {
+      var on = btn.getAttribute("data-cd-tab") === name;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll(".cd-tab-panel").forEach(function (panel) {
+      var on = panel.getAttribute("data-cd-panel") === name;
+      panel.hidden = !on;
+    });
   }
 
   function activeActionHtml(row, idSuffix) {
@@ -157,7 +219,7 @@
     }
     if (row.status === "Exit Trade") {
       return (
-        '<button type="button" class="cd-btn cd-btn-danger" data-cd-action="exit" data-cd-id="' +
+        '<button type="button" class="cd-btn cd-btn-danger" data-cd-action="exit-active" data-cd-id="' +
         row.id +
         '" id="cdExitBtn' +
         suffix +
@@ -165,21 +227,22 @@
       );
     }
     return (
-      '<button type="button" class="cd-btn" disabled>' +
-      (row.status === "In-Trade" ? "In trade…" : "Waiting…") +
-      "</button>"
+      '<button type="button" class="cd-btn" disabled>Waiting…</button>'
     );
   }
 
-  function bindActiveRowActions(container, rowsById) {
+  function bindRowActions(container, rowsById) {
     if (!container) return;
     container.querySelectorAll("[data-cd-action]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var id = Number(btn.getAttribute("data-cd-id"));
-        var row = rowsById[id];
+        var row = rowsById[id] || inTradeById[id];
         if (!row) return;
-        if (btn.getAttribute("data-cd-action") === "take") openTake(row);
-        else if (btn.getAttribute("data-cd-action") === "exit") openExit(row);
+        var action = btn.getAttribute("data-cd-action");
+        if (action === "take") openTake(row);
+        else if (action === "exit-active" || action === "exit") openEdit(row, "exit");
+        else if (action === "edit") openEdit(row, "edit");
+        else if (action === "delete") confirmDelete(row);
       });
     });
   }
@@ -212,44 +275,36 @@
       .map(function (row) {
         var statusClass = "cd-status";
         if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
-        var dirClass = row.direction === "BEAR" ? "cd-dir-bear" : "cd-dir-bull";
         var displaySym = row.symbol_raw || row.symbol_mapped || "—";
-        var mapWarn =
-          row.status === "In-Trade" && !row.instrument_key
-            ? '<div class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</div>'
-            : "";
         return (
           "<tr>" +
           '<td class="cd-field-val">' +
-          fmt(displaySym) +
+          esc(fmt(displaySym)) +
           "</td>" +
-          '<td class="cd-field-val ' +
-          dirClass +
-          '">' +
-          fmt(row.direction) +
+          "<td>" +
+          dirChip(row.direction) +
           "</td>" +
           "<td><span class=\"" +
           statusClass +
           '">' +
-          fmt(row.status) +
+          esc(fmt(row.status)) +
           "</span></td>" +
           '<td class="cd-field-val">' +
-          fmt(row.div_received_at) +
+          esc(fmt(row.div_received_at)) +
           "</td>" +
           '<td class="cd-field-val">' +
-          fmt(row.go_received_at) +
+          esc(fmt(row.go_received_at)) +
           "</td>" +
           '<td class="cd-field-val">' +
-          fmt(row.entry_price) +
-          (row.trade_taken_at ? " @ " + fmt(row.trade_taken_at) : "") +
+          esc(fmt(row.entry_price)) +
+          (row.trade_taken_at ? " @ " + esc(fmt(row.trade_taken_at)) : "") +
           "</td>" +
           '<td class="cd-field-val">' +
-          fmt(row.ltp) +
-          (row.ltp_updated_at ? ' <span class="cd-muted">' + fmt(row.ltp_updated_at) + "</span>" : "") +
+          esc(fmt(row.ltp)) +
+          (row.ltp_updated_at ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>" : "") +
           "</td>" +
           "<td>" +
           activeActionHtml(row, String(row.id)) +
-          mapWarn +
           "</td>" +
           "</tr>"
         );
@@ -280,10 +335,6 @@
           if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
           var displaySym = row.symbol_raw || row.symbol_mapped || "—";
           var timeSrc = row.go_received_at || row.div_received_at || row.trade_taken_at || "";
-          var mapWarn =
-            row.status === "In-Trade" && !row.instrument_key
-              ? '<p class="cd-note">Front-month FUT not resolved yet — LTP retries on the 10-min Upstox sidecar.</p>'
-              : "";
           return (
             '<article class="cd-mcard">' +
             '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
@@ -317,18 +368,135 @@
             '<div class="cd-mcard-actions">' +
             activeActionHtml(row, "M" + row.id) +
             "</div>" +
-            mapWarn +
             "</div></article>"
           );
         })
         .join("");
     }
 
-    bindActiveRowActions(panel, rowsById);
-    bindActiveRowActions(mobile, rowsById);
+    bindRowActions(panel, rowsById);
+    bindRowActions(mobile, rowsById);
     list.forEach(function (row) {
       if (row.status === "Exit Trade") playExit(row.id);
     });
+  }
+
+  function inTradeActionsHtml(row) {
+    return (
+      '<div class="cd-row-actions">' +
+      '<button type="button" class="cd-icon-btn" data-cd-action="edit" data-cd-id="' +
+      row.id +
+      '" title="Edit"><i class="fas fa-pencil-alt"></i></button>' +
+      '<button type="button" class="cd-icon-btn cd-icon-danger" data-cd-action="delete" data-cd-id="' +
+      row.id +
+      '" title="Delete"><i class="fas fa-trash"></i></button>' +
+      '<button type="button" class="cd-btn cd-btn-danger cd-btn-sm" data-cd-action="exit" data-cd-id="' +
+      row.id +
+      '">Exit</button>' +
+      "</div>"
+    );
+  }
+
+  function renderInTrade(rows) {
+    var empty = $("cdInTradeEmpty");
+    var desktop = $("cdInTradeDesktop");
+    var body = $("cdInTradeBody");
+    var mobile = $("cdInTradeMobile");
+    var list = Array.isArray(rows) ? rows : [];
+    inTradeById = {};
+    list.forEach(function (r) {
+      inTradeById[r.id] = r;
+    });
+
+    if (!list.length) {
+      empty.hidden = false;
+      if (desktop) desktop.hidden = true;
+      if (body) body.innerHTML = "";
+      if (mobile) {
+        mobile.hidden = true;
+        mobile.innerHTML = "";
+      }
+      return;
+    }
+    empty.hidden = true;
+    if (desktop) desktop.hidden = false;
+    if (mobile) mobile.hidden = false;
+
+    if (body) {
+      body.innerHTML = list
+        .map(function (row) {
+          var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+          return (
+            "<tr>" +
+            '<td class="cd-field-val">' +
+            esc(fmt(displaySym)) +
+            "</td>" +
+            "<td>" +
+            dirChip(row.direction) +
+            "</td>" +
+            '<td class="cd-field-val">' +
+            esc(fmt(row.trade_taken_at)) +
+            "</td>" +
+            '<td class="cd-field-val">' +
+            esc(fmt(row.entry_price)) +
+            "</td>" +
+            '<td class="cd-field-val">' +
+            esc(fmt(row.ltp)) +
+            (row.ltp_updated_at
+              ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>"
+              : "") +
+            "</td>" +
+            "<td>" +
+            pnlHtml(row.pnl) +
+            "</td>" +
+            "<td>" +
+            inTradeActionsHtml(row) +
+            "</td>" +
+            "</tr>"
+          );
+        })
+        .join("");
+    }
+
+    if (mobile) {
+      mobile.innerHTML = list
+        .map(function (row) {
+          var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+          var timeSrc = row.trade_taken_at || "";
+          return (
+            '<article class="cd-mcard">' +
+            '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
+            '<span class="cd-mcard-time">' +
+            esc(cardTimeLabel(timeSrc)) +
+            "</span>" +
+            '<span class="cd-mcard-sym">' +
+            esc(displaySym) +
+            "</span>" +
+            '<span class="cd-mcard-side">' +
+            dirChip(row.direction) +
+            "</span>" +
+            '<span class="cd-mcard-pnl">' +
+            pnlHtml(row.pnl) +
+            "</span>" +
+            '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
+            "</button>" +
+            '<div class="cd-mcard-body" hidden>' +
+            fieldHtml("Entry time", esc(fmt(row.trade_taken_at))) +
+            fieldHtml("Entry price", esc(fmt(row.entry_price))) +
+            fieldHtml("LTP", esc(fmt(row.ltp))) +
+            fieldHtml("PnL", pnlHtml(row.pnl)) +
+            fieldHtml("Mode", esc(fmt(row.trade_mode || "PAPER"))) +
+            '<div class="cd-mcard-actions">' +
+            inTradeActionsHtml(row) +
+            "</div>" +
+            "</div></article>"
+          );
+        })
+        .join("");
+    }
+
+    bindRowActions(desktop, inTradeById);
+    bindRowActions(mobile, inTradeById);
   }
 
   function renderHistory(rows) {
@@ -346,23 +514,27 @@
       var tr = document.createElement("tr");
       tr.innerHTML =
         "<td>" +
-        fmt(r.symbol_raw || r.symbol_mapped) +
+        esc(fmt(r.symbol_raw || r.symbol_mapped)) +
         "</td><td>" +
-        fmt(r.direction) +
+        dirChip(r.direction) +
         "</td><td>" +
-        fmt(r.div_received_at) +
+        esc(fmt(r.div_received_at)) +
         "</td><td>" +
-        fmt(r.go_received_at) +
+        esc(fmt(r.go_received_at)) +
         "</td><td>" +
-        fmt(r.entry_price) +
+        esc(fmt(r.entry_price)) +
         "</td><td>" +
-        fmt(r.trade_taken_at) +
+        esc(fmt(r.trade_taken_at)) +
         "</td><td>" +
-        fmt(r.exit_price) +
+        esc(fmt(r.exit_price)) +
         "</td><td>" +
-        fmt(r.exit_at) +
+        esc(fmt(r.exit_at)) +
         "</td><td>" +
-        fmt(r.trade_log_id) +
+        pnlHtml(r.pnl) +
+        "</td><td>" +
+        esc(fmt(r.trade_mode || "PAPER")) +
+        "</td><td>" +
+        esc(fmt(r.trade_log_id)) +
         "</td>";
       body.appendChild(tr);
     });
@@ -400,6 +572,9 @@
               '<span class="cd-mcard-side">' +
               dirChip(r.direction) +
               "</span>" +
+              '<span class="cd-mcard-pnl">' +
+              pnlHtml(r.pnl) +
+              "</span>" +
               '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
               "</button>" +
               '<div class="cd-mcard-body" hidden>' +
@@ -409,6 +584,8 @@
               fieldHtml("Entry time", esc(fmt(r.trade_taken_at))) +
               fieldHtml("Exit", esc(fmt(r.exit_price))) +
               fieldHtml("Exit time", esc(fmt(r.exit_at))) +
+              fieldHtml("PnL", pnlHtml(r.pnl)) +
+              fieldHtml("Mode", esc(fmt(r.trade_mode || "PAPER"))) +
               fieldHtml("trade_log", esc(fmt(r.trade_log_id))) +
               "</div></article>"
             );
@@ -437,6 +614,7 @@
     $("cdTakeMeta").textContent =
       (row.symbol_raw || row.symbol_mapped || "") + " " + row.direction;
     $("cdEntryPrice").value = "";
+    if ($("cdTakeMode")) $("cdTakeMode").value = "PAPER";
     $("cdTakeModal").hidden = false;
   }
 
@@ -445,49 +623,96 @@
     takeSignalId = null;
   }
 
-  function toDatetimeLocalValue(serverIst) {
-    // serverIst: "YYYY-MM-DD HH:MM:SS"
-    if (!serverIst || serverIst.length < 16) {
-      var d = new Date();
-      var pad = function (n) {
-        return n < 10 ? "0" + n : "" + n;
-      };
-      return (
-        d.getFullYear() +
-        "-" +
-        pad(d.getMonth() + 1) +
-        "-" +
-        pad(d.getDate()) +
-        "T" +
-        pad(d.getHours()) +
-        ":" +
-        pad(d.getMinutes())
-      );
+  function openEdit(row, mode) {
+    editSignalId = row.id;
+    editMode = mode || "edit";
+    var title = editMode === "exit" ? "Exit Trade" : "Edit Trade";
+    $("cdEditTitle").textContent = title;
+    $("cdEditMeta").textContent =
+      (row.symbol_raw || row.symbol_mapped || "") + " · " + (row.status || "");
+
+    var entry = splitIst(row.trade_taken_at);
+    $("cdEditEntryDate").value = entry.date || "";
+    $("cdEditEntryTime").value = entry.time ? entry.time.slice(0, 8) : "";
+    $("cdEditEntryPrice").value = row.entry_price != null ? row.entry_price : "";
+    $("cdEditDirection").value = String(row.direction || "BULL").toUpperCase() === "BEAR" ? "BEAR" : "BULL";
+    $("cdEditMode").value = String(row.trade_mode || "PAPER").toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+
+    var exitParts = splitIst(row.exit_at);
+    if (editMode === "exit" && !exitParts.date) {
+      exitParts = toDatetimeLocalValue($("cdServerTime").textContent);
     }
-    return serverIst.slice(0, 16).replace(" ", "T");
+    $("cdEditExitDate").value = exitParts.date || "";
+    $("cdEditExitTime").value = exitParts.time ? exitParts.time.slice(0, 8) : "";
+    var exitPx = row.exit_price != null ? row.exit_price : row.ltp != null ? row.ltp : "";
+    $("cdEditExitPrice").value = exitPx;
+
+    var saveBtn = $("cdEditSaveBtn");
+    var exitBtn = $("cdEditExitSubmitBtn");
+    if (editMode === "exit") {
+      saveBtn.hidden = true;
+      exitBtn.hidden = false;
+      $("cdEditExitPrice").required = true;
+      $("cdEditExitDate").required = true;
+      $("cdEditExitTime").required = true;
+      setTimeout(function () {
+        $("cdEditExitPrice").focus();
+      }, 50);
+    } else {
+      saveBtn.hidden = false;
+      exitBtn.hidden = false;
+      $("cdEditExitPrice").required = false;
+      $("cdEditExitDate").required = false;
+      $("cdEditExitTime").required = false;
+    }
+
+    $("cdEditModal").hidden = false;
   }
 
-  function openExit(row) {
-    exitSignalId = row.id;
-    $("cdExitMeta").textContent =
-      (row.symbol_raw || row.symbol_mapped || "") + " " + row.direction;
-    $("cdExitEntryReadonly").value = row.entry_price != null ? row.entry_price : "";
-    $("cdExitPrice").value = "";
-    $("cdExitAt").value = toDatetimeLocalValue($("cdServerTime").textContent);
-    $("cdExitModal").hidden = false;
+  function closeEdit() {
+    $("cdEditModal").hidden = true;
+    editSignalId = null;
+    editMode = "edit";
   }
 
-  function closeExit() {
-    $("cdExitModal").hidden = true;
-    exitSignalId = null;
+  async function confirmDelete(row) {
+    var sym = row.symbol_raw || row.symbol_mapped || row.id;
+    if (!window.confirm("Delete In-Trade row for " + sym + "?\nWebhook raw log is kept.")) return;
+    try {
+      await api("/signal/delete", {
+        method: "POST",
+        body: JSON.stringify({ signal_id: row.id }),
+      });
+      showBanner("Deleted " + sym, false);
+      await load();
+    } catch (e) {
+      showBanner(String(e.message || e), true);
+    }
+  }
+
+  function collectEditPayload() {
+    var entryAt = combineIst($("cdEditEntryDate"), $("cdEditEntryTime"));
+    var exitAt = combineIst($("cdEditExitDate"), $("cdEditExitTime"));
+    var entryPrice = parseFloat($("cdEditEntryPrice").value);
+    var exitPriceRaw = $("cdEditExitPrice").value;
+    var exitPrice = exitPriceRaw !== "" ? parseFloat(exitPriceRaw) : null;
+    return {
+      signal_id: editSignalId,
+      entry_price: entryPrice,
+      trade_taken_at: entryAt,
+      direction: $("cdEditDirection").value,
+      trade_mode: $("cdEditMode").value,
+      exit_price: exitPrice,
+      exit_at: exitAt || null,
+    };
   }
 
   async function load() {
     try {
       var data = await api("/workspace");
       if (data.server_time_ist) $("cdServerTime").textContent = data.server_time_ist;
-      var actives = data.actives || data.active;
-      renderActive(actives);
+      renderActive(data.actives || data.active || []);
+      renderInTrade(data.in_trade || []);
       renderHistory(data.history || []);
       showBanner("");
     } catch (e) {
@@ -498,7 +723,13 @@
   function bind() {
     $("cdReloadBtn").addEventListener("click", load);
     $("cdTakeCancel").addEventListener("click", closeTake);
-    $("cdExitCancel").addEventListener("click", closeExit);
+    $("cdEditCancel").addEventListener("click", closeEdit);
+
+    document.querySelectorAll(".cd-tab").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        setTab(btn.getAttribute("data-cd-tab"));
+      });
+    });
 
     document.addEventListener("click", function (ev) {
       var summary = ev.target.closest(".cd-mcard-summary");
@@ -516,41 +747,66 @@
       ev.preventDefault();
       if (takeSignalId == null) return;
       var price = parseFloat($("cdEntryPrice").value);
+      var mode = $("cdTakeMode") ? $("cdTakeMode").value : "PAPER";
       try {
         var res = await api("/take-trade", {
           method: "POST",
-          body: JSON.stringify({ signal_id: takeSignalId, entry_price: price }),
+          body: JSON.stringify({
+            signal_id: takeSignalId,
+            entry_price: price,
+            trade_mode: mode,
+          }),
         });
         closeTake();
         if (res.signal && res.signal.play_trade_audio) playTrade();
         if (res.signal && res.signal.mapping_warning) showBanner(res.signal.mapping_warning, false);
+        setTab("in_trade");
         await load();
       } catch (e) {
         showBanner(String(e.message || e), true);
       }
     });
 
-    $("cdExitForm").addEventListener("submit", async function (ev) {
-      ev.preventDefault();
-      if (exitSignalId == null) return;
-      var price = parseFloat($("cdExitPrice").value);
-      var local = $("cdExitAt").value;
-      if (!local) {
-        showBanner("Exit date & time required", true);
+    $("cdEditSaveBtn").addEventListener("click", async function () {
+      if (editSignalId == null) return;
+      var payload = collectEditPayload();
+      if (!payload.trade_taken_at || !(payload.entry_price > 0)) {
+        showBanner("Entry date/time and price required", true);
         return;
       }
-      var exitAt = local.replace("T", " ") + (local.length === 16 ? ":00" : "");
+      try {
+        await api("/signal/update", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        closeEdit();
+        showBanner("Trade updated", false);
+        await load();
+      } catch (e) {
+        showBanner(String(e.message || e), true);
+      }
+    });
+
+    $("cdEditForm").addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      if (editSignalId == null) return;
+      var payload = collectEditPayload();
+      if (!payload.trade_taken_at || !(payload.entry_price > 0)) {
+        showBanner("Entry date/time and price required", true);
+        return;
+      }
+      if (!payload.exit_at || !(payload.exit_price > 0)) {
+        showBanner("Exit date/time and price required to move to History", true);
+        return;
+      }
       try {
         await api("/exit-submit", {
           method: "POST",
-          body: JSON.stringify({
-            signal_id: exitSignalId,
-            exit_price: price,
-            exit_at: exitAt,
-          }),
+          body: JSON.stringify(payload),
         });
-        closeExit();
+        closeEdit();
         lastExitAudioForId = null;
+        setTab("history");
         await load();
       } catch (e) {
         showBanner(String(e.message || e), true);
@@ -560,6 +816,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     bind();
+    setTab("active");
     load();
     pollTimer = setInterval(load, 15000);
   });
