@@ -639,6 +639,12 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                     on_upstox_option_tick(ik, ltp=float(eff_ltp), now=now_ist)
                 except Exception as so_exc:
                     logger.debug("upstox_market_feed: stock_option tick skipped %s: %s", ik, so_exc)
+                try:
+                    from backend.services.commodities_div.ws_ltp import on_upstox_commodities_div_tick
+
+                    on_upstox_commodities_div_tick(ik, ltp=float(eff_ltp), now=now_ist)
+                except Exception as cd_exc:
+                    logger.debug("upstox_market_feed: commodities_div tick skipped %s: %s", ik, cd_exc)
 
 
 def _decode_and_ingest(binary: bytes) -> None:

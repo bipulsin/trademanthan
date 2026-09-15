@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from sqlalchemy import text
 
@@ -13,6 +14,55 @@ from backend.services.commodities_div.schema import ensure_commodities_div_table
 from backend.services.commodities_div.webhook import now_ist_second
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_ik(k: str) -> str:
+    return str(k or "").replace(" ", "").replace(":", "|").upper()
+
+
+def _ltp_from_upstox_ltp_api(upstox: Any, instrument_keys: List[str]) -> Dict[str, float]:
+    """
+    Prefer dedicated LTP endpoint — response keys are often trading symbols, but each
+    payload includes instrument_token matching MCX_FO|nnnnnn.
+    """
+    out: Dict[str, float] = {}
+    if not instrument_keys:
+        return out
+    want = {_norm_ik(k): k for k in instrument_keys if (k or "").strip()}
+    try:
+        keys_param = ",".join(instrument_keys)
+        url = (
+            "https://api.upstox.com/v2/market-quote/ltp"
+            f"?instrument_key={quote(keys_param, safe=',')}"
+        )
+        data = upstox.make_api_request(url, method="GET", timeout=15, max_retries=2)
+        if not data or data.get("status") != "success":
+            return out
+        raw = data.get("data") or {}
+        if not isinstance(raw, dict):
+            return out
+        for _sym, payload in raw.items():
+            if not isinstance(payload, dict):
+                continue
+            tok = (
+                payload.get("instrument_token")
+                or payload.get("instrument_key")
+                or payload.get("instrumentKey")
+            )
+            lp = payload.get("last_price")
+            try:
+                price = float(lp) if lp is not None else 0.0
+            except (TypeError, ValueError):
+                continue
+            if price <= 0 or not tok:
+                continue
+            nk = _norm_ik(str(tok))
+            req = want.get(nk)
+            if req:
+                out[req] = price
+    except Exception as e:
+        logger.warning("commodities_div LTP API failed: %s", e)
+    return out
 
 
 def refresh_in_trade_ltp() -> Dict[str, Any]:
@@ -50,6 +100,7 @@ def refresh_in_trade_ltp() -> Dict[str, Any]:
         results: List[Dict[str, Any]] = []
         any_updated = False
         now = now_ist_second()
+        resolved: List[Dict[str, Any]] = []
 
         for row in rows:
             ik = (row.get("instrument_key") or "").strip()
@@ -86,36 +137,47 @@ def refresh_in_trade_ltp() -> Dict[str, Any]:
                         }
                     )
                     continue
+            resolved.append({"id": int(row["id"]), "instrument_key": ik, "symbol": row.get("symbol_mapped")})
 
+        keys = [r["instrument_key"] for r in resolved]
+        ltp_map: Dict[str, float] = {}
+        try:
+            ltp_map = upstox.get_market_quotes_batch_by_keys(keys) or {}
+        except Exception as e:
+            logger.warning("commodities_div LTP quotes batch failed: %s", e)
+
+        missing = [k for k in keys if k not in ltp_map]
+        if missing:
+            ltp_api = _ltp_from_upstox_ltp_api(upstox, missing)
+            ltp_map.update(ltp_api)
+
+        for row in resolved:
+            ik = row["instrument_key"]
             ltp: Optional[float] = None
-            try:
-                quotes = upstox.get_market_quotes_batch_by_keys([ik]) or {}
-                raw = quotes.get(ik)
-                if raw is None:
-                    for k, v in quotes.items():
-                        if str(k).replace("|", "").endswith(ik.split("|")[-1]):
-                            raw = v
-                            break
-                if raw is not None:
-                    ltp = float(raw)
-            except Exception as e:
-                logger.warning("commodities_div LTP quote failed id=%s: %s", row["id"], e)
-                results.append(
-                    {
-                        "signal_id": int(row["id"]),
-                        "updated": False,
-                        "error": str(e),
-                    }
-                )
-                continue
-
+            if ik in ltp_map:
+                try:
+                    ltp = float(ltp_map[ik])
+                except (TypeError, ValueError):
+                    ltp = None
             if ltp is None:
+                # Fuzzy: match by normalized token suffix
+                want = _norm_ik(ik)
+                for k, v in ltp_map.items():
+                    if _norm_ik(k) == want:
+                        try:
+                            ltp = float(v)
+                        except (TypeError, ValueError):
+                            ltp = None
+                        break
+
+            if ltp is None or ltp <= 0:
                 results.append(
                     {
-                        "signal_id": int(row["id"]),
+                        "signal_id": row["id"],
                         "updated": False,
                         "reason": "no_ltp",
                         "instrument_key": ik,
+                        "symbol": row.get("symbol"),
                     }
                 )
                 continue
@@ -130,16 +192,17 @@ def refresh_in_trade_ltp() -> Dict[str, Any]:
                     WHERE id = :id
                     """
                 ),
-                {"ltp": ltp, "ts": now, "id": int(row["id"])},
+                {"ltp": ltp, "ts": now, "id": row["id"]},
             )
             db.commit()
             any_updated = True
             results.append(
                 {
-                    "signal_id": int(row["id"]),
+                    "signal_id": row["id"],
                     "updated": True,
                     "ltp": ltp,
                     "instrument_key": ik,
+                    "symbol": row.get("symbol"),
                     "ltp_updated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )

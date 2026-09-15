@@ -29,6 +29,16 @@ EDITABLE_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE}
 EXITABLE_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE}
 
 
+def _sync_ws_ltp_best_effort() -> None:
+    """Subscribe/unsubscribe In-Trade keys on the shared Upstox feed (non-fatal)."""
+    try:
+        from backend.services.commodities_div.ws_ltp import sync_in_trade_subscriptions
+
+        sync_in_trade_subscriptions(force=True)
+    except Exception as e:
+        logger.debug("commodities_div ws_ltp sync after mutation failed: %s", e)
+
+
 def _fmt_dt(v: Any) -> Optional[str]:
     if v is None:
         return None
@@ -266,6 +276,7 @@ def take_trade(*, signal_id: int, entry_price: float, trade_mode: Optional[str] 
         out["mapping_warning"] = None if ik else (
             "Upstox front-month FUT not resolved yet — LTP will retry on the 10-min sidecar"
         )
+        _sync_ws_ltp_best_effort()
         return out
     except Exception:
         db.rollback()
@@ -415,6 +426,7 @@ def delete_in_trade(*, signal_id: int) -> Dict[str, Any]:
             {"id": int(signal_id)},
         )
         db.commit()
+        _sync_ws_ltp_best_effort()
         return {"ok": True, "deleted_id": int(signal_id), "signal": snap}
     except Exception:
         db.rollback()
@@ -543,6 +555,7 @@ def exit_submit(
         ).mappings().first()
         out = serialize_signal(dict(updated), prefer_exit_pnl=True)
         out["trade_log_id"] = int(trade_log_id)
+        _sync_ws_ltp_best_effort()
         return out
     except Exception:
         db.rollback()

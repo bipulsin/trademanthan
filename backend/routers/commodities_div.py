@@ -183,4 +183,11 @@ def commodities_div_delete_signal_post(
 
 @router.post("/ltp-refresh")
 def commodities_div_ltp_refresh(user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    return refresh_in_trade_ltp()
+    out = refresh_in_trade_ltp()
+    try:
+        from backend.services.commodities_div.ws_ltp import sync_in_trade_subscriptions
+
+        out["ws_sync"] = sync_in_trade_subscriptions(force=True)
+    except Exception as e:
+        out["ws_sync"] = {"ok": False, "error": str(e)[:200]}
+    return out

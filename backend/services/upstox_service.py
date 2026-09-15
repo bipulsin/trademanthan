@@ -2401,9 +2401,18 @@ class UpstoxService:
                     return float(lp) if lp and float(lp) > 0 else None
                 norm_req = normalize_key(req_key)
                 for resp_key, quote_data in raw.items():
+                    if not isinstance(quote_data, dict):
+                        continue
                     if normalize_key(resp_key) == norm_req:
                         lp = quote_data.get("last_price", 0)
                         return float(lp) if lp and float(lp) > 0 else None
+                    # Upstox often keys LTP/quotes by trading symbol (e.g. MCX_FO:COPPER26SEPFUT)
+                    # while callers request numeric instrument_key (MCX_FO|571298).
+                    for tok_field in ("instrument_token", "instrument_key", "instrumentKey"):
+                        tok = quote_data.get(tok_field)
+                        if tok and normalize_key(str(tok)) == norm_req:
+                            lp = quote_data.get("last_price", 0)
+                            return float(lp) if lp and float(lp) > 0 else None
                 return None
 
             for req_key in keys_batch:
