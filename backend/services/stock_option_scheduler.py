@@ -1,10 +1,15 @@
-"""IST 11:15 / 13:15 / 15:15 + post-market 15:45 — Stock Options 2h EMAs."""
+"""IST 11:15 / 13:15 / 15:15 + post-market 15:45 — Stock Options 2h EMAs.
+
+Also keeps Executed option instrument keys on the shared Upstox WS (1m sync)
+so sell/buy LTPs update live; 2h ``refresh_executed_ltps`` remains the REST fallback.
+"""
 from __future__ import annotations
 
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.stock_option_signals import ensure_index_radar_rows, run_ema_tick
@@ -23,6 +28,21 @@ def _tick() -> None:
         logger.info("stock_option ema tick: %s", out)
     except Exception:
         logger.exception("stock_option ema tick failed")
+
+
+def _ws_ltp_sync() -> None:
+    if should_skip_scheduled_market_jobs_ist():
+        return
+    try:
+        from backend.services.stock_option_ws_ltp import sync_executed_option_subscriptions
+
+        out = sync_executed_option_subscriptions()
+        if out.get("skipped"):
+            logger.debug("stock_option_ws_ltp sync skipped: %s", out.get("skipped"))
+        else:
+            logger.info("stock_option_ws_ltp sync: %s", out)
+    except Exception:
+        logger.exception("stock_option_ws_ltp sync failed")
 
 
 def start_stock_option_scheduler() -> None:
@@ -66,10 +86,25 @@ def start_stock_option_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Live Executed option LTPs via shared Upstox WS (subscribe/unsubscribe).
+    sch.add_job(
+        _ws_ltp_sync,
+        IntervalTrigger(minutes=1, timezone="Asia/Kolkata"),
+        id="stock_option_ws_ltp_1m",
+        name="Stock Options Executed WS LTP sync 1m",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     sch.start()
     _scheduler = sch
+    try:
+        _ws_ltp_sync()
+    except Exception:
+        logger.exception("stock_option_ws_ltp initial sync failed")
     logger.info(
-        "Stock Options 2h EMA scheduler started (11:15, 13:15, 15:15, post-market 15:45 IST)"
+        "Stock Options scheduler started "
+        "(EMA 11:15/13:15/15:15/15:45 + Executed WS LTP sync 1m IST)"
     )
 
 
@@ -80,3 +115,10 @@ def stop_stock_option_scheduler() -> None:
             _scheduler.shutdown(wait=False)
         finally:
             _scheduler = None
+        try:
+            from backend.services.upstox_market_feed import set_feed_provider_keys
+            from backend.services.stock_option_ws_ltp import PROVIDER_NAME
+
+            set_feed_provider_keys(PROVIDER_NAME, [])
+        except Exception:
+            logger.debug("stock_option_ws_ltp provider clear on stop failed", exc_info=True)

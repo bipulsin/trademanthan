@@ -2422,41 +2422,57 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
     }
 
 
+def _sync_executed_ws_ltp_subscriptions() -> None:
+    """Best-effort: keep shared Upstox WS subscribed to filled Executed option keys."""
+    try:
+        from backend.services.stock_option_ws_ltp import sync_executed_option_subscriptions
+
+        sync_executed_option_subscriptions()
+    except Exception:
+        logger.debug("stock_option WS LTP sync after mutation failed", exc_info=True)
+
+
 def refresh_executed_ltps(now: Optional[datetime] = None) -> int:
     """Quote LTPs for Executed rows with strikes + entry costs filled.
 
-    Called at the end of ``run_ema_tick`` (after EMA / WR work) so it never races
-    ahead of the 2h indicator cycle. No websocket.
+    Called at the end of ``run_ema_tick`` (after EMA / WR work). Prefer WS cache via
+    ``ltp_map_with_fallback``; REST batch quotes fill gaps. Live ticks also push LTPs
+    via ``stock_option_ws_ltp`` between 2h cycles.
     """
     ensure_stock_option_tables()
     now_naive = now_ist_second() if now is None else naive_ist(now)
-    db = SessionLocal()
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT id, sell_instrument_key, buy_instrument_key
-                FROM stock_option_signals
-                WHERE status = :executed
-                  AND date_traded IS NOT NULL
-                  AND sell_cost IS NOT NULL
-                  AND buy_cost IS NOT NULL
-                  AND (
-                    COALESCE(user_sell_strike, sell_strike) IS NOT NULL
-                    AND COALESCE(user_buy_strike, buy_strike) IS NOT NULL
-                  )
-                  AND remarks IS DISTINCT FROM :remarks
-                  AND COALESCE(remarks, '') NOT LIKE :expiry
-                """
-            ),
-            {
-                "executed": STATUS_EXECUTED,
-                "remarks": INVALIDATE_REMARKS,
-                "expiry": f"%{EXPIRY_REMARKS}%",
-            },
-        ).mappings().all()
-    finally:
-        db.close()
+        from backend.services.stock_option_ws_ltp import list_executed_option_ltp_rows
+
+        rows = list_executed_option_ltp_rows()
+    except Exception:
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, sell_instrument_key, buy_instrument_key
+                    FROM stock_option_signals
+                    WHERE status = :executed
+                      AND date_traded IS NOT NULL
+                      AND sell_cost IS NOT NULL
+                      AND buy_cost IS NOT NULL
+                      AND (
+                        COALESCE(user_sell_strike, sell_strike) IS NOT NULL
+                        AND COALESCE(user_buy_strike, buy_strike) IS NOT NULL
+                      )
+                      AND remarks IS DISTINCT FROM :remarks
+                      AND COALESCE(remarks, '') NOT LIKE :expiry
+                    """
+                ),
+                {
+                    "executed": STATUS_EXECUTED,
+                    "remarks": INVALIDATE_REMARKS,
+                    "expiry": f"%{EXPIRY_REMARKS}%",
+                },
+            ).mappings().all()
+        finally:
+            db.close()
     if not rows:
         return 0
     keys = []
@@ -2728,6 +2744,7 @@ def submit_trade(
         raise
     finally:
         db.close()
+    _sync_executed_ws_ltp_subscriptions()
     return {"ok": True, "id": signal_id, "status": STATUS_EXECUTED}
 
 
@@ -2913,6 +2930,7 @@ def submit_exit(
         raise
     finally:
         db.close()
+    _sync_executed_ws_ltp_subscriptions()
     return {
         "ok": True,
         "id": signal_id,
@@ -3067,6 +3085,7 @@ def update_trade(
             },
         )
         db.commit()
+        _sync_executed_ws_ltp_subscriptions()
         return {
             "ok": True,
             "id": signal_id,

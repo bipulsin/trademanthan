@@ -40,7 +40,12 @@ _CACHE_LOCK = threading.Lock()
 _OI_LTP_BY_KEY: Dict[str, Dict[str, Any]] = {}
 _FEED_THREAD: Optional[threading.Thread] = None
 _STOP_EVENT = threading.Event()
+# Last subscribed universe (base callers + named providers).
 _LAST_KEYS_SIG: Optional[Tuple[str, ...]] = None
+# Last base universe from ensure_market_feed_running (excludes sidecar providers).
+_BASE_KEYS_SIG: Optional[Tuple[str, ...]] = None
+# Named sidecar key sets (e.g. stock_option_executed) merged into every subscribe.
+_PROVIDER_KEYS: Dict[str, Tuple[str, ...]] = {}
 _FEED_LAST_ERROR: Optional[str] = None
 
 _CHUNK = 100
@@ -628,6 +633,12 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                     )
                 except Exception as rocket_exc:
                     logger.debug("upstox_market_feed: rocket tick skipped %s: %s", ik, rocket_exc)
+                try:
+                    from backend.services.stock_option_ws_ltp import on_upstox_option_tick
+
+                    on_upstox_option_tick(ik, ltp=float(eff_ltp), now=now_ist)
+                except Exception as so_exc:
+                    logger.debug("upstox_market_feed: stock_option tick skipped %s: %s", ik, so_exc)
 
 
 def _decode_and_ingest(binary: bytes) -> None:
@@ -751,50 +762,35 @@ def _thread_main(batches: List[List[str]]) -> None:
         logger.error("upstox_market_feed: thread fatal: %s", e, exc_info=True)
 
 
-def ensure_market_feed_running(
-    instrument_keys: List[str],
-    *,
-    union: bool = False,
-) -> None:
-    """
-    Start or restart background WebSocket if instrument universe changed.
-    No-op when UPSTOX_MARKET_FEED_ENABLED is false or list empty.
-
-    union=True merges ``instrument_keys`` into the live subscribe set without dropping
-    existing keys (Breakfast 9:15 index confirm). Replace (union=False) is unchanged
-    for callers that pass a full universe.
-    """
-    global _FEED_THREAD, _LAST_KEYS_SIG, _STOP_EVENT
-
-    if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
-        return
-    keys = [k.strip() for k in instrument_keys if (k or "").strip()]
-    if not keys:
-        return
-
+def _exclusivity_blocks_feed_start() -> bool:
     try:
         from backend.services.breakfast_upstox_gate import (
             breakfast_exclusivity_active,
             breakfast_priority_owner_active,
         )
 
-        if breakfast_exclusivity_active() and not breakfast_priority_owner_active():
-            logger.info(
-                "breakfast_exclusivity: skipped ensure_market_feed_running "
-                "union=%s incoming_keys=%s",
-                union,
-                len(keys),
-            )
-            return
+        return bool(breakfast_exclusivity_active() and not breakfast_priority_owner_active())
     except Exception as e:
         logger.exception("breakfast_exclusivity: check_failed error=%s", e)
+        return False
 
-    if union and _LAST_KEYS_SIG:
-        keys = sorted(set(_LAST_KEYS_SIG) | set(keys))
-    else:
-        keys = sorted(set(keys))
 
-    sig = tuple(keys)
+def _provider_key_set() -> set:
+    out: set = set()
+    for keys in _PROVIDER_KEYS.values():
+        out.update(keys)
+    return out
+
+
+def _combined_subscribe_keys(base: List[str]) -> List[str]:
+    return sorted(set(base) | _provider_key_set())
+
+
+def _start_feed_thread(combined: List[str]) -> None:
+    """Restart the daemon WS thread for ``combined`` instrument keys."""
+    global _FEED_THREAD, _LAST_KEYS_SIG, _STOP_EVENT
+
+    sig = tuple(combined)
     if _FEED_THREAD is not None and _FEED_THREAD.is_alive() and sig == _LAST_KEYS_SIG:
         return
 
@@ -804,7 +800,7 @@ def ensure_market_feed_running(
 
     _STOP_EVENT = threading.Event()
     _LAST_KEYS_SIG = sig
-    batches = [keys[i : i + _CHUNK] for i in range(0, len(keys), _CHUNK)]
+    batches = [combined[i : i + _CHUNK] for i in range(0, len(combined), _CHUNK)]
     _FEED_THREAD = threading.Thread(
         target=_thread_main,
         args=(batches,),
@@ -813,10 +809,114 @@ def ensure_market_feed_running(
     )
     _FEED_THREAD.start()
     logger.info(
-        "upstox_market_feed: started WebSocket feed for %s instruments in %s chunks",
-        len(keys),
+        "upstox_market_feed: started WebSocket feed for %s instruments in %s chunks "
+        "(providers=%s)",
+        len(combined),
         len(batches),
+        {n: len(k) for n, k in _PROVIDER_KEYS.items()},
     )
+
+
+def set_feed_provider_keys(name: str, instrument_keys: List[str]) -> None:
+    """
+    Register or replace a named sidecar subscribe set merged into the shared WS.
+
+    Empty ``instrument_keys`` removes the provider (unsubscribe on next rebuild).
+    Survives replace-mode ``ensure_market_feed_running`` from Rocket / market_data.
+    Respects Breakfast exclusivity the same way as ``ensure_market_feed_running``.
+    """
+    global _PROVIDER_KEYS
+
+    if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
+        return
+    pname = (name or "").strip()
+    if not pname:
+        return
+
+    if _exclusivity_blocks_feed_start():
+        logger.info(
+            "breakfast_exclusivity: skipped set_feed_provider_keys name=%s incoming_keys=%s",
+            pname,
+            len(instrument_keys or []),
+        )
+        return
+
+    keys = tuple(
+        sorted(
+            {
+                _normalize_ik(k)
+                for k in (instrument_keys or [])
+                if (k or "").strip()
+            }
+        )
+    )
+    prev = _PROVIDER_KEYS.get(pname)
+    if prev == keys:
+        # Provider unchanged — still recover a dead thread if we have any universe.
+        combined = _combined_subscribe_keys(list(_BASE_KEYS_SIG or ()))
+        if combined and (_FEED_THREAD is None or not _FEED_THREAD.is_alive()):
+            _start_feed_thread(combined)
+        return
+
+    if keys:
+        _PROVIDER_KEYS[pname] = keys
+    else:
+        _PROVIDER_KEYS.pop(pname, None)
+
+    combined = _combined_subscribe_keys(list(_BASE_KEYS_SIG or ()))
+    if not combined:
+        # Nothing left to stream; leave any running thread (base may return later).
+        logger.info("upstox_market_feed: provider %s cleared; no keys to subscribe", pname)
+        return
+    _start_feed_thread(combined)
+
+
+def ensure_market_feed_running(
+    instrument_keys: List[str],
+    *,
+    union: bool = False,
+) -> None:
+    """
+    Start or restart background WebSocket if instrument universe changed.
+    No-op when UPSTOX_MARKET_FEED_ENABLED is false or list empty.
+
+    union=True merges ``instrument_keys`` into the live *base* set without dropping
+    existing base keys (Breakfast 9:15 index confirm). Replace (union=False) is
+    unchanged for callers that pass a full universe.
+
+    Named providers (``set_feed_provider_keys``) are always re-merged so sidecar
+    consumers are not wiped by replace-mode callers.
+    """
+    global _BASE_KEYS_SIG
+
+    if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
+        return
+    keys = [_normalize_ik(k) for k in instrument_keys if (k or "").strip()]
+    if not keys:
+        return
+
+    if _exclusivity_blocks_feed_start():
+        logger.info(
+            "breakfast_exclusivity: skipped ensure_market_feed_running "
+            "union=%s incoming_keys=%s",
+            union,
+            len(keys),
+        )
+        return
+
+    if union and _BASE_KEYS_SIG:
+        base = sorted(set(_BASE_KEYS_SIG) | set(keys))
+    elif union and _LAST_KEYS_SIG and not _BASE_KEYS_SIG:
+        # First union after process start when only providers may have set keys:
+        # keep prior subscribed non-provider keys if any were recorded as last sig.
+        prior = set(_LAST_KEYS_SIG) - _provider_key_set()
+        base = sorted(prior | set(keys))
+    else:
+        base = sorted(set(keys))
+
+    _BASE_KEYS_SIG = tuple(base)
+    combined = _combined_subscribe_keys(base)
+    _start_feed_thread(combined)
 
 
 def get_ws_feed_row(instrument_key: str) -> Optional[Dict[str, Any]]:
@@ -916,6 +1016,8 @@ def feed_status() -> Dict[str, Any]:
         "cached_instruments": n,
         "last_error": _FEED_LAST_ERROR,
         "universe_keys": len(_LAST_KEYS_SIG or ()),
+        "base_keys": len(_BASE_KEYS_SIG or ()),
+        "provider_keys": {n: len(k) for n, k in _PROVIDER_KEYS.items()},
     }
 
 
