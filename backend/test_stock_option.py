@@ -487,7 +487,8 @@ def test_mark_ema_fetch_failed_preserves_prior_emas(monkeypatch):
     )
     assert len(executed) == 1
     sql = executed[0].lower()
-    assert "ema_fetch_ok" not in sql
+    assert "ema_fetch_ok" in sql
+    assert "false" in sql
     assert "ema9" not in sql
 
     executed.clear()
@@ -496,6 +497,39 @@ def test_mark_ema_fetch_failed_preserves_prior_emas(monkeypatch):
     sql = executed[0].lower()
     assert "ema_fetch_ok" in sql
     assert "ema9" in sql
+
+
+def test_schedule_ema_fetch_retry_adds_date_job(monkeypatch):
+    from backend.services import stock_option_scheduler as sch
+
+    added = {}
+
+    class _FakeSched:
+        def add_job(self, fn, trigger, **kwargs):
+            added["fn"] = fn
+            added["trigger"] = trigger
+            added["kwargs"] = kwargs
+
+    monkeypatch.setattr(sch, "_scheduler", _FakeSched())
+    sch._schedule_ema_fetch_retry()
+    assert added["fn"] is sch._retry_tick
+    assert added["kwargs"]["id"] == sch.EMA_RETRY_JOB_ID
+    assert added["kwargs"]["replace_existing"] is True
+
+
+def test_tick_schedules_retry_when_fetch_failed(monkeypatch):
+    from backend.services import stock_option_scheduler as sch
+
+    scheduled = {"n": 0}
+    monkeypatch.setattr(sch, "should_skip_scheduled_market_jobs_ist", lambda: False)
+    monkeypatch.setattr(sch, "run_ema_tick", lambda: {"ok": True, "ema_fetch_failed": 3})
+    monkeypatch.setattr(sch, "_schedule_ema_fetch_retry", lambda: scheduled.__setitem__("n", scheduled["n"] + 1))
+    sch._tick()
+    assert scheduled["n"] == 1
+
+    monkeypatch.setattr(sch, "run_ema_tick", lambda: {"ok": True, "ema_fetch_failed": 0})
+    sch._tick()
+    assert scheduled["n"] == 1
 
 
 def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):

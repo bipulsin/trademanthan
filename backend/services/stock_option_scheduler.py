@@ -3,16 +3,20 @@
 Also keeps Executed option instrument keys on the shared Upstox WS (1m sync from
 09:30 IST after Breakfast) so sell/buy LTPs update live; 2h
 ``refresh_executed_ltps`` remains the REST fallback.
+
+When a 2h tick leaves rows with ``ema_fetch_ok=FALSE``, schedules a one-shot
+retry ~10 minutes later for those symbols only.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time as dt_time
+from datetime import datetime, timedelta, time as dt_time
 
 import pytz
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
@@ -24,8 +28,32 @@ IST = pytz.timezone("Asia/Kolkata")
 # After Breakfast exclusivity (ends by lock or 09:25); user-facing live LTP from 09:30.
 WS_LTP_SESSION_START = dt_time(9, 30)
 WS_LTP_SESSION_END = dt_time(15, 35)
+EMA_RETRY_DELAY = timedelta(minutes=10)
+EMA_RETRY_JOB_ID = "stock_option_ema_retry"
 
 _scheduler: BackgroundScheduler | None = None
+
+
+def _schedule_ema_fetch_retry(*, delay: timedelta = EMA_RETRY_DELAY) -> None:
+    """Enqueue a one-shot retry for rows left with ema_fetch_ok=FALSE."""
+    if _scheduler is None:
+        logger.warning("stock_option ema retry: scheduler not started; skip schedule")
+        return
+    run_at = datetime.now(IST) + delay
+    try:
+        _scheduler.add_job(
+            _retry_tick,
+            DateTrigger(run_date=run_at, timezone="Asia/Kolkata"),
+            id=EMA_RETRY_JOB_ID,
+            name="Stock Options EMA fetch retry +10m",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+        logger.info("stock_option ema retry scheduled for %s IST", run_at.isoformat())
+    except Exception:
+        logger.exception("stock_option ema retry schedule failed")
 
 
 def _tick() -> None:
@@ -35,8 +63,21 @@ def _tick() -> None:
     try:
         out = run_ema_tick()
         logger.info("stock_option ema tick: %s", out)
+        if int(out.get("ema_fetch_failed") or 0) > 0:
+            _schedule_ema_fetch_retry()
     except Exception:
         logger.exception("stock_option ema tick failed")
+
+
+def _retry_tick() -> None:
+    if should_skip_scheduled_market_jobs_ist():
+        logger.info("stock_option ema retry: skipped (weekend/holiday)")
+        return
+    try:
+        out = run_ema_tick(only_fetch_failed=True)
+        logger.info("stock_option ema retry tick: %s", out)
+    except Exception:
+        logger.exception("stock_option ema retry tick failed")
 
 
 def _within_ws_ltp_session(now: datetime | None = None) -> bool:
@@ -139,7 +180,8 @@ def start_stock_option_scheduler() -> None:
         logger.exception("stock_option_ws_ltp initial sync failed")
     logger.info(
         "Stock Options scheduler started "
-        "(EMA 11:15/13:15/15:15/15:45 + Executed WS LTP from 09:30 IST)"
+        "(EMA 11:15/13:15/15:15/15:45 + fetch-fail +10m retry + "
+        "Executed WS LTP from 09:30 IST)"
     )
 
 

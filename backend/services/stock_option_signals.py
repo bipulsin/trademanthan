@@ -2117,24 +2117,25 @@ def _mark_ema_fetch_failed(
     prior_ema30: Any = None,
     prior_ema100: Any = None,
 ) -> None:
-    """On fetch fail: preserve last good EMAs; only wipe when none existed."""
+    """On fetch fail: set ema_fetch_ok=FALSE (UI ⚠); preserve last good EMAs if any."""
     has_prior = any(v is not None for v in (prior_ema9, prior_ema30, prior_ema100))
     db = SessionLocal()
     try:
         if has_prior:
-            # Transient empty Upstox response must not blank a prior good cycle.
+            # Keep last good numbers in DB, but flag so Radar shows ⚠ until retry succeeds.
             db.execute(
                 text(
                     """
                     UPDATE stock_option_signals
-                    SET updated_at = :ts
+                    SET ema_fetch_ok = FALSE,
+                        updated_at = :ts
                     WHERE id = :id
                     """
                 ),
                 {"ts": now_naive, "id": row_id},
             )
             logger.info(
-                "stock_option EMA fetch failed id=%s; preserved prior EMAs (no wipe)",
+                "stock_option EMA fetch failed id=%s; preserved prior EMAs, ema_fetch_ok=FALSE",
                 row_id,
             )
         else:
@@ -2213,17 +2214,19 @@ def _fill_spreads_if_blank(row: Dict[str, Any], now: datetime) -> None:
         db.close()
 
 
-def _open_rows() -> List[Dict[str, Any]]:
+def _open_rows(*, only_fetch_failed: bool = False) -> List[Dict[str, Any]]:
     db = SessionLocal()
     try:
+        failed_clause = " AND ema_fetch_ok IS FALSE" if only_fetch_failed else ""
         rows = db.execute(
             text(
-                """
+                f"""
                 SELECT id, symbol, instrument_key, status, side,
                        armed_at, ema9, ema30, ema100, sell_strike, buy_strike,
                        date_traded, sell_cost, buy_cost
                 FROM stock_option_signals
                 WHERE status IN (:radar, :active)
+                {failed_clause}
                 ORDER BY id
                 """
             ),
@@ -2306,24 +2309,49 @@ def expire_stale_active(now: Optional[datetime] = None) -> int:
         db.close()
 
 
-def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
+def run_ema_tick(
+    now: Optional[datetime] = None,
+    *,
+    only_fetch_failed: bool = False,
+) -> Dict[str, Any]:
     """2h job: seed index Radar, expire stale Active, update EMAs, arm, invalidate, fill spreads.
 
     NIFTY/BANKNIFTY: no WR gate; Radar→Active only on EMA9 cross vs EMA30+EMA100.
     Stocks: WR side already set; arm when EMA condition holds.
+
+    When ``only_fetch_failed`` is True (off-schedule +10m retry), only Radar/Active
+    rows with ``ema_fetch_ok=FALSE`` are refreshed; seed/expire/LTP refresh are skipped.
     """
     ensure_stock_option_tables()
     from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
 
-    if defer_job_for_breakfast_exclusivity("stock_option_ema"):
-        return {"ok": True, "skipped": "breakfast_exclusivity"}
+    job_label = "stock_option_ema_retry" if only_fetch_failed else "stock_option_ema"
+    if defer_job_for_breakfast_exclusivity(job_label):
+        return {"ok": True, "skipped": "breakfast_exclusivity", "retry": only_fetch_failed}
 
     now_naive = now_ist_second() if now is None else naive_ist(now)
-    seeded = ensure_index_radar_rows(now_naive)
-    expired = expire_stale_active(now_naive)
+    seeded = 0
+    expired = 0
+    if not only_fetch_failed:
+        seeded = ensure_index_radar_rows(now_naive)
+        expired = expire_stale_active(now_naive)
     # Indices first so permanent NIFTY/BANKNIFTY EMA/arm is not starved by late-loop
     # Upstox empty responses after many stock candle fetches.
-    rows = _pin_index_rows(_open_rows())
+    rows = _pin_index_rows(_open_rows(only_fetch_failed=only_fetch_failed))
+    if only_fetch_failed and not rows:
+        return {
+            "ok": True,
+            "retry": True,
+            "skipped": "no_failed_rows",
+            "open_rows": 0,
+            "updated": 0,
+            "armed": 0,
+            "invalidated": 0,
+            "ema_fetch_failed": 0,
+            "expired_72h": 0,
+            "index_radar_seeded": 0,
+            "ltp_refreshed": 0,
+        }
     updated = armed = invalidated = failed = 0
     for row in rows:
         ik = (row.get("instrument_key") or "").strip()
@@ -2573,9 +2601,10 @@ def run_ema_tick(now: Optional[datetime] = None) -> Dict[str, Any]:
             _fill_spreads_if_blank(row, now_naive)
         time.sleep(FETCH_SLEEP_SEC)
 
-    ltp_n = refresh_executed_ltps(now_naive)
+    ltp_n = 0 if only_fetch_failed else refresh_executed_ltps(now_naive)
     return {
         "ok": True,
+        "retry": only_fetch_failed,
         "open_rows": len(rows),
         "updated": updated,
         "armed": armed,
