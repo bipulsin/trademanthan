@@ -39,6 +39,17 @@ from backend.services.upstox_service import UpstoxService, _candles_rows_to_stru
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
+TRADE_MODE_PAPER = "PAPER"
+TRADE_MODE_LIVE = "LIVE"
+TRADE_MODE_BACKFILL_FROM = date(2026, 9, 1)
+
+
+def normalize_trade_mode(value: Any) -> str:
+    """PAPER|LIVE. Untagged / unknown / historical → PAPER."""
+    s = str(value or "").strip().upper()
+    if s == TRADE_MODE_LIVE:
+        return TRADE_MODE_LIVE
+    return TRADE_MODE_PAPER
 
 _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
 _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -243,6 +254,7 @@ def ensure_daily_futures_tables() -> None:
         peak_ltp NUMERIC(18,4),
         peak_pnl_pct NUMERIC(8,4),
         exit_reason VARCHAR(32),
+        trade_mode VARCHAR(16) NOT NULL DEFAULT 'PAPER',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
@@ -358,6 +370,24 @@ def ensure_daily_futures_tables() -> None:
                 conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS sell_time VARCHAR(16)"))
                 conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_price NUMERIC(18,4)"))
                 conn.execute(text("ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS buy_time VARCHAR(16)"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE daily_futures_user_trade ADD COLUMN IF NOT EXISTS trade_mode VARCHAR(16) NOT NULL DEFAULT 'PAPER'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_user_trade t
+                        SET trade_mode = 'PAPER'
+                        FROM daily_futures_screening s
+                        WHERE t.screening_id = s.id
+                          AND s.trade_date >= CAST(:d AS DATE)
+                          AND UPPER(TRIM(COALESCE(t.trade_mode, 'PAPER'))) <> 'LIVE'
+                        """
+                    ),
+                    {"d": str(TRADE_MODE_BACKFILL_FROM)},
+                )
                 # Allow same underlying on one day for LONG vs SHORT parallel screeners
                 try:
                     conn.execute(
@@ -3955,7 +3985,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                    s.stock_change_pct, s.nifty_change_pct,
                    s.conviction_oi_leg, s.conviction_vwap_leg, s.session_vwap, s.conviction_breakdown_json,
                    s.effective_conviction,
-                   s.trade_date
+                   s.trade_date,
+                   t.trade_mode
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
@@ -4009,6 +4040,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "conviction_breakdown_json": row[33] if len(row) > 33 and row[33] is not None else None,
                 "effective_conviction": float(row[34]) if len(row) > 34 and row[34] is not None else None,
                 "trade_date": str(row[35]) if len(row) > 35 and row[35] is not None else str(td),
+                "trade_mode": normalize_trade_mode(row[36] if len(row) > 36 else None),
                 "warn_two_misses": miss >= 2,
             }
         )
@@ -4021,7 +4053,8 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                    t.pnl_points, t.pnl_rupees,
                    s.second_scan_time, s.entry_window_start, s.entry_window_end,
                    s.first_hit_at,
-                   s.ltp
+                   s.ltp,
+                   t.trade_mode
             FROM daily_futures_user_trade t
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
@@ -4048,6 +4081,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         dtx = str(row[3] or "LONG").strip().upper()
         pnl_pts = float(row[15]) if row[15] is not None else None
         pnl_rs = float(row[16]) if row[16] is not None else None
+        mode = normalize_trade_mode(row[22] if len(row) > 22 else None)
         if dtx == "SHORT":
             et_disp = str(row[9]).strip() if row[9] is not None else None
             ep_disp = float(row[10]) if row[10] is not None else None
@@ -4060,15 +4094,23 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             xp = float(row[12]) if row[12] is not None else None
         wl = None
         if pnl_rs is not None:
-            total_pnl += pnl_rs
-            if pnl_rs > 0:
-                wins += 1
-                wl = "Win"
-            elif pnl_rs < 0:
-                losses += 1
-                wl = "Loss"
+            if mode == TRADE_MODE_LIVE:
+                total_pnl += pnl_rs
+                if pnl_rs > 0:
+                    wins += 1
+                    wl = "Win"
+                elif pnl_rs < 0:
+                    losses += 1
+                    wl = "Loss"
+                else:
+                    wl = "Flat"
             else:
-                wl = "Flat"
+                if pnl_rs > 0:
+                    wl = "Win"
+                elif pnl_rs < 0:
+                    wl = "Loss"
+                else:
+                    wl = "Flat"
         closed.append(
             {
                 "trade_id": row[0],
@@ -4089,6 +4131,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "pnl_rupees": pnl_rs,
                 "first_scan_time": row[20].isoformat() if row[20] is not None and hasattr(row[20], "isoformat") else None,
                 "ltp": float(row[21]) if row[21] is not None else None,
+                "trade_mode": mode,
                 "win_loss": wl,
             }
         )
@@ -4624,7 +4667,14 @@ def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
     }
 
 
-def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, entry_price: float) -> Dict[str, Any]:
+def confirm_buy(
+    db: Session,
+    user_id: int,
+    screening_id: int,
+    entry_time: str,
+    entry_price: float,
+    trade_mode: Optional[str] = None,
+) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     if not is_daily_futures_session_open_ist():
         raise ValueError("Daily Futures session opens at 09:00 IST. Orders are not accepted before that.")
@@ -4720,15 +4770,17 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     if exists:
         raise ValueError("Already bought this pick")
 
+    mode = normalize_trade_mode(trade_mode)
+
     if dtp == "SHORT":
         ins = db.execute(
             text(
                 """
                 INSERT INTO daily_futures_user_trade (
                   user_id, screening_id, underlying, direction_type, future_symbol, instrument_key, lot_size,
-                  order_status, sell_time, sell_price, consecutive_webhook_misses
+                  order_status, sell_time, sell_price, consecutive_webhook_misses, trade_mode
                 ) VALUES (
-                  :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :st, :sp, 0
+                  :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :st, :sp, 0, :mode
                 ) RETURNING id
                 """
             ),
@@ -4742,6 +4794,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                 "lot": row[5],
                 "st": entry_time.strip(),
                 "sp": entry_price,
+                "mode": mode,
             },
         ).fetchone()
     else:
@@ -4750,9 +4803,9 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                 """
                 INSERT INTO daily_futures_user_trade (
                   user_id, screening_id, underlying, direction_type, future_symbol, instrument_key, lot_size,
-                  order_status, entry_time, entry_price, consecutive_webhook_misses
+                  order_status, entry_time, entry_price, consecutive_webhook_misses, trade_mode
                 ) VALUES (
-                  :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :et, :ep, 0
+                  :u, :sid, :und, :dt, :fs, :ik, :lot, 'bought', :et, :ep, 0, :mode
                 ) RETURNING id
                 """
             ),
@@ -4766,6 +4819,7 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
                 "lot": row[5],
                 "et": entry_time.strip(),
                 "ep": entry_price,
+                "mode": mode,
             },
         ).fetchone()
     trade_id = int(ins[0]) if ins and ins[0] is not None else None
@@ -4791,7 +4845,14 @@ def confirm_buy(db: Session, user_id: int, screening_id: int, entry_time: str, e
     return {"success": True}
 
 
-def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_price: float) -> Dict[str, Any]:
+def confirm_sell(
+    db: Session,
+    user_id: int,
+    trade_id: int,
+    exit_time: str,
+    exit_price: float,
+    trade_mode: Optional[str] = None,
+) -> Dict[str, Any]:
     ensure_daily_futures_tables()
     row = db.execute(
         text(
@@ -4825,6 +4886,8 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
         if lot:
             pnl_rs = round(float(pts) * int(lot), 2)
 
+    mode = normalize_trade_mode(trade_mode) if trade_mode is not None else None
+
     if dtx == "SHORT":
         db.execute(
             text(
@@ -4837,6 +4900,7 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
                   exit_price = :bp,
                   pnl_points = :pts,
                   pnl_rupees = :pnl,
+                  trade_mode = COALESCE(:mode, trade_mode),
                   updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND user_id = :u
                 """
@@ -4846,6 +4910,7 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
                 "bp": cover_px,
                 "pts": pts,
                 "pnl": pnl_rs,
+                "mode": mode,
                 "id": trade_id,
                 "u": user_id,
             },
@@ -4860,6 +4925,7 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
                   exit_price = :xp,
                   pnl_points = :pts,
                   pnl_rupees = :pnl,
+                  trade_mode = COALESCE(:mode, trade_mode),
                   updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND user_id = :u
                 """
@@ -4869,12 +4935,47 @@ def confirm_sell(db: Session, user_id: int, trade_id: int, exit_time: str, exit_
                 "xp": cover_px,
                 "pts": pts,
                 "pnl": pnl_rs,
+                "mode": mode,
                 "id": trade_id,
                 "u": user_id,
             },
         )
     db.commit()
     return {"success": True, "pnl_points": pts, "pnl_rupees": pnl_rs}
+
+
+def update_user_trade_mode(
+    db: Session,
+    user_id: int,
+    trade_id: int,
+    trade_mode: str,
+) -> Dict[str, Any]:
+    """Set PAPER|LIVE on an existing daily_futures_user_trade row."""
+    ensure_daily_futures_tables()
+    mode = normalize_trade_mode(trade_mode)
+    row = db.execute(
+        text(
+            """
+            SELECT id FROM daily_futures_user_trade
+            WHERE id = :id AND user_id = :u
+            """
+        ),
+        {"id": trade_id, "u": user_id},
+    ).fetchone()
+    if not row:
+        raise ValueError("Trade not found")
+    db.execute(
+        text(
+            """
+            UPDATE daily_futures_user_trade
+            SET trade_mode = :mode, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND user_id = :u
+            """
+        ),
+        {"mode": mode, "id": trade_id, "u": user_id},
+    )
+    db.commit()
+    return {"success": True, "trade_id": trade_id, "trade_mode": mode}
 
 
 def manual_update_conviction_vwap(

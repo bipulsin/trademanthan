@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.daily_futures_service import ensure_daily_futures_tables
 from backend.services.smart_futures_picker.position_sizing import (
     get_futures_lot_size_by_instrument_key,
 )
@@ -74,6 +75,10 @@ def _fetch_merged_sold_rows(
     source_norm = (source or "").strip().lower().replace("-", "_").replace(" ", "_")
 
     if source_norm in ("", "all", "daily", "daily_futures"):
+        try:
+            ensure_daily_futures_tables()
+        except Exception:
+            pass
         daily_sql = """
             SELECT
                 s.trade_date::date AS trade_date,
@@ -106,6 +111,7 @@ def _fetch_merged_sold_rows(
             JOIN daily_futures_screening s ON s.id = t.screening_id
             WHERE t.user_id = :u
               AND LOWER(TRIM(t.order_status)) = 'sold'
+              AND UPPER(TRIM(COALESCE(t.trade_mode, 'PAPER'))) = 'LIVE'
               AND (:sd IS NULL OR s.trade_date >= :sd)
               AND (:ed IS NULL OR s.trade_date <= :ed)
             ORDER BY s.trade_date DESC, t.updated_at DESC

@@ -351,6 +351,7 @@
     workspace: null,
     pickScreeningId: null,
     sellTradeId: null,
+    editTradeId: null,
     convictionEditScreeningId: null,
     convictionEditMode: null,
     /** @type {Record<number, number>} trade_id -> bit mask of active exit alerts (1=nifty,2=trail,4=momo) */
@@ -1231,6 +1232,7 @@
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
+          modeChip(r.trade_mode) +
           carry +
           '</strong></td><td>' +
           esc(r.trade_date || '—') +
@@ -1291,7 +1293,7 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th>Qty</th><th title="Starts 5 min after second qualifying scan (effective conviction >= 60) and lasts 15 minutes.">Entry window</th><th title="Long: buy time; Short: sell time">Entry</th><th class="num" title="Long: buy ₹; Short: sell ₹">Entry ₹</th><th title="Long: sell time; Short: cover time">Exit</th><th class="num" title="Long: sell ₹; Short: cover ₹">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th></tr></thead>';
+      '<thead><tr><th>Future</th><th>Qty</th><th title="Starts 5 min after second qualifying scan (effective conviction >= 60) and lasts 15 minutes.">Entry window</th><th title="Long: buy time; Short: sell time">Entry</th><th class="num" title="Long: buy ₹; Short: sell ₹">Entry ₹</th><th title="Long: sell time; Short: cover time">Exit</th><th class="num" title="Long: sell ₹; Short: cover ₹">Exit ₹</th><th class="num">PnL ₹</th><th>Win/Loss</th><th></th></tr></thead>';
     const body = rows
       .map(function (r) {
         const wl = r.win_loss || '—';
@@ -1321,6 +1323,7 @@
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
+          modeChip(r.trade_mode) +
           '</strong></td><td class="num">' +
           esc(r.lot_size) +
           '</td><td>' +
@@ -1341,11 +1344,20 @@
           wlCls +
           '">' +
           esc(wl) +
-          '</span></td></tr>'
+          '</span></td><td><button type="button" class="df-edit-btn" data-edit-tid="' +
+          r.trade_id +
+          '" title="Edit trade mode" aria-label="Edit trade mode"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></td></tr>'
         );
       })
       .join('');
     el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
+    el.querySelectorAll('button[data-edit-tid]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const tid = parseInt(btn.getAttribute('data-edit-tid'), 10);
+        const row = rows.find(function (x) { return Number(x.trade_id) === tid; });
+        openEditModal(tid, row);
+      });
+    });
   }
 
   function rowProjectedPnlRupees(r) {
@@ -1518,6 +1530,26 @@
     return chartBtn + ' <span class="df-dir-pill ' + cls + '">' + esc(dir) + '</span>';
   }
 
+  function normalizeTradeMode(v) {
+    return String(v || '').trim().toUpperCase() === 'LIVE' ? 'LIVE' : 'PAPER';
+  }
+
+  function modeChip(v) {
+    const mode = normalizeTradeMode(v);
+    const cls = mode === 'LIVE' ? 'df-mode-live' : 'df-mode-paper';
+    return '<span class="df-mode-chip ' + cls + '">' + mode + '</span>';
+  }
+
+  function selectedTradeMode(id) {
+    const el = document.getElementById(id);
+    return normalizeTradeMode(el ? el.value : 'PAPER');
+  }
+
+  function setTradeModeSelect(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = normalizeTradeMode(value);
+  }
+
   function openBuyModal(screeningId, row, isBearish) {
     state.pickScreeningId = screeningId;
     const m = document.getElementById('dfBuyModal');
@@ -1537,6 +1569,7 @@
     document.getElementById('dfBuyTime').value = istHmNow();
     document.getElementById('dfBuyPrice').value =
       row && row.ltp != null ? String(row.ltp) : '';
+    setTradeModeSelect('dfBuyMode', 'PAPER');
     document.getElementById('dfBuyErr').textContent = '';
     m.setAttribute('aria-hidden', 'false');
   }
@@ -1559,6 +1592,7 @@
     document.getElementById('dfSellTime').value = istHmNow();
     document.getElementById('dfSellPrice').value =
       row && row.ltp != null ? String(row.ltp) : '';
+    setTradeModeSelect('dfSellMode', row && row.trade_mode);
     document.getElementById('dfSellErr').textContent = '';
     document.getElementById('dfSellModal').setAttribute('aria-hidden', 'false');
   }
@@ -1571,6 +1605,82 @@
       okBtn.textContent = 'Confirm sell';
     }
     state.sellTradeId = null;
+  }
+
+  function openEditModal(tradeId, row) {
+    state.editTradeId = tradeId;
+    const okBtn = document.getElementById('dfEditOk');
+    if (okBtn) {
+      okBtn.disabled = false;
+      okBtn.textContent = 'Save';
+    }
+    document.getElementById('dfEditSym').innerHTML = row
+      ? symbolWithDirectionHtml(row) + modeChip(row.trade_mode) + ' · ' + esc(row.underlying)
+      : '';
+    setTradeModeSelect('dfEditMode', row && row.trade_mode);
+    document.getElementById('dfEditErr').textContent = '';
+    document.getElementById('dfEditModal').setAttribute('aria-hidden', 'false');
+  }
+
+  function closeEditModal() {
+    document.getElementById('dfEditModal').setAttribute('aria-hidden', 'true');
+    const okBtn = document.getElementById('dfEditOk');
+    if (okBtn) {
+      okBtn.disabled = false;
+      okBtn.textContent = 'Save';
+    }
+    state.editTradeId = null;
+  }
+
+  async function submitEditMode() {
+    const okBtn = document.getElementById('dfEditOk');
+    const tid = state.editTradeId;
+    const err = document.getElementById('dfEditErr');
+    err.textContent = '';
+    if (!tid) {
+      err.textContent = 'Trade not found.';
+      return;
+    }
+    const mode = selectedTradeMode('dfEditMode');
+    const paths = ['/api/daily-futures/order/' + tid, '/daily-futures/order/' + tid];
+    if (okBtn) {
+      okBtn.disabled = true;
+      okBtn.textContent = 'Saving...';
+    }
+    let lastErr = null;
+    for (let i = 0; i < paths.length; i++) {
+      try {
+        const res = await fetch(API_BASE + paths[i], {
+          method: 'PATCH',
+          headers: authHeaders(),
+          body: JSON.stringify({ trade_mode: mode }),
+        });
+        const raw = await res.text();
+        if (res.ok) {
+          closeEditModal();
+          await refresh();
+          return;
+        }
+        try {
+          const j = JSON.parse(raw);
+          err.textContent = j.detail || raw.slice(0, 120);
+        } catch (_e) {
+          err.textContent = raw.slice(0, 120);
+        }
+        if (okBtn) {
+          okBtn.disabled = false;
+          okBtn.textContent = 'Save';
+        }
+        return;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    err.textContent = lastErr && lastErr.message ? lastErr.message : 'Request failed';
+    if (okBtn) {
+      okBtn.disabled = false;
+      okBtn.textContent = 'Save';
+    }
   }
 
   function _parseBreakdownJson(r) {
@@ -1754,6 +1864,7 @@
             screening_id: sid,
             entry_time: et,
             entry_price: ep,
+            trade_mode: selectedTradeMode('dfBuyMode'),
           }),
         });
         const raw = await res.text();
@@ -1811,6 +1922,7 @@
             trade_id: tid,
             exit_time: xt,
             exit_price: xp,
+            trade_mode: selectedTradeMode('dfSellMode'),
           }),
         });
         const raw = await res.text();
@@ -1933,6 +2045,12 @@
     document.getElementById('dfSellBackdrop').addEventListener('click', closeSellModal);
     document.getElementById('dfSellCancel').addEventListener('click', closeSellModal);
     document.getElementById('dfSellOk').addEventListener('click', submitSell);
+    const edB = document.getElementById('dfEditBackdrop');
+    const edC = document.getElementById('dfEditCancel');
+    const edO = document.getElementById('dfEditOk');
+    if (edB) edB.addEventListener('click', closeEditModal);
+    if (edC) edC.addEventListener('click', closeEditModal);
+    if (edO) edO.addEventListener('click', submitEditMode);
     const cvB = document.getElementById('dfConvBackdrop');
     const cvC = document.getElementById('dfConvCancel');
     const cvO = document.getElementById('dfConvOk');

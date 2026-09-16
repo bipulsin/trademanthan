@@ -480,7 +480,8 @@ table.df-table td.df-rs-cell {
 }
 
 .df-modal-panel input,
-.df-modal-panel textarea {
+.df-modal-panel textarea,
+.df-modal-panel select {
     width: 100%;
     box-sizing: border-box;
     margin-top: 4px;
@@ -493,7 +494,8 @@ table.df-table td.df-rs-cell {
 }
 
 .df-modal-panel input:focus,
-.df-modal-panel textarea:focus {
+.df-modal-panel textarea:focus,
+.df-modal-panel select:focus {
     outline: none;
     border-color: rgba(61, 186, 122, 0.55);
     box-shadow: 0 0 0 2px rgba(61, 186, 122, 0.15);
@@ -643,6 +645,48 @@ body.daily-futures-page .df-wrap .df-exit-badges span.df-exit-badge.df-exit-gb,
     gap: 6px;
     align-items: center;
     justify-content: flex-end;
+}
+
+.df-mode-chip {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    line-height: 1.35;
+}
+
+.df-mode-paper {
+    color: #9db7c9;
+    background: rgba(120, 150, 170, 0.18);
+    border: 1px solid rgba(120, 150, 170, 0.35);
+}
+
+.df-mode-live {
+    color: #b8f5d0;
+    background: rgba(61, 186, 122, 0.18);
+    border: 1px solid rgba(61, 186, 122, 0.4);
+}
+
+.df-edit-btn {
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.df-edit-btn:hover {
+    border-color: rgba(61, 186, 122, 0.55);
+    color: #4fd48c;
 }
 
 table.df-table th.df-alerts-cell,
@@ -1081,7 +1125,8 @@ body.daily-futures-page[data-theme="light"] .df-carry-badge {
 }
 
 body.daily-futures-page[data-theme="light"] .df-modal-panel input,
-body.daily-futures-page[data-theme="light"] .df-modal-panel textarea {
+body.daily-futures-page[data-theme="light"] .df-modal-panel textarea,
+body.daily-futures-page[data-theme="light"] .df-modal-panel select {
     background: #fff;
     color: var(--text);
 }

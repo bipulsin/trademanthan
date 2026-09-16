@@ -36,6 +36,7 @@ from backend.services.daily_futures_service import (
     persist_chartink_webhook_raw_body,
     process_chartink_webhook,
     process_chartink_webhook_bearish,
+    update_user_trade_mode,
     webhook_bearish_secret_ok,
     webhook_secret_ok,
 )
@@ -53,12 +54,18 @@ class BuyBody(BaseModel):
     screening_id: int = Field(..., ge=1)
     entry_time: str = Field(..., min_length=3, max_length=16)
     entry_price: float = Field(..., gt=0)
+    trade_mode: Optional[str] = Field(None, max_length=16)
 
 
 class SellBody(BaseModel):
     trade_id: int = Field(..., ge=1)
     exit_time: str = Field(..., min_length=3, max_length=16)
     exit_price: float = Field(..., gt=0)
+    trade_mode: Optional[str] = Field(None, max_length=16)
+
+
+class PatchTradeBody(BaseModel):
+    trade_mode: str = Field(..., min_length=3, max_length=16)
 
 
 class ManualConvictionVwapBody(BaseModel):
@@ -107,7 +114,9 @@ def daily_futures_buy(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     try:
-        return confirm_buy(db, user.id, body.screening_id, body.entry_time, body.entry_price)
+        return confirm_buy(
+            db, user.id, body.screening_id, body.entry_time, body.entry_price, body.trade_mode
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -119,7 +128,22 @@ def daily_futures_sell(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     try:
-        return confirm_sell(db, user.id, body.trade_id, body.exit_time, body.exit_price)
+        return confirm_sell(
+            db, user.id, body.trade_id, body.exit_time, body.exit_price, body.trade_mode
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/order/{trade_id}")
+def daily_futures_patch_trade(
+    trade_id: int,
+    body: PatchTradeBody,
+    user: User = Depends(_auth_user),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    try:
+        return update_user_trade_mode(db, user.id, trade_id, body.trade_mode)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

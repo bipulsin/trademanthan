@@ -72,11 +72,14 @@
     const rows = doc && Array.isArray(doc.running) ? doc.running : [];
     let un = 0;
     rows.forEach(function (r) {
+      const mode = String((r && r.trade_mode) || "").trim().toUpperCase();
+      if (mode !== "LIVE") return;
       const ltp = toNum(r && r.ltp);
-      const ep = toNum(r && r.entry_price);
+      const isShort = String((r && r.direction_type) || "").trim().toUpperCase() === "SHORT";
+      const ep = toNum(isShort ? r && r.sell_price : r && r.entry_price);
       const qty = toNum(r && r.lot_size);
       if (ltp == null || ep == null || qty == null) return;
-      un += (ltp - ep) * qty;
+      un += (isShort ? ep - ltp : ltp - ep) * qty;
     });
     const realized = toNum(doc && doc.summary && doc.summary.cumulative_pnl_rupees) || 0;
     return { realized: realized, unrealized: un };

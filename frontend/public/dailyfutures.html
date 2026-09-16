@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="dailyfutures.css?v=2" />
+    <link rel="stylesheet" href="dailyfutures.css?v=3" />
 </head>
 <body class="daily-futures-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -134,6 +134,11 @@
             <input type="text" id="dfBuyTime" autocomplete="off" placeholder="09:45" />
             <label id="dfBuyPriceLabel">Entry price (₹)</label>
             <input type="number" id="dfBuyPrice" step="any" min="0" />
+            <label for="dfBuyMode">Mode</label>
+            <select id="dfBuyMode" aria-label="PAPER or LIVE">
+                <option value="PAPER" selected>PAPER</option>
+                <option value="LIVE">LIVE</option>
+            </select>
             <p id="dfBuyErr" style="color:#f87171;min-height:1.2em;font-size:0.85rem;"></p>
             <div class="df-modal-actions">
                 <button type="button" class="df-modal-cancel" id="dfBuyCancel">Cancel</button>
@@ -165,6 +170,11 @@
             <input type="text" id="dfSellTime" autocomplete="off" placeholder="15:10" />
             <label>Exit price (₹)</label>
             <input type="number" id="dfSellPrice" step="any" min="0" />
+            <label for="dfSellMode">Mode</label>
+            <select id="dfSellMode" aria-label="PAPER or LIVE">
+                <option value="PAPER" selected>PAPER</option>
+                <option value="LIVE">LIVE</option>
+            </select>
             <p id="dfSellErr" style="color:#f87171;min-height:1.2em;font-size:0.85rem;"></p>
             <div class="df-modal-actions">
                 <button type="button" class="df-modal-cancel" id="dfSellCancel">Cancel</button>
@@ -192,8 +202,26 @@
         </div>
     </div>
 
+    <div id="dfEditModal" class="df-modal" aria-hidden="true" role="dialog">
+        <div class="df-modal-backdrop" id="dfEditBackdrop"></div>
+        <div class="df-modal-panel">
+            <h3 style="margin:0 0 8px;">Edit trade</h3>
+            <p id="dfEditSym" style="margin:0;font-size:0.88rem;color:var(--theme-muted);"></p>
+            <label for="dfEditMode">Mode</label>
+            <select id="dfEditMode" aria-label="PAPER or LIVE">
+                <option value="PAPER">PAPER</option>
+                <option value="LIVE">LIVE</option>
+            </select>
+            <p id="dfEditErr" style="color:#f87171;min-height:1.2em;font-size:0.85rem;"></p>
+            <div class="df-modal-actions">
+                <button type="button" class="df-modal-cancel" id="dfEditCancel">Cancel</button>
+                <button type="button" class="df-btn df-btn-order" id="dfEditOk">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script src="left-menu.js?v=3.48"></script>
     <script src="notify-trade-channel.js?v=1"></script>
-    <script src="dailyfutures.js?v=68"></script>
+    <script src="dailyfutures.js?v=69"></script>
 </body>
 </html>
