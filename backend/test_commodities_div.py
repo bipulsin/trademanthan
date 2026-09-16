@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 from backend.services.commodities_div.mapping import (
     attach_instrument_fields,
@@ -9,6 +11,7 @@ from backend.services.commodities_div.mapping import (
     parse_underlying,
 )
 from backend.services.commodities_div.webhook import (
+    accept_webhook,
     decode_raw_payload,
     parse_flag_fields,
     _symbols_match,
@@ -63,8 +66,19 @@ def test_parse_underlying_rejects_crypto_and_unknown():
     assert parse_underlying("NIFTY1!") is None
     assert parse_underlying("CDTEST1!") is None
     assert parse_underlying("") is None
-    inst = attach_instrument_fields("ETHUSDU2026")
+    inst = attach_instrument_fields("ETHUSDU2026", resolve_contract=False)
     assert inst["underlying_matched"] is False
+
+
+def test_attach_instrument_fields_fast_path_skips_upstox():
+    with patch(
+        "backend.services.commodities_div.mapping.resolve_underlying_instrument"
+    ) as resolve:
+        inst = attach_instrument_fields("NATURALGASV2026", resolve_contract=False)
+        resolve.assert_not_called()
+        assert inst["underlying_matched"] is True
+        assert inst["symbol_mapped"] == "NATURALGAS"
+        assert inst["instrument_key"] is None
 
 
 def test_decode_text_plain_json_body():
@@ -105,3 +119,29 @@ def test_roundtrip_payload_json_dumps():
     status, fields = parse_flag_fields(parsed)
     assert status == "success"
     assert fields["signal_kind"] == "EXIT"
+
+
+def test_accept_webhook_persists_without_upstox_resolve():
+    body = b'{"flag":"BEAR-DIV","symbol":"NATURALGASV2026","time":1789579800000}'
+    received_at = datetime(2026, 9, 16, 23, 30, 3)
+
+    mock_db = MagicMock()
+    mock_db.execute.return_value.scalar.return_value = 42
+
+    with patch(
+        "backend.services.commodities_div.webhook.ensure_commodities_div_tables"
+    ), patch(
+        "backend.services.commodities_div.webhook.SessionLocal", return_value=mock_db
+    ), patch(
+        "backend.services.commodities_div.mapping.resolve_underlying_instrument"
+    ) as resolve:
+        out = accept_webhook(received_at=received_at, source_ip="127.0.0.1", body=body)
+        resolve.assert_not_called()
+
+    assert out["ok"] is True
+    assert out["accepted"] is True
+    assert out["promote_queued"] is True
+    assert out["log_id"] == 42
+    assert out["flag"] == "BEAR-DIV"
+    assert out["symbol_mapped"] == "NATURALGAS"
+    mock_db.commit.assert_called_once()

@@ -7,10 +7,18 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Front-month resolve is expensive (full Upstox master scan). Cache per underlying
+# so concurrent DIV+GO webhooks do not each re-scan / re-download.
+_RESOLVE_TTL_SEC = 6 * 3600
+_resolve_lock = threading.Lock()
+_resolve_cache: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}
 
 _EXCHANGE_PREFIX = re.compile(
     r"^(NSE|BSE|NFO|MCX|BINANCE|BYBIT|COINBASE|CRYPTO|NYSE|NASDAQ|AMEX)\s*:\s*",
@@ -187,27 +195,45 @@ def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optiona
 
 
 def resolve_underlying_instrument(canonical: str) -> Optional[Dict[str, Any]]:
-    """Resolve desk canonical name → front-month MCX FUT."""
-    prefer = PREFERRED_UNDERLYING_SYMBOL.get(canonical, canonical)
+    """Resolve desk canonical name → front-month MCX FUT (cached)."""
+    key = (canonical or "").strip().upper()
+    if not key:
+        return None
+    now = time.time()
+    with _resolve_lock:
+        hit = _resolve_cache.get(key)
+        if hit and now - float(hit[0]) < _RESOLVE_TTL_SEC:
+            cached = hit[1]
+            return dict(cached) if cached else None
+
+    prefer = PREFERRED_UNDERLYING_SYMBOL.get(key, key)
     inst = resolve_mcx_instrument(prefer)
     if inst and inst.get("instrument_key"):
-        inst["canonical"] = canonical
-        return inst
-    for name in UPSTOX_RESOLVE_ALIASES.get(canonical, [canonical]):
-        if name == prefer:
-            continue
-        inst = resolve_mcx_instrument(name)
-        if inst and inst.get("instrument_key"):
-            inst["canonical"] = canonical
-            return inst
-    return None
+        inst["canonical"] = key
+    else:
+        inst = None
+        for name in UPSTOX_RESOLVE_ALIASES.get(key, [key]):
+            if name == prefer:
+                continue
+            cand = resolve_mcx_instrument(name)
+            if cand and cand.get("instrument_key"):
+                cand["canonical"] = key
+                inst = cand
+                break
+
+    with _resolve_lock:
+        _resolve_cache[key] = (now, dict(inst) if inst else None)
+    return dict(inst) if inst else None
 
 
-def attach_instrument_fields(symbol_raw: str) -> Dict[str, Any]:
+def attach_instrument_fields(
+    symbol_raw: str, *, resolve_contract: bool = True
+) -> Dict[str, Any]:
     """
-    Parse TV symbol → fixed underlying + front-month MCX FUT.
+    Parse TV symbol → fixed underlying + optional front-month MCX FUT.
 
     underlying_matched=False when symbol is not one of the five allowed names.
+    Set resolve_contract=False for webhook fast-path (no Upstox master I/O).
     """
     underlying = parse_underlying(symbol_raw)
     out: Dict[str, Any] = {
@@ -223,6 +249,8 @@ def attach_instrument_fields(symbol_raw: str) -> Dict[str, Any]:
     if not underlying:
         return out
     out["symbol_mapped"] = underlying
+    if not resolve_contract:
+        return out
     inst = resolve_underlying_instrument(underlying)
     if not inst:
         return out

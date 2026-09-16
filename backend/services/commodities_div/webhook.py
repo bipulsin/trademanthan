@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
@@ -41,9 +43,28 @@ STATUS_HISTORY = "History"
 ACTIVE_PRE_TRADE = {STATUS_DIVERGENCE, STATUS_ACTIVATED}
 BLOCKING_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE}
 
+# Serialize DIV/GO/EXIT for the same underlying so simultaneous TV dual-fires
+# do not race (GO before DIV → unmatched).
+_symbol_locks_guard = threading.Lock()
+_symbol_locks: Dict[str, threading.Lock] = {}
+
+# Brief wait when GO arrives before Divergence row is visible (same-second dual fire).
+_GO_RETRY_DELAY_SEC = 0.45
+_GO_RETRY_ATTEMPTS = 1
+
 
 def now_ist_second() -> datetime:
     return naive_ist(datetime.now(IST))
+
+
+def _lock_for_symbol(symbol_key: str) -> threading.Lock:
+    key = (symbol_key or "").strip().upper() or "_unknown"
+    with _symbol_locks_guard:
+        lock = _symbol_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _symbol_locks[key] = lock
+        return lock
 
 
 def decode_raw_payload(body: bytes) -> Tuple[Any, Dict[str, Any]]:
@@ -173,6 +194,49 @@ def _insert_log(
     return int(rid)
 
 
+def _update_log(
+    db,
+    log_id: int,
+    *,
+    parse_status: str,
+    disposition: Optional[str],
+    active_signal_id: Optional[int] = None,
+    symbol_mapped: Optional[str] = None,
+    fields: Optional[Dict[str, Any]] = None,
+) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE commodities_div_webhook_log SET
+                parse_status = :parse_status,
+                disposition = :disposition,
+                active_signal_id = COALESCE(:active_signal_id, active_signal_id),
+                symbol_mapped = COALESCE(:symbol_mapped, symbol_mapped),
+                flag = COALESCE(:flag, flag),
+                symbol_raw = COALESCE(:symbol_raw, symbol_raw),
+                direction = COALESCE(:direction, direction),
+                signal_kind = COALESCE(:signal_kind, signal_kind),
+                tv_time_ms = COALESCE(:tv_time_ms, tv_time_ms),
+                tv_time_ist = COALESCE(:tv_time_ist, tv_time_ist)
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": log_id,
+            "parse_status": parse_status,
+            "disposition": disposition,
+            "active_signal_id": active_signal_id,
+            "symbol_mapped": symbol_mapped,
+            "flag": (fields or {}).get("flag"),
+            "symbol_raw": (fields or {}).get("symbol_raw"),
+            "direction": (fields or {}).get("direction"),
+            "signal_kind": (fields or {}).get("signal_kind"),
+            "tv_time_ms": (fields or {}).get("tv_time_ms"),
+            "tv_time_ist": (fields or {}).get("tv_time_ist"),
+        },
+    )
+
+
 def _delete_pre_trade_for_symbol(
     db, symbol_raw: str, symbol_mapped: str
 ) -> Optional[int]:
@@ -235,21 +299,181 @@ def _create_divergence(
     return int(rid)
 
 
-def process_webhook(
+def accept_webhook(
     *,
     received_at: datetime,
     source_ip: Optional[str],
     body: bytes,
 ) -> Dict[str, Any]:
+    """
+    Persist raw webhook immediately (no Upstox / state machine) for TradingView ack.
+
+    Heavy apply runs via apply_webhook_after_ack in a background worker.
+    """
+    ensure_commodities_div_tables()
+    parsed, raw_payload = decode_raw_payload(body)
+    parse_status, fields = parse_flag_fields(parsed)
+    symbol_mapped: Optional[str] = None
+    if fields and fields.get("symbol_raw"):
+        # Parse-only — never touch Upstox master on the HTTP path.
+        symbol_mapped = parse_underlying(fields["symbol_raw"]) or normalize_tv_ticker(
+            fields["symbol_raw"]
+        )
+
+    db = SessionLocal()
+    try:
+        log_id = _insert_log(
+            db,
+            received_at=received_at,
+            source_ip=source_ip,
+            fields=fields,
+            raw_payload=raw_payload,
+            parse_status=parse_status if fields is not None else "failed",
+            disposition=None,
+            symbol_mapped=symbol_mapped,
+        )
+        db.commit()
+        return {
+            "ok": True,
+            "accepted": True,
+            "stored": True,
+            "log_id": log_id,
+            "promote_queued": True,
+            "parse_status": parse_status if fields is not None else "failed",
+            "flag": (fields or {}).get("flag"),
+            "symbol_raw": (fields or {}).get("symbol_raw"),
+            "symbol_mapped": symbol_mapped,
+            "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def apply_webhook_after_ack(
+    *,
+    log_id: int,
+    received_at: datetime,
+    source_ip: Optional[str],
+    body: bytes,
+) -> Dict[str, Any]:
+    """Background worker: full state machine after TradingView already got HTTP 200."""
+    try:
+        return process_webhook(
+            received_at=received_at,
+            source_ip=source_ip,
+            body=body,
+            existing_log_id=int(log_id),
+        )
+    except Exception as e:
+        logger.exception(
+            "commodities_div apply_webhook_after_ack failed log_id=%s: %s", log_id, e
+        )
+        return {"ok": False, "log_id": log_id, "error": str(e)}
+
+
+def process_webhook(
+    *,
+    received_at: datetime,
+    source_ip: Optional[str],
+    body: bytes,
+    existing_log_id: Optional[int] = None,
+) -> Dict[str, Any]:
     ensure_commodities_div_tables()
     parsed, raw_payload = decode_raw_payload(body)
     parse_status, fields = parse_flag_fields(parsed)
 
+    # Resolve lock key without Upstox (parse only) so we can serialize early.
+    lock_key = "_parse_failed"
+    if fields and fields.get("symbol_raw"):
+        lock_key = (
+            parse_underlying(fields["symbol_raw"])
+            or normalize_tv_ticker(fields["symbol_raw"])
+            or fields["symbol_raw"]
+        )
+
+    # GO may arrive in the same second as DIV. Sleep *outside* the symbol lock so
+    # a concurrent DIV apply can create Divergence before we retry.
+    attempts = 1
+    if fields and fields.get("signal_kind") == "GO":
+        attempts = 1 + _GO_RETRY_ATTEMPTS
+
+    last: Dict[str, Any] = {}
+    for attempt in range(attempts):
+        with _lock_for_symbol(str(lock_key)):
+            last = _process_webhook_locked(
+                received_at=received_at,
+                source_ip=source_ip,
+                raw_payload=raw_payload,
+                parse_status=parse_status,
+                fields=fields,
+                existing_log_id=existing_log_id,
+            )
+        if (
+            attempt + 1 < attempts
+            and last.get("disposition") == "unmatched"
+            and last.get("reason") == "no_matching_divergence"
+        ):
+            time.sleep(_GO_RETRY_DELAY_SEC)
+            continue
+        return last
+    return last
+
+
+def _finalize_log(
+    db,
+    *,
+    existing_log_id: Optional[int],
+    received_at: datetime,
+    source_ip: Optional[str],
+    fields: Optional[Dict[str, Any]],
+    raw_payload: Dict[str, Any],
+    parse_status: str,
+    disposition: Optional[str],
+    active_signal_id: Optional[int] = None,
+    symbol_mapped: Optional[str] = None,
+) -> int:
+    if existing_log_id is not None:
+        _update_log(
+            db,
+            existing_log_id,
+            parse_status=parse_status,
+            disposition=disposition,
+            active_signal_id=active_signal_id,
+            symbol_mapped=symbol_mapped,
+            fields=fields,
+        )
+        return int(existing_log_id)
+    return _insert_log(
+        db,
+        received_at=received_at,
+        source_ip=source_ip,
+        fields=fields,
+        raw_payload=raw_payload,
+        parse_status=parse_status,
+        disposition=disposition,
+        active_signal_id=active_signal_id,
+        symbol_mapped=symbol_mapped,
+    )
+
+
+def _process_webhook_locked(
+    *,
+    received_at: datetime,
+    source_ip: Optional[str],
+    raw_payload: Dict[str, Any],
+    parse_status: str,
+    fields: Optional[Dict[str, Any]],
+    existing_log_id: Optional[int],
+) -> Dict[str, Any]:
     db = SessionLocal()
     try:
         if fields is None:
-            log_id = _insert_log(
+            log_id = _finalize_log(
                 db,
+                existing_log_id=existing_log_id,
                 received_at=received_at,
                 source_ip=source_ip,
                 fields=None,
@@ -267,15 +491,17 @@ def process_webhook(
                 "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
-        inst = attach_instrument_fields(fields["symbol_raw"])
+        # Upstox resolve happens here (background / locked), not on HTTP ack path.
+        inst = attach_instrument_fields(fields["symbol_raw"], resolve_contract=True)
         symbol_mapped = inst["symbol_mapped"]
         kind = fields["signal_kind"]
         direction = fields["direction"]
 
         # Unknown underlying — log only, never create / mutate active.
         if not inst.get("underlying_matched"):
-            log_id = _insert_log(
+            log_id = _finalize_log(
                 db,
+                existing_log_id=existing_log_id,
                 received_at=received_at,
                 source_ip=source_ip,
                 fields=fields,
@@ -308,8 +534,9 @@ def process_webhook(
 
             if active and active["status"] in BLOCKING_STATUSES:
                 # Same symbol In-Trade / Exit Trade blocks new DIV.
-                log_id = _insert_log(
+                log_id = _finalize_log(
                     db,
+                    existing_log_id=existing_log_id,
                     received_at=received_at,
                     source_ip=source_ip,
                     fields=fields,
@@ -333,8 +560,9 @@ def process_webhook(
                 }
 
             if active and active["status"] in ACTIVE_PRE_TRADE and not same_direction:
-                log_id = _insert_log(
+                log_id = _finalize_log(
                     db,
+                    existing_log_id=existing_log_id,
                     received_at=received_at,
                     source_ip=source_ip,
                     fields=fields,
@@ -361,8 +589,9 @@ def process_webhook(
                 _delete_pre_trade_for_symbol(db, fields["symbol_raw"], symbol_mapped)
                 disposition = "replaced_prior"
 
-            log_id = _insert_log(
+            log_id = _finalize_log(
                 db,
+                existing_log_id=existing_log_id,
                 received_at=received_at,
                 source_ip=source_ip,
                 fields=fields,
@@ -400,8 +629,9 @@ def process_webhook(
         # --- GO ---
         if kind == "GO":
             if active and active["status"] in BLOCKING_STATUSES:
-                log_id = _insert_log(
+                log_id = _finalize_log(
                     db,
+                    existing_log_id=existing_log_id,
                     received_at=received_at,
                     source_ip=source_ip,
                     fields=fields,
@@ -428,9 +658,11 @@ def process_webhook(
                 and str(active.get("direction")) == direction
                 and active["status"] == STATUS_DIVERGENCE
             )
+
             if not match:
-                log_id = _insert_log(
+                log_id = _finalize_log(
                     db,
+                    existing_log_id=existing_log_id,
                     received_at=received_at,
                     source_ip=source_ip,
                     fields=fields,
@@ -451,8 +683,9 @@ def process_webhook(
                     "reason": "no_matching_divergence",
                 }
 
-            log_id = _insert_log(
+            log_id = _finalize_log(
                 db,
+                existing_log_id=existing_log_id,
                 received_at=received_at,
                 source_ip=source_ip,
                 fields=fields,
@@ -508,15 +741,14 @@ def process_webhook(
                 and active["status"] == STATUS_IN_TRADE
             )
             if not match:
-                # Same symbol already checked; wrong status / direction → unmatched
-                # (In-Trade block for EXIT when already Exit Trade, etc.)
                 disposition = "unmatched"
                 if active and active["status"] in BLOCKING_STATUSES and str(
                     active.get("direction")
                 ) == direction:
                     disposition = "ignored_in_trade_block"
-                log_id = _insert_log(
+                log_id = _finalize_log(
                     db,
+                    existing_log_id=existing_log_id,
                     received_at=received_at,
                     source_ip=source_ip,
                     fields=fields,
@@ -537,8 +769,9 @@ def process_webhook(
                     "reason": "no_matching_in_trade",
                 }
 
-            log_id = _insert_log(
+            log_id = _finalize_log(
                 db,
+                existing_log_id=existing_log_id,
                 received_at=received_at,
                 source_ip=source_ip,
                 fields=fields,
@@ -581,8 +814,9 @@ def process_webhook(
             }
 
         # unreachable
-        log_id = _insert_log(
+        log_id = _finalize_log(
             db,
+            existing_log_id=existing_log_id,
             received_at=received_at,
             source_ip=source_ip,
             fields=fields,

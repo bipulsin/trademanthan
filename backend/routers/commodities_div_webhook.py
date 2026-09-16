@@ -1,15 +1,21 @@
 """POST /webhook/commDiv — TradingView Commodities Div ingest."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
+from functools import partial
 from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from backend.services.commodities_div.webhook import now_ist_second, process_webhook
+from backend.services.commodities_div.webhook import (
+    accept_webhook,
+    apply_webhook_after_ack,
+    now_ist_second,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +80,12 @@ async def commodities_div_webhook_get() -> JSONResponse:
 @router.post("/webhook/commDiv")
 @router.post("/webhook/commdiv")
 async def commodities_div_webhook(request: Request) -> JSONResponse:
+    """
+    Persist TV alert immediately and return HTTP 200.
+
+    Upstox MCX resolve + DIV/GO/EXIT state machine run in a thread-pool worker so
+    TradingView's short webhook timeout does not fail DIV when DIV+GO fire together.
+    """
     received_at = now_ist_second()
     if not _token_ok(request):
         return JSONResponse(
@@ -93,7 +105,7 @@ async def commodities_div_webhook(request: Request) -> JSONResponse:
         len(body or b""),
     )
     try:
-        result = process_webhook(received_at=received_at, source_ip=source_ip, body=body)
+        result = accept_webhook(received_at=received_at, source_ip=source_ip, body=body)
     except Exception as e:
         logger.exception("commodities_div webhook persist failed: %s", e)
         return JSONResponse(
@@ -104,4 +116,25 @@ async def commodities_div_webhook(request: Request) -> JSONResponse:
                 "message": "Could not store webhook; retry",
             },
         )
-    return JSONResponse(status_code=200, content=result)
+
+    if result.get("promote_queued") and result.get("log_id") is not None:
+        body_copy = bytes(body or b"")
+        asyncio.get_running_loop().run_in_executor(
+            None,
+            partial(
+                apply_webhook_after_ack,
+                log_id=int(result["log_id"]),
+                received_at=received_at,
+                source_ip=source_ip,
+                body=body_copy,
+            ),
+        )
+        logger.info(
+            "commodities_div queued background apply log_id=%s flag=%s symbol=%s",
+            result.get("log_id"),
+            result.get("flag"),
+            result.get("symbol_raw"),
+        )
+
+    public = {k: v for k, v in result.items() if k != "promote_queued"}
+    return JSONResponse(status_code=200, content=public)

@@ -5,6 +5,7 @@ import calendar
 import gzip
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,7 @@ MASTER_PATH = CACHE_DIR / "complete.json"
 MAX_AGE_SEC = 24 * 3600
 
 _cache: Dict[str, Any] = {"rows": [], "loaded_at": 0.0}
+_master_lock = threading.Lock()
 
 
 def _parse_expiry_ms(expiry: Any) -> Optional[int]:
@@ -39,30 +41,35 @@ def _parse_expiry_ms(expiry: Any) -> Optional[int]:
 
 
 def ensure_instrument_master(force: bool = False) -> List[Dict[str, Any]]:
+    """Load Upstox complete master once; concurrent callers share one load."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     now = time.time()
     if not force and _cache["rows"] and now - float(_cache["loaded_at"]) < MAX_AGE_SEC:
         return _cache["rows"]
-    if not force and MASTER_PATH.exists() and now - MASTER_PATH.stat().st_mtime < MAX_AGE_SEC:
-        rows = json.loads(MASTER_PATH.read_text(encoding="utf-8"))
+    with _master_lock:
+        now = time.time()
+        if not force and _cache["rows"] and now - float(_cache["loaded_at"]) < MAX_AGE_SEC:
+            return _cache["rows"]
+        if not force and MASTER_PATH.exists() and now - MASTER_PATH.stat().st_mtime < MAX_AGE_SEC:
+            rows = json.loads(MASTER_PATH.read_text(encoding="utf-8"))
+            _cache["rows"] = rows
+            _cache["loaded_at"] = now
+            return rows
+
+        logger.info("Downloading Upstox instrument master…")
+        resp = requests.get(COMPLETE_URL, timeout=120)
+        resp.raise_for_status()
+        raw = resp.content
+        if COMPLETE_URL.endswith(".gz") or raw[:2] == b"\x1f\x8b":
+            text = gzip.decompress(raw).decode("utf-8")
+        else:
+            text = raw.decode("utf-8")
+        rows = json.loads(text)
+        MASTER_PATH.write_text(json.dumps(rows), encoding="utf-8")
         _cache["rows"] = rows
         _cache["loaded_at"] = now
+        logger.info("Instrument master loaded: %s rows", len(rows))
         return rows
-
-    logger.info("Downloading Upstox instrument master…")
-    resp = requests.get(COMPLETE_URL, timeout=120)
-    resp.raise_for_status()
-    raw = resp.content
-    if COMPLETE_URL.endswith(".gz") or raw[:2] == b"\x1f\x8b":
-        text = gzip.decompress(raw).decode("utf-8")
-    else:
-        text = raw.decode("utf-8")
-    rows = json.loads(text)
-    MASTER_PATH.write_text(json.dumps(rows), encoding="utf-8")
-    _cache["rows"] = rows
-    _cache["loaded_at"] = now
-    logger.info("Instrument master loaded: %s rows", len(rows))
-    return rows
 
 
 def _match_name(row: Dict[str, Any], symbol: str) -> bool:
