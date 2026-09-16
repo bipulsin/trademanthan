@@ -243,7 +243,7 @@
 
   const SIDE_TIPS = {
     "BEAR CALL": [
-      "(when William%R is OverBought Above -5 / -1)",
+      "(when William%R is OverBought Above -1)",
       "WHEN - EMA9 crosses below both EMA30 & EMA100 (EMA30 can be above or below EMA100)",
       "When the LOW of the candle breaches (10% rule) then create the Bear CALL Spread. PROVIDED the candle size is less than 1.5%",
       "Higher Delta SELL - Lower Delta BUY - example",
@@ -255,7 +255,7 @@
       "Extreme SL - 3x of the Sell PE price, placed as GTT/Forever order",
     ],
     "BULL PUT": [
-      "when William%R is Oversold below -95 / -99",
+      "when William%R is Oversold below -99",
       "WHEN - EMA9 crosses above both EMA30 & EMA100 (EMA30 can be above or below EMA100)",
       "When the High of the candle breaches (10% rule) then create the BULL PUT Spread. PROVIDED the candle size is less than 1.5%",
       "Higher Delta SELL - Lower Delta BUY - example",
@@ -449,13 +449,18 @@
     return pinned.concat(rest);
   }
 
-  function symbolCell(r) {
+  function symbolCell(r, opts) {
     const name = esc(r.symbol || "—");
-    if (!isIndexRow(r)) return name;
+    const caution =
+      opts && opts.caution && r.arm_caution
+        ? '<span class="so-arm-caution" title="EMA arm caution — review entry">●</span>'
+        : "";
+    const body = caution ? caution + name : name;
+    if (!isIndexRow(r)) return body;
     return (
       '<span class="so-index-sym" title="Index FUT">' +
       '<span class="so-index-arrow" aria-hidden="true"></span>' +
-      name +
+      body +
       "</span>"
     );
   }
@@ -846,7 +851,7 @@
     return `
       <tr${isIndexRow(r) ? ' class="so-index-row"' : ""}>
         <td>${esc(when)}</td>
-        <td>${symbolCell(r)} ${modeChip(r.trade_mode)}</td>
+        <td>${symbolCell(r, { caution: true })} ${modeChip(r.trade_mode)}</td>
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-tight">${strikeLine("Sell", r.user_sell_strike, r.side)}<br>${strikeLine("Buy", r.user_buy_strike, r.side)}</td>
@@ -869,14 +874,7 @@
     const when = r.date_traded || r.armed_at || "";
     const summary =
       '<span class="so-mcard-time">' + hourOnlyLabel(when) + "</span>" +
-      '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
-      modeChip(r.trade_mode) +
-      '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>";
-    const details =
-      detailRow("Date traded", esc(formatDateTimeAmPm(when))) +
-      detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
-      detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
-      detailRow("Costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
+      '<span class="so-mcard-sym">' + symbolCell(r, { caution: true }) + "</span>" +
       detailRow("LTP", num(r.sell_ltp) + "<br>" + num(r.buy_ltp)) +
       detailRow("P&amp;L ₹", '<span class="so-executed-pnl ' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>") +
       detailRow("Hard stop", '<span class="so-hs-cell">' + num(r.hard_stop) + hsBox + "</span>") +

@@ -7,7 +7,7 @@ walks the same 11:15 / 13:15 / 15:15 IST EMA clock as the live scheduler.
 ChartInk ``williamsr`` (if present) is ignored. Side comes from Upstox WR(280)
 on completed 2h bars ending at/before each trigger:
 
-    WR > -3 → BEAR CALL; WR < -97 → BULL PUT; else discard
+    WR > -1 → BEAR CALL; WR < -99 → BULL PUT; else discard
 
 Arming uses 2h EMA9/30/100 after the trigger. Active rows lose EMA → Executed
 (invalidate remark), or auto-expire after 72h from armed_at. Remaining Active
@@ -42,7 +42,6 @@ from backend.services.market_holiday import should_skip_scheduled_market_jobs_is
 from backend.services.stock_option_signals import (
     EMA_SLOW,
     FETCH_SLEEP_SEC,
-    INVALIDATE_REMARKS,
     STATUS_ACTIVE,
     STATUS_EXECUTED,
     STATUS_RADAR,
@@ -549,6 +548,9 @@ def simulate(
                 snap["ema30"],
                 snap["ema100"],
                 sig["trade_submitted"],
+                prev_ema9=sig.get("ema9"),
+                prev_ema30=sig.get("ema30"),
+                prev_ema100=sig.get("ema100"),
             )
             if snap["ema9"] is not None:
                 sig["ema9"] = snap["ema9"]
@@ -562,10 +564,11 @@ def simulate(
                 sig["status"] = STATUS_ACTIVE
                 if sig.get("armed_at") is None:
                     sig["armed_at"] = tick
-            elif action == "invalidate":
-                sig["status"] = STATUS_EXECUTED
-                sig["remarks"] = INVALIDATE_REMARKS
-                open_by_sym.pop(sym, None)
+            elif action == "demote":
+                sig["status"] = STATUS_RADAR
+                sig["armed_at"] = None
+                sig["remarks"] = "Demoted to Radar: EMA hold failed after arm"
+                sig["arm_caution"] = True
 
     return signals, webhook_groups, stats
 

@@ -7,7 +7,7 @@ end is at or before trigger_at (never a later bar):
 
     %R = (Highest High(280) - Close) / (Highest High(280) - Lowest Low(280)) * -100
 
-Gates: WR > -3 → BEAR CALL; WR < -97 → BULL PUT; else REJECTED.
+Gates: WR > -1 → BEAR CALL; WR < -99 → BULL PUT; else REJECTED.
 Rows are walked in trigger-time order per symbol so an open Radar/Active row
 still blocks a later trigger. EMA arm/invalidate and 72h Active expiry use the
 existing helpers. User-submitted Executed rows (both costs filled) are left
@@ -294,6 +294,9 @@ def replay_symbol(
             snap.get("ema30"),
             snap.get("ema100"),
             False,
+            prev_ema9=open_row.get("ema9"),
+            prev_ema30=open_row.get("ema30"),
+            prev_ema100=open_row.get("ema100"),
         )
         if snap.get("ema9") is not None:
             open_row["ema9"] = snap["ema9"]
@@ -306,15 +309,11 @@ def replay_symbol(
             open_row["status"] = STATUS_ACTIVE
             if open_row.get("armed_at") is None:
                 open_row["armed_at"] = tick
-        elif action == "invalidate":
-            dest = invalidate_outcome(
-                open_row.get("armed_at"),
-                open_row.get("sell_strike"),
-                open_row.get("buy_strike"),
-            )
-            open_row["status"] = dest
-            open_row["remarks"] = INVALIDATE_REMARKS
-            open_row = None
+        elif action == "demote":
+            open_row["status"] = STATUS_RADAR
+            open_row["armed_at"] = None
+            open_row["remarks"] = "Demoted to Radar: EMA hold failed after arm"
+            open_row["arm_caution"] = True
 
     if open_row is not None and open_row.get("status") == STATUS_ACTIVE:
         apply_expiry(open_row, asof)
@@ -514,8 +513,8 @@ def main() -> None:
                 flipped += 1
 
     after = counts(rows)
-    gate_bear = sum(1 for r in rows if r.get("new_wr") is not None and r["new_wr"] > -3)
-    gate_bull = sum(1 for r in rows if r.get("new_wr") is not None and r["new_wr"] < -97)
+    gate_bear = sum(1 for r in rows if r.get("new_wr") is not None and r["new_wr"] > -1)
+    gate_bull = sum(1 for r in rows if r.get("new_wr") is not None and r["new_wr"] < -99)
     sample = next((r for r in rows if r["id"] == 423), None)
     summary = {
         "period": WR_PERIOD,
@@ -528,8 +527,8 @@ def main() -> None:
         "ignored_open_row": ignored,
         "kept_user_submitted": kept_user,
         "symbols_without_bars": no_bars,
-        "gate_bear_gt_m3": gate_bear,
-        "gate_bull_lt_m97": gate_bull,
+        "gate_bear_gt_m1": gate_bear,
+        "gate_bull_lt_m99": gate_bull,
         "adanient_423": None
         if sample is None
         else {

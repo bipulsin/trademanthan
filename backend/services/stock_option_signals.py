@@ -1,7 +1,10 @@
-"""Stock Options algo: ChartInk webhook ingest, Upstox WR(280), 2h EMA arm/invalidate.
+"""Stock Options algo: ChartInk webhook ingest, Upstox WR(280), 2h EMA arm/demote.
 
 Permanent indices NIFTY/BANKNIFTY (arbitrage_master): always on Radar, no WR gate,
-arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads, re-seed Radar after Executed.
+arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads; Active→Radar demote on hold fail.
+
+Stocks: WR only for Radar entry (WR > -1 BEAR / WR < -99 BULL); Radar→Active requires
+ema_condition_holds(side) AND a fresh 1-candle EMA9 cross matching that WR side.
 """
 from __future__ import annotations
 
@@ -50,8 +53,9 @@ _MONTH_NUM = {
 _MONTH_ABBR = {v: k for k, v in _MONTH_NUM.items()}
 
 WR_PERIOD = 280
-WR_BEAR_GT = -3.0
-WR_BULL_LT = -97.0
+WR_BEAR_GT = -1.0
+WR_BULL_LT = -99.0
+DEMOTE_REMARKS = "Demoted to Radar: EMA hold failed after arm"
 DELTA_SELL = 28.0
 DELTA_BUY = 18.0
 # Permanent index underlyings (arbitrage_master): no WR gate; EMA cross to arm.
@@ -105,6 +109,7 @@ def ensure_stock_option_tables() -> None:
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS contract_mmm_yyyy TEXT",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS ema_fetch_ok BOOLEAN",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER'",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS arm_caution BOOLEAN NOT NULL DEFAULT FALSE",
         ):
             conn.execute(text(stmt))
         if _CONTRACT_MIGRATION.is_file():
@@ -344,7 +349,7 @@ def decode_raw_payload(body: bytes) -> Tuple[Any, Dict[str, Any]]:
 
 
 def side_from_williamsr(williamsr: Any) -> Optional[str]:
-    """> -3 → BEAR CALL; < -97 → BULL PUT. -3 and -97 themselves do not qualify."""
+    """> -1 → BEAR CALL; < -99 → BULL PUT. -1 and -99 themselves do not qualify."""
     try:
         wr = float(williamsr)
     except (TypeError, ValueError):
@@ -519,12 +524,14 @@ def detect_ema_cross_side(
     curr_ema30: Any,
     curr_ema100: Any,
 ) -> Optional[str]:
-    """Index arm side from EMA9 cross vs EMA30+EMA100 on consecutive completed 2h bars.
+    """EMA9 cross vs EMA30+EMA100 on consecutive completed 2h bars (1-candle lookback).
 
-    BULL PUT: previous bar EMA9 was *not* above both; current bar EMA9 is *strictly*
-    above both EMA30 and EMA100.
+    Finish must be strictly below both (BEAR) or above both (BULL) — EMA9 must not
+    sit between EMA30 and EMA100 on the current bar.
+
+    BULL PUT: previous bar EMA9 was *not* above both; current is *strictly* above both.
     BEAR CALL: previous bar EMA9 was *not* below both; current is *strictly* below both.
-    Hold (condition already true on previous bar) does not qualify — that is stocks only.
+    Hold already true on the previous bar does not qualify as a fresh cross.
     """
     try:
         p9, p30, p100 = float(prev_ema9), float(prev_ema30), float(prev_ema100)
@@ -542,6 +549,57 @@ def detect_ema_cross_side(
     return None
 
 
+def next_stock_ema_action(
+    status: str,
+    side: Optional[str],
+    prev_ema9: Any,
+    prev_ema30: Any,
+    prev_ema100: Any,
+    curr_ema9: Any,
+    curr_ema30: Any,
+    curr_ema100: Any,
+    trade_submitted: bool,
+) -> str:
+    """Stock path: arm | demote | hold.
+
+    Radar→Active only when ``ema_condition_holds(side)`` on the latest bar **and**
+    a fresh 1-candle cross matches the existing WR-derived ``side`` (no reverse flip).
+    Active (not submitted) → demote to Radar when hold fails.
+    Incomplete EMAs never arm or demote.
+    """
+    st = (status or "").strip().lower()
+    incomplete = any(
+        v is None
+        for v in (
+            prev_ema9,
+            prev_ema30,
+            prev_ema100,
+            curr_ema9,
+            curr_ema30,
+            curr_ema100,
+        )
+    )
+    if incomplete:
+        return "hold"
+    holds = ema_condition_holds(side, curr_ema9, curr_ema30, curr_ema100)
+    if st == "radar":
+        if not holds or not side:
+            return "hold"
+        crossed = detect_ema_cross_side(
+            prev_ema9, prev_ema30, prev_ema100, curr_ema9, curr_ema30, curr_ema100
+        )
+        if crossed == side:
+            return "arm"
+        return "hold"
+    if st == "active":
+        if trade_submitted:
+            return "hold"
+        if not holds:
+            return "demote"
+        return "hold"
+    return "hold"
+
+
 def next_ema_action(
     status: str,
     side: Optional[str],
@@ -549,25 +607,37 @@ def next_ema_action(
     ema30: Any,
     ema100: Any,
     trade_submitted: bool,
+    *,
+    prev_ema9: Any = None,
+    prev_ema30: Any = None,
+    prev_ema100: Any = None,
 ) -> str:
-    """Stock path: arm | invalidate | hold when EMA *condition holds* (not cross).
+    """Compat wrapper: prefer ``next_stock_ema_action`` with prev+curr snaps.
 
-    Incomplete EMAs never arm or invalidate. Indices use ``next_index_ema_action``.
+    Without prev snaps, Radar never arms (hold-only is insufficient); Active still
+    demotes when the current bar fails ``ema_condition_holds``.
     """
-    st = (status or "").strip().lower()
-    incomplete = ema9 is None or ema30 is None or ema100 is None
-    holds = (not incomplete) and ema_condition_holds(side, ema9, ema30, ema100)
-    if st == "radar":
-        if holds:
-            return "arm"
-        return "hold"
-    if st == "active":
-        if trade_submitted or incomplete:
+    if prev_ema9 is None or prev_ema30 is None or prev_ema100 is None:
+        st = (status or "").strip().lower()
+        incomplete = ema9 is None or ema30 is None or ema100 is None
+        if incomplete:
             return "hold"
-        if not holds:
-            return "invalidate"
+        if st == "active" and not trade_submitted:
+            if not ema_condition_holds(side, ema9, ema30, ema100):
+                return "demote"
+            return "hold"
         return "hold"
-    return "hold"
+    return next_stock_ema_action(
+        status,
+        side,
+        prev_ema9,
+        prev_ema30,
+        prev_ema100,
+        ema9,
+        ema30,
+        ema100,
+        trade_submitted,
+    )
 
 
 def next_index_ema_action(
@@ -581,7 +651,7 @@ def next_index_ema_action(
     curr_ema100: Any,
     trade_submitted: bool,
 ) -> Tuple[str, Optional[str]]:
-    """Index path: Radar arms only on EMA *cross*; Active invalidates when hold fails.
+    """Index path: Radar arms only on EMA *cross*; Active demotes when hold fails.
 
     Returns ``(action, side_on_arm)``. ``side_on_arm`` is set when arming from Radar
     (may be blank before arm). Incomplete prev/curr EMAs → hold.
@@ -611,7 +681,7 @@ def next_index_ema_action(
         if trade_submitted:
             return "hold", None
         if not ema_condition_holds(side, curr_ema9, curr_ema30, curr_ema100):
-            return "invalidate", None
+            return "demote", None
         return "hold", None
     return "hold", None
 
@@ -2420,17 +2490,102 @@ def expire_stale_active(now: Optional[datetime] = None) -> int:
         db.close()
 
 
+def _flag_executed_arm_caution(now: Optional[datetime] = None) -> int:
+    """Set arm_caution on Executed (not Completed) rows that still need review.
+
+    Covers: (1) legacy invalidate-without-trade rows; (2) Executed with entry costs
+    but no exit (not Trade Report / Completed) whose stored EMAs no longer support
+    the side. Does not invent status changes.
+    """
+    now_naive = now_ist_second() if now is None else naive_ist(now)
+    db = SessionLocal()
+    n = 0
+    try:
+        # Legacy false-arm → Executed (invalidate remarks) without a submitted trade.
+        r1 = db.execute(
+            text(
+                """
+                UPDATE stock_option_signals
+                SET arm_caution = TRUE, updated_at = :ts
+                WHERE status = :executed
+                  AND arm_caution IS NOT TRUE
+                  AND remarks = :inv
+                  AND date_traded IS NULL
+                  AND sell_cost IS NULL
+                  AND buy_cost IS NULL
+                """
+            ),
+            {
+                "ts": now_naive,
+                "executed": STATUS_EXECUTED,
+                "inv": INVALIDATE_REMARKS,
+            },
+        )
+        n += int(r1.rowcount or 0)
+
+        rows = db.execute(
+            text(
+                """
+                SELECT id, side, ema9, ema30, ema100
+                FROM stock_option_signals
+                WHERE status = :executed
+                  AND exit_date IS NULL
+                  AND sell_cost IS NOT NULL
+                  AND buy_cost IS NOT NULL
+                  AND arm_caution IS NOT TRUE
+                  AND ema9 IS NOT NULL
+                  AND ema30 IS NOT NULL
+                  AND ema100 IS NOT NULL
+                """
+            ),
+            {"executed": STATUS_EXECUTED},
+        ).mappings().all()
+        for row in rows:
+            if ema_condition_holds(
+                row.get("side"), row.get("ema9"), row.get("ema30"), row.get("ema100")
+            ):
+                continue
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET arm_caution = TRUE, updated_at = :ts
+                    WHERE id = :id AND status = :executed
+                    """
+                ),
+                {"ts": now_naive, "id": row["id"], "executed": STATUS_EXECUTED},
+            )
+            n += 1
+        db.commit()
+        if n:
+            logger.info("stock_option arm_caution flagged on %s Executed row(s)", n)
+        return n
+    except Exception:
+        db.rollback()
+        logger.exception("stock_option arm_caution flag failed")
+        return 0
+    finally:
+        db.close()
+
+
 def run_ema_tick(
     now: Optional[datetime] = None,
     *,
     only_fetch_failed: bool = False,
 ) -> Dict[str, Any]:
-    """2h job: seed index Radar, expire stale Active, update EMAs, arm, invalidate, fill spreads.
+    """2h job: seed index Radar, expire stale Active, update EMAs, arm, demote, fill spreads.
 
-    NIFTY/BANKNIFTY: no WR gate; Radar→Active only on EMA9 cross vs EMA30+EMA100.
-    Stocks: WR side already set; arm when EMA condition holds.
+    NIFTY/BANKNIFTY: no WR gate; Radar→Active only on EMA9 cross vs EMA30+EMA100;
+    Active (not submitted) demotes to Radar when hold fails.
+    Stocks: WR side already set at Radar entry; arm when hold **and** fresh 1-candle
+    cross matches that side; Active demotes to Radar when hold fails.
 
-    When ``only_fetch_failed`` is True (off-schedule +10m retry), only Radar/Active
+    EMA reliability: failed fetches set ``ema_fetch_ok=FALSE`` (UI ⚠) and preserve
+    last good EMAs; scheduler schedules +10m (then chained) retries for those rows
+    only. Tick order pins indices first, then fetch-failed Active, then other Active,
+    then Radar — so open rows are not starved by late Upstox empties.
+
+    When ``only_fetch_failed`` is True (off-schedule retry), only Radar/Active
     rows with ``ema_fetch_ok=FALSE`` are refreshed; seed/expire/LTP refresh are skipped.
     """
     ensure_stock_option_tables()
@@ -2457,13 +2612,14 @@ def run_ema_tick(
             "open_rows": 0,
             "updated": 0,
             "armed": 0,
-            "invalidated": 0,
+            "demoted": 0,
+            "cautioned": 0,
             "ema_fetch_failed": 0,
             "expired_72h": 0,
             "index_radar_seeded": 0,
             "ltp_refreshed": 0,
         }
-    updated = armed = invalidated = failed = 0
+    updated = armed = demoted = failed = 0
     for row in rows:
         ik = (row.get("instrument_key") or "").strip()
         if not ik:
@@ -2566,7 +2722,7 @@ def run_ema_tick(
             time.sleep(FETCH_SLEEP_SEC)
             continue
         index_sym = is_index_symbol(row.get("symbol"))
-        pair = ema_snapshot_pair(closes) if index_sym else None
+        pair = ema_snapshot_pair(closes)
         wr_now = None
         if not index_sym:
             try:
@@ -2594,54 +2750,63 @@ def run_ema_tick(
                     submitted,
                 )
         else:
-            action = next_ema_action(
-                row.get("status") or "",
-                row.get("side"),
-                snap["ema9"],
-                snap["ema30"],
-                snap["ema100"],
-                submitted,
-            )
+            if pair is None:
+                action = "hold"
+            else:
+                prev, curr = pair
+                snap = curr
+                action = next_stock_ema_action(
+                    row.get("status") or "",
+                    row.get("side"),
+                    prev["ema9"],
+                    prev["ema30"],
+                    prev["ema100"],
+                    curr["ema9"],
+                    curr["ema30"],
+                    curr["ema100"],
+                    submitted,
+                )
         db = SessionLocal()
         try:
-            if action == "invalidate":
-                dest = invalidate_outcome(
-                    row.get("armed_at"),
-                    row.get("sell_strike"),
-                    row.get("buy_strike"),
-                )
-                # Keep suggested strikes when both arm date and strikes exist.
-                # Never wipe them, and never invent replacements. No LTP snapshot
-                # unless one was already stored at arm time.
+            if action == "demote":
                 db.execute(
                     text(
                         """
                         UPDATE stock_option_signals
-                        SET status = :dest,
+                        SET status = :radar,
+                            armed_at = NULL,
+                            contract_mmm_yyyy = NULL,
+                            sell_strike = NULL,
+                            sell_delta = NULL,
+                            sell_instrument_key = NULL,
+                            buy_strike = NULL,
+                            buy_delta = NULL,
+                            buy_instrument_key = NULL,
                             ema9 = :ema9, ema30 = :ema30, ema100 = :ema100,
                             ema_updated_at = :ts,
                             ema_fetch_ok = TRUE,
                             williamsr = COALESCE(:williamsr, williamsr),
+                            arm_caution = TRUE,
                             remarks = :remarks,
                             updated_at = :ts
                         WHERE id = :id AND status = :active AND date_traded IS NULL
+                          AND sell_cost IS NULL AND buy_cost IS NULL
                         """
                     ),
                     {
-                        "dest": dest,
+                        "radar": STATUS_RADAR,
                         "ema9": snap["ema9"],
                         "ema30": snap["ema30"],
                         "ema100": snap["ema100"],
                         "williamsr": wr_now,
                         "ts": now_naive,
-                        "remarks": INVALIDATE_REMARKS,
+                        "remarks": DEMOTE_REMARKS,
                         "id": row["id"],
                         "active": STATUS_ACTIVE,
                     },
                 )
-                invalidated += 1
-                if index_sym:
-                    ensure_index_radar_row(db, row.get("symbol") or "", now=now_naive)
+                demoted += 1
+                row["status"] = STATUS_RADAR
             elif action == "arm":
                 contract = resolve_contract_mmm_yyyy(
                     row.get("symbol"), now_naive, db=db
@@ -2659,6 +2824,8 @@ def run_ema_tick(
                             ema_updated_at = :ts,
                             ema_fetch_ok = TRUE,
                             williamsr = COALESCE(:williamsr, williamsr),
+                            arm_caution = FALSE,
+                            remarks = NULL,
                             updated_at = :ts
                         WHERE id = :id AND status = :radar
                         """
@@ -2723,7 +2890,7 @@ def run_ema_tick(
         finally:
             db.close()
 
-        if action != "invalidate" and (
+        if action != "demote" and (
             action == "arm"
             or (
                 (row.get("status") or "").strip().lower() == "active"
@@ -2735,6 +2902,7 @@ def run_ema_tick(
             _fill_spreads_if_blank(row, now_naive)
         time.sleep(FETCH_SLEEP_SEC)
 
+    cautioned = 0 if only_fetch_failed else _flag_executed_arm_caution(now_naive)
     ltp_n = 0 if only_fetch_failed else refresh_executed_ltps(now_naive)
     return {
         "ok": True,
@@ -2742,12 +2910,14 @@ def run_ema_tick(
         "open_rows": len(rows),
         "updated": updated,
         "armed": armed,
-        "invalidated": invalidated,
+        "demoted": demoted,
+        "cautioned": cautioned,
         "ema_fetch_failed": failed,
         "expired_72h": expired,
         "index_radar_seeded": seeded,
         "ltp_refreshed": ltp_n,
     }
+
 
 
 def _sync_executed_ws_ltp_subscriptions() -> None:
@@ -2943,6 +3113,7 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "hard_stop": hs,
         "hard_stop_placed": bool(r.get("hard_stop_placed")),
         "remarks": r.get("remarks"),
+        "arm_caution": bool(r.get("arm_caution")),
     }
 
 
@@ -2982,7 +3153,7 @@ def list_workspace() -> Dict[str, Any]:
                 """
                 SELECT id, symbol, williamsr, instrument_key, status, side,
                        trigger_at, armed_at, contract_mmm_yyyy, ema9, ema30, ema100,
-                       ema_updated_at, ema_fetch_ok,
+                       ema_updated_at, ema_fetch_ok, arm_caution,
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,

@@ -1158,6 +1158,17 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
     cursor: help;
 }
 
+.so-arm-caution {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    margin-right: 0.35rem;
+    border-radius: 50%;
+    background: #e6b800;
+    vertical-align: 0.05em;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
 /* Light theme — readable contrast (mirrors desktop) */
 body.stock-options-page[data-theme="light"] {
     --bg0: #f4f7f5;

@@ -4,8 +4,15 @@ Also keeps Executed option instrument keys on the shared Upstox WS (1m sync from
 09:30 IST after Breakfast) so sell/buy LTPs update live; 2h
 ``refresh_executed_ltps`` remains the REST fallback.
 
-When a 2h tick leaves rows with ``ema_fetch_ok=FALSE``, schedules a one-shot
-retry ~10 minutes later for those symbols only.
+EMA non-update guardrails:
+- Failed fetches set ``ema_fetch_ok=FALSE`` (UI ⚠) without wiping last good EMAs.
+- After a main tick with failures, schedule +10m retry for failed rows only; if that
+  retry still fails, chain another +10m (up to ``EMA_RETRY_CHAIN_MAX``) while the
+  session is open — same path for stocks and NIFTY/BANKNIFTY.
+- Mid-session catch-up cron at :45 past 11/13 (and reliance on 15:45 post-market)
+  refreshes any leftover ``ema_fetch_ok=FALSE`` rows if a main :15 cycle was missed
+  or starved.
+- Tick order: indices → fetch-failed Active → Active → Radar.
 """
 from __future__ import annotations
 
@@ -29,15 +36,40 @@ IST = pytz.timezone("Asia/Kolkata")
 WS_LTP_SESSION_START = dt_time(9, 30)
 WS_LTP_SESSION_END = dt_time(15, 35)
 EMA_RETRY_DELAY = timedelta(minutes=10)
+EMA_RETRY_CHAIN_MAX = 3
 EMA_RETRY_JOB_ID = "stock_option_ema_retry"
+EMA_CATCHUP_JOB_ID = "stock_option_ema_catchup"
 
 _scheduler: BackgroundScheduler | None = None
+_ema_retry_chain: int = 0
+
+
+def _within_ema_retry_window(now: datetime | None = None) -> bool:
+    """Allow chained EMA retries through post-market catch-up window."""
+    t = now or datetime.now(IST)
+    if t.tzinfo is None:
+        t = IST.localize(t)
+    else:
+        t = t.astimezone(IST)
+    tt = t.time()
+    return dt_time(9, 20) <= tt <= dt_time(16, 15)
 
 
 def _schedule_ema_fetch_retry(*, delay: timedelta = EMA_RETRY_DELAY) -> None:
     """Enqueue a one-shot retry for rows left with ema_fetch_ok=FALSE."""
+    global _ema_retry_chain
     if _scheduler is None:
         logger.warning("stock_option ema retry: scheduler not started; skip schedule")
+        return
+    if not _within_ema_retry_window():
+        logger.info("stock_option ema retry: outside session window; skip schedule")
+        _ema_retry_chain = 0
+        return
+    if _ema_retry_chain >= EMA_RETRY_CHAIN_MAX:
+        logger.info(
+            "stock_option ema retry: chain cap %s reached; wait for next main/catch-up tick",
+            EMA_RETRY_CHAIN_MAX,
+        )
         return
     run_at = datetime.now(IST) + delay
     try:
@@ -51,16 +83,23 @@ def _schedule_ema_fetch_retry(*, delay: timedelta = EMA_RETRY_DELAY) -> None:
             coalesce=True,
             misfire_grace_time=300,
         )
-        logger.info("stock_option ema retry scheduled for %s IST", run_at.isoformat())
+        logger.info(
+            "stock_option ema retry scheduled for %s IST (chain=%s/%s)",
+            run_at.isoformat(),
+            _ema_retry_chain + 1,
+            EMA_RETRY_CHAIN_MAX,
+        )
     except Exception:
         logger.exception("stock_option ema retry schedule failed")
 
 
 def _tick() -> None:
+    global _ema_retry_chain
     if should_skip_scheduled_market_jobs_ist():
         logger.info("stock_option ema: skipped (weekend/holiday)")
         return
     try:
+        _ema_retry_chain = 0
         out = run_ema_tick()
         logger.info("stock_option ema tick: %s", out)
         if int(out.get("ema_fetch_failed") or 0) > 0:
@@ -70,14 +109,37 @@ def _tick() -> None:
 
 
 def _retry_tick() -> None:
+    global _ema_retry_chain
     if should_skip_scheduled_market_jobs_ist():
         logger.info("stock_option ema retry: skipped (weekend/holiday)")
         return
     try:
+        _ema_retry_chain += 1
         out = run_ema_tick(only_fetch_failed=True)
         logger.info("stock_option ema retry tick: %s", out)
+        if int(out.get("ema_fetch_failed") or 0) > 0:
+            _schedule_ema_fetch_retry()
+        else:
+            _ema_retry_chain = 0
     except Exception:
         logger.exception("stock_option ema retry tick failed")
+
+
+def _catchup_tick() -> None:
+    """Mid-session backup: refresh any leftover ema_fetch_ok=FALSE open rows."""
+    global _ema_retry_chain
+    if should_skip_scheduled_market_jobs_ist():
+        logger.info("stock_option ema catch-up: skipped (weekend/holiday)")
+        return
+    try:
+        out = run_ema_tick(only_fetch_failed=True)
+        logger.info("stock_option ema catch-up tick: %s", out)
+        if int(out.get("ema_fetch_failed") or 0) > 0:
+            _schedule_ema_fetch_retry()
+        else:
+            _ema_retry_chain = 0
+    except Exception:
+        logger.exception("stock_option ema catch-up tick failed")
 
 
 def _within_ws_ltp_session(now: datetime | None = None) -> bool:
@@ -148,6 +210,21 @@ def start_stock_option_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Backup if a main :15 cycle left fetch failures (or was starved): catch-up at :45.
+    sch.add_job(
+        _catchup_tick,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour="11,13",
+            minute=45,
+            timezone="Asia/Kolkata",
+        ),
+        id=EMA_CATCHUP_JOB_ID,
+        name="Stock Options EMA catch-up 11:45/13:45",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # Live Executed option LTPs via shared Upstox WS from 09:30 IST (after Breakfast).
     sch.add_job(
         _ws_ltp_sync,
@@ -180,8 +257,8 @@ def start_stock_option_scheduler() -> None:
         logger.exception("stock_option_ws_ltp initial sync failed")
     logger.info(
         "Stock Options scheduler started "
-        "(EMA 11:15/13:15/15:15/15:45 + fetch-fail +10m retry + "
-        "Executed WS LTP from 09:30 IST)"
+        "(EMA 11:15/13:15/15:15/15:45 + catch-up 11:45/13:45 + "
+        "fetch-fail +10m chained retry + Executed WS LTP from 09:30 IST)"
     )
 
 

@@ -34,6 +34,7 @@ from backend.services.stock_option_signals import (
     _row_public,
     next_ema_action,
     next_index_ema_action,
+    next_stock_ema_action,
     parse_chartink_symbols,
     parse_fut_trading_symbol_expiry,
     pick_nearest_delta,
@@ -48,15 +49,18 @@ IST = pytz.timezone("Asia/Kolkata")
 
 
 def test_williamsr_gate_bounds_excluded():
-    assert side_from_williamsr(-2.9) == SIDE_BEAR
+    assert side_from_williamsr(-0.9) == SIDE_BEAR
     assert side_from_williamsr(0) == SIDE_BEAR
-    assert side_from_williamsr(-3) is None
-    assert side_from_williamsr(-3.0) is None
+    assert side_from_williamsr(-1) is None
+    assert side_from_williamsr(-1.0) is None
     assert side_from_williamsr(-50) is None
-    assert side_from_williamsr(-97) is None
-    assert side_from_williamsr(-97.1) == SIDE_BULL
+    assert side_from_williamsr(-99) is None
+    assert side_from_williamsr(-99.1) == SIDE_BULL
     assert side_from_williamsr(-100) == SIDE_BULL
     assert side_from_williamsr("nope") is None
+    # Former -3/-97 gates no longer qualify
+    assert side_from_williamsr(-2.9) is None
+    assert side_from_williamsr(-97.1) is None
 
 
 def test_parse_columns_ignores_webhook_williamsr():
@@ -93,14 +97,14 @@ def test_williams_r_280_gate_uses_last_completed_bar():
     asof = start + timedelta(hours=2 * (WR_PERIOD - 1))
     later = asof + timedelta(hours=2)
 
-    bear = _bars(WR_PERIOD, 109.5, start)
+    bear = _bars(WR_PERIOD, 109.9, start)
     bear.append({"end": later, "high": 110.0, "low": 90.0, "close": 90.0})
     wr_bear = williams_r_at(bear, asof)
-    assert wr_bear == (110.0 - 109.5) / (110.0 - 90.0) * -100.0
+    assert wr_bear == (110.0 - 109.9) / (110.0 - 90.0) * -100.0
     assert side_from_williamsr(wr_bear) == SIDE_BEAR
     assert williams_r_at(bear, asof) != williams_r_at(bear, later)
 
-    bull = _bars(WR_PERIOD, 90.2, start)
+    bull = _bars(WR_PERIOD, 90.05, start)
     assert side_from_williamsr(williams_r_at(bull, asof)) == SIDE_BULL
 
     mid = _bars(WR_PERIOD, 100.0, start)
@@ -146,19 +150,61 @@ def test_active_expires_after_72h():
     assert expiry_remarks(EXPIRY_REMARKS) == EXPIRY_REMARKS
 
 
-def test_ema_arm_and_invalidate():
+def test_ema_arm_requires_fresh_cross_matching_side():
     assert ema_condition_holds(SIDE_BEAR, 90, 100, 110) is True
     assert ema_condition_holds(SIDE_BEAR, 100, 100, 90) is False
     assert ema_condition_holds(SIDE_BULL, 120, 100, 90) is True
     assert ema_condition_holds(SIDE_BULL, 90, 100, 80) is False
 
-    assert next_ema_action(STATUS_RADAR, SIDE_BEAR, 90, 100, 110, False) == "arm"
-    assert next_ema_action(STATUS_RADAR, SIDE_BEAR, 120, 100, 110, False) == "hold"
+    # Fresh BEAR cross + hold → arm
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BEAR, 105, 100, 110, 90, 100, 110, False
+        )
+        == "arm"
+    )
+    # Hold already true on prev (no fresh cross) → hold
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BEAR, 90, 100, 110, 85, 100, 110, False
+        )
+        == "hold"
+    )
+    # Hold alone without prev (compat wrapper) never arms
+    assert next_ema_action(STATUS_RADAR, SIDE_BEAR, 90, 100, 110, False) == "hold"
     assert next_ema_action(STATUS_RADAR, SIDE_BEAR, None, 100, 110, False) == "hold"
-    assert next_ema_action(STATUS_ACTIVE, SIDE_BEAR, 120, 100, 110, False) == "invalidate"
-    assert next_ema_action(STATUS_ACTIVE, SIDE_BEAR, 120, 100, 110, True) == "hold"
-    assert next_ema_action(STATUS_ACTIVE, SIDE_BULL, 80, 100, 110, False) == "invalidate"
-    assert next_ema_action(STATUS_ACTIVE, SIDE_BULL, 130, 100, 110, False) == "hold"
+    # Cross opposite to WR side → no arm / no flip
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BULL, 105, 100, 110, 90, 100, 110, False
+        )
+        == "hold"
+    )
+    # Active hold fail → demote
+    assert (
+        next_stock_ema_action(
+            STATUS_ACTIVE, SIDE_BEAR, 90, 100, 110, 120, 100, 110, False
+        )
+        == "demote"
+    )
+    assert (
+        next_stock_ema_action(
+            STATUS_ACTIVE, SIDE_BEAR, 90, 100, 110, 120, 100, 110, True
+        )
+        == "hold"
+    )
+    assert (
+        next_stock_ema_action(
+            STATUS_ACTIVE, SIDE_BULL, 120, 100, 90, 80, 100, 90, False
+        )
+        == "demote"
+    )
+    assert (
+        next_stock_ema_action(
+            STATUS_ACTIVE, SIDE_BULL, 95, 100, 90, 120, 100, 90, False
+        )
+        == "hold"
+    )
 
 
 def test_index_symbols_and_delta_targets():
@@ -205,8 +251,19 @@ def test_index_ema_cross_vs_hold_bull_put():
         STATUS_RADAR, None, 120, 100, 90, 130, 100, 90, False
     )
     assert action == "hold" and side is None
-    # Stock path WOULD arm when condition merely holds
-    assert next_ema_action(STATUS_RADAR, SIDE_BULL, 130, 100, 90, False) == "arm"
+    # Stock path also requires fresh cross (not mere hold)
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BULL, 120, 100, 90, 130, 100, 90, False
+        )
+        == "hold"
+    )
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BULL, 95, 100, 90, 120, 100, 90, False
+        )
+        == "arm"
+    )
 
 
 def test_index_ema_cross_vs_hold_bear_call():
@@ -223,11 +280,22 @@ def test_index_ema_cross_vs_hold_bear_call():
         STATUS_RADAR, None, 90, 100, 110, 85, 100, 110, False
     )
     assert action == "hold" and side is None
-    assert next_ema_action(STATUS_RADAR, SIDE_BEAR, 85, 100, 110, False) == "arm"
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BEAR, 90, 100, 110, 85, 100, 110, False
+        )
+        == "hold"
+    )
+    assert (
+        next_stock_ema_action(
+            STATUS_RADAR, SIDE_BEAR, 105, 100, 110, 90, 100, 110, False
+        )
+        == "arm"
+    )
 
 
-def test_index_active_invalidates_when_hold_fails():
-    """After arm, indices use hold-fail invalidate (same as stocks), not reverse-cross."""
+def test_index_active_demotes_when_hold_fails():
+    """After arm, indices demote to Radar when hold fails (not reverse-cross)."""
     action, side = next_index_ema_action(
         STATUS_ACTIVE, SIDE_BULL, 95, 100, 90, 120, 100, 90, False
     )
@@ -235,7 +303,7 @@ def test_index_active_invalidates_when_hold_fails():
     action, side = next_index_ema_action(
         STATUS_ACTIVE, SIDE_BULL, 120, 100, 90, 80, 100, 90, False
     )
-    assert action == "invalidate"
+    assert action == "demote"
     action, side = next_index_ema_action(
         STATUS_ACTIVE, SIDE_BEAR, 105, 100, 110, 90, 100, 110, False
     )
@@ -243,8 +311,8 @@ def test_index_active_invalidates_when_hold_fails():
     action, side = next_index_ema_action(
         STATUS_ACTIVE, SIDE_BEAR, 90, 100, 110, 120, 100, 110, False
     )
-    assert action == "invalidate"
-    # Trade submitted → never invalidate
+    assert action == "demote"
+    # Trade submitted → never demote
     action, _ = next_index_ema_action(
         STATUS_ACTIVE, SIDE_BULL, 120, 100, 90, 80, 100, 90, True
     )
@@ -254,6 +322,13 @@ def test_index_active_invalidates_when_hold_fails():
         STATUS_RADAR, None, None, 100, 90, 120, 100, 90, False
     )
     assert action == "hold"
+
+
+def test_row_public_exposes_arm_caution():
+    pub = _row_public({"symbol": "PIIND", "status": "Executed", "arm_caution": True})
+    assert pub["arm_caution"] is True
+    pub2 = _row_public({"symbol": "TCS", "status": "Radar"})
+    assert pub2["arm_caution"] is False
 
 
 def test_spread_labels_and_delta_volume_tiebreak():
