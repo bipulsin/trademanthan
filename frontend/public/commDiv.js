@@ -95,6 +95,30 @@
     return v == null || v === "" ? "—" : String(v);
   }
 
+  /** Date on first line, time below in smaller font (all datetime columns). */
+  function dtStackHtml(dt) {
+    var s = String(dt || "").trim().replace("T", " ");
+    if (!s || s === "—") return '<span class="cd-dt">—</span>';
+    var datePart = s.length >= 10 ? s.slice(0, 10) : s;
+    var timePart = "";
+    if (s.length >= 16) {
+      timePart = s.slice(11, 19);
+      if (timePart.length === 5) timePart += ":00";
+    }
+    if (!timePart) {
+      return '<span class="cd-dt"><span class="cd-dt-date">' + esc(datePart) + "</span></span>";
+    }
+    return (
+      '<span class="cd-dt">' +
+      '<span class="cd-dt-date">' +
+      esc(datePart) +
+      "</span>" +
+      '<span class="cd-dt-time">' +
+      esc(timePart) +
+      "</span></span>"
+    );
+  }
+
   function esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -273,23 +297,19 @@
       "</td><td>" +
       dirChip(r.direction) +
       "</td><td>" +
-      esc(fmt(r.div_received_at)) +
+      dtStackHtml(r.div_received_at) +
       "</td><td>" +
-      esc(fmt(r.go_received_at)) +
+      dtStackHtml(r.go_received_at) +
       "</td><td>" +
       esc(fmt(r.entry_price)) +
       "</td><td>" +
-      esc(fmt(r.trade_taken_at)) +
+      dtStackHtml(r.trade_taken_at) +
       "</td><td>" +
       esc(fmt(r.exit_price)) +
       "</td><td>" +
-      esc(fmt(r.exit_at)) +
+      dtStackHtml(r.exit_at) +
       "</td><td>" +
       pnlHtml(r.pnl) +
-      "</td><td>" +
-      esc(fmt(r.trade_mode || "PAPER")) +
-      "</td><td>" +
-      esc(fmt(r.trade_log_id)) +
       "</td><td>" +
       historyActionsHtml(r) +
       "</td></tr>"
@@ -316,15 +336,13 @@
       '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
       "</button>" +
       '<div class="cd-mcard-body" hidden>' +
-      fieldHtml("DIV", esc(fmt(r.div_received_at))) +
-      fieldHtml("GO", esc(fmt(r.go_received_at))) +
+      fieldHtml("DIV", dtStackHtml(r.div_received_at)) +
+      fieldHtml("GO", dtStackHtml(r.go_received_at)) +
       fieldHtml("Entry", esc(fmt(r.entry_price))) +
-      fieldHtml("Entry time", esc(fmt(r.trade_taken_at))) +
+      fieldHtml("Entry time", dtStackHtml(r.trade_taken_at)) +
       fieldHtml("Exit", esc(fmt(r.exit_price))) +
-      fieldHtml("Exit time", esc(fmt(r.exit_at))) +
+      fieldHtml("Exit time", dtStackHtml(r.exit_at)) +
       fieldHtml("PnL", pnlHtml(r.pnl)) +
-      fieldHtml("Mode", esc(fmt(r.trade_mode || "PAPER"))) +
-      fieldHtml("trade_log", esc(fmt(r.trade_log_id))) +
       '<div class="cd-mcard-actions">' +
       historyActionsHtml(r) +
       "</div>" +
@@ -396,7 +414,7 @@
       "<thead><tr>" +
       "<th>Symbol</th><th>Dir</th><th>DIV</th><th>GO</th>" +
       "<th>Entry</th><th>Entry time</th><th>Exit</th><th>Exit time</th>" +
-      "<th>PnL</th><th>Mode</th><th>trade_log</th><th>Actions</th>" +
+      "<th>PnL</th><th>Actions</th>" +
       "</tr></thead><tbody>" +
       rows.map(historyRowHtml).join("") +
       "</tbody></table></div></div>";
@@ -491,18 +509,22 @@
           esc(fmt(row.status)) +
           "</span></td>" +
           '<td class="cd-field-val">' +
-          esc(fmt(row.div_received_at)) +
+          dtStackHtml(row.div_received_at) +
           "</td>" +
           '<td class="cd-field-val">' +
-          esc(fmt(row.go_received_at)) +
+          dtStackHtml(row.go_received_at) +
           "</td>" +
           '<td class="cd-field-val">' +
           esc(fmt(row.entry_price)) +
-          (row.trade_taken_at ? " @ " + esc(fmt(row.trade_taken_at)) : "") +
+          (row.trade_taken_at
+            ? '<div class="cd-dt-with-price">' + dtStackHtml(row.trade_taken_at) + "</div>"
+            : "") +
           "</td>" +
           '<td class="cd-field-val">' +
           esc(fmt(row.ltp)) +
-          (row.ltp_updated_at ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>" : "") +
+          (row.ltp_updated_at
+            ? '<div class="cd-dt-with-price">' + dtStackHtml(row.ltp_updated_at) + "</div>"
+            : "") +
           "</td>" +
           "<td>" +
           activeActionHtml(row, String(row.id)) +
@@ -552,18 +574,20 @@
             "</button>" +
             '<div class="cd-mcard-body" hidden>' +
             fieldHtml("Status", '<span class="' + statusClass + '">' + esc(row.status) + "</span>") +
-            fieldHtml("DIV", esc(fmt(row.div_received_at))) +
-            fieldHtml("GO", esc(fmt(row.go_received_at))) +
+            fieldHtml("DIV", dtStackHtml(row.div_received_at)) +
+            fieldHtml("GO", dtStackHtml(row.go_received_at)) +
             fieldHtml(
               "Entry",
               esc(fmt(row.entry_price)) +
-                (row.trade_taken_at ? " @ " + esc(fmt(row.trade_taken_at)) : "")
+                (row.trade_taken_at
+                  ? '<div class="cd-dt-with-price">' + dtStackHtml(row.trade_taken_at) + "</div>"
+                  : "")
             ) +
             fieldHtml(
               "LTP",
               esc(fmt(row.ltp)) +
                 (row.ltp_updated_at
-                  ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>"
+                  ? '<div class="cd-dt-with-price">' + dtStackHtml(row.ltp_updated_at) + "</div>"
                   : "")
             ) +
             '<div class="cd-mcard-actions">' +
@@ -636,7 +660,7 @@
             dirChip(row.direction) +
             "</td>" +
             '<td class="cd-field-val">' +
-            esc(fmt(row.trade_taken_at)) +
+            dtStackHtml(row.trade_taken_at) +
             "</td>" +
             '<td class="cd-field-val">' +
             esc(fmt(row.entry_price)) +
@@ -644,7 +668,7 @@
             '<td class="cd-field-val">' +
             esc(fmt(row.ltp)) +
             (row.ltp_updated_at
-              ? ' <span class="cd-muted">' + esc(fmt(row.ltp_updated_at)) + "</span>"
+              ? '<div class="cd-dt-with-price">' + dtStackHtml(row.ltp_updated_at) + "</div>"
               : "") +
             "</td>" +
             "<td>" +
@@ -682,9 +706,15 @@
             '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
             "</button>" +
             '<div class="cd-mcard-body" hidden>' +
-            fieldHtml("Entry time", esc(fmt(row.trade_taken_at))) +
+            fieldHtml("Entry time", dtStackHtml(row.trade_taken_at)) +
             fieldHtml("Entry price", esc(fmt(row.entry_price))) +
-            fieldHtml("LTP", esc(fmt(row.ltp))) +
+            fieldHtml(
+              "LTP",
+              esc(fmt(row.ltp)) +
+                (row.ltp_updated_at
+                  ? '<div class="cd-dt-with-price">' + dtStackHtml(row.ltp_updated_at) + "</div>"
+                  : "")
+            ) +
             fieldHtml("PnL", pnlHtml(row.pnl)) +
             fieldHtml("Mode", esc(fmt(row.trade_mode || "PAPER"))) +
             '<div class="cd-mcard-actions">' +

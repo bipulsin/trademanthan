@@ -311,7 +311,38 @@ body.comm-div-page .mobile-logo {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+}
+
+.cd-dt {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.25;
+}
+
+.cd-dt-date {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.cd-dt-time {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--muted);
+}
+
+.cd-dt-with-price {
+    margin-top: 0.2rem;
+}
+
+.cd-mcard-field-val .cd-dt {
+    align-items: flex-end;
 }
 
 .cd-icon-btn {
