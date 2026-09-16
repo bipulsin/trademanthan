@@ -875,6 +875,13 @@
     const summary =
       '<span class="so-mcard-time">' + hourOnlyLabel(when) + "</span>" +
       '<span class="so-mcard-sym">' + symbolCell(r, { caution: true }) + "</span>" +
+      modeChip(r.trade_mode) +
+      '<span class="so-mcard-side">' + sideChipPlain(r.side) + "</span>";
+    const details =
+      detailRow("Date traded", esc(formatDateTimeAmPm(when))) +
+      detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
+      detailRow("Strikes", strikeLine("Sell", r.user_sell_strike, r.side) + "<br>" + strikeLine("Buy", r.user_buy_strike, r.side)) +
+      detailRow("Costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
       detailRow("LTP", num(r.sell_ltp) + "<br>" + num(r.buy_ltp)) +
       detailRow("P&amp;L ₹", '<span class="so-executed-pnl ' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>") +
       detailRow("Hard stop", '<span class="so-hs-cell">' + num(r.hard_stop) + hsBox + "</span>") +
