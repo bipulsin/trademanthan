@@ -1,4 +1,4 @@
-"""Stock Options webhook + workspace. POST /webhook/stockOption (and stockoption)."""
+"""Stock Options webhook (log-only) + workspace. POST /webhook/stockOption."""
 from __future__ import annotations
 
 import logging
@@ -147,7 +147,7 @@ async def stock_option_webhook_ping() -> JSONResponse:
                 "columns[].symbol",
                 "columns[].williamsr",
             ],
-            "williamsr": "received and logged only; side uses Upstox WR(280) on completed 2h bars",
+            "williamsr": "logged only; ChartInk no longer inserts Radar — use WR(280) scan",
         },
     )
 

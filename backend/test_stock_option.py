@@ -121,15 +121,33 @@ def test_williams_r_280_gate_uses_last_completed_bar():
     assert ohlc[0]["low"] == 9
 
 
-def test_ignore_if_radar_or_active_allow_if_only_executed():
+def test_ignore_if_open_lifecycle_allow_completed_rejected():
     assert should_insert_new_signal([]) is True
     assert should_insert_new_signal([STATUS_RADAR]) is False
     assert should_insert_new_signal([STATUS_ACTIVE]) is False
     assert should_insert_new_signal([STATUS_EXECUTED, STATUS_RADAR]) is False
-    assert should_insert_new_signal([STATUS_EXECUTED]) is True
-    assert should_insert_new_signal([STATUS_EXECUTED, STATUS_EXECUTED]) is True
+    # Executed is open lifecycle — block until Completed / Trade Report
+    assert should_insert_new_signal([STATUS_EXECUTED]) is False
+    assert should_insert_new_signal([STATUS_EXECUTED, STATUS_EXECUTED]) is False
     assert should_insert_new_signal([STATUS_REJECTED]) is True
     assert should_insert_new_signal([STATUS_COMPLETED]) is True
+    assert should_insert_new_signal([STATUS_COMPLETED, STATUS_REJECTED]) is True
+    # Index re-seed may ignore Executed
+    assert should_insert_new_signal([STATUS_EXECUTED], block_executed=False) is True
+    assert should_insert_new_signal([STATUS_RADAR], block_executed=False) is False
+
+
+def test_should_remove_radar_eod_gates():
+    from backend.services.stock_option_signals import should_remove_radar_eod
+
+    assert should_remove_radar_eod(SIDE_BULL, -4.9) is True
+    assert should_remove_radar_eod(SIDE_BULL, -5.0) is False
+    assert should_remove_radar_eod(SIDE_BULL, -50) is False
+    assert should_remove_radar_eod(SIDE_BEAR, -95.1) is True
+    assert should_remove_radar_eod(SIDE_BEAR, -95.0) is False
+    assert should_remove_radar_eod(SIDE_BEAR, -50) is False
+    assert should_remove_radar_eod(SIDE_BEAR, None) is False
+    assert should_remove_radar_eod(None, -0.5) is False
 
 
 def test_invalidate_keeps_executed_only_with_arm_and_strikes():
@@ -401,6 +419,7 @@ def test_fetch_2h_closes_overlays_hours1_when_hours2_stale(monkeypatch):
             pass
 
     monkeypatch.setattr("backend.services.upstox_service.UpstoxService", _FakeUpstox)
+    sos.clear_tick_wr_bars_cache()
 
     h2 = []
     d0 = date(2026, 7, 1)
@@ -418,7 +437,10 @@ def test_fetch_2h_closes_overlays_hours1_when_hours2_stale(monkeypatch):
             }
         )
 
+    calls = []
+
     def fake_retry(u, ik, *, interval, days_back, range_end_date=None):
+        calls.append((interval, days_back))
         if interval == "hours/2":
             return h2
         if interval == "hours/1":
@@ -437,6 +459,10 @@ def test_fetch_2h_closes_overlays_hours1_when_hours2_stale(monkeypatch):
     assert len(closes) >= 100
     assert closes[-1] == 4891.5
     assert closes[-2] == 4893.0
+    # Healthy path: hours/2 + short hours/1 overlay only (no full 60d / 15m).
+    assert ("hours/2", 120) in calls
+    assert any(iv == "hours/1" and db <= sos.EMA_OVERLAY_DAYS_WHEN_READY for iv, db in calls)
+    assert not any(iv == "minutes/15" for iv, _ in calls)
 
 
 def test_normalize_2h_bars_newest_first_to_ascending():
@@ -712,6 +738,8 @@ def test_schedule_ema_fetch_retry_adds_date_job(monkeypatch):
             added["kwargs"] = kwargs
 
     monkeypatch.setattr(sch, "_scheduler", _FakeSched())
+    monkeypatch.setattr(sch, "_within_ema_retry_window", lambda now=None: True)
+    sch._ema_retry_chain = 0
     sch._schedule_ema_fetch_retry()
     assert added["fn"] is sch._retry_tick
     assert added["kwargs"]["id"] == sch.EMA_RETRY_JOB_ID
@@ -723,6 +751,7 @@ def test_tick_schedules_retry_when_fetch_failed(monkeypatch):
 
     scheduled = {"n": 0}
     monkeypatch.setattr(sch, "should_skip_scheduled_market_jobs_ist", lambda: False)
+    monkeypatch.setattr(sch, "run_wr_radar_scan", lambda: {"ok": True, "inserted": 0})
     monkeypatch.setattr(sch, "run_ema_tick", lambda: {"ok": True, "ema_fetch_failed": 3})
     monkeypatch.setattr(sch, "_schedule_ema_fetch_retry", lambda: scheduled.__setitem__("n", scheduled["n"] + 1))
     sch._tick()
@@ -731,6 +760,63 @@ def test_tick_schedules_retry_when_fetch_failed(monkeypatch):
     monkeypatch.setattr(sch, "run_ema_tick", lambda: {"ok": True, "ema_fetch_failed": 0})
     sch._tick()
     assert scheduled["n"] == 1
+
+
+def test_post_market_runs_ema_then_eod_cleanup(monkeypatch):
+    from backend.services import stock_option_scheduler as sch
+
+    order = []
+    monkeypatch.setattr(sch, "should_skip_scheduled_market_jobs_ist", lambda: False)
+    monkeypatch.setattr(
+        sch,
+        "run_ema_tick",
+        lambda: order.append("ema") or {"ok": True, "ema_fetch_failed": 0},
+    )
+    monkeypatch.setattr(
+        sch,
+        "run_radar_eod_cleanup",
+        lambda: order.append("eod") or {"ok": True, "removed": 0},
+    )
+    sch._post_market_tick()
+    assert order == ["ema", "eod"]
+
+
+def test_webhook_insert_disabled_returns_zero(monkeypatch):
+    """ChartInk path logs only — no Radar inserts."""
+    from backend.services import stock_option_signals as sos
+
+    class _FakeDb:
+        def execute(self, *a, **k):
+            return None
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(sos, "ensure_stock_option_tables", lambda: None)
+    monkeypatch.setattr(sos, "SessionLocal", lambda: _FakeDb())
+    out = sos.insert_webhook_and_signals(
+        received_at=datetime(2026, 9, 15, 11, 15),
+        source_ip="127.0.0.1",
+        parsed={"stocks": "RELIANCE, TCS", "scan_name": "HA-stock option"},
+        raw_payload={"stocks": "RELIANCE, TCS"},
+    )
+    assert out["inserted"] == 0
+    assert out["chartink_inserts"] is False
+    assert out["candidates"] == 2
+    assert out["ignored"] == 2
+
+
+def test_side_from_williamsr_still_used_by_scan_gates():
+    """Scan insert gates reuse side_from_williamsr (> -1 / < -99)."""
+    assert side_from_williamsr(-0.5) == SIDE_BEAR
+    assert side_from_williamsr(-99.5) == SIDE_BULL
+    assert side_from_williamsr(-50) is None
 
 
 def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):

@@ -1,4 +1,8 @@
-"""IST 11:15 / 13:15 / 15:15 + post-market 15:45 — Stock Options 2h EMAs.
+"""IST 11:15 / 13:15 / 15:15 + post-market 15:45 — Stock Options WR scan + 2h EMAs.
+
+Main ticks (11:15 / 13:15 / 15:15): WR(280) Radar scan over arbitrage_master, then
+EMA arm/demote for Radar/Active. Post-market 15:45: EMA tick + Radar EOD cleanup
+(no full-universe WR scan). Catch-up 11:45 / 13:45: EMA fetch-failed only.
 
 Also keeps Executed option instrument keys on the shared Upstox WS (1m sync from
 09:30 IST after Breakfast) so sell/buy LTPs update live; 2h
@@ -27,7 +31,12 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
-from backend.services.stock_option_signals import ensure_index_radar_rows, run_ema_tick
+from backend.services.stock_option_signals import (
+    ensure_index_radar_rows,
+    run_ema_tick,
+    run_radar_eod_cleanup,
+    run_wr_radar_scan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,18 +103,39 @@ def _schedule_ema_fetch_retry(*, delay: timedelta = EMA_RETRY_DELAY) -> None:
 
 
 def _tick() -> None:
+    """Main 2h tick: WR Radar scan then EMA arm/demote."""
     global _ema_retry_chain
     if should_skip_scheduled_market_jobs_ist():
         logger.info("stock_option ema: skipped (weekend/holiday)")
         return
     try:
         _ema_retry_chain = 0
+        scan_out = run_wr_radar_scan()
+        logger.info("stock_option WR scan: %s", scan_out)
         out = run_ema_tick()
         logger.info("stock_option ema tick: %s", out)
         if int(out.get("ema_fetch_failed") or 0) > 0:
             _schedule_ema_fetch_retry()
     except Exception:
         logger.exception("stock_option ema tick failed")
+
+
+def _post_market_tick() -> None:
+    """15:45: EMA only (no full WR universe scan) + Radar EOD WR cleanup."""
+    global _ema_retry_chain
+    if should_skip_scheduled_market_jobs_ist():
+        logger.info("stock_option post-market: skipped (weekend/holiday)")
+        return
+    try:
+        _ema_retry_chain = 0
+        out = run_ema_tick()
+        logger.info("stock_option post-market ema tick: %s", out)
+        if int(out.get("ema_fetch_failed") or 0) > 0:
+            _schedule_ema_fetch_retry()
+        cleanup = run_radar_eod_cleanup()
+        logger.info("stock_option Radar EOD cleanup: %s", cleanup)
+    except Exception:
+        logger.exception("stock_option post-market tick failed")
 
 
 def _retry_tick() -> None:
@@ -189,15 +219,14 @@ def start_stock_option_scheduler() -> None:
             timezone="Asia/Kolkata",
         ),
         id="stock_option_ema_2h",
-        name="Stock Options 2h EMA 11:15/13:15/15:15",
+        name="Stock Options WR scan + 2h EMA 11:15/13:15/15:15",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
     )
-    # After cash close: last 2h bucket (13:15–15:15) and Upstox history are settled.
-    # Retries same path as session ticks (hours/2 → 1h → 15m → Kavach 10m/5m).
+    # After cash close: EMA settle + Radar EOD WR cleanup (no full universe scan).
     sch.add_job(
-        _tick,
+        _post_market_tick,
         CronTrigger(
             day_of_week="mon-fri",
             hour=15,
@@ -205,7 +234,7 @@ def start_stock_option_scheduler() -> None:
             timezone="Asia/Kolkata",
         ),
         id="stock_option_ema_post_market",
-        name="Stock Options post-market EMA 15:45",
+        name="Stock Options post-market EMA + Radar EOD 15:45",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -257,7 +286,7 @@ def start_stock_option_scheduler() -> None:
         logger.exception("stock_option_ws_ltp initial sync failed")
     logger.info(
         "Stock Options scheduler started "
-        "(EMA 11:15/13:15/15:15/15:45 + catch-up 11:45/13:45 + "
+        "(WR+EMA 11:15/13:15/15:15; EMA+EOD cleanup 15:45; catch-up 11:45/13:45; "
         "fetch-fail +10m chained retry + Executed WS LTP from 09:30 IST)"
     )
 

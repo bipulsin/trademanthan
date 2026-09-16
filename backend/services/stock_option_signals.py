@@ -1,10 +1,11 @@
-"""Stock Options algo: ChartInk webhook ingest, Upstox WR(280), 2h EMA arm/demote.
+"""Stock Options algo: scheduled WR(280) Radar scan, Upstox 2h EMA arm/demote.
 
 Permanent indices NIFTY/BANKNIFTY (arbitrage_master): always on Radar, no WR gate,
 arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads; Active→Radar demote on hold fail.
 
-Stocks: WR only for Radar entry (WR > -1 BEAR / WR < -99 BULL); Radar→Active requires
-ema_condition_holds(side) AND a fresh 1-candle EMA9 cross matching that WR side.
+Stocks: Radar entry from the 2h WR scan (not ChartInk) — WR > -1 BEAR / WR < -99 BULL.
+Radar→Active requires ema_condition_holds(side) AND a fresh 1-candle EMA9 cross matching
+that WR side. ChartInk ``/webhook/stockOption`` is logged only (no stock Radar inserts).
 """
 from __future__ import annotations
 
@@ -55,7 +56,17 @@ _MONTH_ABBR = {v: k for k, v in _MONTH_NUM.items()}
 WR_PERIOD = 280
 WR_BEAR_GT = -1.0
 WR_BULL_LT = -99.0
+# EOD Radar cleanup: remove only if WR has moved well off the entry extreme.
+WR_EOD_BULL_REMOVE_GT = -5.0  # BULL PUT + WR > -5 → delete Radar
+WR_EOD_BEAR_REMOVE_LT = -95.0  # BEAR CALL + WR < -95 → delete Radar
+# When hours/2 already has ≥ EMA_SLOW closes, only pull a short hours/1 window for
+# session freshness (hours/2 is not in the Upstox intraday-merge set).
+EMA_OVERLAY_DAYS_WHEN_READY = 10
+WR_CHUNK_DAYS = 60
+WR_CHUNK_STEP_DAYS = 50
+WR_MAX_CHUNKS = 5
 DEMOTE_REMARKS = "Demoted to Radar: EMA hold failed after arm"
+SCAN_NAME_WR = "WR280-2h-scan"
 DELTA_SELL = 28.0
 DELTA_BUY = 18.0
 # Permanent index underlyings (arbitrage_master): no WR gate; EMA cross to arm.
@@ -361,17 +372,61 @@ def side_from_williamsr(williamsr: Any) -> Optional[str]:
     return None
 
 
-def should_insert_new_signal(existing_statuses: Sequence[str]) -> bool:
-    """New Radar only when no Radar/Active row exists for the symbol.
+def should_insert_new_signal(
+    existing_statuses: Sequence[str],
+    *,
+    block_executed: bool = True,
+) -> bool:
+    """New Radar only when no open-lifecycle row exists for the symbol.
 
-    First trigger (no rows) inserts. A later trigger inserts only when every
-    existing row is Executed. Any Radar or Active row ignores the new trigger.
+    By default blocks Radar, Active, and Executed (stock WR scan). Completed /
+    Rejected (and empty history) are eligible. Permanent index seeding passes
+    ``block_executed=False`` so a prior Executed index trade does not prevent
+    re-pinning Radar.
     """
     for raw in existing_statuses or []:
         st = (raw or "").strip().lower()
         if st in ("radar", "active"):
             return False
+        if block_executed and st == "executed":
+            return False
     return True
+
+
+def should_remove_radar_eod(side: Any, williamsr: Any) -> bool:
+    """EOD cleanup gate for Radar-only rows (not Active / Executed)."""
+    try:
+        wr = float(williamsr)
+    except (TypeError, ValueError):
+        return False
+    side_n = (str(side or "")).strip().upper()
+    if side_n == SIDE_BULL and wr > WR_EOD_BULL_REMOVE_GT:
+        return True
+    if side_n == SIDE_BEAR and wr < WR_EOD_BEAR_REMOVE_LT:
+        return True
+    return False
+
+
+# Per-tick OHLC cache (instrument_key → completed WR bars) so WR scan + EMA share fetches.
+_TICK_WR_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def clear_tick_wr_bars_cache() -> None:
+    _TICK_WR_BARS_CACHE.clear()
+
+
+def cache_tick_wr_bars(instrument_key: str, bars: Sequence[Dict[str, Any]]) -> None:
+    ik = (instrument_key or "").strip()
+    if not ik or not bars:
+        return
+    _TICK_WR_BARS_CACHE[ik] = list(bars)
+
+
+def get_cached_tick_wr_bars(instrument_key: str) -> Optional[List[Dict[str, Any]]]:
+    ik = (instrument_key or "").strip()
+    if not ik:
+        return None
+    return _TICK_WR_BARS_CACHE.get(ik)
 
 
 def _norm_symbol(raw: Any) -> str:
@@ -1485,43 +1540,69 @@ def williams_r_at(
 
 
 def fetch_completed_2h_ohlc(instrument_key: str, asof: datetime) -> List[Dict[str, Any]]:
-    """hours/1 chunks aggregated to completed 09:15 2h bars, same window as WR(280) backfill."""
+    """Completed 2h OHLC for WR(280). Prefer hours/2 chunks; early-stop at ≥280 bars.
+
+    Typical call volume: **2–3** ``hours/2`` requests (60d windows stepped
+    ``WR_CHUNK_STEP_DAYS``) when history is dense; at most ``WR_MAX_CHUNKS``.
+    Falls back to ``hours/1`` chunks only if hours/2 stays short. Reuses the
+    per-tick cache when present. Throttles with ``FETCH_SLEEP_SEC``.
+    """
+    cached = get_cached_tick_wr_bars(instrument_key)
+    if cached is not None and len(cached) >= WR_PERIOD:
+        return cached
+
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
     u = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     asof_n = naive_ist(asof)
     asof_d = asof_n.date()
-    ends = [asof_d - timedelta(days=55 * i) for i in range(5)]
-    chunks: List[List[Dict[str, Any]]] = []
-    for end_d in ends:
-        kwargs: Dict[str, Any] = {"interval": "hours/1", "days_back": 60}
-        if end_d < asof_d:
-            kwargs["range_end_date"] = end_d
-        raw = None
-        last_err: Optional[Exception] = None
-        for attempt in range(3):
-            try:
-                raw = u.get_historical_candles_by_instrument_key(instrument_key, **kwargs)
-                last_err = None
-                break
-            except Exception as e:
-                last_err = e
-                time.sleep(1.5 * (attempt + 1))
-        if last_err is not None:
-            logger.info("stock_option hours/1 end=%s failed %s: %s", end_d, instrument_key, last_err)
-        chunks.append(raw or [])
-        time.sleep(FETCH_SLEEP_SEC)
+    ends = [asof_d - timedelta(days=WR_CHUNK_STEP_DAYS * i) for i in range(WR_MAX_CHUNKS)]
 
-    by_ts: Dict[str, Dict[str, Any]] = {}
-    for chunk in chunks:
-        for c in chunk or []:
-            key = str(c.get("timestamp") or "")
-            if key:
-                by_ts[key] = c
-    merged = [by_ts[k] for k in sorted(by_ts)]
-    agg = aggregate_intraday_to_2h(merged, now=IST.localize(asof_n))
-    return completed_2h_ohlc(agg)
+    def _merge_chunks(interval: str) -> List[Dict[str, Any]]:
+        by_ts: Dict[str, Dict[str, Any]] = {}
+        for end_d in ends:
+            raw = _upstox_candles_with_retry(
+                u,
+                instrument_key,
+                interval=interval,
+                days_back=WR_CHUNK_DAYS,
+                range_end_date=end_d if end_d < asof_d else None,
+            )
+            for c in raw or []:
+                key = str(c.get("timestamp") or "")
+                if key:
+                    by_ts[key] = c
+            time.sleep(FETCH_SLEEP_SEC)
+            merged_raw = [by_ts[k] for k in sorted(by_ts)]
+            if interval == "hours/2":
+                agg = completed_2h_bars(merged_raw, now=IST.localize(asof_n))
+            else:
+                agg = aggregate_intraday_to_2h(merged_raw, now=IST.localize(asof_n))
+            ohlc = completed_2h_ohlc(agg)
+            if len(ohlc) >= WR_PERIOD:
+                return ohlc
+        merged_raw = [by_ts[k] for k in sorted(by_ts)]
+        if interval == "hours/2":
+            agg = completed_2h_bars(merged_raw, now=IST.localize(asof_n))
+        else:
+            agg = aggregate_intraday_to_2h(merged_raw, now=IST.localize(asof_n))
+        return completed_2h_ohlc(agg)
+
+    ohlc = _merge_chunks("hours/2")
+    if len(ohlc) < WR_PERIOD:
+        logger.info(
+            "stock_option WR hours/2 short for %s bars=%s; trying hours/1",
+            instrument_key,
+            len(ohlc),
+        )
+        ohlc_h1 = _merge_chunks("hours/1")
+        if len(ohlc_h1) > len(ohlc):
+            ohlc = ohlc_h1
+
+    if ohlc:
+        cache_tick_wr_bars(instrument_key, ohlc)
+    return ohlc
 
 
 def compute_williams_r_280(instrument_key: str, asof: datetime) -> Optional[float]:
@@ -1661,7 +1742,9 @@ def ensure_index_radar_row(
     sym = _norm_symbol(symbol)
     if not is_index_symbol(sym):
         return False
-    if not should_insert_new_signal(_statuses_for_symbol(db, sym)):
+    if not should_insert_new_signal(
+        _statuses_for_symbol(db, sym), block_executed=False
+    ):
         return False
     ts = now_ist_second() if now is None else naive_ist(now)
     ik = resolve_equity_instrument_key(sym, db)
@@ -1923,12 +2006,15 @@ def insert_webhook_and_signals(
     parsed: Any,
     raw_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
+    """Log ChartInk (or any) webhook body; do **not** insert stock Radar rows.
+
+    Radar entry is owned by ``run_wr_radar_scan``. Permanent NIFTY/BANKNIFTY rows
+    remain scheduler-seeded. Webhook still returns 200 with parse metadata so
+    ChartInk does not retry-storm.
+    """
     ensure_stock_option_tables()
     status, candidates, meta = parse_chartink_symbols(parsed)
     payload_json = json.dumps(raw_payload if raw_payload is not None else {})
-    inserted = 0
-    ignored = 0
-    discarded = 0
     db = SessionLocal()
     try:
         db.execute(
@@ -1953,80 +2039,26 @@ def insert_webhook_and_signals(
                 "parse_status": status,
             },
         )
-        seen: set[str] = set()
-        for cand in candidates:
-            sym = cand["symbol"]
-            if sym in seen:
-                continue
-            seen.add(sym)
-            # Permanent indices are seeded/managed by the 2h job — never ChartInk.
-            if is_index_symbol(sym):
-                ignored += 1
-                continue
-            statuses = _statuses_for_symbol(db, sym)
-            if not should_insert_new_signal(statuses):
-                ignored += 1
-                continue
-            ik = resolve_equity_instrument_key(sym, db)
-            wr = None
-            if ik:
-                try:
-                    wr = compute_williams_r_280(ik, received_at)
-                except Exception as e:
-                    logger.info("stock_option WR(280) fetch failed for %s: %s", sym, e)
-                    wr = None
-            side = side_from_williamsr(wr)
-            if side is None:
-                discarded += 1
-                logger.info(
-                    "stock_option rejected %s: computed WR(280)=%s (webhook williamsr ignored)",
-                    sym,
-                    wr,
-                )
-                continue
-            db.execute(
-                text(
-                    """
-                    INSERT INTO stock_option_signals (
-                        symbol, williamsr, instrument_key, status, side,
-                        trigger_at, triggered_at_raw, scan_name, alert_name, raw_payload,
-                        hard_stop_placed, created_at, updated_at
-                    ) VALUES (
-                        :symbol, :williamsr, :instrument_key, :status, :side,
-                        :trigger_at, :triggered_at_raw, :scan_name, :alert_name,
-                        CAST(:raw_payload AS jsonb),
-                        FALSE, :created_at, :updated_at
-                    )
-                    """
-                ),
-                {
-                    "symbol": sym,
-                    "williamsr": wr,
-                    "instrument_key": ik,
-                    "status": STATUS_RADAR,
-                    "side": side,
-                    "trigger_at": received_at,
-                    "triggered_at_raw": meta.get("triggered_at_raw"),
-                    "scan_name": meta.get("scan_name"),
-                    "alert_name": meta.get("alert_name"),
-                    "raw_payload": payload_json,
-                    "created_at": received_at,
-                    "updated_at": received_at,
-                },
-            )
-            inserted += 1
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+    logger.info(
+        "stock_option webhook logged only (ChartInk Radar ingest disabled) "
+        "parse=%s candidates=%s",
+        status,
+        len(candidates),
+    )
     return {
         "parse_status": status,
-        "inserted": inserted,
-        "ignored": ignored,
-        "discarded": discarded,
+        "inserted": 0,
+        "ignored": len(candidates),
+        "discarded": 0,
         "candidates": len(candidates),
+        "radar_source": "wr_scan",
+        "chartink_inserts": False,
     }
 
 
@@ -2160,6 +2192,9 @@ def _fetch_2h_closes_from_10m_fallback(
             time.sleep(FETCH_SLEEP_SEC)
             if interval == "minutes/5" and len(by_ts) >= 500:
                 break
+        closes_probe = _closes_from_5m_via_10m([by_ts[k] for k in sorted(by_ts)], now=now)
+        if _ema_closes_ready(closes_probe):
+            break
         time.sleep(FETCH_SLEEP_SEC)
 
     merged = [by_ts[k] for k in sorted(by_ts)]
@@ -2241,12 +2276,22 @@ def _merge_2h_bar_dicts(
 def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
     """REST historical 2h closes for EMA (oldest→newest).
 
-    Prefer native hours/2 (includes Upstox 15:15 final bar) but always overlay
-    hours/1 aggregates — hours/2 is not merged with the intraday V3 feed, so it
-    often lags the current session even when it already has ≥100 bars (which
-    previously caused a stale early-return and frozen EMAs). Overlay wins on
-    bucket conflicts. Closes are always normalized ascending before return.
+    Prefer native hours/2 (includes Upstox 15:15 final bar). When hours/2 already
+    has ≥100 closes, overlay only a **short** hours/1 window
+    (``EMA_OVERLAY_DAYS_WHEN_READY``) for session freshness — hours/2 is not in
+    the Upstox intraday-merge set, so a full 60d hours/1 pull is wasteful.
+    Full hours/1 (60d), minutes/15, then 10m/5m fallback only when still short.
+
+    Approx call volume per symbol per attempt:
+    - Healthy (≥100 from hours/2): **2** candle requests (hours/2 + short hours/1)
+    - Thin history: **3+** (add full hours/1 / 15m / chunked 5m–10m)
+    Each request retries up to ``EMA_FETCH_RETRIES``. Overlay wins on bucket
+    conflicts; closes always normalized ascending before return.
     """
+    cached = get_cached_tick_wr_bars(instrument_key)
+    if cached is not None and len(cached) >= EMA_SLOW:
+        return [float(b["close"]) for b in cached]
+
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
@@ -2257,12 +2302,25 @@ def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> Lis
         u, instrument_key, interval="hours/2", days_back=120
     )
     bars_h2 = completed_2h_bars(native, now=now)
+    closes_h2 = _closes_from_2h_bar_dicts(bars_h2)
+
+    if _ema_closes_ready(closes_h2):
+        # Short overlay only — keep ascending merge / tip freshness without a
+        # redundant full multi-month hours/1 pull.
+        one = _upstox_candles_with_retry(
+            u,
+            instrument_key,
+            interval="hours/1",
+            days_back=EMA_OVERLAY_DAYS_WHEN_READY,
+        )
+        bars_h1 = aggregate_intraday_to_2h(one, now=now)
+        merged = _merge_2h_bar_dicts(bars_h2, bars_h1)
+        return _closes_from_2h_bar_dicts(merged)
 
     one = _upstox_candles_with_retry(
         u, instrument_key, interval="hours/1", days_back=60
     )
     bars_h1 = aggregate_intraday_to_2h(one, now=now)
-
     merged = _merge_2h_bar_dicts(bars_h2, bars_h1)
     closes = _closes_from_2h_bar_dicts(merged)
     if _ema_closes_ready(closes):
@@ -2568,6 +2626,267 @@ def _flag_executed_arm_caution(now: Optional[datetime] = None) -> int:
         db.close()
 
 
+def list_arbitrage_master_equity_universe(db: Any) -> List[Tuple[str, str]]:
+    """(symbol, stock_instrument_key) from arbitrage_master — equity keys for WR scan."""
+    rows = db.execute(
+        text(
+            """
+            SELECT UPPER(TRIM(stock)) AS stock, TRIM(stock_instrument_key) AS ikey
+            FROM arbitrage_master
+            WHERE stock IS NOT NULL
+              AND TRIM(stock) <> ''
+              AND stock_instrument_key IS NOT NULL
+              AND TRIM(stock_instrument_key) <> ''
+            ORDER BY stock
+            """
+        )
+    ).fetchall()
+    out: List[Tuple[str, str]] = []
+    seen: set[str] = set()
+    for r in rows:
+        sym = _norm_symbol(r[0])
+        ik = str(r[1] or "").strip()
+        if not sym or not ik or sym in seen or is_index_symbol(sym):
+            continue
+        seen.add(sym)
+        out.append((sym, ik))
+    return out
+
+
+def _blocked_open_lifecycle_symbols(db: Any) -> set[str]:
+    """Symbols with Radar / Active / Executed — ineligible for new Radar insert."""
+    rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT UPPER(TRIM(symbol))
+            FROM stock_option_signals
+            WHERE LOWER(TRIM(status)) IN ('radar', 'active', 'executed')
+            """
+        )
+    ).fetchall()
+    return {_norm_symbol(r[0]) for r in rows if r and r[0]}
+
+
+def insert_radar_from_wr_scan(
+    db: Any,
+    *,
+    symbol: str,
+    instrument_key: str,
+    williamsr: float,
+    side: str,
+    now: datetime,
+) -> None:
+    db.execute(
+        text(
+            """
+            INSERT INTO stock_option_signals (
+                symbol, williamsr, instrument_key, status, side,
+                trigger_at, triggered_at_raw, scan_name, alert_name, raw_payload,
+                hard_stop_placed, created_at, updated_at
+            ) VALUES (
+                :symbol, :williamsr, :instrument_key, :status, :side,
+                :trigger_at, :triggered_at_raw, :scan_name, :alert_name,
+                CAST(:raw_payload AS jsonb),
+                FALSE, :created_at, :updated_at
+            )
+            """
+        ),
+        {
+            "symbol": symbol,
+            "williamsr": williamsr,
+            "instrument_key": instrument_key,
+            "status": STATUS_RADAR,
+            "side": side,
+            "trigger_at": now,
+            "triggered_at_raw": now.strftime("%H:%M"),
+            "scan_name": SCAN_NAME_WR,
+            "alert_name": SCAN_NAME_WR,
+            "raw_payload": json.dumps({"source": SCAN_NAME_WR, "asof": now.isoformat()}),
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+
+def run_wr_radar_scan(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Universe WR(280) scan → Radar inserts (BEAR CALL / BULL PUT).
+
+    Universe = arbitrage_master equities with instrument keys. Skips symbols that
+    already have Radar / Active / Executed. Completed / Rejected are eligible.
+    Shares OHLC via the per-tick cache for the subsequent EMA pass.
+    """
+    ensure_stock_option_tables()
+    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
+
+    if defer_job_for_breakfast_exclusivity("stock_option_wr_scan"):
+        return {"ok": True, "skipped": "breakfast_exclusivity"}
+
+    now_naive = now_ist_second() if now is None else naive_ist(now)
+    clear_tick_wr_bars_cache()
+    scanned = inserted = ignored = discarded = failed = 0
+    db = SessionLocal()
+    try:
+        universe = list_arbitrage_master_equity_universe(db)
+        blocked = _blocked_open_lifecycle_symbols(db)
+    finally:
+        db.close()
+
+    for sym, ik in universe:
+        scanned += 1
+        if sym in blocked:
+            ignored += 1
+            continue
+        try:
+            bars = fetch_completed_2h_ohlc(ik, now_naive)
+            wr = williams_r_at(bars, now_naive, WR_PERIOD)
+        except Exception as e:
+            failed += 1
+            logger.info("stock_option WR scan fetch failed %s: %s", sym, e)
+            time.sleep(FETCH_SLEEP_SEC)
+            continue
+        side = side_from_williamsr(wr)
+        if side is None:
+            discarded += 1
+            time.sleep(FETCH_SLEEP_SEC)
+            continue
+        db = SessionLocal()
+        try:
+            # Re-check under write lock path (race with concurrent arm/execute).
+            if not should_insert_new_signal(_statuses_for_symbol(db, sym)):
+                ignored += 1
+                db.rollback()
+            else:
+                insert_radar_from_wr_scan(
+                    db,
+                    symbol=sym,
+                    instrument_key=ik,
+                    williamsr=float(wr),
+                    side=side,
+                    now=now_naive,
+                )
+                db.commit()
+                inserted += 1
+                blocked.add(sym)
+                logger.info(
+                    "stock_option WR scan insert %s side=%s wr=%s",
+                    sym,
+                    side,
+                    wr,
+                )
+        except Exception:
+            db.rollback()
+            failed += 1
+            logger.exception("stock_option WR scan insert failed for %s", sym)
+        finally:
+            db.close()
+        time.sleep(FETCH_SLEEP_SEC)
+
+    out = {
+        "ok": True,
+        "scanned": scanned,
+        "inserted": inserted,
+        "ignored": ignored,
+        "discarded": discarded,
+        "failed": failed,
+        "asof": now_naive.isoformat(sep=" "),
+    }
+    logger.info("stock_option WR radar scan: %s", out)
+    return out
+
+
+def run_radar_eod_cleanup(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Post-market: drop Radar rows whose WR has left the entry extreme.
+
+    Only ``Radar`` (not Active / Executed). BULL PUT + WR > -5, or BEAR CALL +
+    WR < -95 → DELETE so the symbol is free for a future scan.
+    """
+    ensure_stock_option_tables()
+    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
+
+    if defer_job_for_breakfast_exclusivity("stock_option_radar_eod"):
+        return {"ok": True, "skipped": "breakfast_exclusivity"}
+
+    now_naive = now_ist_second() if now is None else naive_ist(now)
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, symbol, side, instrument_key, williamsr
+                FROM stock_option_signals
+                WHERE status = :radar
+                  AND UPPER(TRIM(symbol)) NOT IN ('NIFTY', 'BANKNIFTY')
+                ORDER BY id
+                """
+            ),
+            {"radar": STATUS_RADAR},
+        ).mappings().all()
+        radar_rows = [dict(r) for r in rows]
+    finally:
+        db.close()
+
+    checked = removed = failed = 0
+    for row in radar_rows:
+        checked += 1
+        ik = (row.get("instrument_key") or "").strip()
+        sym = _norm_symbol(row.get("symbol"))
+        if not ik:
+            db = SessionLocal()
+            try:
+                ik = resolve_equity_instrument_key(sym, db) or ""
+            finally:
+                db.close()
+        wr = None
+        if ik:
+            try:
+                wr = compute_williams_r_280(ik, now_naive)
+            except Exception as e:
+                failed += 1
+                logger.info("stock_option EOD WR failed %s: %s", sym, e)
+                time.sleep(FETCH_SLEEP_SEC)
+                continue
+        if not should_remove_radar_eod(row.get("side"), wr):
+            time.sleep(FETCH_SLEEP_SEC)
+            continue
+        db = SessionLocal()
+        try:
+            db.execute(
+                text(
+                    """
+                    DELETE FROM stock_option_signals
+                    WHERE id = :id AND status = :radar
+                    """
+                ),
+                {"id": row["id"], "radar": STATUS_RADAR},
+            )
+            db.commit()
+            removed += 1
+            logger.info(
+                "stock_option EOD removed Radar id=%s %s side=%s wr=%s",
+                row["id"],
+                sym,
+                row.get("side"),
+                wr,
+            )
+        except Exception:
+            db.rollback()
+            failed += 1
+            logger.exception("stock_option EOD delete failed id=%s", row.get("id"))
+        finally:
+            db.close()
+        time.sleep(FETCH_SLEEP_SEC)
+
+    out = {
+        "ok": True,
+        "checked": checked,
+        "removed": removed,
+        "failed": failed,
+        "asof": now_naive.isoformat(sep=" "),
+    }
+    logger.info("stock_option Radar EOD cleanup: %s", out)
+    return out
+
+
 def run_ema_tick(
     now: Optional[datetime] = None,
     *,
@@ -2726,7 +3045,13 @@ def run_ema_tick(
         wr_now = None
         if not index_sym:
             try:
-                wr_now = compute_williams_r_280(ik, now_naive)
+                cached_wr = get_cached_tick_wr_bars(ik)
+                if cached_wr is not None and len(cached_wr) >= WR_PERIOD:
+                    wr_now = williams_r_at(cached_wr, now_naive, WR_PERIOD)
+                else:
+                    # Avoid a second multi-chunk WR pull on the EMA path — entry WR
+                    # was set by the scan; COALESCE keeps prior when wr_now is None.
+                    wr_now = None
             except Exception as e:
                 logger.info("stock_option WR(280) refresh failed for %s: %s", row.get("symbol"), e)
                 wr_now = None
