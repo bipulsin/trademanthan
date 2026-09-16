@@ -179,7 +179,9 @@ def _aggregate_1m_to_n_minute(candles: List[Dict[str, Any]], n: int) -> List[Dic
 
 
 # V3 intraday endpoint has today's session; historical minute/hour bars lag for F&O.
-_INTRADAY_MERGE_INTERVALS = frozenset({"minutes/5", "minutes/15", "minutes/30", "hours/1"})
+_INTRADAY_MERGE_INTERVALS = frozenset(
+    {"minutes/5", "minutes/10", "minutes/15", "minutes/30", "hours/1", "hours/2"}
+)
 
 
 def _merge_historical_with_intraday(
@@ -1563,6 +1565,9 @@ class UpstoxService:
                 if iv == "minutes/5":
                     one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
                     candles = _aggregate_1m_to_n_minute(one, 5) if one else None
+                elif iv == "minutes/10":
+                    one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
+                    candles = _aggregate_1m_to_n_minute(one, 10) if one else None
                 elif iv == "minutes/15":
                     one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
                     candles = _aggregate_1m_to_n_minute(one, 15) if one else None

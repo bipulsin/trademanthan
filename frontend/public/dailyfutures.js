@@ -16,7 +16,7 @@
     if (_dfChartEngineLoadPromise) return _dfChartEngineLoadPromise;
     _dfChartEngineLoadPromise = new Promise(function (resolve, reject) {
       const s = document.createElement('script');
-      s.src = 'security-chart/security-chart-engine.js?v=10';
+      s.src = 'security-chart/security-chart-engine.js?v=11';
       s.async = true;
       s.onload = function () {
         if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);

@@ -10,10 +10,10 @@
             ? 'http://localhost:8000'
             : global.location.origin;
 
-    const TF_OPTIONS = ['5m', '15m', '30m', '1hr', '1d'];
+    const TF_OPTIONS = ['5m', '10m', '15m', '30m', '1hr', '2h', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=7';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=8';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
@@ -29,13 +29,13 @@
     const HM_PANE_MAX_PX = 320;
     const EMA_PERIOD_MIN = 2;
     const EMA_PERIOD_MAX = 200;
-    const EMA_PERIOD_DEFAULT = 5;
+    const EMA_SLOT_DEFAULTS = [9, 30, 100];
+    const EMA_COLORS = ['#eab308', '#38bdf8', '#f97316'];
     const INTEL_PANEL_MAX_PX = 380;
     const INTEL_PANEL_MIN_PX = 200;
     const INTEL_PANEL_DEFAULT_PX = 320;
     const LIVE_POLL_MS = 1000;
 
-    const EMA_COLOR = '#eab308';
     const INITIAL_VISIBLE_BARS = 100;
 
     function isChartDarkTheme() {
@@ -147,10 +147,72 @@
         return formatChartDisplayTime(time, true);
     }
 
-    function clampEmaPeriod(n) {
+    function clampEmaPeriod(n, fallback) {
         const p = Math.floor(Number(n));
-        if (!Number.isFinite(p)) return EMA_PERIOD_DEFAULT;
+        if (!Number.isFinite(p)) {
+            const fb = Math.floor(Number(fallback));
+            if (Number.isFinite(fb)) {
+                return Math.max(EMA_PERIOD_MIN, Math.min(EMA_PERIOD_MAX, fb));
+            }
+            return EMA_SLOT_DEFAULTS[0];
+        }
         return Math.max(EMA_PERIOD_MIN, Math.min(EMA_PERIOD_MAX, p));
+    }
+
+    function defaultEmaSlots() {
+        return EMA_SLOT_DEFAULTS.map(function (period, i) {
+            return { enabled: i === 0, period: period };
+        });
+    }
+
+    function normalizeEmaSlots(config) {
+        const slots = defaultEmaSlots();
+        if (!config) return slots;
+        if (Array.isArray(config.emas)) {
+            config.emas.forEach(function (row, i) {
+                if (i >= slots.length || !row) return;
+                if (row.enabled != null) slots[i].enabled = !!row.enabled;
+                if (row.period != null) slots[i].period = clampEmaPeriod(row.period, slots[i].period);
+            });
+            return slots;
+        }
+        if (config.emaEnabled != null) slots[0].enabled = !!config.emaEnabled;
+        if (config.emaPeriod != null) slots[0].period = clampEmaPeriod(config.emaPeriod, slots[0].period);
+        if (config.ema2Enabled != null) slots[1].enabled = !!config.ema2Enabled;
+        if (config.ema2Period != null) slots[1].period = clampEmaPeriod(config.ema2Period, slots[1].period);
+        if (config.ema3Enabled != null) slots[2].enabled = !!config.ema3Enabled;
+        if (config.ema3Period != null) slots[2].period = clampEmaPeriod(config.ema3Period, slots[2].period);
+        return slots;
+    }
+
+    function emaOverlaysHtml() {
+        return EMA_SLOT_DEFAULTS.map(function (period, i) {
+            const checked = i === 0 ? ' checked' : '';
+            return (
+                '<div class="uscm-ema-row" data-uscm-ema-row="' +
+                i +
+                '">' +
+                '<label class="uscm-ov-label">' +
+                '<input type="checkbox" data-uscm-ema-on data-ema-idx="' +
+                i +
+                '"' +
+                checked +
+                '> EMA' +
+                '</label>' +
+                '<input type="number" class="uscm-ema-period" data-uscm-ema-period data-ema-idx="' +
+                i +
+                '" min="' +
+                EMA_PERIOD_MIN +
+                '" max="' +
+                EMA_PERIOD_MAX +
+                '" value="' +
+                period +
+                '" title="EMA period" aria-label="EMA ' +
+                (i + 1) +
+                ' period">' +
+                '</div>'
+            );
+        }).join('');
     }
 
     function computeEma(bars, period) {
@@ -485,7 +547,7 @@
         this.chart = null;
         this.candleSeries = null;
         this.volumeSeries = null;
-        this.emaSeries = null;
+        this.emaSeriesList = [null, null, null];
         this.vwapSeries = null;
         this._barsCache = [];
         this.resizeObs = null;
@@ -496,9 +558,8 @@
         this._lastOhlc = null;
         this._screenerData = null;
         this._direction = '';
-        this.emaEnabled = true;
+        this.emaSlots = defaultEmaSlots();
         this.vwapEnabled = true;
-        this.emaPeriod = EMA_PERIOD_DEFAULT;
         this.hmEnabled = false;
         this.hmPaneHeight = HM_PANE_DEFAULT_PX;
         this.hmIndicator = null;
@@ -610,16 +671,7 @@
             '<button type="button" class="uscm-indicator-btn" data-uscm-indicator-toggle aria-haspopup="true" aria-expanded="false">Indicator</button>' +
             '<div class="uscm-indicator-menu uscm-hidden" data-uscm-indicator-menu role="menu">' +
             '<div class="uscm-indicator-menu-inner" data-uscm-overlays>' +
-            '<label class="uscm-ov-label">' +
-            '<input type="checkbox" data-uscm-ema-on checked> EMA' +
-            '</label>' +
-            '<input type="number" class="uscm-ema-period" data-uscm-ema-period min="' +
-            EMA_PERIOD_MIN +
-            '" max="' +
-            EMA_PERIOD_MAX +
-            '" value="' +
-            EMA_PERIOD_DEFAULT +
-            '" title="EMA period" aria-label="EMA period">' +
+            emaOverlaysHtml() +
             '<label class="uscm-ov-label">' +
             '<input type="checkbox" data-uscm-vwap-on checked> VWAP' +
             '</label>' +
@@ -697,6 +749,18 @@
         const root = modalRoot;
         if (!root) return;
         const overlays = root.querySelector('[data-uscm-overlays]');
+        if (overlays && overlays.querySelectorAll('[data-uscm-ema-row]').length < EMA_SLOT_DEFAULTS.length) {
+            const legacyEmaOn = overlays.querySelector('[data-uscm-ema-on]');
+            const legacyEmaIn = overlays.querySelector('[data-uscm-ema-period]');
+            if (legacyEmaOn) legacyEmaOn.parentElement && legacyEmaOn.parentElement.remove();
+            if (legacyEmaIn) legacyEmaIn.remove();
+            overlays.querySelectorAll('[data-uscm-ema-row]').forEach(function (el) {
+                el.remove();
+            });
+            overlays.insertAdjacentHTML('afterbegin', emaOverlaysHtml());
+            overlays._uscmOverlayBound = false;
+            bindOverlayControls(root, this);
+        }
         if (overlays && !overlays.querySelector('[data-uscm-vol-on]')) {
             const hmLabel = overlays.querySelector('.uscm-ov-label--hm');
             const volHtml =
@@ -713,6 +777,37 @@
                     '<input type="checkbox" data-uscm-hm-on> Hilega-Milega' +
                     '</label>'
             );
+        }
+        const tfHost = root.querySelector('[data-uscm-tf]');
+        if (tfHost) {
+            const existing = {};
+            tfHost.querySelectorAll('.uscm-tf-btn').forEach(function (b) {
+                existing[b.dataset.tf] = true;
+            });
+            const self = this;
+            TF_OPTIONS.forEach(function (tf) {
+                if (existing[tf]) return;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'uscm-tf-btn';
+                btn.textContent = tf;
+                btn.dataset.tf = tf;
+                btn.addEventListener('click', function () {
+                    self.setTimeframe(tf);
+                });
+                const orderIdx = TF_OPTIONS.indexOf(tf);
+                const buttons = Array.prototype.slice.call(tfHost.querySelectorAll('.uscm-tf-btn'));
+                let inserted = false;
+                for (let i = 0; i < buttons.length; i++) {
+                    const otherIdx = TF_OPTIONS.indexOf(buttons[i].dataset.tf);
+                    if (otherIdx > orderIdx) {
+                        tfHost.insertBefore(btn, buttons[i]);
+                        inserted = true;
+                        break;
+                    }
+                }
+                if (!inserted) tfHost.appendChild(btn);
+            });
         }
         const wrap = root.querySelector('.uscm-chart-wrap');
         if (!wrap || wrap.querySelector('[data-uscm-chart-stack]')) return;
@@ -929,11 +1024,9 @@
         if (!host || host._uscmOverlayBound) return;
         host._uscmOverlayBound = true;
 
-        const emaCb = host.querySelector('[data-uscm-ema-on]');
         const vwapCb = host.querySelector('[data-uscm-vwap-on]');
         const volCb = host.querySelector('[data-uscm-vol-on]');
         const hmCb = host.querySelector('[data-uscm-hm-on]');
-        const emaIn = host.querySelector('[data-uscm-ema-period]');
 
         function onOverlayChange() {
             modalInstance._readOverlayPrefs();
@@ -942,9 +1035,19 @@
             modalInstance._applyHmIndicator();
         }
 
-        if (emaCb) {
+        host.querySelectorAll('[data-uscm-ema-on]').forEach(function (emaCb) {
             emaCb.addEventListener('change', onOverlayChange);
-        }
+        });
+        host.querySelectorAll('[data-uscm-ema-period]').forEach(function (emaIn) {
+            emaIn.addEventListener('change', onOverlayChange);
+            emaIn.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    emaIn.blur();
+                    onOverlayChange();
+                }
+            });
+        });
         if (vwapCb) {
             vwapCb.addEventListener('change', onOverlayChange);
         }
@@ -955,16 +1058,6 @@
         if (hmCb) {
             hmCb.addEventListener('change', onOverlayChange);
             hmCb._uscmHmBound = true;
-        }
-        if (emaIn) {
-            emaIn.addEventListener('change', onOverlayChange);
-            emaIn.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    emaIn.blur();
-                    onOverlayChange();
-                }
-            });
         }
     }
 
@@ -1123,7 +1216,7 @@
         }
         this.candleSeries = null;
         this.volumeSeries = null;
-        this.emaSeries = null;
+        this.emaSeriesList = [null, null, null];
         this.vwapSeries = null;
         this._barsCache = [];
         const el = modalRoot && modalRoot.querySelector('[data-uscm-chart]');
@@ -1159,16 +1252,25 @@
     SecurityChartModal.prototype._readOverlayPrefs = function () {
         const root = modalRoot;
         if (!root) return;
-        const emaCb = root.querySelector('[data-uscm-ema-on]');
-        const vwapCb = root.querySelector('[data-uscm-vwap-on]');
-        const emaIn = root.querySelector('[data-uscm-ema-period]');
-        if (emaCb) this.emaEnabled = emaCb.checked;
-        if (vwapCb) this.vwapEnabled = vwapCb.checked;
-        if (emaIn) {
-            this.emaPeriod = clampEmaPeriod(emaIn.value);
-            emaIn.value = String(this.emaPeriod);
-            emaIn.disabled = !this.emaEnabled;
+        const self = this;
+        if (!this.emaSlots || this.emaSlots.length !== EMA_SLOT_DEFAULTS.length) {
+            this.emaSlots = defaultEmaSlots();
         }
+        root.querySelectorAll('[data-uscm-ema-on]').forEach(function (emaCb) {
+            const idx = Number(emaCb.getAttribute('data-ema-idx') || 0);
+            if (!self.emaSlots[idx]) return;
+            self.emaSlots[idx].enabled = emaCb.checked;
+        });
+        root.querySelectorAll('[data-uscm-ema-period]').forEach(function (emaIn) {
+            const idx = Number(emaIn.getAttribute('data-ema-idx') || 0);
+            if (!self.emaSlots[idx]) return;
+            const fallback = EMA_SLOT_DEFAULTS[idx] || EMA_SLOT_DEFAULTS[0];
+            self.emaSlots[idx].period = clampEmaPeriod(emaIn.value, fallback);
+            emaIn.value = String(self.emaSlots[idx].period);
+            emaIn.disabled = !self.emaSlots[idx].enabled;
+        });
+        const vwapCb = root.querySelector('[data-uscm-vwap-on]');
+        if (vwapCb) this.vwapEnabled = vwapCb.checked;
         const hmCb = root.querySelector('[data-uscm-hm-on]');
         if (hmCb) this.hmEnabled = hmCb.checked;
         const volCb = root.querySelector('[data-uscm-vol-on]');
@@ -1178,32 +1280,44 @@
     SecurityChartModal.prototype._syncOverlayUi = function () {
         const root = modalRoot;
         if (!root) return;
-        const emaCb = root.querySelector('[data-uscm-ema-on]');
+        const self = this;
+        if (!this.emaSlots || this.emaSlots.length !== EMA_SLOT_DEFAULTS.length) {
+            this.emaSlots = defaultEmaSlots();
+        }
+        root.querySelectorAll('[data-uscm-ema-on]').forEach(function (emaCb) {
+            const idx = Number(emaCb.getAttribute('data-ema-idx') || 0);
+            if (!self.emaSlots[idx]) return;
+            emaCb.checked = !!self.emaSlots[idx].enabled;
+        });
+        root.querySelectorAll('[data-uscm-ema-period]').forEach(function (emaIn) {
+            const idx = Number(emaIn.getAttribute('data-ema-idx') || 0);
+            if (!self.emaSlots[idx]) return;
+            emaIn.value = String(self.emaSlots[idx].period);
+            emaIn.disabled = !self.emaSlots[idx].enabled;
+        });
         const vwapCb = root.querySelector('[data-uscm-vwap-on]');
         const hmCb = root.querySelector('[data-uscm-hm-on]');
         const volCb = root.querySelector('[data-uscm-vol-on]');
-        const emaIn = root.querySelector('[data-uscm-ema-period]');
-        if (emaCb) emaCb.checked = this.emaEnabled;
         if (vwapCb) vwapCb.checked = this.vwapEnabled;
         if (volCb) volCb.checked = this.volumeEnabled;
         if (hmCb) hmCb.checked = this.hmEnabled;
-        if (emaIn) {
-            emaIn.value = String(this.emaPeriod);
-            emaIn.disabled = !this.emaEnabled;
-        }
     };
 
     SecurityChartModal.prototype._rebuildOverlays = function () {
         if (!this.chart || !this._barsCache.length) return;
-        const emaData = computeEma(this._barsCache, this.emaPeriod);
+        const self = this;
         const vwapData = computeSessionVwap(this._barsCache);
-        if (this.emaSeries) {
-            this.emaSeries.applyOptions({
-                visible: this.emaEnabled,
-                title: 'EMA(' + this.emaPeriod + ')',
+        (this.emaSeriesList || []).forEach(function (series, i) {
+            if (!series || !self.emaSlots[i]) return;
+            const slot = self.emaSlots[i];
+            const emaData = computeEma(self._barsCache, slot.period);
+            series.applyOptions({
+                visible: !!slot.enabled,
+                title: 'EMA(' + slot.period + ')',
+                color: EMA_COLORS[i] || EMA_COLORS[0],
             });
-            this.emaSeries.setData(this.emaEnabled && emaData.length ? emaData : []);
-        }
+            series.setData(slot.enabled && emaData.length ? emaData : []);
+        });
         if (this.vwapSeries) {
             this.vwapSeries.applyOptions({ visible: this.vwapEnabled });
             this.vwapSeries.setData(this.vwapEnabled && vwapData.length ? vwapData : []);
@@ -1319,13 +1433,17 @@
             priceScaleId: '',
         });
         this._readOverlayPrefs();
-        this.emaSeries = this.chart.addLineSeries({
-            color: EMA_COLOR,
-            lineWidth: 2,
-            title: 'EMA(' + this.emaPeriod + ')',
-            priceLineVisible: false,
-            lastValueVisible: true,
-            visible: this.emaEnabled,
+        this.emaSeriesList = [];
+        const selfEma = this;
+        (this.emaSlots || defaultEmaSlots()).forEach(function (slot, i) {
+            selfEma.emaSeriesList[i] = selfEma.chart.addLineSeries({
+                color: EMA_COLORS[i] || EMA_COLORS[0],
+                lineWidth: 2,
+                title: 'EMA(' + slot.period + ')',
+                priceLineVisible: false,
+                lastValueVisible: true,
+                visible: !!slot.enabled,
+            });
         });
         this.vwapSeries = this.chart.addLineSeries({
             color: colors.vwap,
@@ -1425,12 +1543,15 @@
 
     SecurityChartModal.prototype._refreshOverlays = function () {
         if (!this._barsCache.length) return;
-        if (this.emaEnabled && this.emaSeries) {
-            const emaData = computeEma(this._barsCache, this.emaPeriod);
+        const self = this;
+        (this.emaSeriesList || []).forEach(function (series, i) {
+            const slot = self.emaSlots && self.emaSlots[i];
+            if (!series || !slot || !slot.enabled) return;
+            const emaData = computeEma(self._barsCache, slot.period);
             if (emaData.length) {
-                this.emaSeries.update(emaData[emaData.length - 1]);
+                series.update(emaData[emaData.length - 1]);
             }
-        }
+        });
         if (this.vwapEnabled && this.vwapSeries) {
             const vwapData = computeSessionVwap(this._barsCache);
             if (vwapData.length) {
@@ -1490,6 +1611,18 @@
             config.direction ||
             (this._screenerData && this._screenerData.direction) ||
             '';
+        this.emaSlots = normalizeEmaSlots(config);
+        this.vwapEnabled = config.vwapEnabled != null ? !!config.vwapEnabled : true;
+        this.hmEnabled = config.hmEnabled != null ? !!config.hmEnabled : false;
+        this.volumeEnabled = config.volumeEnabled != null ? !!config.volumeEnabled : true;
+        if (config.indicatorsEnabled === false || config.noIndicators === true) {
+            this.emaSlots = this.emaSlots.map(function (s) {
+                return { enabled: false, period: s.period };
+            });
+            this.vwapEnabled = false;
+            this.hmEnabled = false;
+            this.volumeEnabled = false;
+        }
 
         return ensureAssets().then(function () {
             const root = self._ensureDom();

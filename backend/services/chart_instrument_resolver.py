@@ -82,13 +82,40 @@ def resolve_chart_instrument(
     if it not in _INSTRUMENT_TYPES:
         raise ValueError(f"Unsupported instrument_type: {instrument_type}")
 
+    exch = (exchange or "NSE").strip().upper() or "NSE"
+
     if ik:
         return {
             "instrument_key": ik.replace(":", "|"),
             "symbol": sym or ik.split("|")[-1][:20],
             "display_symbol": sym or ik,
-            "exchange": (exchange or "NSE").upper(),
+            "exchange": exch,
             "instrument_type": it,
+        }
+
+    if exch == "MCX":
+        from backend.services.commodities_div.mapping import (
+            attach_instrument_fields,
+            resolve_underlying_instrument,
+            parse_underlying,
+        )
+
+        underlying = parse_underlying(sym) or sym
+        inst = resolve_underlying_instrument(underlying) if underlying else None
+        if not inst or not inst.get("instrument_key"):
+            attached = attach_instrument_fields(sym)
+            if attached.get("instrument_key"):
+                inst = attached
+        if not inst or not inst.get("instrument_key"):
+            raise ValueError(f"No MCX front-month future instrument_key for {sym}")
+        return {
+            "instrument_key": str(inst["instrument_key"]).replace(":", "|"),
+            "symbol": str(inst.get("canonical") or underlying or sym).strip(),
+            "display_symbol": str(
+                inst.get("trading_symbol") or inst.get("contract") or underlying or sym
+            ).strip(),
+            "exchange": "MCX",
+            "instrument_type": "FUT",
         }
 
     if it == "FUT":

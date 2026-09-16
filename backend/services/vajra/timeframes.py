@@ -12,9 +12,11 @@ DEFAULT_HTF = "1d"
 
 _TF_MINUTES: Dict[str, int] = {
     "5m": 5,
+    "10m": 10,
     "15m": 15,
     "30m": 30,
     "1hr": 60,
+    "2h": 120,
     "1d": 1440,
     "1w": 10080,
 }
@@ -22,9 +24,11 @@ _TF_MINUTES: Dict[str, int] = {
 # Upstox interval + history depth for stable indicators (~80+ bars)
 _TF_FETCH: Dict[str, Dict[str, object]] = {
     "5m": {"interval": "minutes/5", "days_back": 8},
+    "10m": {"interval": "minutes/10", "days_back": 10},
     "15m": {"interval": "minutes/15", "days_back": 12},
     "30m": {"interval": "minutes/30", "days_back": 20},
     "1hr": {"interval": "hours/1", "days_back": 92},
+    "2h": {"interval": "hours/2", "days_back": 120},
     "1d": {"interval": "days/1", "days_back": 120},
     "1w": {"interval": "weeks/1", "days_back": 730},
 }

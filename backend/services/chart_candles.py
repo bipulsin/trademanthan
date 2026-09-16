@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 
-CHART_TIMEFRAMES = ("5m", "15m", "30m", "1hr", "1d")
+CHART_TIMEFRAMES = ("5m", "10m", "15m", "30m", "1hr", "2h", "1d")
 DEFAULT_CHART_TF = "5m"
 
 
@@ -23,6 +23,8 @@ def normalize_chart_timeframe(tf: Optional[str]) -> str:
     v = (tf or DEFAULT_CHART_TF).strip().lower()
     if v in ("1h", "60m"):
         v = "1hr"
+    if v in ("2hr", "120m"):
+        v = "2h"
     if v not in CHART_TIMEFRAMES:
         raise ValueError(f"Invalid timeframe: {tf}")
     return v

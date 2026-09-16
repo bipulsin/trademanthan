@@ -53,11 +53,99 @@
   var editSignalId = null;
   var editMode = "edit"; // "edit" | "exit"
   var currentTab = "active";
+  var activeById = {};
   var inTradeById = {};
   var historyById = {};
+  var _cdChartEngineLoadPromise = null;
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  function ensureChartEngine() {
+    if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
+    if (_cdChartEngineLoadPromise) return _cdChartEngineLoadPromise;
+    _cdChartEngineLoadPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "security-chart/security-chart-engine.js?v=11";
+      s.async = true;
+      s.onload = function () {
+        if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+        else reject(new Error("Chart module failed to initialize"));
+      };
+      s.onerror = function () {
+        reject(new Error("Chart module failed to load"));
+      };
+      document.head.appendChild(s);
+    });
+    return _cdChartEngineLoadPromise;
+  }
+
+  function findCdRowById(id) {
+    var nid = Number(id);
+    if (!Number.isFinite(nid)) return null;
+    return activeById[nid] || inTradeById[nid] || historyById[nid] || null;
+  }
+
+  function openCommDivChart(row) {
+    if (!row) return;
+    var mapped = String(row.symbol_mapped || "").trim();
+    var raw = String(row.symbol_raw || "").trim();
+    var symbol = mapped || raw;
+    if (!symbol || symbol === "—") return;
+    var instrumentKey = String(row.instrument_key || "").trim();
+    var displaySymbol = raw || mapped || symbol;
+    ensureChartEngine()
+      .then(function (eng) {
+        if (!eng || typeof eng.openSecurityChart !== "function") {
+          throw new Error("Chart module unavailable");
+        }
+        return eng.openSecurityChart({
+          symbol: symbol,
+          instrumentType: "FUT",
+          instrumentKey: instrumentKey,
+          displaySymbol: displaySymbol,
+          exchange: "MCX",
+          timeframe: "1hr",
+          direction: row.direction || "",
+          screenerData: {
+            direction: row.direction,
+            status: row.status,
+            entryPrice: row.entry_price,
+            ltp: row.ltp,
+            pnl: row.pnl,
+          },
+          metadata: { algo: "commodities_div" },
+          noIndicators: true,
+        });
+      })
+      .catch(function (err) {
+        if (window.console && window.console.warn) window.console.warn("Commodities Div chart:", err);
+      });
+  }
+
+  function symbolChartButtonHtml(row) {
+    var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+    var mapped = String(row.symbol_mapped || "").trim();
+    var raw = String(row.symbol_raw || "").trim();
+    var symbol = mapped || raw;
+    if (!symbol || displaySym === "—") return esc(fmt(displaySym));
+    return (
+      '<span role="button" tabindex="0" class="cd-security-link" title="Open chart" ' +
+      'data-cd-chart-id="' +
+      esc(String(row.id != null ? row.id : "")) +
+      '" data-chart-symbol="' +
+      esc(symbol) +
+      '" data-chart-instrument-key="' +
+      esc(String(row.instrument_key || "")) +
+      '" data-chart-label="' +
+      esc(String(displaySym)) +
+      '" data-chart-direction="' +
+      esc(String(row.direction || "")) +
+      '">' +
+      esc(fmt(displaySym)) +
+      "</span>"
+    );
   }
 
   function showBanner(msg, isErr) {
@@ -293,7 +381,7 @@
     return (
       "<tr>" +
       "<td>" +
-      esc(fmt(r.symbol_raw || r.symbol_mapped)) +
+      symbolChartButtonHtml(r) +
       "</td><td>" +
       dirChip(r.direction) +
       "</td><td>" +
@@ -325,7 +413,7 @@
       esc(cardTimeLabel(tSrc)) +
       "</span>" +
       '<span class="cd-mcard-sym">' +
-      esc(r.symbol_raw || r.symbol_mapped || "—") +
+      symbolChartButtonHtml(r) +
       "</span>" +
       '<span class="cd-mcard-side">' +
       dirChip(r.direction) +
@@ -486,19 +574,20 @@
     if (mobile) mobile.hidden = false;
 
     var rowsById = {};
+    activeById = {};
     list.forEach(function (r) {
       rowsById[r.id] = r;
+      activeById[r.id] = r;
     });
 
     var bodyHtml = list
       .map(function (row) {
         var statusClass = "cd-status";
         if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
-        var displaySym = row.symbol_raw || row.symbol_mapped || "—";
         return (
           "<tr>" +
           '<td class="cd-field-val">' +
-          esc(fmt(displaySym)) +
+          symbolChartButtonHtml(row) +
           "</td>" +
           "<td>" +
           dirChip(row.direction) +
@@ -556,7 +645,6 @@
         .map(function (row) {
           var statusClass = "cd-status";
           if (row.status === "Exit Trade") statusClass += " cd-status-exit cd-status-blink";
-          var displaySym = row.symbol_raw || row.symbol_mapped || "—";
           var timeSrc = row.go_received_at || row.div_received_at || row.trade_taken_at || "";
           return (
             '<article class="cd-mcard">' +
@@ -565,7 +653,7 @@
             esc(cardTimeLabel(timeSrc)) +
             "</span>" +
             '<span class="cd-mcard-sym">' +
-            esc(displaySym) +
+            symbolChartButtonHtml(row) +
             "</span>" +
             '<span class="cd-mcard-side">' +
             dirChip(row.direction) +
@@ -650,11 +738,10 @@
     if (body) {
       body.innerHTML = list
         .map(function (row) {
-          var displaySym = row.symbol_raw || row.symbol_mapped || "—";
           return (
             "<tr>" +
             '<td class="cd-field-val">' +
-            esc(fmt(displaySym)) +
+            symbolChartButtonHtml(row) +
             "</td>" +
             "<td>" +
             dirChip(row.direction) +
@@ -686,7 +773,6 @@
     if (mobile) {
       mobile.innerHTML = list
         .map(function (row) {
-          var displaySym = row.symbol_raw || row.symbol_mapped || "—";
           var timeSrc = row.trade_taken_at || "";
           return (
             '<article class="cd-mcard">' +
@@ -695,7 +781,7 @@
             esc(cardTimeLabel(timeSrc)) +
             "</span>" +
             '<span class="cd-mcard-sym">' +
-            esc(displaySym) +
+            symbolChartButtonHtml(row) +
             "</span>" +
             '<span class="cd-mcard-side">' +
             dirChip(row.direction) +
@@ -859,6 +945,21 @@
     });
 
     document.addEventListener("click", function (ev) {
+      var chartBtn = ev.target.closest(".cd-security-link");
+      if (chartBtn) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var id = chartBtn.getAttribute("data-cd-chart-id");
+        var row = findCdRowById(id) || {
+          id: id,
+          symbol_mapped: chartBtn.getAttribute("data-chart-symbol") || "",
+          symbol_raw: chartBtn.getAttribute("data-chart-label") || "",
+          instrument_key: chartBtn.getAttribute("data-chart-instrument-key") || "",
+          direction: chartBtn.getAttribute("data-chart-direction") || "",
+        };
+        openCommDivChart(row);
+        return;
+      }
       var summary = ev.target.closest(".cd-mcard-summary");
       if (!summary) return;
       var card = summary.closest(".cd-mcard");
@@ -868,6 +969,23 @@
       summary.setAttribute("aria-expanded", open ? "false" : "true");
       card.classList.toggle("cd-mcard-open", !open);
       if (body) body.hidden = open;
+    });
+
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      var chartBtn = ev.target.closest(".cd-security-link");
+      if (!chartBtn) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      var id = chartBtn.getAttribute("data-cd-chart-id");
+      var row = findCdRowById(id) || {
+        id: id,
+        symbol_mapped: chartBtn.getAttribute("data-chart-symbol") || "",
+        symbol_raw: chartBtn.getAttribute("data-chart-label") || "",
+        instrument_key: chartBtn.getAttribute("data-chart-instrument-key") || "",
+        direction: chartBtn.getAttribute("data-chart-direction") || "",
+      };
+      openCommDivChart(row);
     });
 
     $("cdTakeForm").addEventListener("submit", async function (ev) {

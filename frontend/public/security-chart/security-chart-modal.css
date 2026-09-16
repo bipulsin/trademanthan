@@ -181,6 +181,12 @@ body[data-theme="light"] .uscm-ltp {
     width: 56px;
 }
 
+.uscm-ema-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .uscm-ov-label {
     display: inline-flex;
     align-items: center;

@@ -428,6 +428,94 @@
 
   const INDEX_PIN = { NIFTY: 0, BANKNIFTY: 1 };
 
+  let _soChartEngineLoadPromise = null;
+
+  function ensureChartEngine() {
+    if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
+    if (_soChartEngineLoadPromise) return _soChartEngineLoadPromise;
+    _soChartEngineLoadPromise = new Promise(function (resolve, reject) {
+      const s = document.createElement("script");
+      s.src = "security-chart/security-chart-engine.js?v=11";
+      s.async = true;
+      s.onload = function () {
+        if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+        else reject(new Error("Chart module failed to initialize"));
+      };
+      s.onerror = function () {
+        reject(new Error("Chart module failed to load"));
+      };
+      document.head.appendChild(s);
+    });
+    return _soChartEngineLoadPromise;
+  }
+
+  function openStockOptionsChart(r) {
+    if (!r) return;
+    const symbol = String(r.symbol || "").trim();
+    if (!symbol || symbol === "—") return;
+    const instrumentKey = String(r.instrument_key || "").trim();
+    const indexRow = isIndexRow(r) || !!r._chartIndex;
+    ensureChartEngine()
+      .then(function (eng) {
+        if (!eng || typeof eng.openSecurityChart !== "function") {
+          throw new Error("Chart module unavailable");
+        }
+        return eng.openSecurityChart({
+          symbol: symbol,
+          instrumentType: indexRow ? "FUT" : "EQUITY",
+          instrumentKey: instrumentKey,
+          displaySymbol: symbol,
+          exchange: "NSE",
+          timeframe: "2h",
+          direction: r.side || "",
+          screenerData: {
+            side: r.side,
+            williamsr: r.williamsr,
+            status: r.status,
+            tradeMode: r.trade_mode,
+          },
+          metadata: { algo: "stock_options" },
+          emas: [
+            { enabled: true, period: 9 },
+            { enabled: true, period: 30 },
+            { enabled: true, period: 100 },
+          ],
+        });
+      })
+      .catch(function (err) {
+        if (window.console && window.console.warn) window.console.warn("Stock Options chart:", err);
+      });
+  }
+
+  function findWorkspaceRowById(id) {
+    const nid = Number(id);
+    if (!Number.isFinite(nid)) return null;
+    const buckets = [
+      workspace.radar,
+      workspace.active,
+      workspace.executed,
+      workspace.completed,
+    ];
+    for (let i = 0; i < buckets.length; i++) {
+      const hit = (buckets[i] || []).find((r) => Number(r.id) === nid);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function openChartFromButton(btn) {
+    if (!btn) return;
+    const id = btn.getAttribute("data-so-chart-id");
+    const row = findWorkspaceRowById(id) || {
+      id: id,
+      symbol: btn.getAttribute("data-chart-symbol") || "",
+      instrument_key: btn.getAttribute("data-chart-instrument-key") || "",
+      side: btn.getAttribute("data-chart-side") || "",
+      _chartIndex: btn.getAttribute("data-chart-index") === "1",
+    };
+    openStockOptionsChart(row);
+  }
+
   function isIndexRow(r) {
     if (r && (r.is_index || r.index_fut)) return true;
     const s = String((r && r.symbol) || "").trim().toUpperCase();
@@ -450,12 +538,30 @@
   }
 
   function symbolCell(r, opts) {
-    const name = esc(r.symbol || "—");
+    const raw = String((r && r.symbol) || "").trim();
+    const name = esc(raw || "—");
     const caution =
       opts && opts.caution && r.arm_caution
         ? '<span class="so-arm-caution" title="EMA arm caution — review entry">●</span>'
         : "";
-    const body = caution ? caution + name : name;
+    const link =
+      raw && raw !== "—"
+        ? '<span role="button" tabindex="0" class="so-security-link" title="Open chart" ' +
+          'data-so-chart-id="' +
+          esc(String(r.id != null ? r.id : "")) +
+          '" data-chart-symbol="' +
+          esc(raw) +
+          '" data-chart-instrument-key="' +
+          esc(String(r.instrument_key || "")) +
+          '" data-chart-index="' +
+          (isIndexRow(r) ? "1" : "0") +
+          '" data-chart-side="' +
+          esc(String(r.side || "")) +
+          '">' +
+          name +
+          "</span>"
+        : name;
+    const body = caution ? caution + link : link;
     if (!isIndexRow(r)) return body;
     return (
       '<span class="so-index-sym" title="Index FUT">' +
@@ -1397,6 +1503,13 @@
     });
     const panel = document.getElementById("soPanel");
     panel.addEventListener("click", (ev) => {
+      const chartBtn = ev.target.closest(".so-security-link");
+      if (chartBtn && panel.contains(chartBtn)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        openChartFromButton(chartBtn);
+        return;
+      }
       const summary = ev.target.closest(".so-mcard-summary");
       if (summary && panel.contains(summary)) {
         if (ev.target.closest(".so-chip-tip")) return;
@@ -1420,6 +1533,14 @@
       if (editBtn) openEdit(editBtn.dataset.edit);
       const exitBtn = ev.target.closest("[data-exit]");
       if (exitBtn) openExit(exitBtn.dataset.exit);
+    });
+    panel.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      const chartBtn = ev.target.closest(".so-security-link");
+      if (!chartBtn || !panel.contains(chartBtn)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      openChartFromButton(chartBtn);
     });
     panel.addEventListener("change", (ev) => {
       const box = ev.target.closest("[data-hs]");

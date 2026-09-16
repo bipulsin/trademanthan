@@ -241,6 +241,22 @@ body.stock-options-page .mobile-logo {
     font-weight: 600;
 }
 
+.so-security-link {
+    font-weight: 700;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+
+.so-security-link:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
 .so-index-arrow {
     display: inline-block;
     flex: 0 0 auto;
