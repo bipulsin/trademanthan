@@ -25,8 +25,9 @@ from backend.services.rule27_trade_log import ensure_trade_log_table, upsert_tra
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-EDITABLE_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE}
+EDITABLE_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE, STATUS_HISTORY}
 EXITABLE_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE}
+DELETABLE_STATUSES = {STATUS_IN_TRADE, STATUS_HISTORY}
 
 
 def _sync_ws_ltp_best_effort() -> None:
@@ -328,7 +329,7 @@ def update_signal(
     exit_at: Any = None,
     trade_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Discretionary edit for In-Trade (or Exit Trade) rows — does not move to History."""
+    """Discretionary edit for In-Trade, Exit Trade, or History — does not change status."""
     ensure_commodities_div_tables()
     db = SessionLocal()
     try:
@@ -339,7 +340,9 @@ def update_signal(
         if not row:
             raise ValueError("signal not found")
         if row["status"] not in EDITABLE_STATUSES:
-            raise ValueError(f"Edit only when In-Trade or Exit Trade (got {row['status']})")
+            raise ValueError(
+                f"Edit only when In-Trade, Exit Trade, or History (got {row['status']})"
+            )
 
         sets: List[str] = ["updated_at = NOW()"]
         params: Dict[str, Any] = {"id": int(signal_id)}
@@ -386,7 +389,8 @@ def update_signal(
             text("SELECT * FROM commodities_div_signals WHERE id = :id"),
             {"id": int(signal_id)},
         ).mappings().first()
-        return serialize_signal(dict(updated))
+        prefer_exit = str(updated["status"]) == STATUS_HISTORY
+        return serialize_signal(dict(updated), prefer_exit_pnl=prefer_exit)
     except Exception:
         db.rollback()
         raise
@@ -394,9 +398,12 @@ def update_signal(
         db.close()
 
 
-def delete_in_trade(*, signal_id: int) -> Dict[str, Any]:
+def delete_signal(*, signal_id: int) -> Dict[str, Any]:
     """
-    Remove an In-Trade row. Webhook raw log is retained; clear active_signal_id refs.
+    Remove an In-Trade or History row.
+
+    Webhook raw log is retained (active_signal_id cleared). trade_log rows are left
+    intact — no cascade delete — so integrity of the trade log is preserved.
     """
     ensure_commodities_div_tables()
     db = SessionLocal()
@@ -407,10 +414,12 @@ def delete_in_trade(*, signal_id: int) -> Dict[str, Any]:
         ).mappings().first()
         if not row:
             raise ValueError("signal not found")
-        if row["status"] != STATUS_IN_TRADE:
-            raise ValueError(f"Delete only when In-Trade (got {row['status']})")
+        status = str(row["status"])
+        if status not in DELETABLE_STATUSES:
+            raise ValueError(f"Delete only when In-Trade or History (got {status})")
 
-        snap = serialize_signal(dict(row))
+        prefer_exit = status == STATUS_HISTORY
+        snap = serialize_signal(dict(row), prefer_exit_pnl=prefer_exit)
         db.execute(
             text(
                 """
@@ -426,13 +435,19 @@ def delete_in_trade(*, signal_id: int) -> Dict[str, Any]:
             {"id": int(signal_id)},
         )
         db.commit()
-        _sync_ws_ltp_best_effort()
+        if status == STATUS_IN_TRADE:
+            _sync_ws_ltp_best_effort()
         return {"ok": True, "deleted_id": int(signal_id), "signal": snap}
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+
+def delete_in_trade(*, signal_id: int) -> Dict[str, Any]:
+    """Compat alias — prefer delete_signal()."""
+    return delete_signal(signal_id=signal_id)
 
 
 def exit_submit(

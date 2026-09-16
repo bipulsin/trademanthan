@@ -12,7 +12,7 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.commodities_div.actions import (
-    delete_in_trade,
+    delete_signal,
     exit_submit,
     list_active_tab_signals,
     list_history,
@@ -165,7 +165,7 @@ def commodities_div_delete_signal(
     user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
     try:
-        return delete_in_trade(signal_id=int(signal_id))
+        return delete_signal(signal_id=int(signal_id))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -176,7 +176,7 @@ def commodities_div_delete_signal_post(
     user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
     try:
-        return delete_in_trade(signal_id=int(body.signal_id))
+        return delete_signal(signal_id=int(body.signal_id))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

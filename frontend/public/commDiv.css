@@ -346,6 +346,41 @@ body.comm-div-page .mobile-logo {
     font-size: 0.8rem;
 }
 
+.cd-history-split {
+    display: flex;
+    flex-direction: column;
+    gap: 1.35rem;
+}
+
+.cd-history-mode-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.65rem;
+    margin: 0 0 0.55rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.cd-history-mode-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+}
+
+.cd-history-mode-meta {
+    font-size: 0.8rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.cd-empty-mode {
+    padding: 4px 2px 8px;
+}
+
 .cd-modal-card-wide {
     width: min(560px, 100%);
 }

@@ -54,6 +54,7 @@
   var editMode = "edit"; // "edit" | "exit"
   var currentTab = "active";
   var inTradeById = {};
+  var historyById = {};
 
   function $(id) {
     return document.getElementById(id);
@@ -236,7 +237,7 @@
     container.querySelectorAll("[data-cd-action]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var id = Number(btn.getAttribute("data-cd-id"));
-        var row = rowsById[id] || inTradeById[id];
+        var row = rowsById[id] || inTradeById[id] || historyById[id];
         if (!row) return;
         var action = btn.getAttribute("data-cd-action");
         if (action === "take") openTake(row);
@@ -245,6 +246,206 @@
         else if (action === "delete") confirmDelete(row);
       });
     });
+  }
+
+  function normalizeTradeMode(mode) {
+    return String(mode || "PAPER").trim().toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+  }
+
+  function historyActionsHtml(row) {
+    return (
+      '<div class="cd-row-actions">' +
+      '<button type="button" class="cd-icon-btn" data-cd-action="edit" data-cd-id="' +
+      row.id +
+      '" title="Edit"><i class="fas fa-pencil-alt"></i></button>' +
+      '<button type="button" class="cd-icon-btn cd-icon-danger" data-cd-action="delete" data-cd-id="' +
+      row.id +
+      '" title="Delete"><i class="fas fa-trash"></i></button>' +
+      "</div>"
+    );
+  }
+
+  function historyRowHtml(r) {
+    return (
+      "<tr>" +
+      "<td>" +
+      esc(fmt(r.symbol_raw || r.symbol_mapped)) +
+      "</td><td>" +
+      dirChip(r.direction) +
+      "</td><td>" +
+      esc(fmt(r.div_received_at)) +
+      "</td><td>" +
+      esc(fmt(r.go_received_at)) +
+      "</td><td>" +
+      esc(fmt(r.entry_price)) +
+      "</td><td>" +
+      esc(fmt(r.trade_taken_at)) +
+      "</td><td>" +
+      esc(fmt(r.exit_price)) +
+      "</td><td>" +
+      esc(fmt(r.exit_at)) +
+      "</td><td>" +
+      pnlHtml(r.pnl) +
+      "</td><td>" +
+      esc(fmt(r.trade_mode || "PAPER")) +
+      "</td><td>" +
+      esc(fmt(r.trade_log_id)) +
+      "</td><td>" +
+      historyActionsHtml(r) +
+      "</td></tr>"
+    );
+  }
+
+  function historyCardHtml(r) {
+    var tSrc = r.exit_at || r.trade_taken_at || r.go_received_at || "";
+    return (
+      '<article class="cd-mcard">' +
+      '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
+      '<span class="cd-mcard-time">' +
+      esc(cardTimeLabel(tSrc)) +
+      "</span>" +
+      '<span class="cd-mcard-sym">' +
+      esc(r.symbol_raw || r.symbol_mapped || "—") +
+      "</span>" +
+      '<span class="cd-mcard-side">' +
+      dirChip(r.direction) +
+      "</span>" +
+      '<span class="cd-mcard-pnl">' +
+      pnlHtml(r.pnl) +
+      "</span>" +
+      '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
+      "</button>" +
+      '<div class="cd-mcard-body" hidden>' +
+      fieldHtml("DIV", esc(fmt(r.div_received_at))) +
+      fieldHtml("GO", esc(fmt(r.go_received_at))) +
+      fieldHtml("Entry", esc(fmt(r.entry_price))) +
+      fieldHtml("Entry time", esc(fmt(r.trade_taken_at))) +
+      fieldHtml("Exit", esc(fmt(r.exit_price))) +
+      fieldHtml("Exit time", esc(fmt(r.exit_at))) +
+      fieldHtml("PnL", pnlHtml(r.pnl)) +
+      fieldHtml("Mode", esc(fmt(r.trade_mode || "PAPER"))) +
+      fieldHtml("trade_log", esc(fmt(r.trade_log_id))) +
+      '<div class="cd-mcard-actions">' +
+      historyActionsHtml(r) +
+      "</div>" +
+      "</div></article>"
+    );
+  }
+
+  function historyMobileGroupsHtml(rows) {
+    var groups = {};
+    var order = [];
+    rows.forEach(function (r) {
+      var k = dateKey(r.exit_at || r.trade_taken_at || r.go_received_at);
+      if (!groups[k]) {
+        groups[k] = [];
+        order.push(k);
+      }
+      groups[k].push(r);
+    });
+    order.sort(function (a, b) {
+      if (a === "—") return 1;
+      if (b === "—") return -1;
+      return String(b).localeCompare(String(a));
+    });
+    return order
+      .map(function (k) {
+        var list = groups[k].map(historyCardHtml).join("");
+        return (
+          '<section class="cd-mgroup">' +
+          '<header class="cd-mgroup-head">' +
+          '<span class="cd-mgroup-title">' +
+          esc(formatDateLabel(k)) +
+          "</span>" +
+          '<span class="cd-mgroup-meta">' +
+          groups[k].length +
+          (groups[k].length === 1 ? " trade" : " trades") +
+          "</span></header>" +
+          '<div class="cd-mgroup-cards">' +
+          list +
+          "</div></section>"
+        );
+      })
+      .join("");
+  }
+
+  function renderHistoryModeBlock(mode, title, rows) {
+    var head =
+      '<header class="cd-history-mode-head">' +
+      '<h3 class="cd-history-mode-title">' +
+      esc(title) +
+      "</h3>" +
+      '<span class="cd-history-mode-meta">' +
+      rows.length +
+      (rows.length === 1 ? " trade" : " trades") +
+      "</span></header>";
+    if (!rows.length) {
+      return (
+        '<section class="cd-history-mode" data-mode="' +
+        mode +
+        '">' +
+        head +
+        '<p class="cd-empty cd-empty-mode">No ' +
+        esc(title.toLowerCase()) +
+        "s yet.</p></section>"
+      );
+    }
+    var table =
+      '<div class="cd-desktop-table"><div class="cd-table-wrap">' +
+      '<table class="cd-table">' +
+      "<thead><tr>" +
+      "<th>Symbol</th><th>Dir</th><th>DIV</th><th>GO</th>" +
+      "<th>Entry</th><th>Entry time</th><th>Exit</th><th>Exit time</th>" +
+      "<th>PnL</th><th>Mode</th><th>trade_log</th><th>Actions</th>" +
+      "</tr></thead><tbody>" +
+      rows.map(historyRowHtml).join("") +
+      "</tbody></table></div></div>";
+    var mobile =
+      '<div class="cd-mobile-cards">' + historyMobileGroupsHtml(rows) + "</div>";
+    return (
+      '<section class="cd-history-mode" data-mode="' +
+      mode +
+      '">' +
+      head +
+      table +
+      mobile +
+      "</section>"
+    );
+  }
+
+  function renderHistory(rows) {
+    var empty = $("cdHistoryEmpty");
+    var host = $("cdHistoryHost");
+    var list = Array.isArray(rows) ? rows : [];
+    historyById = {};
+    list.forEach(function (r) {
+      historyById[r.id] = r;
+    });
+
+    if (!list.length) {
+      empty.hidden = false;
+      if (host) {
+        host.hidden = true;
+        host.innerHTML = "";
+      }
+      return;
+    }
+    empty.hidden = true;
+    if (!host) return;
+    host.hidden = false;
+
+    var live = list.filter(function (r) {
+      return normalizeTradeMode(r.trade_mode) === "LIVE";
+    });
+    var paper = list.filter(function (r) {
+      return normalizeTradeMode(r.trade_mode) !== "LIVE";
+    });
+    host.innerHTML =
+      '<div class="cd-history-split">' +
+      renderHistoryModeBlock("LIVE", "Live Trade", live) +
+      renderHistoryModeBlock("PAPER", "Paper Trade", paper) +
+      "</div>";
+    bindRowActions(host, historyById);
   }
 
   function renderActive(rows) {
@@ -499,116 +700,6 @@
     bindRowActions(mobile, inTradeById);
   }
 
-  function renderHistory(rows) {
-    var body = $("cdHistoryBody");
-    var empty = $("cdHistoryEmpty");
-    var mobile = $("cdHistoryMobile");
-    body.innerHTML = "";
-    if (mobile) mobile.innerHTML = "";
-    if (!rows || !rows.length) {
-      empty.hidden = false;
-      return;
-    }
-    empty.hidden = true;
-    rows.forEach(function (r) {
-      var tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td>" +
-        esc(fmt(r.symbol_raw || r.symbol_mapped)) +
-        "</td><td>" +
-        dirChip(r.direction) +
-        "</td><td>" +
-        esc(fmt(r.div_received_at)) +
-        "</td><td>" +
-        esc(fmt(r.go_received_at)) +
-        "</td><td>" +
-        esc(fmt(r.entry_price)) +
-        "</td><td>" +
-        esc(fmt(r.trade_taken_at)) +
-        "</td><td>" +
-        esc(fmt(r.exit_price)) +
-        "</td><td>" +
-        esc(fmt(r.exit_at)) +
-        "</td><td>" +
-        pnlHtml(r.pnl) +
-        "</td><td>" +
-        esc(fmt(r.trade_mode || "PAPER")) +
-        "</td><td>" +
-        esc(fmt(r.trade_log_id)) +
-        "</td>";
-      body.appendChild(tr);
-    });
-
-    if (!mobile) return;
-    var groups = {};
-    var order = [];
-    rows.forEach(function (r) {
-      var k = dateKey(r.exit_at || r.trade_taken_at || r.go_received_at);
-      if (!groups[k]) {
-        groups[k] = [];
-        order.push(k);
-      }
-      groups[k].push(r);
-    });
-    order.sort(function (a, b) {
-      if (a === "—") return 1;
-      if (b === "—") return -1;
-      return String(b).localeCompare(String(a));
-    });
-    mobile.innerHTML = order
-      .map(function (k) {
-        var list = groups[k]
-          .map(function (r) {
-            var tSrc = r.exit_at || r.trade_taken_at || r.go_received_at || "";
-            return (
-              '<article class="cd-mcard">' +
-              '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
-              '<span class="cd-mcard-time">' +
-              esc(cardTimeLabel(tSrc)) +
-              "</span>" +
-              '<span class="cd-mcard-sym">' +
-              esc(r.symbol_raw || r.symbol_mapped || "—") +
-              "</span>" +
-              '<span class="cd-mcard-side">' +
-              dirChip(r.direction) +
-              "</span>" +
-              '<span class="cd-mcard-pnl">' +
-              pnlHtml(r.pnl) +
-              "</span>" +
-              '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
-              "</button>" +
-              '<div class="cd-mcard-body" hidden>' +
-              fieldHtml("DIV", esc(fmt(r.div_received_at))) +
-              fieldHtml("GO", esc(fmt(r.go_received_at))) +
-              fieldHtml("Entry", esc(fmt(r.entry_price))) +
-              fieldHtml("Entry time", esc(fmt(r.trade_taken_at))) +
-              fieldHtml("Exit", esc(fmt(r.exit_price))) +
-              fieldHtml("Exit time", esc(fmt(r.exit_at))) +
-              fieldHtml("PnL", pnlHtml(r.pnl)) +
-              fieldHtml("Mode", esc(fmt(r.trade_mode || "PAPER"))) +
-              fieldHtml("trade_log", esc(fmt(r.trade_log_id))) +
-              "</div></article>"
-            );
-          })
-          .join("");
-        return (
-          '<section class="cd-mgroup">' +
-          '<header class="cd-mgroup-head">' +
-          '<span class="cd-mgroup-title">' +
-          esc(formatDateLabel(k)) +
-          "</span>" +
-          '<span class="cd-mgroup-meta">' +
-          groups[k].length +
-          (groups[k].length === 1 ? " trade" : " trades") +
-          "</span></header>" +
-          '<div class="cd-mgroup-cards">' +
-          list +
-          "</div></section>"
-        );
-      })
-      .join("");
-  }
-
   function openTake(row) {
     takeSignalId = row.id;
     $("cdTakeMeta").textContent =
@@ -626,6 +717,7 @@
   function openEdit(row, mode) {
     editSignalId = row.id;
     editMode = mode || "edit";
+    var isHistory = String(row.status || "") === "History";
     var title = editMode === "exit" ? "Exit Trade" : "Edit Trade";
     $("cdEditTitle").textContent = title;
     $("cdEditMeta").textContent =
@@ -636,7 +728,7 @@
     $("cdEditEntryTime").value = entry.time ? entry.time.slice(0, 8) : "";
     $("cdEditEntryPrice").value = row.entry_price != null ? row.entry_price : "";
     $("cdEditDirection").value = String(row.direction || "BULL").toUpperCase() === "BEAR" ? "BEAR" : "BULL";
-    $("cdEditMode").value = String(row.trade_mode || "PAPER").toUpperCase() === "LIVE" ? "LIVE" : "PAPER";
+    $("cdEditMode").value = normalizeTradeMode(row.trade_mode);
 
     var exitParts = splitIst(row.exit_at);
     if (editMode === "exit" && !exitParts.date) {
@@ -660,10 +752,11 @@
       }, 50);
     } else {
       saveBtn.hidden = false;
-      exitBtn.hidden = false;
-      $("cdEditExitPrice").required = false;
-      $("cdEditExitDate").required = false;
-      $("cdEditExitTime").required = false;
+      // History stays History — no "move to History" action.
+      exitBtn.hidden = isHistory;
+      $("cdEditExitPrice").required = isHistory;
+      $("cdEditExitDate").required = isHistory;
+      $("cdEditExitTime").required = isHistory;
     }
 
     $("cdEditModal").hidden = false;
@@ -677,7 +770,11 @@
 
   async function confirmDelete(row) {
     var sym = row.symbol_raw || row.symbol_mapped || row.id;
-    if (!window.confirm("Delete In-Trade row for " + sym + "?\nWebhook raw log is kept.")) return;
+    var isHistory = String(row.status || "") === "History";
+    var msg = isHistory
+      ? "Delete History row for " + sym + "?\nSignal is removed; trade_log (if any) is kept."
+      : "Delete In-Trade row for " + sym + "?\nWebhook raw log is kept.";
+    if (!window.confirm(msg)) return;
     try {
       await api("/signal/delete", {
         method: "POST",
@@ -775,12 +872,15 @@
         return;
       }
       try {
+        var wasHistory =
+          !!(historyById[editSignalId] && historyById[editSignalId].status === "History");
         await api("/signal/update", {
           method: "POST",
           body: JSON.stringify(payload),
         });
         closeEdit();
         showBanner("Trade updated", false);
+        if (wasHistory || currentTab === "history") setTab("history");
         await load();
       } catch (e) {
         showBanner(String(e.message || e), true);
