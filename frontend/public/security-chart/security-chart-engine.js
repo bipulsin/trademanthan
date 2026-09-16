@@ -13,12 +13,13 @@
     const TF_OPTIONS = ['5m', '10m', '15m', '30m', '1hr', '2h', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=8';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=9';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
         'security-chart/indicators/movingAverages.js?v=1',
         'security-chart/indicators/hilega-milega.js?v=1',
+        'security-chart/indicators/macd-divergence.js?v=1',
     ];
     const CHART_UTIL_SCRIPTS = [
         'security-chart/chart/crosshair-format.js?v=1',
@@ -27,6 +28,9 @@
     const HM_PANE_DEFAULT_PX = 140;
     const HM_PANE_MIN_PX = 80;
     const HM_PANE_MAX_PX = 320;
+    const MD_PANE_DEFAULT_PX = 160;
+    const MD_PANE_MIN_PX = 100;
+    const MD_PANE_MAX_PX = 360;
     const EMA_PERIOD_MIN = 2;
     const EMA_PERIOD_MAX = 200;
     const EMA_SLOT_DEFAULTS = [9, 30, 100];
@@ -299,7 +303,9 @@
     }
 
     function loadHmIndicators() {
-        if (global.HilegaMilegaIndicator) return Promise.resolve();
+        if (global.HilegaMilegaIndicator && global.MacdDivergenceIndicator) {
+            return Promise.resolve();
+        }
         if (hmScriptsPromise) return hmScriptsPromise;
         hmScriptsPromise = loadLwc().then(function () {
             let chain = loadChartUtils();
@@ -563,6 +569,9 @@
         this.hmEnabled = false;
         this.hmPaneHeight = HM_PANE_DEFAULT_PX;
         this.hmIndicator = null;
+        this.mdEnabled = false;
+        this.mdPaneHeight = MD_PANE_DEFAULT_PX;
+        this.mdIndicator = null;
         this.volumeEnabled = true;
         this._crosshairUnsubs = [];
     }
@@ -627,6 +636,7 @@
         if (!root) return;
         const chartEl = root.querySelector('[data-uscm-chart]');
         const hmEl = root.querySelector('[data-uscm-hm-chart]');
+        const mdEl = root.querySelector('[data-uscm-md-chart]');
         if (this.chart && chartEl && chartEl.clientWidth && chartEl.clientHeight) {
             try {
                 this.chart.applyOptions({
@@ -644,6 +654,17 @@
                     const range = this.chart.timeScale().getVisibleLogicalRange();
                     if (range) this.hmIndicator.chart.timeScale().setVisibleLogicalRange(range);
                 } catch (e2) {
+                    /* ignore */
+                }
+            }
+        }
+        if (this.mdIndicator && mdEl && mdEl.clientWidth && mdEl.clientHeight) {
+            this.mdIndicator.resize(mdEl.clientWidth, mdEl.clientHeight);
+            if (this.chart && this.mdIndicator.chart) {
+                try {
+                    const range2 = this.chart.timeScale().getVisibleLogicalRange();
+                    if (range2) this.mdIndicator.chart.timeScale().setVisibleLogicalRange(range2);
+                } catch (e3) {
                     /* ignore */
                 }
             }
@@ -668,7 +689,7 @@
             '</div>' +
             '<div class="uscm-header-prices">' +
             '<div class="uscm-indicator-wrap" data-uscm-indicator-wrap>' +
-            '<button type="button" class="uscm-indicator-btn" data-uscm-indicator-toggle aria-haspopup="true" aria-expanded="false">Indicator</button>' +
+            '<button type="button" class="uscm-indicator-btn" data-uscm-indicator-toggle aria-haspopup="true" aria-expanded="false" aria-label="Indicators">fx</button>' +
             '<div class="uscm-indicator-menu uscm-hidden" data-uscm-indicator-menu role="menu">' +
             '<div class="uscm-indicator-menu-inner" data-uscm-overlays>' +
             emaOverlaysHtml() +
@@ -680,6 +701,9 @@
             '</label>' +
             '<label class="uscm-ov-label uscm-ov-label--hm">' +
             '<input type="checkbox" data-uscm-hm-on> Hilega-Milega' +
+            '</label>' +
+            '<label class="uscm-ov-label">' +
+            '<input type="checkbox" data-uscm-md-on> MACD Divergence' +
             '</label>' +
             '</div></div></div>' +
             '<div class="uscm-ltp-block">' +
@@ -704,6 +728,11 @@
             '<div class="uscm-hm-pane uscm-hidden" data-uscm-hm-pane>' +
             '<div class="uscm-hm-label">Hilega-Milega</div>' +
             '<div class="uscm-hm-chart-root" data-uscm-hm-chart></div>' +
+            '</div>' +
+            '<div class="uscm-md-splitter uscm-hidden" data-uscm-md-splitter role="separator" aria-orientation="horizontal" aria-label="Resize MACD Divergence panel" tabindex="0"></div>' +
+            '<div class="uscm-md-pane uscm-hidden" data-uscm-md-pane>' +
+            '<div class="uscm-md-label">MACD Divergence</div>' +
+            '<div class="uscm-md-chart-root" data-uscm-md-chart></div>' +
             '</div>' +
             '</div>' +
             '</div>' +
@@ -739,6 +768,7 @@
         });
         bindIntelSplitter(backdrop, self);
         bindHmSplitter(backdrop, self);
+        bindMdSplitter(backdrop, self);
         bindOverlayControls(backdrop, self);
         bindIndicatorDropdown(backdrop);
         modalRoot = backdrop;
@@ -748,6 +778,13 @@
     SecurityChartModal.prototype._upgradeChartDom = function () {
         const root = modalRoot;
         if (!root) return;
+        const indBtn = root.querySelector('[data-uscm-indicator-toggle]');
+        if (indBtn) {
+            indBtn.textContent = 'fx';
+            if (!indBtn.getAttribute('aria-label')) {
+                indBtn.setAttribute('aria-label', 'Indicators');
+            }
+        }
         const overlays = root.querySelector('[data-uscm-overlays]');
         if (overlays && overlays.querySelectorAll('[data-uscm-ema-row]').length < EMA_SLOT_DEFAULTS.length) {
             const legacyEmaOn = overlays.querySelector('[data-uscm-ema-on]');
@@ -777,6 +814,16 @@
                     '<input type="checkbox" data-uscm-hm-on> Hilega-Milega' +
                     '</label>'
             );
+        }
+        if (overlays && !overlays.querySelector('[data-uscm-md-on]')) {
+            overlays.insertAdjacentHTML(
+                'beforeend',
+                '<label class="uscm-ov-label">' +
+                    '<input type="checkbox" data-uscm-md-on> MACD Divergence' +
+                    '</label>'
+            );
+            overlays._uscmOverlayBound = false;
+            bindOverlayControls(root, this);
         }
         const tfHost = root.querySelector('[data-uscm-tf]');
         if (tfHost) {
@@ -810,7 +857,35 @@
             });
         }
         const wrap = root.querySelector('.uscm-chart-wrap');
-        if (!wrap || wrap.querySelector('[data-uscm-chart-stack]')) return;
+        if (wrap) {
+            const stack = wrap.querySelector('[data-uscm-chart-stack]');
+            if (stack && !stack.querySelector('[data-uscm-md-pane]')) {
+                stack.insertAdjacentHTML(
+                    'beforeend',
+                    '<div class="uscm-md-splitter uscm-hidden" data-uscm-md-splitter role="separator" aria-orientation="horizontal" aria-label="Resize MACD Divergence panel" tabindex="0"></div>' +
+                        '<div class="uscm-md-pane uscm-hidden" data-uscm-md-pane>' +
+                        '<div class="uscm-md-label">MACD Divergence</div>' +
+                        '<div class="uscm-md-chart-root" data-uscm-md-chart></div>' +
+                        '</div>'
+                );
+                bindMdSplitter(root, this);
+            }
+        }
+        if (!wrap || wrap.querySelector('[data-uscm-chart-stack]')) {
+            bindHmSplitter(root, this);
+            bindMdSplitter(root, this);
+            bindHmCheckboxIfNeeded(root, this);
+            bindMdCheckboxIfNeeded(root, this);
+            bindVolumeCheckboxIfNeeded(root, this);
+            const mainPane = root.querySelector('[data-uscm-main-pane]');
+            if (mainPane && !mainPane.querySelector('[data-uscm-crosshair-time]')) {
+                mainPane.insertAdjacentHTML(
+                    'afterbegin',
+                    '<div class="uscm-crosshair-time uscm-hidden" data-uscm-crosshair-time aria-live="polite"></div>'
+                );
+            }
+            return;
+        }
         const skeleton = wrap.querySelector('[data-uscm-skeleton]');
         const skDisplay = skeleton ? skeleton.style.display : '';
         const skText = skeleton ? skeleton.textContent : 'Loading chart…';
@@ -821,14 +896,20 @@
             '<div class="uscm-hm-splitter uscm-hidden" data-uscm-hm-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Hilega-Milega panel" tabindex="0"></div>' +
             '<div class="uscm-hm-pane uscm-hidden" data-uscm-hm-pane>' +
             '<div class="uscm-hm-label">Hilega-Milega</div>' +
-            '<div class="uscm-hm-chart-root" data-uscm-hm-chart></div></div></div>';
+            '<div class="uscm-hm-chart-root" data-uscm-hm-chart></div></div>' +
+            '<div class="uscm-md-splitter uscm-hidden" data-uscm-md-splitter role="separator" aria-orientation="horizontal" aria-label="Resize MACD Divergence panel" tabindex="0"></div>' +
+            '<div class="uscm-md-pane uscm-hidden" data-uscm-md-pane>' +
+            '<div class="uscm-md-label">MACD Divergence</div>' +
+            '<div class="uscm-md-chart-root" data-uscm-md-chart></div></div></div>';
         const sk2 = wrap.querySelector('[data-uscm-skeleton]');
         if (sk2) {
             sk2.style.display = skDisplay || '';
             sk2.textContent = skText;
         }
         bindHmSplitter(root, this);
+        bindMdSplitter(root, this);
         bindHmCheckboxIfNeeded(root, this);
+        bindMdCheckboxIfNeeded(root, this);
         bindVolumeCheckboxIfNeeded(root, this);
         const mainPane = root.querySelector('[data-uscm-main-pane]');
         if (mainPane && !mainPane.querySelector('[data-uscm-crosshair-time]')) {
@@ -907,6 +988,18 @@
                 }
             );
         }
+        if (this.mdIndicator && this.mdIndicator.chart) {
+            this.mdIndicator.chart.subscribeCrosshairMove(onCrosshair);
+            this._crosshairUnsubs.push(
+                function () {
+                    try {
+                        self.mdIndicator.chart.unsubscribeCrosshairMove(onCrosshair);
+                    } catch (e) {
+                        /* ignore */
+                    }
+                }
+            );
+        }
     };
 
     SecurityChartModal.prototype._applyVolumeVisibility = function () {
@@ -931,6 +1024,19 @@
             modalInstance._readOverlayPrefs();
             modalInstance._rebuildOverlays();
             modalInstance._applyHmIndicator();
+            modalInstance._applyMdIndicator();
+        });
+    }
+
+    function bindMdCheckboxIfNeeded(root, modalInstance) {
+        const mdCb = root.querySelector('[data-uscm-md-on]');
+        if (!mdCb || mdCb._uscmMdBound) return;
+        mdCb._uscmMdBound = true;
+        mdCb.addEventListener('change', function () {
+            modalInstance._readOverlayPrefs();
+            modalInstance._rebuildOverlays();
+            modalInstance._applyHmIndicator();
+            modalInstance._applyMdIndicator();
         });
     }
 
@@ -952,6 +1058,18 @@
             modalInstance._notifyChartResize();
         }
 
+        function hmBottomY() {
+            const mdSplitter = stack.querySelector('[data-uscm-md-splitter]');
+            if (
+                modalInstance.mdEnabled &&
+                mdSplitter &&
+                !mdSplitter.classList.contains('uscm-hidden')
+            ) {
+                return mdSplitter.getBoundingClientRect().top;
+            }
+            return stack.getBoundingClientRect().bottom;
+        }
+
         splitter.addEventListener('pointerdown', function (e) {
             if (!root.classList.contains('uscm-panel--hm')) return;
             dragging = true;
@@ -967,14 +1085,67 @@
 
         splitter.addEventListener('pointermove', function (e) {
             if (!dragging) return;
-            const sr = stack.getBoundingClientRect();
-            setHmHeight(sr.bottom - e.clientY);
+            setHmHeight(hmBottomY() - e.clientY);
         });
 
         function endDrag(e) {
             if (!dragging) return;
             dragging = false;
             splitter.classList.remove('uscm-hm-splitter--active');
+            document.body.classList.remove('uscm-row-resize');
+            try {
+                splitter.releasePointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerup', endDrag);
+        splitter.addEventListener('pointercancel', endDrag);
+    }
+
+    function bindMdSplitter(root, modalInstance) {
+        const splitter = root.querySelector('[data-uscm-md-splitter]');
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        if (!splitter || !stack || splitter._uscmMdBound) return;
+        splitter._uscmMdBound = true;
+
+        let dragging = false;
+
+        function clampMdHeight(px) {
+            return Math.max(MD_PANE_MIN_PX, Math.min(MD_PANE_MAX_PX, px));
+        }
+
+        function setMdHeight(px) {
+            modalInstance.mdPaneHeight = clampMdHeight(px);
+            stack.style.setProperty('--uscm-md-h', modalInstance.mdPaneHeight + 'px');
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerdown', function (e) {
+            if (!root.classList.contains('uscm-panel--md')) return;
+            dragging = true;
+            splitter.classList.add('uscm-md-splitter--active');
+            try {
+                splitter.setPointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            document.body.classList.add('uscm-row-resize');
+            e.preventDefault();
+        });
+
+        splitter.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            const sr = stack.getBoundingClientRect();
+            setMdHeight(sr.bottom - e.clientY);
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            splitter.classList.remove('uscm-md-splitter--active');
             document.body.classList.remove('uscm-row-resize');
             try {
                 splitter.releasePointerCapture(e.pointerId);
@@ -1027,12 +1198,14 @@
         const vwapCb = host.querySelector('[data-uscm-vwap-on]');
         const volCb = host.querySelector('[data-uscm-vol-on]');
         const hmCb = host.querySelector('[data-uscm-hm-on]');
+        const mdCb = host.querySelector('[data-uscm-md-on]');
 
         function onOverlayChange() {
             modalInstance._readOverlayPrefs();
             modalInstance._rebuildOverlays();
             modalInstance._applyVolumeVisibility();
             modalInstance._applyHmIndicator();
+            modalInstance._applyMdIndicator();
         }
 
         host.querySelectorAll('[data-uscm-ema-on]').forEach(function (emaCb) {
@@ -1058,6 +1231,10 @@
         if (hmCb) {
             hmCb.addEventListener('change', onOverlayChange);
             hmCb._uscmHmBound = true;
+        }
+        if (mdCb) {
+            mdCb.addEventListener('change', onOverlayChange);
+            mdCb._uscmMdBound = true;
         }
     }
 
@@ -1142,6 +1319,24 @@
         }
     };
 
+    SecurityChartModal.prototype._destroyMdIndicator = function () {
+        const root = modalRoot;
+        const mdEl = root && root.querySelector('[data-uscm-md-chart]');
+        if (this.mdIndicator) {
+            this.mdIndicator.destroy(mdEl);
+            this.mdIndicator = null;
+        } else if (mdEl) {
+            mdEl.innerHTML = '';
+        }
+        if (this.candleSeries && this.candleSeries.setMarkers) {
+            try {
+                this.candleSeries.setMarkers([]);
+            } catch (e) {
+                /* ignore */
+            }
+        }
+    };
+
     SecurityChartModal.prototype._updateHmLayout = function () {
         const root = modalRoot;
         if (!root) return;
@@ -1156,6 +1351,25 @@
             stack.style.setProperty('--uscm-hm-h', this.hmPaneHeight + 'px');
         } else {
             root.classList.remove('uscm-panel--hm');
+            if (splitter) splitter.classList.add('uscm-hidden');
+            if (pane) pane.classList.add('uscm-hidden');
+        }
+    };
+
+    SecurityChartModal.prototype._updateMdLayout = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        const splitter = root.querySelector('[data-uscm-md-splitter]');
+        const pane = root.querySelector('[data-uscm-md-pane]');
+        if (!stack) return;
+        if (this.mdEnabled) {
+            root.classList.add('uscm-panel--md');
+            if (splitter) splitter.classList.remove('uscm-hidden');
+            if (pane) pane.classList.remove('uscm-hidden');
+            stack.style.setProperty('--uscm-md-h', this.mdPaneHeight + 'px');
+        } else {
+            root.classList.remove('uscm-panel--md');
             if (splitter) splitter.classList.add('uscm-hidden');
             if (pane) pane.classList.add('uscm-hidden');
         }
@@ -1199,9 +1413,67 @@
         });
     };
 
+    SecurityChartModal.prototype._applyMdPriceMarkers = function () {
+        if (!this.candleSeries || !this.candleSeries.setMarkers) return;
+        if (!this.mdEnabled || !this.mdIndicator || !this._barsCache.length) {
+            try {
+                this.candleSeries.setMarkers([]);
+            } catch (e) {
+                /* ignore */
+            }
+            return;
+        }
+        const markers = this.mdIndicator.getPriceMarkers(this._barsCache);
+        try {
+            this.candleSeries.setMarkers(markers || []);
+        } catch (e2) {
+            /* ignore */
+        }
+    };
+
+    SecurityChartModal.prototype._applyMdIndicator = function () {
+        const root = modalRoot;
+        if (!root) return;
+        this._updateMdLayout();
+        if (!this.mdEnabled) {
+            this._destroyMdIndicator();
+            return;
+        }
+        if (!this.chart || !this._barsCache.length || !global.MacdDivergenceIndicator) {
+            return;
+        }
+        const mdEl = root.querySelector('[data-uscm-md-chart]');
+        if (!mdEl) return;
+        if (!this.mdIndicator) {
+            this.mdIndicator = new global.MacdDivergenceIndicator();
+        }
+        const self = this;
+        this.mdIndicator.render({
+            container: mdEl,
+            bars: this._barsCache,
+            isDark: isChartDarkTheme(),
+            mainChart: this.chart,
+            timeFormatter: function (time) {
+                return crosshairLabelForTime(time, self.timeframe);
+            },
+            tickMarkFormatter: function (time) {
+                return axisTickForTime(time, self.timeframe);
+            },
+        });
+        this._applyMdPriceMarkers();
+        requestAnimationFrame(function () {
+            self._notifyChartResize();
+            if (self.chart && self.mdIndicator) {
+                self.mdIndicator.syncFromMain(self.chart);
+            }
+            self._bindCrosshairHandlers();
+        });
+    };
+
     SecurityChartModal.prototype._destroyChart = function () {
         this._clearCrosshairHandlers();
         this._destroyHmIndicator();
+        this._destroyMdIndicator();
         if (this.resizeObs) {
             this.resizeObs.disconnect();
             this.resizeObs = null;
@@ -1273,6 +1545,8 @@
         if (vwapCb) this.vwapEnabled = vwapCb.checked;
         const hmCb = root.querySelector('[data-uscm-hm-on]');
         if (hmCb) this.hmEnabled = hmCb.checked;
+        const mdCb = root.querySelector('[data-uscm-md-on]');
+        if (mdCb) this.mdEnabled = mdCb.checked;
         const volCb = root.querySelector('[data-uscm-vol-on]');
         if (volCb) this.volumeEnabled = volCb.checked;
     };
@@ -1297,10 +1571,12 @@
         });
         const vwapCb = root.querySelector('[data-uscm-vwap-on]');
         const hmCb = root.querySelector('[data-uscm-hm-on]');
+        const mdCb = root.querySelector('[data-uscm-md-on]');
         const volCb = root.querySelector('[data-uscm-vol-on]');
         if (vwapCb) vwapCb.checked = this.vwapEnabled;
         if (volCb) volCb.checked = this.volumeEnabled;
         if (hmCb) hmCb.checked = this.hmEnabled;
+        if (mdCb) mdCb.checked = this.mdEnabled;
     };
 
     SecurityChartModal.prototype._rebuildOverlays = function () {
@@ -1482,6 +1758,7 @@
         setInitialVisibleBars(this.chart, candles.length);
         this._seedLtpFromBars();
         this._applyHmIndicator();
+        this._applyMdIndicator();
         this._bindCrosshairHandlers();
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
@@ -1587,6 +1864,10 @@
             if (this.hmIndicator && this.hmEnabled) {
                 this.hmIndicator.updateLastBar(this._barsCache);
             }
+            if (this.mdIndicator && this.mdEnabled) {
+                this.mdIndicator.updateLastBar(this._barsCache);
+                this._applyMdPriceMarkers();
+            }
         } catch (e) {
             /* ignore occasional time mismatch */
         }
@@ -1614,6 +1895,12 @@
         this.emaSlots = normalizeEmaSlots(config);
         this.vwapEnabled = config.vwapEnabled != null ? !!config.vwapEnabled : true;
         this.hmEnabled = config.hmEnabled != null ? !!config.hmEnabled : false;
+        this.mdEnabled =
+            config.macdDivergenceEnabled != null
+                ? !!config.macdDivergenceEnabled
+                : config.mdEnabled != null
+                  ? !!config.mdEnabled
+                  : false;
         this.volumeEnabled = config.volumeEnabled != null ? !!config.volumeEnabled : true;
         if (config.indicatorsEnabled === false || config.noIndicators === true) {
             this.emaSlots = this.emaSlots.map(function (s) {
@@ -1622,6 +1909,10 @@
             this.vwapEnabled = false;
             this.hmEnabled = false;
             this.volumeEnabled = false;
+            // macdDivergenceEnabled is independent of noIndicators — set after/alongside
+            if (config.macdDivergenceEnabled == null && config.mdEnabled == null) {
+                this.mdEnabled = false;
+            }
         }
 
         return ensureAssets().then(function () {

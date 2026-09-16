@@ -96,11 +96,16 @@ body[data-theme="light"] .uscm-symbol {
     border: 1px solid #475569;
     background: #1e293b;
     color: #e2e8f0;
-    font-size: 0.75rem;
-    padding: 5px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-style: italic;
+    font-family: Georgia, "Times New Roman", serif;
+    padding: 5px 10px;
+    min-width: 2rem;
     border-radius: 6px;
     cursor: pointer;
     white-space: nowrap;
+    letter-spacing: 0.02em;
 }
 
 .uscm-indicator-btn:hover,
@@ -308,6 +313,7 @@ body[data-theme="light"] .uscm-tf-btn {
     flex-direction: column;
     min-height: 0;
     --uscm-hm-h: 140px;
+    --uscm-md-h: 160px;
 }
 
 .uscm-main-pane {
@@ -348,12 +354,14 @@ body[data-theme="light"] .uscm-crosshair-time {
 }
 
 .uscm-chart-root,
-.uscm-hm-chart-root {
+.uscm-hm-chart-root,
+.uscm-md-chart-root {
     position: absolute;
     inset: 0;
 }
 
-.uscm-hm-splitter {
+.uscm-hm-splitter,
+.uscm-md-splitter {
     flex: 0 0 5px;
     cursor: row-resize;
     background: #334155;
@@ -361,11 +369,14 @@ body[data-theme="light"] .uscm-crosshair-time {
 }
 
 .uscm-hm-splitter:hover,
-.uscm-hm-splitter--active {
+.uscm-hm-splitter--active,
+.uscm-md-splitter:hover,
+.uscm-md-splitter--active {
     background: #60a5fa;
 }
 
-body[data-theme="light"] .uscm-hm-splitter {
+body[data-theme="light"] .uscm-hm-splitter,
+body[data-theme="light"] .uscm-md-splitter {
     background: #cbd5e1;
 }
 
@@ -382,7 +393,21 @@ body[data-theme="light"] .uscm-panel--hm .uscm-hm-pane {
     border-top-color: #e2e8f0;
 }
 
-.uscm-hm-label {
+.uscm-panel--md .uscm-md-pane {
+    flex: 0 0 var(--uscm-md-h, 160px);
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid #334155;
+    position: relative;
+}
+
+body[data-theme="light"] .uscm-panel--md .uscm-md-pane {
+    border-top-color: #e2e8f0;
+}
+
+.uscm-hm-label,
+.uscm-md-label {
     flex: 0 0 auto;
     font-size: 0.68rem;
     font-weight: 600;
@@ -393,11 +418,13 @@ body[data-theme="light"] .uscm-panel--hm .uscm-hm-pane {
     user-select: none;
 }
 
-body[data-theme="light"] .uscm-hm-label {
+body[data-theme="light"] .uscm-hm-label,
+body[data-theme="light"] .uscm-md-label {
     color: #64748b;
 }
 
-.uscm-hm-chart-root {
+.uscm-hm-chart-root,
+.uscm-md-chart-root {
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
