@@ -364,6 +364,62 @@ def test_fetch_2h_closes_overlays_hours1_when_hours2_stale(monkeypatch):
     assert closes[-2] == 4893.0
 
 
+def test_normalize_2h_bars_newest_first_to_ascending():
+    """Upstox-style newest-first input must not reverse EMA closes."""
+    from backend.services.stock_option_signals import (
+        _closes_from_2h_bar_dicts,
+        _normalize_2h_bars_chronological,
+        ema_plausible_vs_last_close,
+        ema_snapshot,
+    )
+
+    asc = _normalize_2h_bars_chronological(
+        [
+            {
+                "timestamp": (
+                    f"2026-08-{(i // 4) + 1:02d}T{[9, 11, 13, 15][i % 4]:02d}:15:00+05:30"
+                ),
+                "close": 2200.0 + i * 0.5,
+            }
+            for i in range(110)
+        ]
+    )
+    desc = list(reversed(asc))
+    closes_fixed = _closes_from_2h_bar_dicts(desc)
+    assert closes_fixed[0] == float(asc[0]["close"])
+    assert closes_fixed[-1] == float(asc[-1]["close"])
+    snap = ema_snapshot(closes_fixed)
+    assert snap["ema9"] is not None
+    assert ema_plausible_vs_last_close(snap["ema9"], closes_fixed[-1])
+    # Reversed closes without normalize sit near the series tip (old highs).
+    snap_bad = ema_snapshot([float(b["close"]) for b in desc])
+    assert snap_bad["ema9"] is not None
+    assert abs(snap_bad["ema9"] - closes_fixed[-1]) > abs(snap["ema9"] - closes_fixed[-1])
+
+
+def test_ema_plausible_vs_last_close():
+    from backend.services.stock_option_signals import ema_plausible_vs_last_close
+
+    assert ema_plausible_vs_last_close(2278.0, 2282.0) is True
+    assert ema_plausible_vs_last_close(2692.0, 2282.0) is False
+    assert ema_plausible_vs_last_close(None, 2282.0) is False
+
+
+def test_merge_2h_prefers_overlay_on_conflict():
+    from backend.services.stock_option_signals import _merge_2h_bar_dicts
+
+    primary = [
+        {"timestamp": "2026-09-15T09:15:00+05:30", "close": 100.0},
+        {"timestamp": "2026-09-15T11:15:00+05:30", "close": 101.0},
+    ]
+    overlay = [
+        {"timestamp": "2026-09-15T11:15:00+05:30", "close": 999.0},
+        {"timestamp": "2026-09-15T13:15:00+05:30", "close": 102.0},
+    ]
+    merged = _merge_2h_bar_dicts(primary, overlay)
+    assert [b["close"] for b in merged] == [100.0, 999.0, 102.0]
+
+
 def test_optional_exit_bundle():
     assert _optional_exit_bundle(None, None, None) is None
     assert _optional_exit_bundle("", "", "") is None

@@ -62,6 +62,9 @@ DELTA_BUY_INDEX = 2.0
 EMA_FAST = 9
 EMA_MID = 30
 EMA_SLOW = 100
+# Reject EMA snaps where EMA9 is farther than this fraction from the latest 2h close.
+# Catches newest-first / reversed close series (EMA tracks old highs while spot is lower).
+EMA_PLAUSIBLE_MAX_REL = 0.12
 SESSION_OPEN = dt_time(9, 15)
 BAR_MINUTES = 120
 FETCH_SLEEP_SEC = 0.4
@@ -460,6 +463,23 @@ def ema_snapshot(closes: Sequence[float]) -> Dict[str, Optional[float]]:
         "ema30": ema_last(closes, EMA_MID),
         "ema100": ema_last(closes, EMA_SLOW),
     }
+
+
+def ema_plausible_vs_last_close(
+    ema9: Any,
+    last_close: Any,
+    *,
+    max_rel: float = EMA_PLAUSIBLE_MAX_REL,
+) -> bool:
+    """True when EMA9 is within ``max_rel`` of the chronologically last 2h close."""
+    try:
+        e9 = float(ema9)
+        lc = float(last_close)
+    except (TypeError, ValueError):
+        return False
+    if lc == 0.0 or max_rel < 0:
+        return False
+    return abs(e9 - lc) / abs(lc) <= float(max_rel)
 
 
 def ema_snapshot_pair(
@@ -2086,40 +2106,76 @@ def _fetch_2h_closes_from_10m_fallback(
     return closes
 
 
+def _normalize_2h_bars_chronological(
+    bars: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Sort 2h bars oldest→newest by parsed timestamp; drop unparseable rows.
+
+    Upstox historical often returns newest-first. EMA9/30/100 require ascending
+    closes — a reversed series tracks old price levels and can falsely arm
+    BULL PUT (EMA9 appears above EMA30/100 while the chart is bearish).
+    """
+    dated: List[Tuple[datetime, Dict[str, Any]]] = []
+    unkeyed = 0
+    for b in bars or []:
+        ts = _parse_candle_ts(b.get("timestamp"))
+        if ts is None or _as_float(b.get("close")) is None:
+            unkeyed += 1
+            continue
+        dated.append((naive_ist(ts), b))
+    if unkeyed:
+        logger.info(
+            "stock_option dropped %s 2h bars without parseable timestamp/close",
+            unkeyed,
+        )
+    if len(dated) >= 2 and dated[0][0] > dated[-1][0]:
+        logger.warning(
+            "stock_option 2h bars arrived newest-first; normalizing to ascending"
+        )
+    dated.sort(key=lambda x: x[0])
+    dedup: Dict[datetime, Dict[str, Any]] = {}
+    for ts, b in dated:
+        dedup[ts] = b
+    return [dedup[k] for k in sorted(dedup)]
+
+
+def _closes_from_2h_bar_dicts(bars: Sequence[Dict[str, Any]]) -> List[float]:
+    """Chronological close series for EMA (always oldest→newest)."""
+    return [float(b["close"]) for b in _normalize_2h_bars_chronological(bars)]
+
+
 def _merge_2h_bar_dicts(
     primary: Sequence[Dict[str, Any]],
     overlay: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Union 2h bars by bucket timestamp. Keep primary on conflict; add missing overlay.
+    """Union 2h bars by bucket time. Overlay wins on conflict (fresher hours/1 / 15m).
 
-    Bars without a timestamp are appended in overlay order after keyed bars (test /
-    degenerate paths) so mid-length series are not dropped before the 10m fallback.
+    hours/2 historical is not merged with the intraday V3 feed, so overlay closes
+    are preferred when both sources share a bucket. Bars without a parseable
+    timestamp are ignored (they must not append newest-first and poison EMA).
     """
-    by_ts: Dict[str, Dict[str, Any]] = {}
-    unkeyed: List[Dict[str, Any]] = []
+    by_ts: Dict[datetime, Dict[str, Any]] = {}
     for b in primary or []:
-        key = str(b.get("timestamp") or "")
-        if key:
-            by_ts[key] = b
-        else:
-            unkeyed.append(b)
+        ts = _parse_candle_ts(b.get("timestamp"))
+        if ts is None or _as_float(b.get("close")) is None:
+            continue
+        by_ts[naive_ist(ts)] = b
     for b in overlay or []:
-        key = str(b.get("timestamp") or "")
-        if not key:
-            unkeyed.append(b)
-        elif key not in by_ts:
-            by_ts[key] = b
-    return [by_ts[k] for k in sorted(by_ts)] + unkeyed
+        ts = _parse_candle_ts(b.get("timestamp"))
+        if ts is None or _as_float(b.get("close")) is None:
+            continue
+        by_ts[naive_ist(ts)] = b
+    return [by_ts[k] for k in sorted(by_ts)]
 
 
 def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> List[float]:
-    """REST historical 2h closes for EMA.
+    """REST historical 2h closes for EMA (oldest→newest).
 
     Prefer native hours/2 (includes Upstox 15:15 final bar) but always overlay
-    hours/1 aggregates for buckets hours/2 historical is missing — hours/2 is
-    not merged with the intraday V3 feed, so it often lags the current session
-    even when it already has ≥100 bars (which previously caused a stale
-    early-return and frozen EMAs).
+    hours/1 aggregates — hours/2 is not merged with the intraday V3 feed, so it
+    often lags the current session even when it already has ≥100 bars (which
+    previously caused a stale early-return and frozen EMAs). Overlay wins on
+    bucket conflicts. Closes are always normalized ascending before return.
     """
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
@@ -2138,7 +2194,7 @@ def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> Lis
     bars_h1 = aggregate_intraday_to_2h(one, now=now)
 
     merged = _merge_2h_bar_dicts(bars_h2, bars_h1)
-    closes = [float(b["close"]) for b in merged]
+    closes = _closes_from_2h_bar_dicts(merged)
     if _ema_closes_ready(closes):
         return closes
     if len(closes) > len(best):
@@ -2149,7 +2205,7 @@ def _fetch_2h_closes(instrument_key: str, now: Optional[datetime] = None) -> Lis
     )
     bars_15 = aggregate_intraday_to_2h(fifteen, now=now)
     merged15 = _merge_2h_bar_dicts(merged, bars_15)
-    closes = [float(b["close"]) for b in merged15]
+    closes = _closes_from_2h_bar_dicts(merged15)
     if _ema_closes_ready(closes):
         return closes
     if len(closes) > len(best):
@@ -2278,7 +2334,7 @@ def _open_rows(*, only_fetch_failed: bool = False) -> List[Dict[str, Any]]:
                 f"""
                 SELECT id, symbol, instrument_key, status, side,
                        armed_at, ema9, ema30, ema100, sell_strike, buy_strike,
-                       date_traded, sell_cost, buy_cost
+                       date_traded, sell_cost, buy_cost, ema_fetch_ok
                 FROM stock_option_signals
                 WHERE status IN (:radar, :active)
                 {failed_clause}
@@ -2486,6 +2542,29 @@ def run_ema_tick(
                 ik,
                 snap,
             )
+        last_close = float(closes[-1]) if closes else None
+        if (
+            snap.get("ema9") is not None
+            and last_close is not None
+            and not ema_plausible_vs_last_close(snap["ema9"], last_close)
+        ):
+            logger.warning(
+                "stock_option EMA implausible for %s ema9=%s last_close=%s closes=%s; treating as fetch fail",
+                row.get("symbol"),
+                snap.get("ema9"),
+                last_close,
+                len(closes),
+            )
+            _mark_ema_fetch_failed(
+                int(row["id"]),
+                now_naive,
+                prior_ema9=None,
+                prior_ema30=None,
+                prior_ema100=None,
+            )
+            failed += 1
+            time.sleep(FETCH_SLEEP_SEC)
+            continue
         index_sym = is_index_symbol(row.get("symbol"))
         pair = ema_snapshot_pair(closes) if index_sym else None
         wr_now = None
@@ -2868,18 +2947,28 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _pin_index_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """NIFTY then BANKNIFTY first; remaining rows keep relative order."""
+    """NIFTY/BANKNIFTY first, then Active (esp. fetch-failed), then remaining Radar."""
     order = {s: i for i, s in enumerate(INDEX_PIN_ORDER)}
     pinned: List[Dict[str, Any]] = []
+    active_failed: List[Dict[str, Any]] = []
+    active_ok: List[Dict[str, Any]] = []
     rest: List[Dict[str, Any]] = []
     for item in rows:
         sym = _norm_symbol(item.get("symbol"))
         if sym in order:
             pinned.append(item)
+            continue
+        st = (item.get("status") or "").strip().lower()
+        if st == "active":
+            # Fetch-failed Active first so poisoned EMAs are refreshed before Radar.
+            if item.get("ema_fetch_ok") is False:
+                active_failed.append(item)
+            else:
+                active_ok.append(item)
         else:
             rest.append(item)
     pinned.sort(key=lambda r: order.get(_norm_symbol(r.get("symbol")), 99))
-    return pinned + rest
+    return pinned + active_failed + active_ok + rest
 
 
 def list_workspace() -> Dict[str, Any]:
