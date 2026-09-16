@@ -398,7 +398,7 @@
 
     function init() {
         const root = document.getElementById("intradayReportRoot");
-        if (!root) return;
+        if (!root || root.closest("[hidden]")) return;
 
         const today = new Date();
         $("endDate").valueAsDate = today;

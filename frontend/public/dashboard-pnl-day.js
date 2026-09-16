@@ -40,6 +40,14 @@
     throw lastErr || new Error("Request failed");
   }
 
+  async function fetchJsonOrNull(paths, useAuth) {
+    try {
+      return await fetchFirstJson(paths, useAuth);
+    } catch (e) {
+      return null;
+    }
+  }
+
   function toNum(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
@@ -61,7 +69,7 @@
   }
 
   function calcDailyFuturesTotals(doc) {
-    const rows = (doc && Array.isArray(doc.running) ? doc.running : []);
+    const rows = doc && Array.isArray(doc.running) ? doc.running : [];
     let un = 0;
     rows.forEach(function (r) {
       const ltp = toNum(r && r.ltp);
@@ -75,7 +83,7 @@
   }
 
   function calcSmartFuturesTotals(doc) {
-    const rows = (doc && Array.isArray(doc.rows) ? doc.rows : []);
+    const rows = doc && Array.isArray(doc.rows) ? doc.rows : [];
     let realized = 0;
     let unrealized = 0;
     rows.forEach(function (r) {
@@ -99,19 +107,19 @@
     return { realized: realized, unrealized: unrealized };
   }
 
-  function calcIntradayTotals(doc) {
-    const trades = (doc && Array.isArray(doc.trades) ? doc.trades : []);
+  function calcStockOptionsSelling(doc) {
+    const overall = toNum(doc && doc.summary && doc.summary.overall_pnl);
+    return { realized: overall || 0, unrealized: 0 };
+  }
+
+  function calcTradeLogPnl(doc) {
+    const trades = doc && Array.isArray(doc.trades) ? doc.trades : [];
     let realized = 0;
-    let unrealized = 0;
     trades.forEach(function (t) {
-      const pnl = toNum(t && t.pnl);
-      if (pnl == null) return;
-      const st = String((t && t.status) || "").trim().toLowerCase();
-      const isRealized = st === "sold" || st.indexOf("exit") !== -1;
-      if (isRealized) realized += pnl;
-      else unrealized += pnl;
+      const pnl = toNum(t && t.gross_pnl_inr);
+      if (pnl != null) realized += pnl;
     });
-    return { realized: realized, unrealized: unrealized };
+    return realized;
   }
 
   function cardHtml(label, totals) {
@@ -131,12 +139,12 @@
     const grid = document.getElementById("dashboardPnlDayGrid");
     const head = document.getElementById("dashboardPnlDayTotal");
     if (!grid || !head) return;
-    const intradayTotal = data.intraday.realized + data.intraday.unrealized;
+    const sellingTotal = data.selling.realized + data.selling.unrealized;
     const smartTotal = data.smart.realized + data.smart.unrealized;
     const dailyTotal = data.daily.realized + data.daily.unrealized;
-    const grandTotal = intradayTotal + smartTotal + dailyTotal;
+    const grandTotal = sellingTotal + smartTotal + dailyTotal;
     grid.innerHTML =
-      cardHtml("Intraday PnL", data.intraday) +
+      cardHtml("Stock Options Selling", data.selling) +
       cardHtml("Smart Futures PnL", data.smart) +
       cardHtml("Premium Futures PnL", data.daily);
     head.innerHTML = "Total: " + chipHtml(grandTotal);
@@ -145,14 +153,18 @@
   async function refreshPnlDay() {
     try {
       const today = encodeURIComponent(istDateYmd());
-      const [intradayDoc, smartDoc, dailyDoc] = await Promise.all([
-        fetchFirstJson(["/scan/daily-trades/" + today], false),
-        fetchFirstJson(["/api/smart-futures/daily", "/smart-futures/daily"], true),
-        fetchFirstJson(["/api/daily-futures/workspace", "/daily-futures/workspace"], true),
+      const sellingQs = "start_date=" + today + "&end_date=" + today;
+      const [sellingDoc, smartDoc, dailyDoc, tradeLogDoc] = await Promise.all([
+        fetchJsonOrNull(["/api/stock-options/selling-report?" + sellingQs, "/stock-options/selling-report?" + sellingQs], true),
+        fetchJsonOrNull(["/api/smart-futures/daily", "/smart-futures/daily"], true),
+        fetchJsonOrNull(["/api/daily-futures/workspace", "/daily-futures/workspace"], true),
+        fetchJsonOrNull(["/api/trade-log?start_date=" + today + "&end_date=" + today], true),
       ]);
+      const smart = calcSmartFuturesTotals(smartDoc);
+      smart.realized += calcTradeLogPnl(tradeLogDoc);
       renderPnlCards({
-        intraday: calcIntradayTotals(intradayDoc),
-        smart: calcSmartFuturesTotals(smartDoc),
+        selling: calcStockOptionsSelling(sellingDoc),
+        smart: smart,
         daily: calcDailyFuturesTotals(dailyDoc),
       });
     } catch (e) {

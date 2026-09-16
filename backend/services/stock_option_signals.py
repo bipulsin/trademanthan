@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import defaultdict
 from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -3527,6 +3528,159 @@ def list_workspace() -> Dict[str, Any]:
         "active": _pin_index_rows(active),
         "executed": _pin_index_rows(executed),
         "completed": _pin_index_rows(completed),
+    }
+
+
+def selling_day_key(item: Dict[str, Any]) -> Optional[str]:
+    """Calendar day for reports: exit date, else date traded."""
+    return _ymd_key(item.get("exit_date")) or _ymd_key(item.get("date_traded"))
+
+
+def _ymd_key(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    s = str(value).strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    return None
+
+
+def _parse_report_ymd(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value).strip()[:10])
+    except ValueError as e:
+        raise ValueError("date must be YYYY-MM-DD") from e
+
+
+def list_live_completed_selling(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Completed LIVE credit spreads for Reports / dashboard PnL."""
+    ensure_stock_option_tables()
+    sd = _parse_report_ymd(start_date)
+    ed = _parse_report_ymd(end_date)
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, symbol, williamsr, instrument_key, status, side,
+                       trigger_at, armed_at, contract_mmm_yyyy, ema9, ema30, ema100,
+                       ema_updated_at, ema_fetch_ok, arm_caution,
+                       sell_strike, sell_delta, buy_strike, buy_delta,
+                       date_traded, sell_cost, buy_cost,
+                       user_sell_strike, user_buy_strike, hard_stop_placed,
+                       remarks, sell_ltp, buy_ltp, sell_instrument_key,
+                       exit_date, sell_exit_price, buy_exit_price, realized_pnl,
+                       trade_mode
+                FROM stock_option_signals
+                WHERE LOWER(TRIM(status)) = 'completed'
+                  AND UPPER(TRIM(COALESCE(trade_mode, 'PAPER'))) = 'LIVE'
+                  AND (:sd IS NULL OR CAST(COALESCE(exit_date, date_traded) AS date) >= :sd)
+                  AND (:ed IS NULL OR CAST(COALESCE(exit_date, date_traded) AS date) <= :ed)
+                ORDER BY COALESCE(exit_date, date_traded) DESC NULLS LAST, id DESC
+                """
+            ),
+            {"sd": sd, "ed": ed},
+        ).mappings().all()
+        raws = [dict(r) for r in rows]
+        need = [(r.get("symbol"), r.get("sell_instrument_key")) for r in raws]
+        lots_by_sym = lookup_option_lots(db, need) if need else {}
+    finally:
+        db.close()
+    out: List[Dict[str, Any]] = []
+    for raw in raws:
+        item = _row_public(raw)
+        lot = lots_by_sym.get(_norm_symbol(item.get("symbol")))
+        attach_rupee_pnl(item, lot)
+        out.append(item)
+    return out
+
+
+def _trade_for_selling_report(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "symbol": item.get("symbol"),
+        "side": item.get("side"),
+        "contract_mmm_yyyy": item.get("contract_mmm_yyyy"),
+        "date_traded": item.get("date_traded"),
+        "exit_date": item.get("exit_date"),
+        "user_sell_strike": item.get("user_sell_strike"),
+        "user_buy_strike": item.get("user_buy_strike"),
+        "sell_cost": item.get("sell_cost"),
+        "buy_cost": item.get("buy_cost"),
+        "sell_exit_price": item.get("sell_exit_price"),
+        "buy_exit_price": item.get("buy_exit_price"),
+        "lot_size": item.get("lot_size"),
+        "pnl": item.get("combined_pnl_inr"),
+        "pnl_points": item.get("combined_pnl"),
+        "trade_mode": item.get("trade_mode"),
+    }
+
+
+def build_selling_report(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Group LIVE completed trades by exit day with running cumulative ₹ PnL."""
+    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        key = selling_day_key(r)
+        if not key:
+            continue
+        grouped[key].append(dict(r))
+
+    chronological = sorted(grouped.keys())
+    running = 0.0
+    day_pnl_map: Dict[str, float] = {}
+    cum_by_day: Dict[str, float] = {}
+    for dt in chronological:
+        day_pnl = 0.0
+        for r in grouped[dt]:
+            v = r.get("combined_pnl_inr")
+            if v is not None:
+                day_pnl += float(v)
+        day_pnl_map[dt] = round(day_pnl, 2)
+        running += day_pnl_map[dt]
+        cum_by_day[dt] = round(running, 2)
+
+    data: List[Dict[str, Any]] = []
+    for dt in sorted(grouped.keys(), reverse=True):
+        day_rows = grouped[dt]
+        pnls = [
+            float(r["combined_pnl_inr"])
+            for r in day_rows
+            if r.get("combined_pnl_inr") is not None
+        ]
+        wins = sum(1 for p in pnls if p > 0)
+        losses = sum(1 for p in pnls if p < 0)
+        denom = wins + losses
+        data.append(
+            {
+                "date": dt,
+                "total_trades": len(day_rows),
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round((wins / denom) * 100, 2) if denom else 0.0,
+                "total_pnl": day_pnl_map[dt],
+                "cumulative_pnl": cum_by_day[dt],
+                "trades": [_trade_for_selling_report(r) for r in day_rows],
+            }
+        )
+
+    overall = cum_by_day[chronological[-1]] if chronological else 0.0
+    return {
+        "success": True,
+        "data": data,
+        "summary": {
+            "total_days": len(data),
+            "total_trades": sum(int(d["total_trades"]) for d in data),
+            "overall_pnl": overall,
+        },
     }
 
 

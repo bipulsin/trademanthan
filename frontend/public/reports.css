@@ -854,6 +854,10 @@ body {
     overflow: hidden;
 }
 
+.reports-accordion[hidden] {
+    display: none !important;
+}
+
 body.theme-page .reports-accordion {
     border-color: var(--theme-border, rgba(148, 163, 184, 0.35));
     background: var(--theme-card, rgba(30, 41, 59, 0.5));

@@ -16,6 +16,7 @@ from backend.services.stock_option_signals import (
     STATUS_REJECTED,
     WR_PERIOD,
     active_past_max_age,
+    build_selling_report,
     delta_targets_for_symbol,
     detect_ema_cross_side,
     expiry_remarks,
@@ -39,6 +40,7 @@ from backend.services.stock_option_signals import (
     parse_fut_trading_symbol_expiry,
     pick_nearest_delta,
     resolve_contract_mmm_yyyy,
+    selling_day_key,
     should_insert_new_signal,
     side_from_williamsr,
     spread_lines,
@@ -571,6 +573,31 @@ def test_pnl_and_hard_stop():
     attach_rupee_pnl(missing, None)
     assert missing["lot_size"] is None
     assert missing["combined_pnl_inr"] is None
+
+
+def test_selling_report_groups_by_exit_date_with_cumulative():
+    assert selling_day_key({"exit_date": "2026-09-16 14:30:00", "date_traded": "2026-09-10"}) == "2026-09-16"
+    assert selling_day_key({"date_traded": "2026-09-14"}) == "2026-09-14"
+    out = build_selling_report(
+        [
+            {"exit_date": "2026-09-15 14:00:00", "combined_pnl_inr": 1000, "symbol": "A"},
+            {"exit_date": "2026-09-16 11:00:00", "combined_pnl_inr": 500, "symbol": "B"},
+            {"exit_date": "2026-09-16 15:00:00", "combined_pnl_inr": -200, "symbol": "C"},
+            {"date_traded": "2026-09-14", "combined_pnl_inr": 300, "symbol": "D"},
+        ]
+    )
+    assert out["success"] is True
+    assert out["summary"]["total_days"] == 3
+    assert out["summary"]["total_trades"] == 4
+    assert out["summary"]["overall_pnl"] == 1600
+    assert [d["date"] for d in out["data"]] == ["2026-09-16", "2026-09-15", "2026-09-14"]
+    assert out["data"][0]["total_pnl"] == 300
+    assert out["data"][0]["cumulative_pnl"] == 1600
+    assert out["data"][0]["total_trades"] == 2
+    assert out["data"][1]["total_pnl"] == 1000
+    assert out["data"][1]["cumulative_pnl"] == 1300
+    assert out["data"][2]["total_pnl"] == 300
+    assert out["data"][2]["cumulative_pnl"] == 300
 
 
 def test_contract_mmm_yyyy_from_fut_symbol():

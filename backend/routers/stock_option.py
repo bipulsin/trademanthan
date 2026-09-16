@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -13,8 +13,10 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.stock_option_signals import (
+    build_selling_report,
     decode_raw_payload,
     insert_webhook_and_signals,
+    list_live_completed_selling,
     list_workspace,
     now_ist_second,
     quote_exit_ltps,
@@ -160,6 +162,24 @@ async def stock_option_workspace(_user: User = Depends(_auth_user)) -> JSONRespo
         logger.exception("stock_option workspace failed: %s", e)
         raise HTTPException(status_code=503, detail="workspace unavailable") from e
     return JSONResponse(status_code=200, content={"ok": True, **data})
+
+
+@router.get("/stock-options/selling-report")
+async def stock_option_selling_report(
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    _user: User = Depends(_auth_user),
+) -> JSONResponse:
+    """Live completed Stock Options Selling trades, grouped by exit date."""
+    try:
+        rows = list_live_completed_selling(start_date, end_date)
+        payload = build_selling_report(rows)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("stock_option selling report failed: %s", e)
+        raise HTTPException(status_code=503, detail="selling report unavailable") from e
+    return JSONResponse(status_code=200, content=payload)
 
 
 @router.post("/stock-options/signals/{signal_id}/submit")
