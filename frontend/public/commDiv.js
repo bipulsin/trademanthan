@@ -267,13 +267,29 @@
     return months[m - 1] + " " + parts[0];
   }
 
+  /** Prefer (exit−entry)×lot (BULL) / (entry−exit)×lot (BEAR); else stored pnl. */
+  function rowPnl(row) {
+    if (!row) return null;
+    var entry = Number(row.entry_price);
+    var mark = row.exit_price != null && row.exit_price !== "" ? Number(row.exit_price) : Number(row.ltp);
+    var lotRaw = row.lot_size != null && row.lot_size !== "" ? row.lot_size : row.lot_qty != null ? row.lot_qty : row.qty;
+    var lot = Number(lotRaw);
+    if (!isNaN(entry) && !isNaN(mark) && !isNaN(lot) && lot > 0) {
+      var dir = String(row.direction || "").trim().toUpperCase();
+      var pts = dir === "BEAR" || dir === "SHORT" || dir === "SELL" ? entry - mark : mark - entry;
+      return Math.round(pts * lot * 100) / 100;
+    }
+    if (row.pnl == null || row.pnl === "") return null;
+    var n = Number(row.pnl);
+    return isNaN(n) ? null : Math.round(n * 100) / 100;
+  }
+
   function sumPnl(rows) {
     var total = 0;
     var any = false;
     (rows || []).forEach(function (r) {
-      if (r == null || r.pnl == null || r.pnl === "") return;
-      var n = Number(r.pnl);
-      if (isNaN(n)) return;
+      var n = rowPnl(r);
+      if (n == null) return;
       total += n;
       any = true;
     });
@@ -474,7 +490,7 @@
       "</td><td>" +
       dtStackHtml(r.exit_at) +
       "</td><td>" +
-      pnlHtml(r.pnl) +
+      pnlHtml(rowPnl(r)) +
       "</td><td>" +
       historyActionsHtml(r) +
       "</td></tr>"
@@ -483,6 +499,7 @@
 
   function historyCardHtml(r) {
     var tSrc = r.exit_at || r.trade_taken_at || r.go_received_at || "";
+    var pnlVal = rowPnl(r);
     return (
       '<article class="cd-mcard">' +
       '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
@@ -496,7 +513,7 @@
       dirChip(r.direction) +
       "</span>" +
       '<span class="cd-mcard-pnl">' +
-      pnlHtml(r.pnl) +
+      pnlHtml(pnlVal) +
       "</span>" +
       '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
       "</button>" +
@@ -507,7 +524,7 @@
       fieldHtml("Entry time", dtStackHtml(r.trade_taken_at)) +
       fieldHtml("Exit", esc(fmt(r.exit_price))) +
       fieldHtml("Exit time", dtStackHtml(r.exit_at)) +
-      fieldHtml("PnL", pnlHtml(r.pnl)) +
+      fieldHtml("PnL", pnlHtml(pnlVal)) +
       '<div class="cd-mcard-actions">' +
       historyActionsHtml(r) +
       "</div>" +
@@ -880,7 +897,7 @@
               : "") +
             "</td>" +
             "<td>" +
-            pnlHtml(row.pnl) +
+            pnlHtml(rowPnl(row)) +
             "</td>" +
             "<td>" +
             inTradeActionsHtml(row) +
@@ -895,6 +912,7 @@
       mobile.innerHTML = list
         .map(function (row) {
           var timeSrc = row.trade_taken_at || "";
+          var pnlVal = rowPnl(row);
           return (
             '<article class="cd-mcard">' +
             '<button type="button" class="cd-mcard-summary" aria-expanded="false">' +
@@ -908,7 +926,7 @@
             dirChip(row.direction) +
             "</span>" +
             '<span class="cd-mcard-pnl">' +
-            pnlHtml(row.pnl) +
+            pnlHtml(pnlVal) +
             "</span>" +
             '<i class="fas fa-chevron-down cd-mcard-chev" aria-hidden="true"></i>' +
             "</button>" +
@@ -922,7 +940,7 @@
                   ? '<div class="cd-dt-with-price">' + dtStackHtml(row.ltp_updated_at) + "</div>"
                   : "")
             ) +
-            fieldHtml("PnL", pnlHtml(row.pnl)) +
+            fieldHtml("PnL", pnlHtml(pnlVal)) +
             fieldHtml("Mode", esc(fmt(row.trade_mode || "PAPER"))) +
             '<div class="cd-mcard-actions">' +
             inTradeActionsHtml(row) +

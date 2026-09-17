@@ -1,7 +1,10 @@
 """Pure helpers for CommDiv History LIVE Overall PnL and month grouping.
 
-Mirrors frontend/public/commDiv.js (execMonthKey / sumPnl / groupRowsByMonth).
+Mirrors frontend/public/commDiv.js (execMonthKey / rowPnl / sumPnl / groupRowsByMonth).
 Timestamps are IST strings like YYYY-MM-DD HH:MM:SS.
+
+PnL single source of truth: recompute from entry/exit × lot when prices+lot
+are known; otherwise fall back to the stored ``pnl`` field.
 """
 from __future__ import annotations
 
@@ -48,16 +51,65 @@ def format_month_label(ym: str) -> str:
     return f"{_MONTHS[m - 1]} {parts[0]}"
 
 
+def _lot_for_pnl(row: Dict[str, Any]) -> Optional[int]:
+    """Prefer lot_size / lot_qty when a positive lot is known."""
+    for key in ("lot_size", "lot_qty", "qty"):
+        raw = row.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            lot = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if lot > 0:
+            return lot
+    return None
+
+
+def row_pnl(row: Optional[Dict[str, Any]]) -> Optional[float]:
+    """
+    Per-trade ₹ PnL.
+
+    Prefer (exit − entry) × lot for BULL / (entry − exit) × lot for BEAR when
+    entry, exit (or mark), and lot are known. Else stored ``pnl``.
+    """
+    if not isinstance(row, dict):
+        return None
+
+    entry_raw = row.get("entry_price")
+    mark_raw = row.get("exit_price")
+    if mark_raw is None or mark_raw == "":
+        mark_raw = row.get("ltp")
+    lot = _lot_for_pnl(row)
+
+    try:
+        entry = float(entry_raw) if entry_raw is not None and entry_raw != "" else None
+        mark = float(mark_raw) if mark_raw is not None and mark_raw != "" else None
+    except (TypeError, ValueError):
+        entry = None
+        mark = None
+
+    if entry is not None and mark is not None and lot is not None:
+        dir_u = str(row.get("direction") or "").strip().upper()
+        if dir_u in ("BEAR", "SHORT", "SELL"):
+            return round((entry - mark) * lot, 2)
+        return round((mark - entry) * lot, 2)
+
+    pnl = row.get("pnl")
+    if pnl is None or pnl == "":
+        return None
+    try:
+        return round(float(pnl), 2)
+    except (TypeError, ValueError):
+        return None
+
+
 def sum_pnl(rows: List[Dict[str, Any]]) -> Optional[float]:
     total = 0.0
     any_val = False
     for r in rows or []:
-        pnl = r.get("pnl") if isinstance(r, dict) else None
-        if pnl is None or pnl == "":
-            continue
-        try:
-            n = float(pnl)
-        except (TypeError, ValueError):
+        n = row_pnl(r if isinstance(r, dict) else None)
+        if n is None:
             continue
         total += n
         any_val = True
@@ -92,7 +144,7 @@ def group_rows_by_month(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def overall_live_pnl(history_rows: List[Dict[str, Any]]) -> Optional[float]:
-    """Sum PnL for LIVE History rows only."""
+    """Sum PnL for LIVE History rows only (PAPER excluded)."""
     live = [
         r
         for r in (history_rows or [])
