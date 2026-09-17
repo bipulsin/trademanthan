@@ -13,6 +13,7 @@ from backend.database import SessionLocal
 from backend.services.commodities_div.mapping import (
     attach_instrument_fields,
     display_symbol_for,
+    normalize_tv_ticker,
 )
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import (
@@ -627,6 +628,181 @@ def exit_submit(
         else:
             out["trade_log_id"] = None
         _sync_ws_ltp_best_effort()
+        return out
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def create_manual_history(
+    *,
+    commodity: str,
+    direction: str,
+    entry_price: float,
+    trade_taken_at: Any,
+    exit_price: float,
+    exit_at: Any,
+    trade_mode: Optional[str] = None,
+    qty: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Insert a completed History row without webhook / DIV / GO flow.
+
+    Resolves MCX contract via mapping when the typed name matches an allowed
+    underlying (optionally with month code). Unresolvable names still save with
+    the typed symbol text so CommDiv History works.
+
+    LIVE: also upsert trade_log (same conventions as exit_submit).
+    PAPER: History only — never write trade_log.
+    """
+    symbol_raw = str(commodity or "").strip()
+    if not symbol_raw:
+        raise ValueError("commodity name is required")
+    if entry_price is None or float(entry_price) <= 0:
+        raise ValueError("entry_price must be > 0")
+    if exit_price is None or float(exit_price) <= 0:
+        raise ValueError("exit_price must be > 0")
+
+    direction_tv = _normalize_direction(direction)
+    mode = _normalize_trade_mode(trade_mode) if trade_mode else "PAPER"
+    entry_dt = _parse_entry_at(trade_taken_at)
+    exit_dt = _parse_exit_at(exit_at)
+
+    ensure_commodities_div_tables()
+    now = now_ist_second()
+
+    try:
+        inst = attach_instrument_fields(symbol_raw, resolve_contract=True)
+    except Exception as e:
+        logger.debug("commodities_div manual resolve failed for %s: %s", symbol_raw, e)
+        inst = {}
+
+    symbol_mapped = (
+        str(inst.get("symbol_mapped") or "").strip()
+        or normalize_tv_ticker(symbol_raw)
+        or symbol_raw.upper()
+    )
+    instrument_key = inst.get("instrument_key")
+    contract = inst.get("contract") or inst.get("trading_symbol")
+    lot_size: Optional[int] = None
+    if qty is not None:
+        try:
+            q = int(qty)
+        except (TypeError, ValueError) as e:
+            raise ValueError("qty must be a positive integer") from e
+        if q <= 0:
+            raise ValueError("qty must be a positive integer")
+        lot_size = q
+    elif inst.get("lot_size") is not None:
+        try:
+            lot_size = int(inst["lot_size"]) or None
+        except (TypeError, ValueError):
+            lot_size = None
+
+    row_for_qty = {
+        "lot_size": lot_size,
+        "symbol_mapped": symbol_mapped,
+        "symbol_raw": symbol_raw,
+        "contract": contract,
+    }
+    tl_qty = _lot_qty(row_for_qty)
+    tl_direction = "LONG" if direction_tv == "BULL" else "SHORT"
+    session_date = entry_dt.date() if isinstance(entry_dt, datetime) else now.date()
+
+    notes_obj = {
+        "commodities_div_manual": True,
+        "symbol_raw": symbol_raw,
+        "direction_tv": direction_tv,
+        "trade_mode": mode,
+        "underlying_matched": bool(inst.get("underlying_matched")),
+        "mapping_found": bool(inst.get("mapping_found")),
+    }
+
+    db = SessionLocal()
+    try:
+        rid = db.execute(
+            text(
+                """
+                INSERT INTO commodities_div_signals (
+                    symbol_raw, symbol_mapped, direction, status,
+                    div_received_at, trade_taken_at, entry_price,
+                    instrument_key, contract, lot_size,
+                    exit_submitted_at, exit_price, exit_at,
+                    trade_log_id, trade_mode, updated_at
+                ) VALUES (
+                    :symbol_raw, :symbol_mapped, :direction, 'History',
+                    :div_received_at, :trade_taken_at, :entry_price,
+                    :instrument_key, :contract, :lot_size,
+                    :exit_submitted_at, :exit_price, :exit_at,
+                    NULL, :trade_mode, NOW()
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "symbol_raw": symbol_raw,
+                "symbol_mapped": symbol_mapped,
+                "direction": direction_tv,
+                "div_received_at": entry_dt,
+                "trade_taken_at": entry_dt,
+                "entry_price": float(entry_price),
+                "instrument_key": instrument_key,
+                "contract": contract,
+                "lot_size": lot_size,
+                "exit_submitted_at": now,
+                "exit_price": float(exit_price),
+                "exit_at": exit_dt,
+                "trade_mode": mode,
+            },
+        ).scalar()
+        signal_id = int(rid)
+
+        # PAPER stays on CommDiv History only — do not pollute trade_log /
+        # reports / dashboard (same rule as exit_submit).
+        trade_log_id: Optional[int] = None
+        if mode == "LIVE":
+            ensure_trade_log_table()
+            notes_obj["commodities_div_signal_id"] = signal_id
+            trade_log_id = upsert_trade(
+                db,
+                {
+                    "session_date": str(session_date),
+                    "symbol": str(symbol_mapped).strip().upper(),
+                    "contract": contract,
+                    "direction": tl_direction,
+                    "qty": tl_qty,
+                    "entry_time": entry_dt.strftime("%H:%M:%S"),
+                    "entry_price": float(entry_price),
+                    "exit_time": exit_dt.strftime("%H:%M:%S"),
+                    "exit_price": float(exit_price),
+                    "source": "commodities_div",
+                    "notes": json.dumps(notes_obj),
+                    "exit_trigger": "commodities_div_manual_entry",
+                    "exit_trigger_type": "discretionary",
+                    "garuda_confluence": "NOT_AVAILABLE",
+                },
+            )
+            db.execute(
+                text(
+                    """
+                    UPDATE commodities_div_signals
+                    SET trade_log_id = :tlid, updated_at = NOW()
+                    WHERE id = :id
+                    """
+                ),
+                {"tlid": int(trade_log_id), "id": signal_id},
+            )
+
+        db.commit()
+        updated = db.execute(
+            text("SELECT * FROM commodities_div_signals WHERE id = :id"),
+            {"id": signal_id},
+        ).mappings().first()
+        out = serialize_signal(dict(updated), prefer_exit_pnl=True)
+        out["trade_log_id"] = int(trade_log_id) if trade_log_id is not None else None
+        out["mapping_resolved"] = bool(instrument_key)
         return out
     except Exception:
         db.rollback()

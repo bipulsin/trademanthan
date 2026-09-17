@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=13" />
+    <link rel="stylesheet" href="commDiv.css?v=14" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -36,6 +36,7 @@
                         <p class="cd-subtitle">Webhook → Divergence → Activated → In-Trade → Exit → History</p>
                     </div>
                     <div class="cd-header-aside">
+                        <button type="button" class="cd-manual-link" id="cdManualEntryBtn" title="Enter a completed trade without webhook">Manual entry</button>
                         <a class="cd-backtest-link" href="divtest.html" title="MACD Divergence Backtest">BackTest</a>
                         <span class="cd-server-time" id="cdServerTime">—</span>
                         <button type="button" class="cd-btn cd-btn-ghost" id="cdReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
@@ -161,7 +162,58 @@
         </div>
     </div>
 
+    <div class="cd-modal" id="cdManualModal" hidden>
+        <div class="cd-modal-card cd-modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="cdManualTitle">
+            <h2 id="cdManualTitle">Manual entry</h2>
+            <p class="cd-note" id="cdManualMeta">Log a completed trade that was not opened via webhook. PAPER stays on History only; LIVE also writes Trade Log.</p>
+            <form id="cdManualForm">
+                <div class="cd-modal-grid">
+                    <label class="cd-modal-span-2">Commodity name
+                        <input type="text" id="cdManualCommodity" required placeholder="e.g. NATURALGAS, CRUDEOIL, NATURALGASV2026" autocomplete="off" />
+                    </label>
+                    <label>Side
+                        <select id="cdManualDirection">
+                            <option value="BULL">BULL</option>
+                            <option value="BEAR">BEAR</option>
+                        </select>
+                    </label>
+                    <label>Mode
+                        <select id="cdManualMode">
+                            <option value="PAPER" selected>PAPER</option>
+                            <option value="LIVE">LIVE</option>
+                        </select>
+                    </label>
+                    <label>Entry date
+                        <input type="date" id="cdManualEntryDate" required />
+                    </label>
+                    <label>Entry time
+                        <input type="time" id="cdManualEntryTime" step="1" required />
+                    </label>
+                    <label>Entry price
+                        <input type="number" step="any" id="cdManualEntryPrice" required />
+                    </label>
+                    <label>Qty (optional)
+                        <input type="number" step="1" min="1" id="cdManualQty" placeholder="lot size" />
+                    </label>
+                    <label>Exit date
+                        <input type="date" id="cdManualExitDate" required />
+                    </label>
+                    <label>Exit time
+                        <input type="time" id="cdManualExitTime" step="1" required />
+                    </label>
+                    <label>Exit price
+                        <input type="number" step="any" id="cdManualExitPrice" required />
+                    </label>
+                </div>
+                <div class="cd-modal-actions">
+                    <button type="button" class="cd-btn cd-btn-ghost" id="cdManualCancel">Cancel</button>
+                    <button type="submit" class="cd-btn cd-btn-primary">Save to History</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script src="left-menu.js?v=3.48"></script>
-    <script src="commDiv.js?v=13"></script>
+    <script src="commDiv.js?v=14"></script>
 </body>
 </html>

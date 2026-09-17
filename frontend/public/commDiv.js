@@ -900,6 +900,28 @@
     editMode = "edit";
   }
 
+  function openManual() {
+    var nowParts = toDatetimeLocalValue($("cdServerTime").textContent);
+    $("cdManualCommodity").value = "";
+    $("cdManualDirection").value = "BULL";
+    $("cdManualMode").value = "PAPER";
+    $("cdManualEntryDate").value = nowParts.date || "";
+    $("cdManualEntryTime").value = nowParts.time ? nowParts.time.slice(0, 8) : "";
+    $("cdManualEntryPrice").value = "";
+    $("cdManualQty").value = "";
+    $("cdManualExitDate").value = nowParts.date || "";
+    $("cdManualExitTime").value = nowParts.time ? nowParts.time.slice(0, 8) : "";
+    $("cdManualExitPrice").value = "";
+    $("cdManualModal").hidden = false;
+    setTimeout(function () {
+      $("cdManualCommodity").focus();
+    }, 50);
+  }
+
+  function closeManual() {
+    $("cdManualModal").hidden = true;
+  }
+
   async function confirmDelete(row) {
     var sym = displaySymbolFor(row);
     if (sym === "—") sym = row.id;
@@ -954,6 +976,8 @@
     $("cdReloadBtn").addEventListener("click", load);
     $("cdTakeCancel").addEventListener("click", closeTake);
     $("cdEditCancel").addEventListener("click", closeEdit);
+    $("cdManualEntryBtn").addEventListener("click", openManual);
+    $("cdManualCancel").addEventListener("click", closeManual);
 
     document.querySelectorAll(".cd-tab").forEach(function (btn) {
       btn.addEventListener("click", function () {
@@ -1073,6 +1097,59 @@
         });
         closeEdit();
         lastExitAudioForId = null;
+        setTab("history");
+        await load();
+      } catch (e) {
+        showBanner(String(e.message || e), true);
+      }
+    });
+
+    $("cdManualForm").addEventListener("submit", async function (ev) {
+      ev.preventDefault();
+      var commodity = String($("cdManualCommodity").value || "").trim();
+      var entryAt = combineIst($("cdManualEntryDate"), $("cdManualEntryTime"));
+      var exitAt = combineIst($("cdManualExitDate"), $("cdManualExitTime"));
+      var entryPrice = parseFloat($("cdManualEntryPrice").value);
+      var exitPrice = parseFloat($("cdManualExitPrice").value);
+      var qtyRaw = String($("cdManualQty").value || "").trim();
+      var qty = qtyRaw !== "" ? parseInt(qtyRaw, 10) : null;
+      if (!commodity) {
+        showBanner("Commodity name is required", true);
+        return;
+      }
+      if (!entryAt || !(entryPrice > 0)) {
+        showBanner("Entry date/time and price required", true);
+        return;
+      }
+      if (!exitAt || !(exitPrice > 0)) {
+        showBanner("Exit date/time and price required", true);
+        return;
+      }
+      if (qtyRaw !== "" && (!(qty > 0) || !Number.isFinite(qty))) {
+        showBanner("Qty must be a positive integer when set", true);
+        return;
+      }
+      var payload = {
+        commodity: commodity,
+        direction: $("cdManualDirection").value,
+        trade_mode: $("cdManualMode").value || "PAPER",
+        entry_price: entryPrice,
+        trade_taken_at: entryAt,
+        exit_price: exitPrice,
+        exit_at: exitAt,
+      };
+      if (qty > 0) payload.qty = qty;
+      try {
+        var res = await api("/manual-entry", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        closeManual();
+        var modeLabel = payload.trade_mode === "LIVE" ? "LIVE (Trade Log)" : "PAPER (History only)";
+        var sym =
+          (res.signal && (res.signal.display_symbol || res.signal.symbol_mapped || res.signal.symbol_raw)) ||
+          commodity;
+        showBanner("Saved " + sym + " · " + modeLabel, false);
         setTab("history");
         await load();
       } catch (e) {

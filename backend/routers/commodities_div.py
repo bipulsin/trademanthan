@@ -12,6 +12,7 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.commodities_div.actions import (
+    create_manual_history,
     delete_signal,
     exit_submit,
     list_active_tab_signals,
@@ -63,6 +64,17 @@ class UpdateSignalBody(BaseModel):
 
 class DeleteSignalBody(BaseModel):
     signal_id: int
+
+
+class ManualEntryBody(BaseModel):
+    commodity: str = Field(..., min_length=1, description="Commodity / TV symbol text")
+    direction: str = Field(..., description="BULL | BEAR")
+    entry_price: float = Field(..., gt=0)
+    trade_taken_at: str = Field(..., min_length=8, description="YYYY-MM-DD HH:MM:SS IST")
+    exit_price: float = Field(..., gt=0)
+    exit_at: str = Field(..., min_length=8, description="YYYY-MM-DD HH:MM:SS IST")
+    trade_mode: Optional[str] = Field("PAPER", description="PAPER | LIVE")
+    qty: Optional[int] = Field(None, gt=0, description="Optional lot qty override")
 
 
 @router.get("/health")
@@ -132,6 +144,28 @@ def commodities_div_exit_submit(
             trade_taken_at=body.trade_taken_at,
             direction=body.direction,
             trade_mode=body.trade_mode,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "signal": row}
+
+
+@router.post("/manual-entry")
+def commodities_div_manual_entry(
+    body: ManualEntryBody,
+    user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Create a completed History trade (optional LIVE trade_log upsert)."""
+    try:
+        row = create_manual_history(
+            commodity=body.commodity,
+            direction=body.direction,
+            entry_price=body.entry_price,
+            trade_taken_at=body.trade_taken_at,
+            exit_price=body.exit_price,
+            exit_at=body.exit_at,
+            trade_mode=body.trade_mode,
+            qty=body.qty,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
