@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from backend.services.commodities_div.mapping import (
+    FUTURES_MONTH_CODES,
     attach_instrument_fields,
     display_symbol_for,
     normalize_tv_ticker,
+    parse_tv_month_code,
+    parse_tv_symbol,
     parse_underlying,
+    resolve_mcx_instrument,
+    resolve_underlying_instrument,
 )
 from backend.services.commodities_div.webhook import (
     accept_webhook,
@@ -17,6 +22,216 @@ from backend.services.commodities_div.webhook import (
     parse_flag_fields,
     _symbols_match,
 )
+
+
+def test_futures_month_codes_standard_set():
+    assert FUTURES_MONTH_CODES["U"] == 9
+    assert FUTURES_MONTH_CODES["V"] == 10
+    assert FUTURES_MONTH_CODES["X"] == 11
+    assert FUTURES_MONTH_CODES["Z"] == 12
+    assert FUTURES_MONTH_CODES["F"] == 1
+    assert FUTURES_MONTH_CODES["G"] == 2
+    assert FUTURES_MONTH_CODES["H"] == 3
+    assert len(FUTURES_MONTH_CODES) == 12
+
+
+def test_parse_tv_month_code_user_examples():
+    assert parse_tv_month_code("NATURALGASV2026") == {
+        "month_code": "V",
+        "month": 10,
+        "year": 2026,
+        "contract_code": "V2026",
+    }
+    assert parse_tv_month_code("CRUDEOILU2026") == {
+        "month_code": "U",
+        "month": 9,
+        "year": 2026,
+        "contract_code": "U2026",
+    }
+    assert parse_tv_month_code("CRUDEOILX2026")["month"] == 11
+    assert parse_tv_month_code("NATURALGASZ2026")["month"] == 12
+    assert parse_tv_month_code("GOLDPETALF2027") == {
+        "month_code": "F",
+        "month": 1,
+        "year": 2027,
+        "contract_code": "F2027",
+    }
+    assert parse_tv_month_code("COPPERG2027")["month"] == 2
+    assert parse_tv_month_code("SILVERMH2027")["month"] == 3
+    assert parse_tv_month_code("CRUDEOIL1!") is None
+    assert parse_tv_month_code("NATURALGAS") is None
+
+
+def test_parse_tv_symbol_underlying_plus_month():
+    p = parse_tv_symbol("NATURALGASV2026")
+    assert p["underlying"] == "NATURALGAS"
+    assert p["month_code"] == "V"
+    assert p["month"] == 10
+    assert p["year"] == 2026
+    assert p["contract_code"] == "V2026"
+
+    p2 = parse_tv_symbol("MCX:CRUDEOILU2026")
+    assert p2["underlying"] == "CRUDEOIL"
+    assert p2["month"] == 9
+    assert p2["year"] == 2026
+
+    p3 = parse_tv_symbol("CRUDEOIL1!")
+    assert p3["underlying"] == "CRUDEOIL"
+    assert p3["month"] is None
+    assert p3["year"] is None
+
+
+def _fake_mcx_rows():
+    """Minimal Upstox-like MCX FUT rows spanning several months."""
+
+    def row(und, key, tsym, y, m, d, lot=100):
+        exp_ms = int(datetime(y, m, d, 12, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        return {
+            "instrument_type": "FUT",
+            "segment": "MCX_FO",
+            "weekly": False,
+            "underlying_symbol": und,
+            "instrument_key": key,
+            "trading_symbol": tsym,
+            "lot_size": lot,
+            "expiry": exp_ms,
+        }
+
+    return [
+        row("CRUDEOIL", "MCX_FO|CO_SEP", "CRUDEOIL 19 SEP FUT", 2026, 9, 19),
+        row("CRUDEOIL", "MCX_FO|CO_OCT", "CRUDEOIL 19 OCT FUT", 2026, 10, 19),
+        row("CRUDEOIL", "MCX_FO|CO_NOV", "CRUDEOIL 19 NOV FUT", 2026, 11, 19),
+        row("NATURALGAS", "MCX_FO|NG_SEP", "NATURALGAS 25 SEP FUT", 2026, 9, 25),
+        row("NATURALGAS", "MCX_FO|NG_OCT", "NATURALGAS 27 OCT FUT", 2026, 10, 27),
+        row("NATURALGAS", "MCX_FO|NG_NOV", "NATURALGAS 25 NOV FUT", 2026, 11, 25),
+        row("NATURALGAS", "MCX_FO|NG_DEC", "NATURALGAS 28 DEC FUT", 2026, 12, 28),
+        row("NATURALGAS", "MCX_FO|NG_JAN", "NATURALGAS 26 JAN FUT", 2027, 1, 26),
+        row("SILVERM", "MCX_FO|SM_NOV", "SILVERM 30 NOV FUT", 2026, 11, 30, lot=1),
+    ]
+
+
+def test_resolve_mcx_exact_month_not_front():
+    rows = _fake_mcx_rows()
+
+    def parse_exp(v):
+        return int(v) if v else None
+
+    with patch(
+        "backend.services.divtest.instruments.ensure_instrument_master",
+        return_value=rows,
+    ), patch(
+        "backend.services.divtest.instruments._parse_expiry_ms",
+        side_effect=parse_exp,
+    ):
+        sep = resolve_mcx_instrument("CRUDEOIL", expiry_year=2026, expiry_month=9)
+        assert sep is not None
+        assert sep["instrument_key"] == "MCX_FO|CO_SEP"
+        assert sep["trading_symbol"] == "CRUDEOIL 19 SEP FUT"
+        assert sep["match_mode"] == "exact_month"
+        assert sep["expiry_fallback"] is False
+
+        oct_ = resolve_mcx_instrument("NATURALGAS", expiry_year=2026, expiry_month=10)
+        assert oct_["instrument_key"] == "MCX_FO|NG_OCT"
+        assert oct_["match_mode"] == "exact_month"
+
+        nov = resolve_mcx_instrument("NATURALGAS", expiry_year=2026, expiry_month=11)
+        assert nov["instrument_key"] == "MCX_FO|NG_NOV"
+
+        jan = resolve_mcx_instrument("NATURALGAS", expiry_year=2027, expiry_month=1)
+        assert jan["instrument_key"] == "MCX_FO|NG_JAN"
+
+
+def test_resolve_mcx_exact_month_fallback_warns():
+    rows = _fake_mcx_rows()
+
+    def parse_exp(v):
+        return int(v) if v else None
+
+    with patch(
+        "backend.services.divtest.instruments.ensure_instrument_master",
+        return_value=rows,
+    ), patch(
+        "backend.services.divtest.instruments._parse_expiry_ms",
+        side_effect=parse_exp,
+    ):
+        miss = resolve_mcx_instrument(
+            "CRUDEOIL", expiry_year=2028, expiry_month=3, allow_front_month_fallback=True
+        )
+        assert miss is not None
+        assert miss["match_mode"] == "front_month_fallback"
+        assert miss["expiry_fallback"] is True
+        assert miss["requested_expiry_ym"] == "2028-03"
+        assert miss["instrument_key"]  # some front-month, not silent None
+        assert "SEP" in str(miss["trading_symbol"]) or "OCT" in str(
+            miss["trading_symbol"]
+        ) or "NOV" in str(miss["trading_symbol"])
+
+        none = resolve_mcx_instrument(
+            "CRUDEOIL",
+            expiry_year=2028,
+            expiry_month=3,
+            allow_front_month_fallback=False,
+        )
+        assert none is None
+
+
+def test_attach_instrument_fields_resolves_tv_month():
+    rows = _fake_mcx_rows()
+
+    def parse_exp(v):
+        return int(v) if v else None
+
+    with patch(
+        "backend.services.divtest.instruments.ensure_instrument_master",
+        return_value=rows,
+    ), patch(
+        "backend.services.divtest.instruments._parse_expiry_ms",
+        side_effect=parse_exp,
+    ):
+        inst = attach_instrument_fields("NATURALGASV2026", resolve_contract=True)
+        assert inst["underlying_matched"] is True
+        assert inst["symbol_mapped"] == "NATURALGAS"
+        assert inst["month_code"] == "V"
+        assert inst["contract_month"] == 10
+        assert inst["contract_year"] == 2026
+        assert inst["instrument_key"] == "MCX_FO|NG_OCT"
+        assert inst["contract"] == "NATURALGAS 27 OCT FUT"
+        assert inst["display_symbol"] == "NATURALGAS 27 OCT FUT"
+        assert inst["match_mode"] == "exact_month"
+        assert inst["expiry_fallback"] is False
+
+        crude = attach_instrument_fields("CRUDEOILU2026", resolve_contract=True)
+        assert crude["instrument_key"] == "MCX_FO|CO_SEP"
+        assert crude["display_symbol"] == "CRUDEOIL 19 SEP FUT"
+
+        silver = attach_instrument_fields("SILVERMX2026", resolve_contract=True)
+        assert silver["symbol_mapped"] == "SILVERMINI"
+        assert silver["instrument_key"] == "MCX_FO|SM_NOV"
+        assert silver["match_mode"] == "exact_month"
+
+
+def test_resolve_cache_keyed_by_month_not_underlying_only():
+    rows = _fake_mcx_rows()
+
+    def parse_exp(v):
+        return int(v) if v else None
+
+    with patch(
+        "backend.services.divtest.instruments.ensure_instrument_master",
+        return_value=rows,
+    ), patch(
+        "backend.services.divtest.instruments._parse_expiry_ms",
+        side_effect=parse_exp,
+    ):
+        a = resolve_underlying_instrument(
+            "NATURALGAS", expiry_year=2026, expiry_month=10
+        )
+        b = resolve_underlying_instrument(
+            "NATURALGAS", expiry_year=2026, expiry_month=11
+        )
+        assert a["instrument_key"] == "MCX_FO|NG_OCT"
+        assert b["instrument_key"] == "MCX_FO|NG_NOV"
+        assert a["instrument_key"] != b["instrument_key"]
 
 
 def test_symbols_match_same_underlying_variants():
@@ -35,12 +250,12 @@ def test_symbols_match_same_underlying_variants():
 def test_display_symbol_for_prefers_upstox_contract():
     assert (
         display_symbol_for(
-            contract="NATURALGAS 26 APR FUT",
-            trading_symbol="NATURALGAS 26 APR FUT",
+            contract="NATURALGAS 27 OCT FUT",
+            trading_symbol="NATURALGAS 27 OCT FUT",
             symbol_mapped="NATURALGAS",
             symbol_raw="NATURALGASV2026",
         )
-        == "NATURALGAS 26 APR FUT"
+        == "NATURALGAS 27 OCT FUT"
     )
     assert (
         display_symbol_for(
@@ -67,6 +282,8 @@ def test_attach_instrument_fields_sets_display_without_resolve():
     assert inst["display_symbol"] == "NATURALGAS"
     assert inst["trading_symbol"] is None
     assert inst["contract"] is None
+    assert inst["month_code"] == "V"
+    assert inst["contract_month"] == 10
 
 
 def test_serialize_signal_exposes_display_and_trading_symbol():
@@ -79,7 +296,7 @@ def test_serialize_signal_exposes_display_and_trading_symbol():
             "symbol_mapped": "CRUDEOIL",
             "direction": "BULL",
             "status": "Activated",
-            "contract": "CRUDEOIL 19 MAY FUT",
+            "contract": "CRUDEOIL 19 OCT FUT",
             "instrument_key": "MCX_FO|123",
             "lot_size": 100,
             "trade_mode": "PAPER",
@@ -88,9 +305,9 @@ def test_serialize_signal_exposes_display_and_trading_symbol():
             "exit_price": None,
         }
     )
-    assert row["trading_symbol"] == "CRUDEOIL 19 MAY FUT"
-    assert row["display_symbol"] == "CRUDEOIL 19 MAY FUT"
-    assert row["mcx_symbol"] == "CRUDEOIL 19 MAY FUT"
+    assert row["trading_symbol"] == "CRUDEOIL 19 OCT FUT"
+    assert row["display_symbol"] == "CRUDEOIL 19 OCT FUT"
+    assert row["mcx_symbol"] == "CRUDEOIL 19 OCT FUT"
 
 
 def test_normalize_tv_ticker_strips_exchange_and_continuous():

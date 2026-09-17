@@ -77,7 +77,7 @@ def list_in_trade_ltp_rows() -> List[Dict[str, Any]]:
 
 
 def ensure_in_trade_instrument_keys(rows: Optional[List[Dict[str, Any]]] = None) -> int:
-    """Resolve missing instrument_key via mapping (front-month FUT)."""
+    """Resolve missing instrument_key via mapping (TV month-coded FUT when present)."""
     from backend.services.commodities_div.mapping import attach_instrument_fields
 
     src = rows if rows is not None else list_in_trade_ltp_rows()

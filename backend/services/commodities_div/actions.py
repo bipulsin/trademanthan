@@ -13,7 +13,6 @@ from backend.database import SessionLocal
 from backend.services.commodities_div.mapping import (
     attach_instrument_fields,
     display_symbol_for,
-    resolve_underlying_instrument,
 )
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import (
@@ -105,24 +104,28 @@ def _mark_for_pnl(row: Dict[str, Any], *, prefer_exit: bool = False) -> Any:
 
 def _backfill_contract_fields(out: Dict[str, Any]) -> None:
     """
-    When DB row lacks contract / instrument_key, resolve front-month MCX FUT
-    for display (and fill instrument_key for chart). Uses mapping resolve cache.
+    When DB row lacks contract / instrument_key, resolve MCX FUT from symbol_raw
+    (honors TV month letter+year) for display and chart. Uses mapping resolve cache.
     """
     contract = str(out.get("contract") or "").strip()
     if contract:
         out["trading_symbol"] = contract
         return
-    mapped = str(out.get("symbol_mapped") or "").strip().upper()
-    if not mapped:
+    raw = str(out.get("symbol_raw") or "").strip()
+    mapped = str(out.get("symbol_mapped") or "").strip()
+    if not raw and not mapped:
         return
     try:
-        inst = resolve_underlying_instrument(mapped)
+        # Prefer symbol_raw so NATURALGASV2026 → Oct FUT, not blind front-month.
+        inst = attach_instrument_fields(raw or mapped, resolve_contract=True)
     except Exception as e:
-        logger.debug("commodities_div display resolve failed for %s: %s", mapped, e)
+        logger.debug(
+            "commodities_div display resolve failed for %s: %s", raw or mapped, e
+        )
         return
-    if not inst:
+    if not inst or not inst.get("instrument_key"):
         return
-    tsym = str(inst.get("trading_symbol") or "").strip()
+    tsym = str(inst.get("trading_symbol") or inst.get("contract") or "").strip()
     if tsym:
         out["contract"] = tsym
         out["trading_symbol"] = tsym

@@ -1,7 +1,11 @@
-"""TV symbol parse → fixed MCX underlyings + Upstox front-month FUT resolve.
+"""TV symbol parse → fixed MCX underlyings + Upstox FUT resolve by contract month.
 
 No user mapping table required. Allowed underlyings:
   CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI
+
+TradingView webhook symbols encode the futures month in the trailing 5 chars
+(letter + 4-digit year), e.g. NATURALGASV2026 → NATURALGAS Oct 2026.
+Continuous forms (CRUDEOIL1!) fall back to front-month.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Front-month resolve is expensive (full Upstox master scan). Cache per underlying
+# Resolve is expensive (full Upstox master scan). Cache per underlying + expiry month
 # so concurrent DIV+GO webhooks do not each re-scan / re-download.
 _RESOLVE_TTL_SEC = 6 * 3600
 _resolve_lock = threading.Lock()
@@ -29,6 +33,22 @@ _CONT_FUT = re.compile(r"\d+!$")
 _LETTER_YEAR = re.compile(r"[A-Z]\d{4}$")
 # Also accept letter + 2-digit year: Z26
 _LETTER_YY = re.compile(r"[A-Z]\d{2}$")
+
+# Standard CME/TV futures month codes (full set for robustness).
+FUTURES_MONTH_CODES: Dict[str, int] = {
+    "F": 1,   # January
+    "G": 2,   # February
+    "H": 3,   # March
+    "J": 4,   # April
+    "K": 5,   # May
+    "M": 6,   # June
+    "N": 7,   # July
+    "Q": 8,   # August
+    "U": 9,   # September
+    "V": 10,  # October
+    "X": 11,  # November
+    "Z": 12,  # December
+}
 
 # Canonical desk names (longest first for prefix match).
 ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
@@ -76,6 +96,64 @@ def _strip_to_core(raw: Optional[str]) -> Optional[str]:
     if " FUT" in s:
         s = s.split(" FUT", 1)[0].strip()
     return s or None
+
+
+def parse_tv_month_code(raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Extract trailing futures month letter + year from a TV symbol.
+
+    Returns dict with month_code, month (1-12), year, contract_code (e.g. V2026),
+    or None when absent / invalid letter.
+    """
+    s = _strip_to_core(raw)
+    if not s:
+        return None
+    s = _CONT_FUT.sub("", s).replace("!", "").strip()
+    m4 = _LETTER_YEAR.search(s)
+    if m4:
+        token = m4.group(0)
+        letter, year_s = token[0], token[1:]
+        month = FUTURES_MONTH_CODES.get(letter)
+        if month is None:
+            return None
+        try:
+            year = int(year_s)
+        except ValueError:
+            return None
+        if year < 2000 or year > 2100:
+            return None
+        return {
+            "month_code": letter,
+            "month": month,
+            "year": year,
+            "contract_code": token,
+        }
+    m2 = _LETTER_YY.search(s)
+    if m2 and len(s) > 3:
+        token = m2.group(0)
+        letter, yy = token[0], token[1:]
+        month = FUTURES_MONTH_CODES.get(letter)
+        if month is None:
+            return None
+        try:
+            year = 2000 + int(yy)
+        except ValueError:
+            return None
+        # Only treat as month code when stripping leaves a plausible core.
+        core = _LETTER_YY.sub("", s)
+        if not (
+            core in ALLOWED_UNDERLYINGS
+            or core in TV_CORE_ALIASES
+            or any(core == u or core.startswith(u) for u in ALLOWED_UNDERLYINGS)
+        ):
+            return None
+        return {
+            "month_code": letter,
+            "month": month,
+            "year": year,
+            "contract_code": f"{letter}{year}",
+        }
+    return None
 
 
 def normalize_tv_ticker(raw: Optional[str]) -> Optional[str]:
@@ -138,12 +216,121 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
     return _canonicalize_core(core)
 
 
-def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optional[Dict[str, Any]]:
-    """Front-month MCX FUT via Upstox complete master, preferring exact underlying_symbol."""
+def parse_tv_symbol(symbol_raw: str) -> Dict[str, Any]:
+    """
+    Parse TV symbol into underlying + optional contract month/year.
+
+    Example: NATURALGASV2026 → underlying=NATURALGAS, month=10, year=2026.
+    """
+    underlying = parse_underlying(symbol_raw)
+    month_info = parse_tv_month_code(symbol_raw) if underlying else None
+    out: Dict[str, Any] = {
+        "underlying": underlying,
+        "month_code": None,
+        "month": None,
+        "year": None,
+        "contract_code": None,
+    }
+    if month_info:
+        out.update(month_info)
+    return out
+
+
+def _cache_key(
+    canonical: str,
+    *,
+    expiry_year: Optional[int] = None,
+    expiry_month: Optional[int] = None,
+) -> str:
+    base = (canonical or "").strip().upper()
+    if expiry_year and expiry_month:
+        return f"{base}:{int(expiry_year):04d}-{int(expiry_month):02d}"
+    return f"{base}:FRONT"
+
+
+def _pick_front_month(futures: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not futures:
+        return None
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    live = [f for f in futures if int(f.get("expiry_ms") or 0) >= now_ms - 7 * 86400_000]
+    return (live or futures)[0]
+
+
+def _pick_exact_month(
+    futures: List[Dict[str, Any]], *, year: int, month: int
+) -> Optional[Dict[str, Any]]:
+    """Pick MCX FUT whose expiry calendar month/year matches the TV contract month."""
+    matches = [
+        f
+        for f in futures
+        if _expiry_ym(f.get("expiry_ms")) == (int(year), int(month))
+    ]
+    if not matches:
+        return None
+    # Prefer earliest expiry within that month (standard monthly contract).
+    matches.sort(key=lambda f: int(f.get("expiry_ms") or 0))
+    return matches[0]
+
+
+def _expiry_ym(expiry_ms: Any) -> Optional[Tuple[int, int]]:
+    try:
+        ms = int(expiry_ms or 0)
+    except (TypeError, ValueError):
+        return None
+    if ms <= 0:
+        return None
+    dt = datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
+    return (dt.year, dt.month)
+
+
+def _result_from_pick(
+    pick: Dict[str, Any],
+    *,
+    prefer_und: str,
+    match_mode: str,
+    requested_ym: Optional[str] = None,
+    fallback_from: Optional[str] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "instrument_key": pick.get("instrument_key"),
+        "trading_symbol": pick.get("trading_symbol"),
+        "lot_size": int(pick.get("lot_size") or 1),
+        "segment": pick.get("segment"),
+        "expiry": pick.get("expiry"),
+        "resolved_as": prefer_und,
+        "underlying_symbol": pick.get("underlying_symbol"),
+        "match_mode": match_mode,
+        "requested_expiry_ym": requested_ym,
+        "expiry_fallback": bool(fallback_from),
+        "fallback_from": fallback_from,
+    }
+    return out
+
+
+def resolve_mcx_instrument(
+    upstox_symbol: str,
+    exchange: str = "MCX",
+    *,
+    expiry_year: Optional[int] = None,
+    expiry_month: Optional[int] = None,
+    allow_front_month_fallback: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolve MCX FUT via Upstox complete master.
+
+    When expiry_year + expiry_month are set, prefer the contract whose expiry
+    falls in that calendar month (TV letter+year). Otherwise front-month.
+    If exact month is missing and allow_front_month_fallback is True, fall back
+    to front-month with expiry_fallback=True and a warning log — never silent.
+    """
     sym = (upstox_symbol or "").strip().upper()
     if not sym:
         return None
     prefer_und = PREFERRED_UNDERLYING_SYMBOL.get(sym, sym)
+    want_exact = expiry_year is not None and expiry_month is not None
+    requested_ym = (
+        f"{int(expiry_year):04d}-{int(expiry_month):02d}" if want_exact else None
+    )
     try:
         from backend.services.divtest.instruments import _parse_expiry_ms, ensure_instrument_master
 
@@ -169,7 +356,9 @@ def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optiona
                     "trading_symbol": r.get("trading_symbol"),
                     "segment": r.get("segment"),
                     "lot_size": int(r.get("lot_size") or r.get("minimum_lot") or 1),
-                    "expiry": datetime.utcfromtimestamp(exp_ms / 1000).strftime("%Y-%m-%d"),
+                    "expiry": datetime.fromtimestamp(
+                        exp_ms / 1000, tz=timezone.utc
+                    ).strftime("%Y-%m-%d"),
                     "expiry_ms": exp_ms,
                     "underlying_symbol": r.get("underlying_symbol"),
                 }
@@ -177,37 +366,90 @@ def resolve_mcx_instrument(upstox_symbol: str, exchange: str = "MCX") -> Optiona
         futures.sort(key=lambda f: f["expiry_ms"])
         if not futures:
             return None
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        live = [f for f in futures if int(f.get("expiry_ms") or 0) >= now_ms - 7 * 86400_000]
-        pick = (live or futures)[0]
-        return {
-            "instrument_key": pick.get("instrument_key"),
-            "trading_symbol": pick.get("trading_symbol"),
-            "lot_size": int(pick.get("lot_size") or 1),
-            "segment": pick.get("segment"),
-            "expiry": pick.get("expiry"),
-            "resolved_as": prefer_und,
-            "underlying_symbol": pick.get("underlying_symbol"),
-        }
+
+        if want_exact:
+            pick = _pick_exact_month(
+                futures, year=int(expiry_year), month=int(expiry_month)
+            )
+            if pick:
+                return _result_from_pick(
+                    pick,
+                    prefer_und=prefer_und,
+                    match_mode="exact_month",
+                    requested_ym=requested_ym,
+                )
+            if not allow_front_month_fallback:
+                logger.warning(
+                    "commodities_div MCX exact month not found for %s %s "
+                    "(no front-month fallback)",
+                    prefer_und,
+                    requested_ym,
+                )
+                return None
+            front = _pick_front_month(futures)
+            if not front:
+                return None
+            logger.warning(
+                "commodities_div MCX exact month missing for %s %s; "
+                "falling back to front-month %s (%s) — wrong month risk",
+                prefer_und,
+                requested_ym,
+                front.get("expiry"),
+                front.get("trading_symbol"),
+            )
+            return _result_from_pick(
+                front,
+                prefer_und=prefer_und,
+                match_mode="front_month_fallback",
+                requested_ym=requested_ym,
+                fallback_from=requested_ym,
+            )
+
+        pick = _pick_front_month(futures)
+        if not pick:
+            return None
+        return _result_from_pick(
+            pick,
+            prefer_und=prefer_und,
+            match_mode="front_month",
+            requested_ym=None,
+        )
     except Exception as e:
-        logger.warning("commodities_div MCX resolve failed for %s: %s", sym, e)
+        logger.warning(
+            "commodities_div MCX resolve failed for %s ym=%s: %s",
+            sym,
+            requested_ym,
+            e,
+        )
         return None
 
 
-def resolve_underlying_instrument(canonical: str) -> Optional[Dict[str, Any]]:
-    """Resolve desk canonical name → front-month MCX FUT (cached)."""
+def resolve_underlying_instrument(
+    canonical: str,
+    *,
+    expiry_year: Optional[int] = None,
+    expiry_month: Optional[int] = None,
+    allow_front_month_fallback: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """Resolve desk canonical name → MCX FUT for optional expiry month (cached)."""
     key = (canonical or "").strip().upper()
     if not key:
         return None
+    cache_key = _cache_key(key, expiry_year=expiry_year, expiry_month=expiry_month)
     now = time.time()
     with _resolve_lock:
-        hit = _resolve_cache.get(key)
+        hit = _resolve_cache.get(cache_key)
         if hit and now - float(hit[0]) < _RESOLVE_TTL_SEC:
             cached = hit[1]
             return dict(cached) if cached else None
 
     prefer = PREFERRED_UNDERLYING_SYMBOL.get(key, key)
-    inst = resolve_mcx_instrument(prefer)
+    resolve_kwargs = {
+        "expiry_year": expiry_year,
+        "expiry_month": expiry_month,
+        "allow_front_month_fallback": allow_front_month_fallback,
+    }
+    inst = resolve_mcx_instrument(prefer, **resolve_kwargs)
     if inst and inst.get("instrument_key"):
         inst["canonical"] = key
     else:
@@ -215,14 +457,14 @@ def resolve_underlying_instrument(canonical: str) -> Optional[Dict[str, Any]]:
         for name in UPSTOX_RESOLVE_ALIASES.get(key, [key]):
             if name == prefer:
                 continue
-            cand = resolve_mcx_instrument(name)
+            cand = resolve_mcx_instrument(name, **resolve_kwargs)
             if cand and cand.get("instrument_key"):
                 cand["canonical"] = key
                 inst = cand
                 break
 
     with _resolve_lock:
-        _resolve_cache[key] = (now, dict(inst) if inst else None)
+        _resolve_cache[cache_key] = (now, dict(inst) if inst else None)
     return dict(inst) if inst else None
 
 
@@ -249,12 +491,15 @@ def attach_instrument_fields(
     symbol_raw: str, *, resolve_contract: bool = True
 ) -> Dict[str, Any]:
     """
-    Parse TV symbol → fixed underlying + optional front-month MCX FUT.
+    Parse TV symbol → fixed underlying + optional month-coded MCX FUT.
 
+    When TV encodes letter+year (e.g. V2026), resolve that exact expiry month.
+    Continuous / bare underlyings resolve front-month.
     underlying_matched=False when symbol is not one of the five allowed names.
     Set resolve_contract=False for webhook fast-path (no Upstox master I/O).
     """
-    underlying = parse_underlying(symbol_raw)
+    parsed = parse_tv_symbol(symbol_raw)
+    underlying = parsed.get("underlying")
     out: Dict[str, Any] = {
         "symbol_mapped": underlying or (normalize_tv_ticker(symbol_raw) or ""),
         "underlying_matched": underlying is not None,
@@ -266,6 +511,13 @@ def attach_instrument_fields(
         "exchange": "MCX",
         "resolved_as": None,
         "display_symbol": "",
+        "month_code": parsed.get("month_code"),
+        "contract_month": parsed.get("month"),
+        "contract_year": parsed.get("year"),
+        "contract_code": parsed.get("contract_code"),
+        "match_mode": None,
+        "expiry_fallback": False,
+        "requested_expiry_ym": None,
     }
     if not underlying:
         out["display_symbol"] = display_symbol_for(
@@ -278,11 +530,26 @@ def attach_instrument_fields(
             symbol_mapped=underlying, symbol_raw=symbol_raw
         )
         return out
-    inst = resolve_underlying_instrument(underlying)
+
+    ey = parsed.get("year")
+    em = parsed.get("month")
+    inst = resolve_underlying_instrument(
+        underlying,
+        expiry_year=int(ey) if ey else None,
+        expiry_month=int(em) if em else None,
+    )
     if not inst:
         out["display_symbol"] = display_symbol_for(
             symbol_mapped=underlying, symbol_raw=symbol_raw
         )
+        if ey and em:
+            out["requested_expiry_ym"] = f"{int(ey):04d}-{int(em):02d}"
+            logger.warning(
+                "commodities_div attach: no MCX instrument for %s %s (TV %s)",
+                underlying,
+                out["requested_expiry_ym"],
+                symbol_raw,
+            )
         return out
     tsym = inst.get("trading_symbol")
     out["instrument_key"] = inst.get("instrument_key")
@@ -290,6 +557,9 @@ def attach_instrument_fields(
     out["trading_symbol"] = tsym
     out["lot_size"] = inst.get("lot_size")
     out["resolved_as"] = inst.get("resolved_as")
+    out["match_mode"] = inst.get("match_mode")
+    out["expiry_fallback"] = bool(inst.get("expiry_fallback"))
+    out["requested_expiry_ym"] = inst.get("requested_expiry_ym")
     out["display_symbol"] = display_symbol_for(
         contract=tsym,
         trading_symbol=tsym,
