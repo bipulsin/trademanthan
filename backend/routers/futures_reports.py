@@ -209,7 +209,9 @@ def _fetch_merged_sold_rows(
                 t.entry_price::numeric AS entry_price,
                 t.exit_time AS exit_time,
                 t.exit_price::numeric AS exit_price,
-                t.points_captured::numeric AS points_captured
+                t.points_captured::numeric AS points_captured,
+                t.source AS source,
+                t.notes AS notes
             FROM trade_log t
             WHERE t.exit_price IS NOT NULL
               AND t.exit_time IS NOT NULL
@@ -221,7 +223,13 @@ def _fetch_merged_sold_rows(
             rows = db.execute(text(kavach_sql), {"sd": sd, "ed": ed}).mappings().all()
         except Exception:
             rows = []
+        try:
+            from backend.services.rule27_trade_log import is_commodities_div_paper_row
+        except Exception:
+            is_commodities_div_paper_row = lambda _r: False  # noqa: E731
         for r in rows:
+            if is_commodities_div_paper_row(dict(r)):
+                continue
             entry_price = float(r["entry_price"]) if r["entry_price"] is not None else None
             exit_price = float(r["exit_price"]) if r["exit_price"] is not None else None
             qty = int(r["qty"]) if r["qty"] is not None else None

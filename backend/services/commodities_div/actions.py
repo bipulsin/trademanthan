@@ -562,26 +562,30 @@ def exit_submit(
             "exit_tv_time_ist": _fmt_dt(row.get("exit_tv_time_ist")),
             "ltp_at_exit_submit": row.get("ltp"),
         }
-        ensure_trade_log_table()
-        trade_log_id = upsert_trade(
-            db,
-            {
-                "session_date": str(session_date),
-                "symbol": str(row["symbol_mapped"]).strip().upper(),
-                "contract": row.get("contract"),
-                "direction": tl_direction,
-                "qty": qty,
-                "entry_time": entry_dt.strftime("%H:%M:%S") if isinstance(entry_dt, datetime) else str(entry_dt),
-                "entry_price": float(entry_px),
-                "exit_time": exit_dt.strftime("%H:%M:%S"),
-                "exit_price": float(exit_price),
-                "source": "commodities_div",
-                "notes": json.dumps(notes_obj),
-                "exit_trigger": "commodities_div_exit_modal",
-                "exit_trigger_type": "discretionary",
-                "garuda_confluence": "NOT_AVAILABLE",
-            },
-        )
+        # PAPER stays on CommDiv History only — do not pollute trade_log /
+        # reports / dashboard (mirror Premium Futures + Stock Options Selling).
+        trade_log_id: Optional[int] = None
+        if mode == "LIVE":
+            ensure_trade_log_table()
+            trade_log_id = upsert_trade(
+                db,
+                {
+                    "session_date": str(session_date),
+                    "symbol": str(row["symbol_mapped"]).strip().upper(),
+                    "contract": row.get("contract"),
+                    "direction": tl_direction,
+                    "qty": qty,
+                    "entry_time": entry_dt.strftime("%H:%M:%S") if isinstance(entry_dt, datetime) else str(entry_dt),
+                    "entry_price": float(entry_px),
+                    "exit_time": exit_dt.strftime("%H:%M:%S"),
+                    "exit_price": float(exit_price),
+                    "source": "commodities_div",
+                    "notes": json.dumps(notes_obj),
+                    "exit_trigger": "commodities_div_exit_modal",
+                    "exit_trigger_type": "discretionary",
+                    "garuda_confluence": "NOT_AVAILABLE",
+                },
+            )
 
         db.execute(
             text(
@@ -608,7 +612,7 @@ def exit_submit(
                 "sub": now,
                 "xp": float(exit_price),
                 "xa": exit_dt,
-                "tlid": int(trade_log_id),
+                "tlid": int(trade_log_id) if trade_log_id is not None else None,
                 "id": int(signal_id),
             },
         )
@@ -618,7 +622,10 @@ def exit_submit(
             {"id": int(signal_id)},
         ).mappings().first()
         out = serialize_signal(dict(updated), prefer_exit_pnl=True)
-        out["trade_log_id"] = int(trade_log_id)
+        if trade_log_id is not None:
+            out["trade_log_id"] = int(trade_log_id)
+        else:
+            out["trade_log_id"] = None
         _sync_ws_ltp_best_effort()
         return out
     except Exception:

@@ -173,10 +173,12 @@ def upsert_session(db, payload: Dict[str, Any]) -> str:
 
 
 def net_pnl_from_trade_log(db, session_date: str) -> float:
-    row = db.execute(
+    from backend.services.rule27_trade_log import is_commodities_div_paper_row
+
+    rows = db.execute(
         text(
             """
-            SELECT COALESCE(SUM(points_captured * qty), 0) AS pnl
+            SELECT points_captured, qty, source, notes
             FROM trade_log
             WHERE session_date = CAST(:d AS date)
               AND points_captured IS NOT NULL
@@ -184,5 +186,13 @@ def net_pnl_from_trade_log(db, session_date: str) -> float:
             """
         ),
         {"d": session_date},
-    ).mappings().first()
-    return round(float(row["pnl"] or 0), 2)
+    ).mappings().all()
+    total = 0.0
+    for r in rows:
+        if is_commodities_div_paper_row(dict(r)):
+            continue
+        try:
+            total += float(r["points_captured"]) * float(r["qty"])
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)

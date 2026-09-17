@@ -5,6 +5,7 @@ were previously packed into Notes (qty, slippage, MFE/MAE, scores at exit, etc.)
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 TABLE = "trade_log"
+SOURCE_COMMODITIES_DIV = "commodities_div"
 
 _CREATE_SQL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE} (
@@ -525,6 +527,57 @@ def upsert_trade(db, payload: Dict[str, Any]) -> int:
     return int(rid)
 
 
+def notes_trade_mode(notes: Any) -> Optional[str]:
+    """Parse trade_mode from commodities_div notes JSON, if present."""
+    if notes is None:
+        return None
+    obj: Any = notes
+    if isinstance(notes, str):
+        s = notes.strip()
+        if not s or s[0] not in "{[":
+            return None
+        try:
+            obj = json.loads(s)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+    if not isinstance(obj, dict):
+        return None
+    raw = obj.get("trade_mode")
+    if raw is None:
+        return None
+    mode = str(raw).strip().upper()
+    return mode or None
+
+
+def is_commodities_div_paper_row(row: Optional[Dict[str, Any]]) -> bool:
+    """True when row is CommDiv and trade_mode is not LIVE (default PAPER).
+
+    Used so PAPER Commodities Div exits never appear in tradelog / reports /
+    dashboard aggregations. LIVE CommDiv rows remain visible.
+    """
+    if not row:
+        return False
+    source = str(row.get("source") or "").strip().lower()
+    if source != SOURCE_COMMODITIES_DIV:
+        return False
+    mode = notes_trade_mode(row.get("notes")) or "PAPER"
+    return mode != "LIVE"
+
+
+def filter_out_commodities_div_paper(
+    rows: Sequence[Optional[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """Drop CommDiv PAPER rows from trade_log result lists."""
+    out: List[Dict[str, Any]] = []
+    for r in rows or []:
+        if not r:
+            continue
+        if is_commodities_div_paper_row(r):
+            continue
+        out.append(dict(r))
+    return out
+
+
 def serialize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
     """JSON-safe trade_log row plus gross PnL."""
     out: Dict[str, Any] = {}
@@ -552,6 +605,9 @@ def serialize_trade(row: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         pnl = None
     out["gross_pnl_inr"] = pnl
+    mode = notes_trade_mode(row.get("notes"))
+    if mode and str(row.get("source") or "").strip().lower() == SOURCE_COMMODITIES_DIV:
+        out["trade_mode"] = mode
     return out
 
 
@@ -565,7 +621,10 @@ def list_trades(db, start_date: Optional[str] = None, end_date: Optional[str] = 
         LIMIT 500
     """
     rows = db.execute(text(sql), {"sd": start_date, "ed": end_date}).mappings().all()
-    return [serialize_trade(dict(r)) for r in rows]
+    # Over-fetch then filter: CommDiv PAPER must not appear in Existing trades /
+    # dashboard PnL. Limit stays 500 before filter (PAPER volume is small).
+    filtered = filter_out_commodities_div_paper([dict(r) for r in rows])
+    return [serialize_trade(r) for r in filtered]
 
 
 def get_trade(db, trade_id: int) -> Optional[Dict[str, Any]]:
