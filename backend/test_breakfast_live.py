@@ -149,6 +149,20 @@ def test_rows_from_live_state_builds_row():
     assert r["first_5m_ts"].startswith("2026-08-28T09:15")
 
 
+def test_rows_from_live_state_maps_ws_rest_status_to_enum():
+    from backend.services.breakfast_strategy.live_persist import normalize_cross_check_status_for_db
+
+    assert normalize_cross_check_status_for_db("ws_rest:1/5_matched") == "mismatched"
+    assert normalize_cross_check_status_for_db("ws_rest:5/5_matched") == "matched"
+    assert normalize_cross_check_status_for_db("ws_rest:0/3_matched") == "mismatched"
+    assert normalize_cross_check_status_for_db("ws_rest:no_instruments") == "matched"
+    assert normalize_cross_check_status_for_db("matched") == "matched"
+    assert normalize_cross_check_status_for_db("mismatched") == "mismatched"
+    rows = rows_from_live_state(SAMPLE_STATE, "ws_rest:1/5_matched")
+    assert rows[0]["websocket_rest_cross_check_status"] == "mismatched"
+    rows_ok = rows_from_live_state(SAMPLE_STATE, "ws_rest:5/5_matched")
+    assert rows_ok[0]["websocket_rest_cross_check_status"] == "matched"
+
 def test_live_state_from_persisted_rows_roundtrip():
     db_rows = rows_from_live_state(SAMPLE_STATE, "matched")
     state = live_state_from_persisted_rows(
@@ -244,6 +258,30 @@ def test_format_lock_failure_banner_reasons():
     assert "only 1 sector after cascade (IT)" in overlay
     assert "Off cycle data" in overlay
 
+
+def test_format_lock_failure_banner_sanitizes_db_errors():
+    from backend.services.breakfast_strategy.live_tick import (
+        format_lock_failure_banner,
+        sanitize_lock_failure_reason,
+    )
+
+    raw = (
+        'Lock failed: (psycopg2.errors.CheckViolation) new row for relation '
+        '"breakfast_live_signals" violates check constraint '
+        '"breakfast_live_signals_websocket_rest_cross_check_status_check"\n'
+        "DETAIL: Failing row contains (..., websocket_rest_cross_check_status = "
+        "ws_rest:1/5_matched, ...)\n"
+        "[SQL: INSERT INTO breakfast_live_signals ...]"
+    )
+    assert sanitize_lock_failure_reason(raw) == "persist_cross_check_status_invalid"
+    banner = format_lock_failure_banner(raw)
+    assert banner == "Lock failed: websocket/REST cross-check status invalid"
+    assert "psycopg2" not in banner
+    assert "SQL" not in banner
+    assert "ws_rest" not in banner
+    assert format_lock_failure_banner("persist_failed") == (
+        "Lock failed: could not save lock signals"
+    )
 
 @patch("backend.services.breakfast_strategy.live._tick_snapshot_for_session", return_value=None)
 @patch("backend.services.breakfast_strategy.live.fetch_session_lock", return_value=None)

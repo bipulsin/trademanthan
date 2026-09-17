@@ -653,9 +653,10 @@ def is_resolved_empty_lock(
 
 def annotate_lock_failure(payload: Dict[str, Any], failure_reason: str) -> None:
     """Set banner/phase for a freeze outcome. Color-empty is not lock_failed."""
-    payload["failure_reason"] = failure_reason
-    payload["banner"] = format_lock_failure_banner(failure_reason, payload)
-    if is_resolved_empty_lock(failure_reason, payload):
+    safe_reason = sanitize_lock_failure_reason(failure_reason)
+    payload["failure_reason"] = safe_reason
+    payload["banner"] = format_lock_failure_banner(safe_reason, payload)
+    if is_resolved_empty_lock(safe_reason, payload):
         payload["state"] = "resolved_no_stocks"
         payload["phase"] = "locked_empty"
         payload["lock_failed"] = False
@@ -665,12 +666,38 @@ def annotate_lock_failure(payload: Dict[str, Any], failure_reason: str) -> None:
     payload["lock_failed"] = True
 
 
+def sanitize_lock_failure_reason(reason: Optional[str]) -> str:
+    """Collapse raw DB/driver exceptions into a short domain code for UI/API."""
+    r = str(reason or "").strip()
+    if not r:
+        return ""
+    low = r.lower()
+    # Already a known domain code / short message
+    if "\n" not in r and len(r) < 120 and "psycopg2" not in low and "sqlalchemy" not in low:
+        if "checkviolation" not in low and "violates check constraint" not in low:
+            if "[sql:" not in low and "failing row contains" not in low:
+                return r
+    if (
+        "checkviolation" in low
+        or "violates check constraint" in low
+        or "websocket_rest_cross_check_status" in low
+    ):
+        return "persist_cross_check_status_invalid"
+    if "uniqueviolation" in low or "duplicate key" in low:
+        return "persist_duplicate_signal"
+    if "psycopg2" in low or "sqlalchemy" in low or "[sql:" in low:
+        return "persist_failed"
+    if len(r) > 160 or "\n" in r:
+        return "persist_failed"
+    return r
+
+
 def format_lock_failure_banner(
     reason: Optional[str],
     payload: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Human-readable freeze banner from failure_reason + selection_meta/sectors."""
-    r = str(reason or "").strip()
+    r = sanitize_lock_failure_reason(reason)
     payload = payload or {}
     meta = payload.get("selection_meta") if isinstance(payload.get("selection_meta"), dict) else {}
     sectors = payload.get("sectors") or []
@@ -699,6 +726,12 @@ def format_lock_failure_banner(
         return "Lock failed: no sectors available at freeze"
     if r == "max_retries_exceeded":
         return "Lock failed: freeze retries exhausted"
+    if r == "persist_cross_check_status_invalid":
+        return "Lock failed: websocket/REST cross-check status invalid"
+    if r == "persist_duplicate_signal":
+        return "Lock failed: signal already saved for this session"
+    if r == "persist_failed":
+        return "Lock failed: could not save lock signals"
     if r == "no_filtered_stocks:wick":
         extra = f" in {top2_names}" if top2_names else " in top sectors"
         return f"Lock failed: no stocks passed the wick filter{extra}"
@@ -1423,7 +1456,7 @@ def run_breakfast_freeze_lock(*, retry: bool = False) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("breakfast freeze persist failed: %s", e)
         lock_status = "failed"
-        failure_reason = str(e)
+        failure_reason = sanitize_lock_failure_reason(str(e)) or "persist_failed"
         annotate_lock_failure(payload, failure_reason)
         try:
             persist_session_lock(

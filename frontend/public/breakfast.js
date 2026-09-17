@@ -374,10 +374,29 @@
         return false;
     }
 
+    function sanitizeLiveBanner(banner) {
+        var b = String(banner || "");
+        var low = b.toLowerCase();
+        if (
+            low.indexOf("psycopg2") >= 0 ||
+            low.indexOf("sqlalchemy") >= 0 ||
+            low.indexOf("checkviolation") >= 0 ||
+            low.indexOf("violates check constraint") >= 0 ||
+            low.indexOf("[sql:") >= 0 ||
+            low.indexOf("failing row contains") >= 0
+        ) {
+            if (low.indexOf("websocket_rest_cross_check") >= 0 || low.indexOf("cross_check_status") >= 0) {
+                return "Lock failed: websocket/REST cross-check status invalid";
+            }
+            return "Lock failed: could not save lock signals";
+        }
+        return b;
+    }
+
     function renderLiveBanner(data) {
         var el = $("bfLiveBanner");
         if (!el) return;
-        var banner = data.banner || "";
+        var banner = sanitizeLiveBanner(data.banner || "");
         if (!banner) { el.hidden = true; return; }
         el.hidden = false;
         el.textContent = banner;

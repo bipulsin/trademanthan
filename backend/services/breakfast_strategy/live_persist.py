@@ -87,6 +87,34 @@ def assign_selected_sector_ranks(sectors: List[Dict[str, Any]]) -> None:
 
 
 
+def normalize_cross_check_status_for_db(cross_check_status: Optional[str]) -> str:
+    """Map runtime WS/REST observation strings to CHECK-allowed enum values.
+
+    Column CHECK allows only ``matched`` / ``mismatched``. Live freeze emits
+    informational strings like ``ws_rest:1/5_matched`` for monitoring; those
+    must be collapsed before INSERT into breakfast_live_signals.
+    """
+    raw = str(cross_check_status or "").strip().lower()
+    if raw in ("matched", "mismatched"):
+        return raw
+    # ws_rest:{matched}/{total}_matched
+    if raw.startswith("ws_rest:") and raw.endswith("_matched"):
+        body = raw[len("ws_rest:") : -len("_matched")]
+        if "/" in body:
+            left, right = body.split("/", 1)
+            try:
+                matched_n = int(left)
+                total_n = int(right)
+            except ValueError:
+                return "mismatched"
+            if total_n > 0 and matched_n == total_n:
+                return "matched"
+            return "mismatched"
+    if raw in ("ws_rest:no_instruments", "ws_rest:unknown", ""):
+        return "matched"
+    return "mismatched"
+
+
 def rows_from_live_state(
     state: Dict[str, Any],
     cross_check_status: str,
@@ -101,6 +129,7 @@ def rows_from_live_state(
     locked_at = _parse_ts(state.get("server_time")) or datetime.now(IST)
     nifty_pct = (state.get("nifty") or {}).get("bias_pct")
     cap_src = capture_source or state.get("capture_source")
+    db_status = normalize_cross_check_status_for_db(cross_check_status)
     rows: List[Dict[str, Any]] = []
 
     for sec in state.get("sectors") or []:
@@ -144,7 +173,7 @@ def rows_from_live_state(
                     "sl_price": float(sl),
                     "lot_size": lot,
                     "locked_at_timestamp": locked_at.isoformat(),
-                    "websocket_rest_cross_check_status": cross_check_status,
+                    "websocket_rest_cross_check_status": db_status,
                     "instrument_key": stk.get("instrument_key"),
                     "capture_source": cap_src,
                     "first_5m_open": stk.get("first_5m_open"),
@@ -203,7 +232,7 @@ def persist_live_signals(
     capture_source: Optional[str] = None,
 ) -> Dict[str, int]:
     """Idempotent insert for all stocks in locked state (up to 6 rows)."""
-    status = str(cross_check_status or "ws_rest:unknown").strip()
+    status = normalize_cross_check_status_for_db(cross_check_status)
     rows = rows_from_live_state(state, status, capture_source=capture_source)
     if not rows:
         return {"inserted": 0, "skipped": 0}
