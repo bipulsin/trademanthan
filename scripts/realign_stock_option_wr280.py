@@ -7,7 +7,7 @@ end is at or before trigger_at (never a later bar):
 
     %R = (Highest High(280) - Close) / (Highest High(280) - Lowest Low(280)) * -100
 
-Gates: WR > -1 → BEAR CALL; WR < -99 → BULL PUT; else REJECTED.
+Gates: WR > -0.2 → BEAR CALL; WR < -98 → BULL PUT; else REJECTED.
 Rows are walked in trigger-time order per symbol so an open Radar/Active row
 still blocks a later trigger. EMA arm/invalidate and 72h Active expiry use the
 existing helpers. User-submitted Executed rows (both costs filled) are left

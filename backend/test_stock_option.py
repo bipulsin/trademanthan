@@ -51,16 +51,22 @@ IST = pytz.timezone("Asia/Kolkata")
 
 
 def test_williamsr_gate_bounds_excluded():
-    assert side_from_williamsr(-0.9) == SIDE_BEAR
+    # BEAR: WR > -0.2
+    assert side_from_williamsr(-0.19) == SIDE_BEAR
     assert side_from_williamsr(0) == SIDE_BEAR
+    assert side_from_williamsr(-0.2) is None
+    assert side_from_williamsr(-0.9) is None
     assert side_from_williamsr(-1) is None
     assert side_from_williamsr(-1.0) is None
     assert side_from_williamsr(-50) is None
-    assert side_from_williamsr(-99) is None
+    # BULL: WR < -98
+    assert side_from_williamsr(-98) is None
+    assert side_from_williamsr(-98.1) == SIDE_BULL
+    assert side_from_williamsr(-99) == SIDE_BULL
     assert side_from_williamsr(-99.1) == SIDE_BULL
     assert side_from_williamsr(-100) == SIDE_BULL
     assert side_from_williamsr("nope") is None
-    # Former -3/-97 gates no longer qualify
+    # Mid-range still does not qualify
     assert side_from_williamsr(-2.9) is None
     assert side_from_williamsr(-97.1) is None
 
@@ -99,10 +105,11 @@ def test_williams_r_280_gate_uses_last_completed_bar():
     asof = start + timedelta(hours=2 * (WR_PERIOD - 1))
     later = asof + timedelta(hours=2)
 
-    bear = _bars(WR_PERIOD, 109.9, start)
+    # Close near high → WR ≈ -0.05 > -0.2 → BEAR
+    bear = _bars(WR_PERIOD, 109.99, start)
     bear.append({"end": later, "high": 110.0, "low": 90.0, "close": 90.0})
     wr_bear = williams_r_at(bear, asof)
-    assert wr_bear == (110.0 - 109.9) / (110.0 - 90.0) * -100.0
+    assert wr_bear == (110.0 - 109.99) / (110.0 - 90.0) * -100.0
     assert side_from_williamsr(wr_bear) == SIDE_BEAR
     assert williams_r_at(bear, asof) != williams_r_at(bear, later)
 
@@ -840,10 +847,12 @@ def test_webhook_insert_disabled_returns_zero(monkeypatch):
 
 
 def test_side_from_williamsr_still_used_by_scan_gates():
-    """Scan insert gates reuse side_from_williamsr (> -1 / < -99)."""
-    assert side_from_williamsr(-0.5) == SIDE_BEAR
-    assert side_from_williamsr(-99.5) == SIDE_BULL
+    """Scan insert gates reuse side_from_williamsr (> -0.2 / < -98)."""
+    assert side_from_williamsr(-0.1) == SIDE_BEAR
+    assert side_from_williamsr(-98.5) == SIDE_BULL
     assert side_from_williamsr(-50) is None
+    assert side_from_williamsr(-0.5) is None  # between gates (stricter BEAR than former > -1)
+    assert side_from_williamsr(-99) == SIDE_BULL  # looser BULL than former < -99
 
 
 def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):

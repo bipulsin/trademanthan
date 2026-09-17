@@ -7,7 +7,7 @@ walks the same 11:15 / 13:15 / 15:15 IST EMA clock as the live scheduler.
 ChartInk ``williamsr`` (if present) is ignored. Side comes from Upstox WR(280)
 on completed 2h bars ending at/before each trigger:
 
-    WR > -1 → BEAR CALL; WR < -99 → BULL PUT; else discard
+    WR > -0.2 → BEAR CALL; WR < -98 → BULL PUT; else discard
 
 Arming uses 2h EMA9/30/100 after the trigger. Active rows lose EMA → Executed
 (invalidate remark), or auto-expire after 72h from armed_at. Remaining Active
