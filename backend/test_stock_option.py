@@ -51,13 +51,12 @@ IST = pytz.timezone("Asia/Kolkata")
 
 
 def test_williamsr_gate_bounds_excluded():
-    # BEAR: WR > -0.2
-    assert side_from_williamsr(-0.19) == SIDE_BEAR
+    # BEAR: WR > -2.0
+    assert side_from_williamsr(-1.9) == SIDE_BEAR
+    assert side_from_williamsr(-0.2) == SIDE_BEAR
     assert side_from_williamsr(0) == SIDE_BEAR
-    assert side_from_williamsr(-0.2) is None
-    assert side_from_williamsr(-0.9) is None
-    assert side_from_williamsr(-1) is None
-    assert side_from_williamsr(-1.0) is None
+    assert side_from_williamsr(-2.0) is None
+    assert side_from_williamsr(-2.1) is None
     assert side_from_williamsr(-50) is None
     # BULL: WR < -98
     assert side_from_williamsr(-98) is None
@@ -105,7 +104,7 @@ def test_williams_r_280_gate_uses_last_completed_bar():
     asof = start + timedelta(hours=2 * (WR_PERIOD - 1))
     later = asof + timedelta(hours=2)
 
-    # Close near high → WR ≈ -0.05 > -0.2 → BEAR
+    # Close near high → WR ≈ -0.05 > -2 → BEAR
     bear = _bars(WR_PERIOD, 109.99, start)
     bear.append({"end": later, "high": 110.0, "low": 90.0, "close": 90.0})
     wr_bear = williams_r_at(bear, asof)
@@ -847,12 +846,13 @@ def test_webhook_insert_disabled_returns_zero(monkeypatch):
 
 
 def test_side_from_williamsr_still_used_by_scan_gates():
-    """Scan insert gates reuse side_from_williamsr (> -0.2 / < -98)."""
+    """Scan insert gates reuse side_from_williamsr (> -2 / < -98)."""
     assert side_from_williamsr(-0.1) == SIDE_BEAR
+    assert side_from_williamsr(-1.5) == SIDE_BEAR
     assert side_from_williamsr(-98.5) == SIDE_BULL
     assert side_from_williamsr(-50) is None
-    assert side_from_williamsr(-0.5) is None  # between gates (stricter BEAR than former > -1)
-    assert side_from_williamsr(-99) == SIDE_BULL  # looser BULL than former < -99
+    assert side_from_williamsr(-2.5) is None  # between gates
+    assert side_from_williamsr(-99) == SIDE_BULL
 
 
 def test_ema_closes_ready_and_index_fut_ohlc_fallback(monkeypatch):

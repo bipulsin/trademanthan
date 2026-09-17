@@ -3,7 +3,7 @@
 Permanent indices NIFTY/BANKNIFTY (arbitrage_master): always on Radar, no WR gate,
 arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads; Active→Radar demote on hold fail.
 
-Stocks: Radar entry from the 2h WR scan (not ChartInk) — WR > -0.2 BEAR / WR < -98 BULL.
+Stocks: Radar entry from the 2h WR scan (not ChartInk) — WR > -2 BEAR / WR < -98 BULL.
 Radar→Active requires ema_condition_holds(side) AND a fresh 1-candle EMA9 cross matching
 that WR side. ChartInk ``/webhook/stockOption`` is logged only (no stock Radar inserts).
 """
@@ -55,7 +55,7 @@ _MONTH_NUM = {
 _MONTH_ABBR = {v: k for k, v in _MONTH_NUM.items()}
 
 WR_PERIOD = 280
-WR_BEAR_GT = -0.2
+WR_BEAR_GT = -2.0
 WR_BULL_LT = -98.0
 # EOD Radar cleanup: remove only if WR has moved well off the entry extreme.
 WR_EOD_BULL_REMOVE_GT = -5.0  # BULL PUT + WR > -5 → delete Radar
@@ -361,7 +361,7 @@ def decode_raw_payload(body: bytes) -> Tuple[Any, Dict[str, Any]]:
 
 
 def side_from_williamsr(williamsr: Any) -> Optional[str]:
-    """> -0.2 → BEAR CALL; < -98 → BULL PUT. -0.2 and -98 themselves do not qualify."""
+    """> -2 → BEAR CALL; < -98 → BULL PUT. -2 and -98 themselves do not qualify."""
     try:
         wr = float(williamsr)
     except (TypeError, ValueError):
