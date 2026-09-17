@@ -1,11 +1,15 @@
 """TV symbol parse → fixed MCX underlyings + Upstox FUT resolve by contract month.
 
-No user mapping table required. Allowed underlyings:
+No user mapping table required. Webhook / desk underlyings (TV alerts):
   CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI
+
+Manual free-text also accepts GOLD, GOLDM, SILVER, CRUDEOILM, ZINC, LEAD,
+NICKEL, MENTHAOIL, ALUMINIUM, etc.
 
 TradingView webhook symbols encode the futures month in the trailing 5 chars
 (letter + 4-digit year), e.g. NATURALGASV2026 → NATURALGAS Oct 2026.
 Continuous forms (CRUDEOIL1!) fall back to front-month.
+Free-text forms (COPPER SEP FUT / COPPERSEPFUT) map via month name → same resolve.
 """
 from __future__ import annotations
 
@@ -33,6 +37,9 @@ _CONT_FUT = re.compile(r"\d+!$")
 _LETTER_YEAR = re.compile(r"[A-Z]\d{4}$")
 # Also accept letter + 2-digit year: Z26
 _LETTER_YY = re.compile(r"[A-Z]\d{2}$")
+_FUT_TOKEN = re.compile(r"^(FUT|FUTURE|FUTURES)$", re.I)
+_YEAR_TOKEN = re.compile(r"^(20\d{2}|\d{2})$")
+_DAY_TOKEN = re.compile(r"^([12]\d|3[01]|0?[1-9])$")
 
 # Standard CME/TV futures month codes (full set for robustness).
 FUTURES_MONTH_CODES: Dict[str, int] = {
@@ -50,8 +57,40 @@ FUTURES_MONTH_CODES: Dict[str, int] = {
     "Z": 12,  # December
 }
 
-# Canonical desk names (longest first for prefix match).
-ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
+# Calendar month names / abbreviations → 1-12 (longest keys first for concat match).
+MONTH_NAME_TO_NUM: Dict[str, int] = {
+    "JANUARY": 1,
+    "FEBRUARY": 2,
+    "MARCH": 3,
+    "APRIL": 4,
+    "MAY": 5,
+    "JUNE": 6,
+    "JULY": 7,
+    "AUGUST": 8,
+    "SEPTEMBER": 9,
+    "OCTOBER": 10,
+    "NOVEMBER": 11,
+    "DECEMBER": 12,
+    "SEPT": 9,
+    "JAN": 1,
+    "FEB": 2,
+    "MAR": 3,
+    "APR": 4,
+    "JUN": 6,
+    "JUL": 7,
+    "AUG": 8,
+    "SEP": 9,
+    "OCT": 10,
+    "NOV": 11,
+    "DEC": 12,
+}
+_MONTH_NAME_KEYS: Tuple[str, ...] = tuple(
+    sorted(MONTH_NAME_TO_NUM.keys(), key=len, reverse=True)
+)
+_MONTH_NUM_TO_CODE: Dict[int, str] = {v: k for k, v in FUTURES_MONTH_CODES.items()}
+
+# Canonical desk names for TV webhooks (longest first for prefix match).
+WEBHOOK_UNDERLYINGS: Tuple[str, ...] = (
     "NATURALGAS",
     "SILVERMINI",
     "GOLDPETAL",
@@ -59,27 +98,67 @@ ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
     "COPPER",
 )
 
+# Broader MCX underlyings for manual free-text (longest first).
+# Includes webhook set plus GOLD / SILVER / base metals / mini crude / etc.
+ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
+    "NATURALGAS",
+    "SILVERMINI",
+    "GOLDPETAL",
+    "MENTHAOIL",
+    "ALUMINIUM",
+    "CRUDEOILM",
+    "CRUDEOIL",
+    "SILVER",
+    "COPPER",
+    "NICKEL",
+    "GOLDM",
+    "GOLD",
+    "ZINC",
+    "LEAD",
+)
+
 # TV / MCX short cores → desk canonical (SILVERMX2026 → SILVERM → SILVERMINI).
 TV_CORE_ALIASES: Dict[str, str] = {
     "SILVERM": "SILVERMINI",
+    "NATGAS": "NATURALGAS",
+    "ALUMINUM": "ALUMINIUM",
 }
 
 # Lookup keys tried against Upstox master (SILVERMINI → SILVERM on Upstox).
 UPSTOX_RESOLVE_ALIASES: Dict[str, List[str]] = {
     "CRUDEOIL": ["CRUDEOIL"],
+    "CRUDEOILM": ["CRUDEOILM"],
     "NATURALGAS": ["NATURALGAS"],
     "COPPER": ["COPPER"],
     "GOLDPETAL": ["GOLDPETAL"],
+    "GOLDM": ["GOLDM"],
+    "GOLD": ["GOLD"],
     "SILVERMINI": ["SILVERM", "SILVERMINI"],
+    "SILVER": ["SILVER"],
+    "ZINC": ["ZINC"],
+    "LEAD": ["LEAD"],
+    "NICKEL": ["NICKEL"],
+    "MENTHAOIL": ["MENTHAOIL"],
+    "ALUMINIUM": ["ALUMINIUM"],
 }
 
-# Exact underlying_symbol to keep (excludes NATGASMINI / CRUDEOILM / SILVERMIC).
+# Exact underlying_symbol to keep on Upstox master.
+# Desk webhook set still prefers full CRUDEOIL / NATURALGAS (not mini variants).
 PREFERRED_UNDERLYING_SYMBOL: Dict[str, str] = {
     "CRUDEOIL": "CRUDEOIL",
+    "CRUDEOILM": "CRUDEOILM",
     "NATURALGAS": "NATURALGAS",
     "COPPER": "COPPER",
     "GOLDPETAL": "GOLDPETAL",
+    "GOLDM": "GOLDM",
+    "GOLD": "GOLD",
     "SILVERMINI": "SILVERM",
+    "SILVER": "SILVER",
+    "ZINC": "ZINC",
+    "LEAD": "LEAD",
+    "NICKEL": "NICKEL",
+    "MENTHAOIL": "MENTHAOIL",
+    "ALUMINIUM": "ALUMINIUM",
 }
 
 
@@ -93,9 +172,290 @@ def _strip_to_core(raw: Optional[str]) -> Optional[str]:
     if ":" in s:
         s = s.split(":")[-1].strip()
     s = re.sub(r"\s+", "", s)
-    if " FUT" in s:
-        s = s.split(" FUT", 1)[0].strip()
+    # Spaces already removed — strip trailing FUT / FUTURES (COPPERSEPFUT → COPPERSEP).
+    for suffix in ("FUTURES", "FUTURE", "FUT"):
+        if s.endswith(suffix) and len(s) > len(suffix):
+            s = s[: -len(suffix)]
+            break
     return s or None
+
+
+def _normalize_year_token(tok: str) -> Optional[int]:
+    if not _YEAR_TOKEN.fullmatch(tok):
+        return None
+    try:
+        y = int(tok)
+    except ValueError:
+        return None
+    if y < 100:
+        y = 2000 + y
+    if y < 2000 or y > 2100:
+        return None
+    return y
+
+
+def infer_contract_year(
+    month: int, *, as_of: Optional[datetime] = None, year_hint: Optional[int] = None
+) -> int:
+    """
+    Pick contract year for a calendar month when user omitted / partially gave year.
+
+    Prefer current calendar year when that month is still upcoming or current;
+    otherwise next year (nearest upcoming). Explicit year_hint wins when valid.
+    """
+    if year_hint is not None:
+        y = int(year_hint)
+        if y < 100:
+            y = 2000 + y
+        return y
+    now = as_of or datetime.now(timezone.utc)
+    m = int(month)
+    if m < 1 or m > 12:
+        return int(now.year)
+    if m < int(now.month):
+        return int(now.year) + 1
+    return int(now.year)
+
+
+def _match_underlying_prefix(blob: str) -> Optional[Tuple[str, str]]:
+    """
+    Longest-first underlying match against a compacted string.
+    Returns (canonical, remainder) or None.
+    """
+    if not blob:
+        return None
+    if blob in TV_CORE_ALIASES:
+        return TV_CORE_ALIASES[blob], ""
+    if blob in ALLOWED_UNDERLYINGS:
+        return blob, ""
+
+    candidates: List[Tuple[str, str, str]] = []
+    for name in ALLOWED_UNDERLYINGS:
+        if blob.startswith(name):
+            candidates.append((name, name, blob[len(name) :]))
+    for alias, canon in TV_CORE_ALIASES.items():
+        if blob.startswith(alias):
+            candidates.append((alias, canon, blob[len(alias) :]))
+    if not candidates:
+        # Letter+year / continuous already stripped elsewhere — try canonicalize.
+        canon = _canonicalize_core(blob)
+        if canon:
+            return canon, ""
+        return None
+    # Longest matched key wins (CRUDEOILM before CRUDEOIL, GOLDPETAL before GOLD).
+    candidates.sort(key=lambda t: len(t[0]), reverse=True)
+    _key, canon, rest = candidates[0]
+    return canon, rest
+
+
+def _extract_month_from_blob(blob: str) -> Optional[Tuple[int, str, str]]:
+    """
+    Find a month name/abbr inside compacted text.
+    Returns (month_num, before, after) for the leftmost longest match, or None.
+    """
+    if not blob:
+        return None
+    best: Optional[Tuple[int, int, int, str]] = None  # start, end, month, key
+    for key in _MONTH_NAME_KEYS:
+        idx = blob.find(key)
+        if idx < 0:
+            continue
+        end = idx + len(key)
+        # Avoid matching inside longer tokens when possible — prefer start/boundary.
+        month = MONTH_NAME_TO_NUM[key]
+        if best is None or idx < best[0] or (idx == best[0] and len(key) > best[3].__len__()):
+            best = (idx, end, month, key)
+    if best is None:
+        return None
+    idx, end, month, _key = best
+    return month, blob[:idx], blob[end:]
+
+
+def parse_free_text_commodity(
+    raw: Optional[str], *, as_of: Optional[datetime] = None
+) -> Dict[str, Any]:
+    """
+    Parse flexible manual-entry commodity text into underlying + optional month/year.
+
+    Accepts forms like:
+      COPPER SEP FUT / COPPER SEPT FUT / COPPER SEPTEMBER FUT
+      COPPER FUT SEP / SEP COPPER FUT
+      COPPERSEPFUT
+      COPPER 30 SEP 26 / COPPER FUT 30 SEP 26
+      COPPER (front-month)
+      NATURALGAS OCT FUT / SILVERM NOV / GOLD DEC 26
+    """
+    out: Dict[str, Any] = {
+        "underlying": None,
+        "month": None,
+        "year": None,
+        "day": None,
+        "month_code": None,
+        "contract_code": None,
+        "parse_mode": None,
+    }
+    if raw is None:
+        return out
+    s = str(raw).strip().strip('"').strip("'").upper()
+    if not s or ("{{" in s and "}}" in s):
+        return out
+    s = _EXCHANGE_PREFIX.sub("", s).strip()
+    if ":" in s:
+        s = s.split(":")[-1].strip()
+    s = s.replace("!", " ")
+    # Tokenize on non-alnum; keep alnum runs.
+    tokens = [t for t in re.split(r"[^A-Z0-9]+", s) if t]
+    if not tokens:
+        return out
+
+    month: Optional[int] = None
+    year: Optional[int] = None
+    day: Optional[int] = None
+    leftover: List[str] = []
+
+    for tok in tokens:
+        if _FUT_TOKEN.fullmatch(tok):
+            continue
+        if month is None and tok in MONTH_NAME_TO_NUM:
+            month = MONTH_NAME_TO_NUM[tok]
+            continue
+        y = _normalize_year_token(tok)
+        if y is not None and year is None and (
+            len(tok) == 4 or (month is not None or day is not None or leftover)
+        ):
+            # Bare 2-digit year only after we already saw commodity/month/day context
+            # (avoid treating GOLD "26" alone as year without month — still OK with month).
+            if len(tok) == 4 or month is not None or day is not None:
+                year = y
+                continue
+        if day is None and _DAY_TOKEN.fullmatch(tok) and not tok.isalpha():
+            # Prefer day when token looks like 1-31 and month not yet from this token.
+            d = int(tok)
+            if 1 <= d <= 31 and (month is not None or leftover):
+                # Defer: 26 could be year; if month already set and no year, prefer year for 2-digit.
+                if month is not None and year is None and len(tok) == 2 and d >= 20:
+                    year = 2000 + d
+                    continue
+                day = d
+                continue
+        leftover.append(tok)
+
+    # Second pass on leftover: 2-digit years that were deferred, or day before month order.
+    cleaned: List[str] = []
+    for tok in leftover:
+        y = _normalize_year_token(tok)
+        if y is not None and year is None and month is not None and len(tok) == 2:
+            year = y
+            continue
+        if day is None and _DAY_TOKEN.fullmatch(tok) and tok.isdigit():
+            d = int(tok)
+            if 1 <= d <= 31:
+                day = d
+                continue
+        cleaned.append(tok)
+    leftover = cleaned
+
+    underlying: Optional[str] = None
+    # Prefer joined leftover tokens as underlying (COPPER, NATURAL GAS → NATURALGAS).
+    joined = "".join(leftover)
+    if joined:
+        hit = _match_underlying_prefix(joined)
+        if hit and hit[1] == "":
+            underlying = hit[0]
+        elif hit and hit[1]:
+            # e.g. leftover compacted still has month residue
+            underlying = hit[0]
+            rest = hit[1]
+            if month is None:
+                extracted = _extract_month_from_blob(rest)
+                if extracted:
+                    month, before, after = extracted
+                    rem = (before + after).strip()
+                    if rem and year is None:
+                        y = _normalize_year_token(rem)
+                        if y:
+                            year = y
+                        elif rem.isdigit() and day is None and 1 <= int(rem) <= 31:
+                            day = int(rem)
+        else:
+            underlying = _canonicalize_core(joined)
+
+    # Concatenated full string fallback (COPPERSEPFUT / COPPER30SEP26).
+    if underlying is None or month is None:
+        compact = re.sub(r"[^A-Z0-9]", "", s)
+        for suffix in ("FUTURES", "FUTURE", "FUT"):
+            if compact.endswith(suffix) and len(compact) > len(suffix):
+                compact = compact[: -len(suffix)]
+                break
+        # Strip TV letter+year if present — defer to TV path normally, but tolerate mix.
+        if underlying is None:
+            tv_u = parse_underlying(raw)
+            if tv_u:
+                underlying = tv_u
+        if month is None or underlying is None:
+            hit = _match_underlying_prefix(compact)
+            if hit:
+                und, rest = hit
+                if underlying is None:
+                    underlying = und
+                if month is None and rest:
+                    # Optional leading day digits: 30SEP26
+                    m_day = re.match(r"^(\d{1,2})([A-Z].*)$", rest)
+                    if m_day:
+                        d = int(m_day.group(1))
+                        if 1 <= d <= 31 and day is None:
+                            day = d
+                        rest = m_day.group(2)
+                    extracted = _extract_month_from_blob(rest)
+                    if extracted:
+                        month, before, after = extracted
+                        rem = (before + after).strip()
+                        if rem and year is None:
+                            y = _normalize_year_token(rem)
+                            if y:
+                                year = y
+                            elif rem.isdigit() and len(rem) <= 2 and day is None:
+                                d = int(rem)
+                                if 1 <= d <= 31:
+                                    day = d
+
+    if underlying is None:
+        # Last resort: TV / continuous forms already handled by parse_underlying.
+        underlying = parse_underlying(raw)
+        if underlying and month is None:
+            mi = parse_tv_month_code(raw)
+            if mi:
+                out.update(
+                    {
+                        "underlying": underlying,
+                        "month": mi.get("month"),
+                        "year": mi.get("year"),
+                        "month_code": mi.get("month_code"),
+                        "contract_code": mi.get("contract_code"),
+                        "parse_mode": "tv",
+                    }
+                )
+                return out
+
+    if not underlying:
+        return out
+
+    if month is not None and year is None:
+        year = infer_contract_year(month, as_of=as_of)
+    month_code = _MONTH_NUM_TO_CODE.get(int(month)) if month else None
+    contract_code = f"{month_code}{year}" if month_code and year else None
+    out.update(
+        {
+            "underlying": underlying,
+            "month": int(month) if month else None,
+            "year": int(year) if year else None,
+            "day": int(day) if day else None,
+            "month_code": month_code,
+            "contract_code": contract_code,
+            "parse_mode": "free_text" if month or day else "free_text_front",
+        }
+    )
+    return out
 
 
 def parse_tv_month_code(raw: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -221,6 +581,7 @@ def parse_tv_symbol(symbol_raw: str) -> Dict[str, Any]:
     Parse TV symbol into underlying + optional contract month/year.
 
     Example: NATURALGASV2026 → underlying=NATURALGAS, month=10, year=2026.
+    Falls back to free-text month names (COPPER SEP FUT) when letter+year absent.
     """
     underlying = parse_underlying(symbol_raw)
     month_info = parse_tv_month_code(symbol_raw) if underlying else None
@@ -230,9 +591,23 @@ def parse_tv_symbol(symbol_raw: str) -> Dict[str, Any]:
         "month": None,
         "year": None,
         "contract_code": None,
+        "parse_mode": "tv" if underlying else None,
     }
     if month_info:
         out.update(month_info)
+        out["parse_mode"] = "tv"
+        return out
+
+    # Free-text: month names / concatenated forms / broader underlyings.
+    ft = parse_free_text_commodity(symbol_raw)
+    if ft.get("underlying"):
+        out["underlying"] = ft["underlying"]
+        out["parse_mode"] = ft.get("parse_mode") or "free_text"
+        if ft.get("month"):
+            out["month"] = ft.get("month")
+            out["year"] = ft.get("year")
+            out["month_code"] = ft.get("month_code")
+            out["contract_code"] = ft.get("contract_code")
     return out
 
 
@@ -491,11 +866,12 @@ def attach_instrument_fields(
     symbol_raw: str, *, resolve_contract: bool = True
 ) -> Dict[str, Any]:
     """
-    Parse TV symbol → fixed underlying + optional month-coded MCX FUT.
+    Parse TV / free-text symbol → underlying + optional month-coded MCX FUT.
 
-    When TV encodes letter+year (e.g. V2026), resolve that exact expiry month.
+    When TV encodes letter+year (e.g. V2026) or free-text encodes a month name
+    (SEP / SEPT / SEPTEMBER), resolve that exact expiry month.
     Continuous / bare underlyings resolve front-month.
-    underlying_matched=False when symbol is not one of the five allowed names.
+    underlying_matched=False when symbol is not a known MCX commodity name.
     Set resolve_contract=False for webhook fast-path (no Upstox master I/O).
     """
     parsed = parse_tv_symbol(symbol_raw)
@@ -518,6 +894,7 @@ def attach_instrument_fields(
         "match_mode": None,
         "expiry_fallback": False,
         "requested_expiry_ym": None,
+        "parse_mode": parsed.get("parse_mode"),
     }
     if not underlying:
         out["display_symbol"] = display_symbol_for(
@@ -545,7 +922,7 @@ def attach_instrument_fields(
         if ey and em:
             out["requested_expiry_ym"] = f"{int(ey):04d}-{int(em):02d}"
             logger.warning(
-                "commodities_div attach: no MCX instrument for %s %s (TV %s)",
+                "commodities_div attach: no MCX instrument for %s %s (input %s)",
                 underlying,
                 out["requested_expiry_ym"],
                 symbol_raw,

@@ -718,6 +718,10 @@ def create_manual_history(
         "trade_mode": mode,
         "underlying_matched": bool(inst.get("underlying_matched")),
         "mapping_found": bool(inst.get("mapping_found")),
+        "parse_mode": inst.get("parse_mode"),
+        "match_mode": inst.get("match_mode"),
+        "contract_month": inst.get("contract_month"),
+        "contract_year": inst.get("contract_year"),
     }
 
     db = SessionLocal()

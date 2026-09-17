@@ -341,12 +341,20 @@ def test_parse_underlying_rejects_crypto_and_unknown():
     assert parse_underlying("BTCUSDT25U2026") is None
     assert parse_underlying("ETHUSDU2026") is None
     assert parse_underlying("BINANCE:ETHUSD") is None
-    assert parse_underlying("GOLD1!") is None
     assert parse_underlying("NIFTY1!") is None
     assert parse_underlying("CDTEST1!") is None
     assert parse_underlying("") is None
     inst = attach_instrument_fields("ETHUSDU2026", resolve_contract=False)
     assert inst["underlying_matched"] is False
+
+
+def test_parse_underlying_gold_and_base_metals():
+    assert parse_underlying("GOLD1!") == "GOLD"
+    assert parse_underlying("GOLDM") == "GOLDM"
+    assert parse_underlying("SILVER") == "SILVER"
+    assert parse_underlying("ZINC") == "ZINC"
+    assert parse_underlying("CRUDEOILM") == "CRUDEOILM"
+    assert parse_underlying("MENTHAOIL1!") == "MENTHAOIL"
 
 
 def test_attach_instrument_fields_fast_path_skips_upstox():

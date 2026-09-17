@@ -900,6 +900,60 @@
     editMode = "edit";
   }
 
+  var manualResolveTimer = null;
+  var manualResolveSeq = 0;
+
+  function setManualResolveHint(text, isMiss) {
+    var el = $("cdManualResolveHint");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.toggle("cd-manual-resolve-miss", !!isMiss);
+  }
+
+  async function previewManualCommodity() {
+    var input = $("cdManualCommodity");
+    if (!input) return;
+    var commodity = String(input.value || "").trim();
+    if (!commodity) {
+      setManualResolveHint("");
+      return;
+    }
+    var seq = ++manualResolveSeq;
+    setManualResolveHint("Resolving…");
+    try {
+      var res = await api(
+        "/resolve-commodity?q=" + encodeURIComponent(commodity),
+        { method: "GET" }
+      );
+      if (seq !== manualResolveSeq) return;
+      if (res && res.contract && res.lot_size) {
+        setManualResolveHint(
+          "→ " + res.contract + " · lot " + res.lot_size,
+          false
+        );
+        var qtyEl = $("cdManualQty");
+        if (qtyEl && !String(qtyEl.value || "").trim()) {
+          qtyEl.placeholder = String(res.lot_size);
+        }
+      } else if (res && res.underlying_matched && res.underlying) {
+        setManualResolveHint(
+          "→ " + (res.display_symbol || res.underlying) + " (no MCX contract yet)",
+          true
+        );
+      } else {
+        setManualResolveHint("Unrecognized commodity — will save as typed", true);
+      }
+    } catch (e) {
+      if (seq !== manualResolveSeq) return;
+      setManualResolveHint("Could not resolve preview", true);
+    }
+  }
+
+  function scheduleManualResolve() {
+    if (manualResolveTimer) clearTimeout(manualResolveTimer);
+    manualResolveTimer = setTimeout(previewManualCommodity, 350);
+  }
+
   function openManual() {
     var nowParts = toDatetimeLocalValue($("cdServerTime").textContent);
     $("cdManualCommodity").value = "";
@@ -909,9 +963,11 @@
     $("cdManualEntryTime").value = nowParts.time ? nowParts.time.slice(0, 8) : "";
     $("cdManualEntryPrice").value = "";
     $("cdManualQty").value = "";
+    $("cdManualQty").placeholder = "lot size";
     $("cdManualExitDate").value = nowParts.date || "";
     $("cdManualExitTime").value = nowParts.time ? nowParts.time.slice(0, 8) : "";
     $("cdManualExitPrice").value = "";
+    setManualResolveHint("");
     $("cdManualModal").hidden = false;
     setTimeout(function () {
       $("cdManualCommodity").focus();
@@ -919,6 +975,9 @@
   }
 
   function closeManual() {
+    if (manualResolveTimer) clearTimeout(manualResolveTimer);
+    manualResolveSeq += 1;
+    setManualResolveHint("");
     $("cdManualModal").hidden = true;
   }
 
@@ -978,6 +1037,11 @@
     $("cdEditCancel").addEventListener("click", closeEdit);
     $("cdManualEntryBtn").addEventListener("click", openManual);
     $("cdManualCancel").addEventListener("click", closeManual);
+    if ($("cdManualCommodity")) {
+      $("cdManualCommodity").addEventListener("blur", previewManualCommodity);
+      $("cdManualCommodity").addEventListener("input", scheduleManualResolve);
+      $("cdManualCommodity").addEventListener("change", previewManualCommodity);
+    }
 
     document.querySelectorAll(".cd-tab").forEach(function (btn) {
       btn.addEventListener("click", function () {

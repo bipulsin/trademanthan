@@ -23,7 +23,11 @@ from backend.services.commodities_div.actions import (
     workspace_payload,
 )
 from backend.services.commodities_div.ltp_sidecar import refresh_in_trade_ltp
-from backend.services.commodities_div.mapping import ALLOWED_UNDERLYINGS
+from backend.services.commodities_div.mapping import (
+    ALLOWED_UNDERLYINGS,
+    attach_instrument_fields,
+    parse_free_text_commodity,
+)
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import now_ist_second
 
@@ -148,6 +152,38 @@ def commodities_div_exit_submit(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "signal": row}
+
+
+@router.get("/resolve-commodity")
+def commodities_div_resolve_commodity(
+    q: str,
+    user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """
+    Preview free-text / TV commodity → MCX contract + lot size (manual entry blur).
+    Does not write History / trade_log.
+    """
+    text = str(q or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="q (commodity text) is required")
+    parsed = parse_free_text_commodity(text)
+    inst = attach_instrument_fields(text, resolve_contract=True)
+    return {
+        "ok": True,
+        "input": text,
+        "underlying": inst.get("symbol_mapped") or parsed.get("underlying"),
+        "underlying_matched": bool(inst.get("underlying_matched")),
+        "contract": inst.get("contract") or inst.get("trading_symbol"),
+        "trading_symbol": inst.get("trading_symbol"),
+        "instrument_key": inst.get("instrument_key"),
+        "lot_size": inst.get("lot_size"),
+        "display_symbol": inst.get("display_symbol"),
+        "contract_month": inst.get("contract_month"),
+        "contract_year": inst.get("contract_year"),
+        "match_mode": inst.get("match_mode"),
+        "parse_mode": inst.get("parse_mode") or parsed.get("parse_mode"),
+        "expiry_fallback": bool(inst.get("expiry_fallback")),
+    }
 
 
 @router.post("/manual-entry")

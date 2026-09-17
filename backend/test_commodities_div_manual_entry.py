@@ -210,6 +210,84 @@ def test_manual_unresolvable_symbol_still_saves(
     assert insert_params["instrument_key"] is None
 
 
+@patch("backend.services.commodities_div.actions.ensure_commodities_div_tables")
+@patch("backend.services.commodities_div.actions.attach_instrument_fields")
+@patch("backend.services.commodities_div.actions.SessionLocal")
+@patch("backend.services.commodities_div.actions.upsert_trade", return_value=55)
+@patch("backend.services.commodities_div.actions.ensure_trade_log_table")
+def test_manual_live_copper_sep_fut_uses_lot_size(
+    mock_ensure_tl, mock_upsert, mock_session, mock_attach, mock_ensure
+):
+    """Regression: COPPER SEP FUT / COPPERSEPFUT must resolve lot 2500, not qty=1."""
+    mock_attach.return_value = {
+        "symbol_mapped": "COPPER",
+        "underlying_matched": True,
+        "mapping_found": True,
+        "instrument_key": "MCX_FO|CU_SEP",
+        "contract": "COPPER FUT 30 SEP 26",
+        "trading_symbol": "COPPER FUT 30 SEP 26",
+        "lot_size": 2500,
+        "parse_mode": "free_text",
+        "match_mode": "exact_month",
+        "contract_month": 9,
+        "contract_year": 2026,
+    }
+    db = MagicMock()
+    insert_result = MagicMock()
+    insert_result.scalar.return_value = 11
+    update_result = MagicMock()
+    select_result = MagicMock()
+    select_result.mappings.return_value.first.return_value = {
+        "id": 11,
+        "symbol_raw": "COPPER SEP FUT",
+        "symbol_mapped": "COPPER",
+        "direction": "BULL",
+        "status": "History",
+        "entry_price": 1387.55,
+        "exit_price": 1391.6,
+        "trade_taken_at": datetime(2026, 9, 17, 10, 0, 0),
+        "exit_at": datetime(2026, 9, 17, 14, 0, 0),
+        "exit_submitted_at": datetime(2026, 9, 17, 14, 1, 0),
+        "trade_mode": "LIVE",
+        "trade_log_id": 55,
+        "lot_size": 2500,
+        "contract": "COPPER FUT 30 SEP 26",
+        "instrument_key": "MCX_FO|CU_SEP",
+        "div_received_at": datetime(2026, 9, 17, 10, 0, 0),
+        "ltp": None,
+        "ltp_updated_at": None,
+        "created_at": None,
+        "updated_at": None,
+        "go_received_at": None,
+        "go_tv_time_ist": None,
+        "div_tv_time_ist": None,
+        "exit_signal_received_at": None,
+        "exit_tv_time_ist": None,
+    }
+    db.execute.side_effect = [insert_result, update_result, select_result]
+    mock_session.return_value = db
+
+    out = create_manual_history(
+        commodity="COPPER SEP FUT",
+        direction="BULL",
+        entry_price=1387.55,
+        trade_taken_at="2026-09-17 10:00:00",
+        exit_price=1391.6,
+        exit_at="2026-09-17 14:00:00",
+        trade_mode="LIVE",
+    )
+
+    mock_attach.assert_called_once()
+    assert mock_attach.call_args[0][0] == "COPPER SEP FUT"
+    insert_params = db.execute.call_args_list[0][0][1]
+    assert insert_params["contract"] == "COPPER FUT 30 SEP 26"
+    assert insert_params["lot_size"] == 2500
+    payload = mock_upsert.call_args[0][1]
+    assert payload["qty"] == 2500
+    assert payload["contract"] == "COPPER FUT 30 SEP 26"
+    assert out["trade_log_id"] == 55
+
+
 def test_manual_rejects_blank_commodity():
     with pytest.raises(ValueError, match="commodity"):
         create_manual_history(
