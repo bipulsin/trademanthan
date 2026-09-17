@@ -109,10 +109,49 @@ body.comm-div-page .cd-subtitle {
 
 body.comm-div-page .cd-header-aside {
     display: flex;
-    align-items: center;
-    gap: 0.65rem;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.45rem;
     flex-shrink: 0;
     margin-left: auto;
+}
+
+body.comm-div-page .cd-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+body.comm-div-page .cd-overall-pnl {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    padding: 0.28rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.22);
+}
+
+body.comm-div-page .cd-overall-pnl-label {
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+body.comm-div-page .cd-overall-pnl-value {
+    font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+body.comm-div-page[data-theme="light"] .cd-overall-pnl {
+    background: rgba(255, 255, 255, 0.72);
 }
 
 body.comm-div-page .cd-backtest-link {
@@ -471,6 +510,52 @@ body.comm-div-page .mobile-logo {
     padding: 4px 2px 8px;
 }
 
+.cd-history-month {
+    margin: 0 0 1rem;
+}
+
+.cd-history-month:last-child {
+    margin-bottom: 0.25rem;
+}
+
+.cd-history-month-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.85rem;
+    margin: 0 0 0.45rem;
+    padding: 0.35rem 0.15rem;
+}
+
+.cd-history-month-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text);
+}
+
+.cd-history-month-meta {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.cd-history-month-total {
+    font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+    font-weight: 600;
+}
+
+.cd-history-month-total-label {
+    color: var(--muted);
+    font-weight: 500;
+}
+
 .cd-modal-card-wide {
     width: min(560px, 100%);
 }
@@ -797,6 +882,15 @@ body.comm-div-page .mobile-logo {
     }
     body.comm-div-page .cd-header-aside {
         margin-left: 0;
+        width: 100%;
+        align-items: stretch;
+    }
+    body.comm-div-page .cd-header-actions {
+        justify-content: flex-start;
+        width: 100%;
+    }
+    body.comm-div-page .cd-overall-pnl {
+        justify-content: space-between;
         width: 100%;
     }
     body.comm-div-page .cd-subtitle {

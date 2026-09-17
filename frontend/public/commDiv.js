@@ -246,6 +246,67 @@
     return s.length >= 10 ? s.slice(0, 10) : "—";
   }
 
+  /** Execution month YYYY-MM from exit (completed) time; fall back to entry. IST strings. */
+  function execMonthKey(row) {
+    var dt = (row && (row.exit_at || row.exit_submitted_at || row.trade_taken_at)) || "";
+    var s = String(dt).trim().replace("T", " ");
+    if (s.length >= 7 && /^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+    return "—";
+  }
+
+  function formatMonthLabel(ym) {
+    if (!ym || ym === "—") return "Date unknown";
+    var parts = String(ym).split("-");
+    if (parts.length < 2) return ym;
+    var months = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
+    var m = Number(parts[1]);
+    if (!m || m < 1 || m > 12) return ym;
+    return months[m - 1] + " " + parts[0];
+  }
+
+  function sumPnl(rows) {
+    var total = 0;
+    var any = false;
+    (rows || []).forEach(function (r) {
+      if (r == null || r.pnl == null || r.pnl === "") return;
+      var n = Number(r.pnl);
+      if (isNaN(n)) return;
+      total += n;
+      any = true;
+    });
+    return any ? Math.round(total * 100) / 100 : null;
+  }
+
+  function groupRowsByMonth(rows) {
+    var groups = {};
+    var order = [];
+    (rows || []).forEach(function (r) {
+      var k = execMonthKey(r);
+      if (!groups[k]) {
+        groups[k] = [];
+        order.push(k);
+      }
+      groups[k].push(r);
+    });
+    order.sort(function (a, b) {
+      if (a === "—") return 1;
+      if (b === "—") return -1;
+      return String(b).localeCompare(String(a));
+    });
+    return order.map(function (k) {
+      return { key: k, label: formatMonthLabel(k), rows: groups[k], pnl: sumPnl(groups[k]) };
+    });
+  }
+
+  function updateOverallPnl(liveRows) {
+    var el = $("cdOverallPnlValue");
+    if (!el) return;
+    el.innerHTML = pnlHtml(sumPnl(liveRows));
+  }
+
   function formatDateLabel(iso) {
     if (!iso || iso === "—") return "Date unknown";
     var parts = String(iso).slice(0, 10).split("-");
@@ -491,6 +552,47 @@
       .join("");
   }
 
+  function historyTableHtml(rows) {
+    return (
+      '<div class="cd-desktop-table"><div class="cd-table-wrap">' +
+      '<table class="cd-table">' +
+      "<thead><tr>" +
+      "<th>Symbol</th><th>Dir</th><th>DIV</th><th>GO</th>" +
+      "<th>Entry</th><th>Entry time</th><th>Exit</th><th>Exit time</th>" +
+      "<th>PnL</th><th>Actions</th>" +
+      "</tr></thead><tbody>" +
+      rows.map(historyRowHtml).join("") +
+      "</tbody></table></div></div>"
+    );
+  }
+
+  function renderLiveMonthSections(rows) {
+    return groupRowsByMonth(rows)
+      .map(function (g) {
+        return (
+          '<section class="cd-history-month" data-month="' +
+          esc(g.key) +
+          '">' +
+          '<header class="cd-history-month-head">' +
+          '<h4 class="cd-history-month-title">' +
+          esc(g.label) +
+          "</h4>" +
+          '<span class="cd-history-month-meta">' +
+          g.rows.length +
+          (g.rows.length === 1 ? " trade" : " trades") +
+          ' · <span class="cd-history-month-total-label">Month total</span> ' +
+          '<span class="cd-history-month-total">' +
+          pnlHtml(g.pnl) +
+          "</span></span></header>" +
+          historyTableHtml(g.rows) +
+          '<div class="cd-mobile-cards">' +
+          g.rows.map(historyCardHtml).join("") +
+          "</div></section>"
+        );
+      })
+      .join("");
+  }
+
   function renderHistoryModeBlock(mode, title, rows) {
     var head =
       '<header class="cd-history-mode-head">' +
@@ -512,16 +614,17 @@
         "s yet.</p></section>"
       );
     }
-    var table =
-      '<div class="cd-desktop-table"><div class="cd-table-wrap">' +
-      '<table class="cd-table">' +
-      "<thead><tr>" +
-      "<th>Symbol</th><th>Dir</th><th>DIV</th><th>GO</th>" +
-      "<th>Entry</th><th>Entry time</th><th>Exit</th><th>Exit time</th>" +
-      "<th>PnL</th><th>Actions</th>" +
-      "</tr></thead><tbody>" +
-      rows.map(historyRowHtml).join("") +
-      "</tbody></table></div></div>";
+    if (mode === "LIVE") {
+      return (
+        '<section class="cd-history-mode" data-mode="' +
+        mode +
+        '">' +
+        head +
+        renderLiveMonthSections(rows) +
+        "</section>"
+      );
+    }
+    var table = historyTableHtml(rows);
     var mobile =
       '<div class="cd-mobile-cards">' + historyMobileGroupsHtml(rows) + "</div>";
     return (
@@ -544,6 +647,14 @@
       historyById[r.id] = r;
     });
 
+    var live = list.filter(function (r) {
+      return normalizeTradeMode(r.trade_mode) === "LIVE";
+    });
+    var paper = list.filter(function (r) {
+      return normalizeTradeMode(r.trade_mode) !== "LIVE";
+    });
+    updateOverallPnl(live);
+
     if (!list.length) {
       empty.hidden = false;
       if (host) {
@@ -556,12 +667,6 @@
     if (!host) return;
     host.hidden = false;
 
-    var live = list.filter(function (r) {
-      return normalizeTradeMode(r.trade_mode) === "LIVE";
-    });
-    var paper = list.filter(function (r) {
-      return normalizeTradeMode(r.trade_mode) !== "LIVE";
-    });
     host.innerHTML =
       '<div class="cd-history-split">' +
       renderHistoryModeBlock("LIVE", "Live Trade", live) +

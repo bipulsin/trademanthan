@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=15" />
+    <link rel="stylesheet" href="commDiv.css?v=16" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -36,10 +36,16 @@
                         <p class="cd-subtitle">Webhook → Divergence → Activated → In-Trade → Exit → History</p>
                     </div>
                     <div class="cd-header-aside">
-                        <button type="button" class="cd-manual-link" id="cdManualEntryBtn" title="Enter a completed trade without webhook">Manual entry</button>
-                        <a class="cd-backtest-link" href="divtest.html" title="MACD Divergence Backtest">BackTest</a>
-                        <span class="cd-server-time" id="cdServerTime">—</span>
-                        <button type="button" class="cd-btn cd-btn-ghost" id="cdReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
+                        <div class="cd-header-actions">
+                            <button type="button" class="cd-manual-link" id="cdManualEntryBtn" title="Enter a completed trade without webhook">Manual entry</button>
+                            <a class="cd-backtest-link" href="divtest.html" title="MACD Divergence Backtest">BackTest</a>
+                            <span class="cd-server-time" id="cdServerTime">—</span>
+                            <button type="button" class="cd-btn cd-btn-ghost" id="cdReloadBtn" title="Reload"><i class="fas fa-sync"></i></button>
+                        </div>
+                        <div class="cd-overall-pnl" id="cdOverallPnl" title="Sum of LIVE History PnL">
+                            <span class="cd-overall-pnl-label">Overall PnL</span>
+                            <span class="cd-overall-pnl-value" id="cdOverallPnlValue">—</span>
+                        </div>
                     </div>
                 </div>
 
@@ -215,6 +221,6 @@
     </div>
 
     <script src="left-menu.js?v=3.48"></script>
-    <script src="commDiv.js?v=15"></script>
+    <script src="commDiv.js?v=16"></script>
 </body>
 </html>
