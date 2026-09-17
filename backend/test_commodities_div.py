@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from backend.services.commodities_div.mapping import (
     attach_instrument_fields,
+    display_symbol_for,
     normalize_tv_ticker,
     parse_underlying,
 )
@@ -29,6 +30,67 @@ def test_symbols_match_same_underlying_variants():
     assert _symbols_match(silver, "SILVERM", "SILVERMINI")
     assert _symbols_match(silver, "SILVERMINI1!", "SILVERMINI")
     assert not _symbols_match(silver, "COPPERU2026", "COPPER")
+
+
+def test_display_symbol_for_prefers_upstox_contract():
+    assert (
+        display_symbol_for(
+            contract="NATURALGAS 26 APR FUT",
+            trading_symbol="NATURALGAS 26 APR FUT",
+            symbol_mapped="NATURALGAS",
+            symbol_raw="NATURALGASV2026",
+        )
+        == "NATURALGAS 26 APR FUT"
+    )
+    assert (
+        display_symbol_for(
+            contract="",
+            trading_symbol=None,
+            symbol_mapped="CRUDEOIL",
+            symbol_raw="CRUDEOILV2026",
+        )
+        == "CRUDEOIL"
+    )
+    assert (
+        display_symbol_for(
+            contract=None,
+            symbol_mapped="",
+            symbol_raw="CRUDEOILV2026",
+        )
+        == "CRUDEOILV2026"
+    )
+    assert display_symbol_for() == ""
+
+
+def test_attach_instrument_fields_sets_display_without_resolve():
+    inst = attach_instrument_fields("NATURALGASV2026", resolve_contract=False)
+    assert inst["display_symbol"] == "NATURALGAS"
+    assert inst["trading_symbol"] is None
+    assert inst["contract"] is None
+
+
+def test_serialize_signal_exposes_display_and_trading_symbol():
+    from backend.services.commodities_div.actions import serialize_signal
+
+    row = serialize_signal(
+        {
+            "id": 1,
+            "symbol_raw": "CRUDEOILV2026",
+            "symbol_mapped": "CRUDEOIL",
+            "direction": "BULL",
+            "status": "Activated",
+            "contract": "CRUDEOIL 19 MAY FUT",
+            "instrument_key": "MCX_FO|123",
+            "lot_size": 100,
+            "trade_mode": "PAPER",
+            "entry_price": None,
+            "ltp": None,
+            "exit_price": None,
+        }
+    )
+    assert row["trading_symbol"] == "CRUDEOIL 19 MAY FUT"
+    assert row["display_symbol"] == "CRUDEOIL 19 MAY FUT"
+    assert row["mcx_symbol"] == "CRUDEOIL 19 MAY FUT"
 
 
 def test_normalize_tv_ticker_strips_exchange_and_continuous():

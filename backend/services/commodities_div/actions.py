@@ -10,7 +10,11 @@ import pytz
 from sqlalchemy import text
 
 from backend.database import SessionLocal
-from backend.services.commodities_div.mapping import attach_instrument_fields
+from backend.services.commodities_div.mapping import (
+    attach_instrument_fields,
+    display_symbol_for,
+    resolve_underlying_instrument,
+)
 from backend.services.commodities_div.schema import ensure_commodities_div_tables
 from backend.services.commodities_div.webhook import (
     STATUS_ACTIVATED,
@@ -99,6 +103,36 @@ def _mark_for_pnl(row: Dict[str, Any], *, prefer_exit: bool = False) -> Any:
     return row.get("ltp")
 
 
+def _backfill_contract_fields(out: Dict[str, Any]) -> None:
+    """
+    When DB row lacks contract / instrument_key, resolve front-month MCX FUT
+    for display (and fill instrument_key for chart). Uses mapping resolve cache.
+    """
+    contract = str(out.get("contract") or "").strip()
+    if contract:
+        out["trading_symbol"] = contract
+        return
+    mapped = str(out.get("symbol_mapped") or "").strip().upper()
+    if not mapped:
+        return
+    try:
+        inst = resolve_underlying_instrument(mapped)
+    except Exception as e:
+        logger.debug("commodities_div display resolve failed for %s: %s", mapped, e)
+        return
+    if not inst:
+        return
+    tsym = str(inst.get("trading_symbol") or "").strip()
+    if tsym:
+        out["contract"] = tsym
+        out["trading_symbol"] = tsym
+    ik = str(inst.get("instrument_key") or "").strip()
+    if ik and not str(out.get("instrument_key") or "").strip():
+        out["instrument_key"] = ik
+    if out.get("lot_size") is None and inst.get("lot_size") is not None:
+        out["lot_size"] = inst.get("lot_size")
+
+
 def serialize_signal(row: Dict[str, Any], *, prefer_exit_pnl: bool = False) -> Dict[str, Any]:
     out = dict(row)
     for k in (
@@ -119,6 +153,18 @@ def serialize_signal(row: Dict[str, Any], *, prefer_exit_pnl: bool = False) -> D
             out[k] = _fmt_dt(out.get(k))
     if not out.get("trade_mode"):
         out["trade_mode"] = "PAPER"
+    _backfill_contract_fields(out)
+    tsym = str(out.get("trading_symbol") or out.get("contract") or "").strip()
+    if tsym:
+        out["trading_symbol"] = tsym
+        out["contract"] = out.get("contract") or tsym
+    out["display_symbol"] = display_symbol_for(
+        contract=out.get("contract"),
+        trading_symbol=out.get("trading_symbol"),
+        symbol_mapped=out.get("symbol_mapped"),
+        symbol_raw=out.get("symbol_raw"),
+    )
+    out["mcx_symbol"] = out["display_symbol"]
     status = str(out.get("status") or "")
     prefer_exit = prefer_exit_pnl or status == STATUS_HISTORY
     mark = _mark_for_pnl(out, prefer_exit=prefer_exit)

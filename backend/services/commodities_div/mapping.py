@@ -226,6 +226,25 @@ def resolve_underlying_instrument(canonical: str) -> Optional[Dict[str, Any]]:
     return dict(inst) if inst else None
 
 
+def display_symbol_for(
+    *,
+    contract: Any = None,
+    trading_symbol: Any = None,
+    symbol_mapped: Any = None,
+    symbol_raw: Any = None,
+) -> str:
+    """
+    UI label for CommDiv rows: prefer Upstox MCX FUT trading_symbol (stored as contract).
+
+    Fallback order when resolve failed / blank: mapped underlying → TV raw → "".
+    """
+    for cand in (contract, trading_symbol, symbol_mapped, symbol_raw):
+        s = str(cand or "").strip()
+        if s:
+            return s
+    return ""
+
+
 def attach_instrument_fields(
     symbol_raw: str, *, resolve_contract: bool = True
 ) -> Dict[str, Any]:
@@ -242,20 +261,39 @@ def attach_instrument_fields(
         "mapping_found": underlying is not None,
         "instrument_key": None,
         "contract": None,
+        "trading_symbol": None,
         "lot_size": None,
         "exchange": "MCX",
         "resolved_as": None,
+        "display_symbol": "",
     }
     if not underlying:
+        out["display_symbol"] = display_symbol_for(
+            symbol_mapped=out["symbol_mapped"], symbol_raw=symbol_raw
+        )
         return out
     out["symbol_mapped"] = underlying
     if not resolve_contract:
+        out["display_symbol"] = display_symbol_for(
+            symbol_mapped=underlying, symbol_raw=symbol_raw
+        )
         return out
     inst = resolve_underlying_instrument(underlying)
     if not inst:
+        out["display_symbol"] = display_symbol_for(
+            symbol_mapped=underlying, symbol_raw=symbol_raw
+        )
         return out
+    tsym = inst.get("trading_symbol")
     out["instrument_key"] = inst.get("instrument_key")
-    out["contract"] = inst.get("trading_symbol")
+    out["contract"] = tsym
+    out["trading_symbol"] = tsym
     out["lot_size"] = inst.get("lot_size")
     out["resolved_as"] = inst.get("resolved_as")
+    out["display_symbol"] = display_symbol_for(
+        contract=tsym,
+        trading_symbol=tsym,
+        symbol_mapped=underlying,
+        symbol_raw=symbol_raw,
+    )
     return out

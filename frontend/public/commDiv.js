@@ -87,6 +87,20 @@
     return activeById[nid] || inTradeById[nid] || historyById[nid] || null;
   }
 
+  function displaySymbolFor(row) {
+    if (!row) return "—";
+    var label =
+      row.display_symbol ||
+      row.mcx_symbol ||
+      row.trading_symbol ||
+      row.contract ||
+      row.symbol_mapped ||
+      row.symbol_raw ||
+      "";
+    var s = String(label).trim();
+    return s || "—";
+  }
+
   function openCommDivChart(row) {
     if (!row) return;
     var mapped = String(row.symbol_mapped || "").trim();
@@ -94,7 +108,8 @@
     var symbol = mapped || raw;
     if (!symbol || symbol === "—") return;
     var instrumentKey = String(row.instrument_key || "").trim();
-    var displaySymbol = raw || mapped || symbol;
+    var displaySymbol = displaySymbolFor(row);
+    if (displaySymbol === "—") displaySymbol = raw || mapped || symbol;
     ensureChartEngine()
       .then(function (eng) {
         if (!eng || typeof eng.openSecurityChart !== "function") {
@@ -126,7 +141,7 @@
   }
 
   function symbolChartButtonHtml(row) {
-    var displaySym = row.symbol_raw || row.symbol_mapped || "—";
+    var displaySym = displaySymbolFor(row);
     var mapped = String(row.symbol_mapped || "").trim();
     var raw = String(row.symbol_raw || "").trim();
     var symbol = mapped || raw;
@@ -820,7 +835,7 @@
   function openTake(row) {
     takeSignalId = row.id;
     $("cdTakeMeta").textContent =
-      (row.symbol_raw || row.symbol_mapped || "") + " " + row.direction;
+      displaySymbolFor(row) + " " + row.direction;
     $("cdEntryPrice").value = "";
     if ($("cdTakeMode")) $("cdTakeMode").value = "PAPER";
     $("cdTakeModal").hidden = false;
@@ -838,7 +853,7 @@
     var title = editMode === "exit" ? "Exit Trade" : "Edit Trade";
     $("cdEditTitle").textContent = title;
     $("cdEditMeta").textContent =
-      (row.symbol_raw || row.symbol_mapped || "") + " · " + (row.status || "");
+      displaySymbolFor(row) + " · " + (row.status || "");
 
     var entry = splitIst(row.trade_taken_at);
     $("cdEditEntryDate").value = entry.date || "";
@@ -886,7 +901,8 @@
   }
 
   async function confirmDelete(row) {
-    var sym = row.symbol_raw || row.symbol_mapped || row.id;
+    var sym = displaySymbolFor(row);
+    if (sym === "—") sym = row.id;
     var isHistory = String(row.status || "") === "History";
     var msg = isHistory
       ? "Delete History row for " + sym + "?\nSignal is removed; trade_log (if any) is kept."
@@ -954,7 +970,8 @@
         var row = findCdRowById(id) || {
           id: id,
           symbol_mapped: chartBtn.getAttribute("data-chart-symbol") || "",
-          symbol_raw: chartBtn.getAttribute("data-chart-label") || "",
+          symbol_raw: chartBtn.getAttribute("data-chart-symbol") || "",
+          display_symbol: chartBtn.getAttribute("data-chart-label") || "",
           instrument_key: chartBtn.getAttribute("data-chart-instrument-key") || "",
           direction: chartBtn.getAttribute("data-chart-direction") || "",
         };
@@ -982,7 +999,8 @@
       var row = findCdRowById(id) || {
         id: id,
         symbol_mapped: chartBtn.getAttribute("data-chart-symbol") || "",
-        symbol_raw: chartBtn.getAttribute("data-chart-label") || "",
+        symbol_raw: chartBtn.getAttribute("data-chart-symbol") || "",
+        display_symbol: chartBtn.getAttribute("data-chart-label") || "",
         instrument_key: chartBtn.getAttribute("data-chart-instrument-key") || "",
         direction: chartBtn.getAttribute("data-chart-direction") || "",
       };
