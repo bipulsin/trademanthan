@@ -64,6 +64,56 @@ def _lot_qty(row: Dict[str, Any]) -> int:
     return lot if lot > 0 else 1
 
 
+def _ensure_resolved_instrument(row: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Fill missing contract / lot_size / instrument_key before trade_log write.
+
+    Manual free-text entries saved before MCX parsing, or webhook rows that
+    never got sidecar resolve, must not write symbol=COPPERSEPFUT qty=1.
+    """
+    out = dict(row)
+    has_contract = bool(str(out.get("contract") or "").strip())
+    has_ik = bool(str(out.get("instrument_key") or "").strip())
+    try:
+        lot_ok = int(out.get("lot_size") or 0) > 0
+    except (TypeError, ValueError):
+        lot_ok = False
+    if has_contract and has_ik and lot_ok:
+        return out
+
+    raw = str(out.get("symbol_raw") or "").strip()
+    mapped = str(out.get("symbol_mapped") or "").strip()
+    if not raw and not mapped:
+        return out
+    try:
+        inst = attach_instrument_fields(raw or mapped, resolve_contract=True)
+    except Exception as e:
+        logger.debug(
+            "commodities_div exit resolve failed for %s: %s", raw or mapped, e
+        )
+        return out
+    if not inst or not inst.get("instrument_key"):
+        return out
+
+    tsym = str(inst.get("trading_symbol") or inst.get("contract") or "").strip()
+    if tsym:
+        out["contract"] = tsym
+    ik = str(inst.get("instrument_key") or "").strip()
+    if ik:
+        out["instrument_key"] = ik
+    if inst.get("lot_size") is not None:
+        try:
+            lot_i = int(inst["lot_size"])
+        except (TypeError, ValueError):
+            lot_i = 0
+        if lot_i > 0:
+            out["lot_size"] = lot_i
+    underlying = str(inst.get("symbol_mapped") or "").strip().upper()
+    if underlying:
+        out["symbol_mapped"] = underlying
+    return out
+
+
 def compute_pnl(
     *,
     direction: Any,
@@ -548,7 +598,12 @@ def exit_submit(
 
         tl_direction = "LONG" if direction_tv == "BULL" else "SHORT"
         session_date = entry_dt.date() if isinstance(entry_dt, datetime) else now.date()
-        qty = _lot_qty(dict(row))
+        # Re-resolve free-text / incomplete instrument before trade_log write so
+        # LIVE exits never persist COPPERSEPFUT / qty=1 when MCX lot is known.
+        resolved = _ensure_resolved_instrument(dict(row))
+        qty = _lot_qty(resolved)
+        tl_symbol = str(resolved.get("symbol_mapped") or row["symbol_mapped"]).strip().upper()
+        tl_contract = resolved.get("contract") or row.get("contract")
 
         notes_obj = {
             "commodities_div_signal_id": int(row["id"]),
@@ -572,8 +627,8 @@ def exit_submit(
                 db,
                 {
                     "session_date": str(session_date),
-                    "symbol": str(row["symbol_mapped"]).strip().upper(),
-                    "contract": row.get("contract"),
+                    "symbol": tl_symbol,
+                    "contract": tl_contract,
                     "direction": tl_direction,
                     "qty": qty,
                     "entry_time": entry_dt.strftime("%H:%M:%S") if isinstance(entry_dt, datetime) else str(entry_dt),
@@ -601,6 +656,10 @@ def exit_submit(
                     exit_price = :xp,
                     exit_at = :xa,
                     trade_log_id = :tlid,
+                    symbol_mapped = COALESCE(:mapped, symbol_mapped),
+                    contract = COALESCE(:contract, contract),
+                    lot_size = COALESCE(:lot, lot_size),
+                    instrument_key = COALESCE(:ik, instrument_key),
                     updated_at = NOW()
                 WHERE id = :id
                 """
@@ -614,6 +673,10 @@ def exit_submit(
                 "xp": float(exit_price),
                 "xa": exit_dt,
                 "tlid": int(trade_log_id) if trade_log_id is not None else None,
+                "mapped": tl_symbol or None,
+                "contract": tl_contract,
+                "lot": resolved.get("lot_size"),
+                "ik": resolved.get("instrument_key"),
                 "id": int(signal_id),
             },
         )
