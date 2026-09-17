@@ -27,7 +27,7 @@ READY NOW note (2026-07-14 / 2026-07-15):
   - Entry outside today's session high/low → EXPIRED (stale/gap).
   - Entry must be live EMA5 (±ENTRY_EMA5_TOL_PCT); no VWAP-blend limit.
   - Missing SL / Risk → not READY; Take Trade disabled.
-  - Risk > ₹3k with R:R < 1:2 → BLOCKED (hard). R:R ≥ 1:2 → cap waived label.
+  - Risk > ₹3k → BLOCKED (hard). No R:R waiver for Take Trade.
   - Computed R:R < 1:2 alone → BLOCKED (independent of ₹3k; was a DLF gap).
   - ≥2 of {REGIME UNSTABLE (blend<0.40), CHURN, DIR CONFLICT} on READY → WAIT.
     REGIME UNSTABLE is live-blended: 0.20×NIFTY TREND + 0.80×signed VWAP slope.
@@ -166,12 +166,16 @@ def session_rr(
 
 def risk_cap_blocks_ready(
     risk_inr: Optional[float],
-    rr: Optional[float],
+    rr: Optional[float] = None,
 ) -> bool:
-    """Hard block when INR risk > cap and R:R is missing or below 1:2."""
-    if risk_inr is None or risk_inr <= MAX_INR_RISK:
+    """Hard block Take Trade / READY when INR risk exceeds ₹3000.
+
+    ``rr`` is accepted for call-site compatibility but no longer waives the cap.
+    Missing risk is handled by :func:`take_trade_structurally_ok` (Take Trade off).
+    """
+    if risk_inr is None:
         return False
-    return rr is None or rr < RR_LOW
+    return float(risk_inr) > MAX_INR_RISK
 
 
 def rr_below_minimum(rr: Optional[float]) -> bool:
@@ -1518,25 +1522,18 @@ def compute_trade_state_for_stock(
             f"(1:{rr} < 1:{RR_LOW:g})"
         )
         risk_cap_waived = False
-    # Hard ₹3k risk gate: over cap + weak/missing R:R → BLOCKED.
+    # Hard ₹3k risk gate: risk above cap always blocks READY / Take Trade (no R:R waiver).
     elif state in (STATE_READY, STATE_READY_RECHECK) and risk_cap_blocks_ready(display_risk, rr):
         state = STATE_BLOCKED
         blocked_reason = (
             f"BLOCKED · risk ₹{int(display_risk)} > ₹{int(MAX_INR_RISK)} "
-            f"and R:R {('1:' + str(rr)) if rr is not None else '—'} < 1:{RR_LOW:g}"
+            f"— Take Trade disabled"
         )
         risk_cap_waived = False
-    elif (
-        state in (STATE_READY, STATE_READY_RECHECK)
-        and display_risk is not None
-        and display_risk > MAX_INR_RISK
-        and rr is not None
-        and rr >= RR_LOW
-    ):
-        risk_cap_waived = True
         badges = list(gate_badges or [])
-        if "CAP WAIVED" not in badges:
-            badges.append("CAP WAIVED")
+        badges = [b for b in badges if b != "CAP WAIVED"]
+        if "RISK CAP" not in badges:
+            badges.append("RISK CAP")
         gate_badges = badges
 
     # Final structural Take Trade check after all mutations.

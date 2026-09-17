@@ -108,11 +108,7 @@ def test_blocked_flat_regime():
 
 
 def test_blocked_risk_over_3k_hard_gate():
-    """Risk > ₹3k with R:R < 1:2 → BLOCKED (hard), Take Trade off.
-
-    R:R floor alone also blocks; with ema10=60 risk is huge and R:R tiny, so
-    either the standalone R:R gate or the ₹3k+R:R gate may fire first.
-    """
+    """Risk > ₹3k → BLOCKED (hard), Take Trade off — R:R no longer waives."""
     out = _compute(levels={"ema10": 60.0}, lot=100)
     assert out["trade_state"] == STATE_BLOCKED
     reason = (out["trade_state_reason"] or "").lower()
@@ -138,17 +134,28 @@ def test_rr_below_minimum_blocks_even_when_under_3k_cap():
     assert "R:R below minimum" in (out["trade_state_reason"] or "")
 
 
-def test_risk_cap_waived_when_rr_high():
-    # Large session high → high RR; risk over but R:R waiver keeps READY
+def test_risk_over_3k_blocks_even_when_rr_high():
+    """Former CAP WAIVED path — risk > ₹3k always disables Take Trade."""
     out = _compute(levels={"ema10": 60.0}, lot=100, session_hi=200.0)
-    assert out["trade_state"] == STATE_READY
+    assert out["trade_state"] == STATE_BLOCKED
     assert out["trade_risk_over"] is True
     assert out["trade_rr"] is not None and out["trade_rr"] >= 2
-    assert out["trade_risk_cap_waived"] is True
-    assert out["trade_risk_cap_flag"] is False
-    assert out["trade_risk_cap_waiver_label"]
-    assert "cap waived" in out["trade_risk_cap_waiver_label"]
-    assert out["trade_take_enabled"] is True
+    assert out["trade_risk_cap_waived"] is False
+    assert out["trade_risk_cap_flag"] is True
+    assert out["trade_take_enabled"] is False
+    reason = (out["trade_state_reason"] or "").lower()
+    assert "risk" in reason
+    assert "3000" in reason or "₹" in (out["trade_state_reason"] or "")
+
+
+def test_risk_cap_blocks_ready_helper():
+    from backend.services.daily_checklist_trade_state import risk_cap_blocks_ready
+
+    assert risk_cap_blocks_ready(None) is False
+    assert risk_cap_blocks_ready(3000) is False
+    assert risk_cap_blocks_ready(3000.01) is True
+    assert risk_cap_blocks_ready(5000, rr=5.0) is True  # RR no longer waives
+    assert risk_cap_blocks_ready(2500, rr=0.5) is False
 
 
 def test_short_symmetric():

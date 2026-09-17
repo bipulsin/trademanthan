@@ -120,6 +120,35 @@ def refresh():
         return {"error": str(exc)}
 
 
+@router.get("/live-entries")
+def live_entries(symbols: Optional[str] = None):
+    """Live EMA5/entry for checklist symbols (arms Upstox/rocket WS).
+
+    ``symbols`` is a comma-separated list. Lightweight poll target so Entry (EMA5)
+    can refresh between full ``/data`` cycles.
+    """
+    try:
+        from backend.services import daily_checklist_live_entries as live_e
+
+        syms = [p.strip() for p in (symbols or "").split(",") if p.strip()]
+        return live_e.live_entry_snapshots(syms)
+    except Exception as exc:
+        logger.warning("daily-checklist live-entries failed: %s", exc)
+        return {"ok": False, "entries": [], "error": str(exc)}
+
+
+@router.post("/arm-feed")
+def arm_feed():
+    """Ensure Upstox market feed / rocket 10m books are running while checklist is open."""
+    try:
+        from backend.services import daily_checklist_live_entries as live_e
+
+        return live_e.arm_live_feed()
+    except Exception as exc:
+        logger.warning("daily-checklist arm-feed failed: %s", exc)
+        return {"ok": False, "feed_armed": False, "error": str(exc)}
+
+
 @router.get("/open-trades")
 def open_trades(date: Optional[str] = None):
     try:

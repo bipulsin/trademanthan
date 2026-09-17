@@ -1451,7 +1451,7 @@ def take_trade(
         if risk_cap_blocks_ready(initial_sl, rr):
             raise ValueError(
                 f"Take Trade blocked — risk ₹{int(initial_sl)} > ₹{int(MAX_INR_RISK)} "
-                f"and R:R {('1:' + str(rr)) if rr is not None else '—'} < 1:{RR_LOW:g}"
+                f"— Take Trade disabled"
             )
         if ema5 is not None and entry_off_live_ema5(px, ema5):
             logger.warning(

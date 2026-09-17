@@ -1033,6 +1033,7 @@
         if (takeBtn) {
             var isBull = (stock.direction || "LONG") !== "SHORT";
             takeBtn.className = "dc-take-trade " + (isBull ? "dc-take-trade--long" : "dc-take-trade--short");
+            applyClientRiskGate(stock);
             if (stock.trade_taken) {
                 takeBtn.disabled = true;
                 takeBtn.title = takeDisableTitle(stock, "Position already open in Open Trades panel");
@@ -1045,6 +1046,9 @@
             } else if (!isReadyState(stock.trade_state)) {
                 takeBtn.disabled = true;
                 takeBtn.title = takeDisableTitle(stock, "Not READY");
+            } else if (riskBlocksTakeTrade(stock)) {
+                takeBtn.disabled = true;
+                takeBtn.title = takeDisableTitle(stock, riskDisableReason(stock));
             } else {
                 takeBtn.disabled = false;
                 takeBtn.title = "Mark trade taken";
@@ -1573,6 +1577,143 @@
             || "Take Trade disabled";
     }
 
+    /** Hard ₹3k risk gate (mirrors backend MAX_INR_RISK). */
+    function riskCapInr(stock) {
+        var cap = stock && stock.trade_risk_cap_inr != null ? Number(stock.trade_risk_cap_inr) : 3000;
+        return isFinite(cap) ? cap : 3000;
+    }
+
+    function riskAmountInr(stock) {
+        if (!stock || stock.trade_risk_inr == null || stock.trade_risk_inr === "") return null;
+        var n = Number(stock.trade_risk_inr);
+        return isFinite(n) ? n : null;
+    }
+
+    /** True when Take Trade must stay off due to risk over cap or missing risk. */
+    function riskBlocksTakeTrade(stock) {
+        var risk = riskAmountInr(stock);
+        if (risk == null) return true;
+        return risk > riskCapInr(stock);
+    }
+
+    function riskDisableReason(stock) {
+        var risk = riskAmountInr(stock);
+        var cap = riskCapInr(stock);
+        if (risk == null) {
+            return "SL/Risk not computed — Take Trade disabled";
+        }
+        return "Risk over ₹" + Math.round(cap).toLocaleString("en-IN") + " — Take Trade disabled";
+    }
+
+    /** Enforce ₹3k gate on stock object + disable reason (no CAP WAIVED). */
+    function applyClientRiskGate(stock) {
+        if (!stock) return;
+        var risk = riskAmountInr(stock);
+        var cap = riskCapInr(stock);
+        if (risk != null && risk > cap) {
+            stock.trade_risk_over = true;
+            stock.trade_risk_cap_flag = true;
+            stock.trade_risk_cap_waived = false;
+            stock.trade_risk_cap_waiver_label = null;
+            stock.trade_take_enabled = false;
+            stock.trade_take_disable_reason = riskDisableReason(stock);
+        }
+    }
+
+    function findStockBySymbol(sym) {
+        var u = String(sym || "").toUpperCase();
+        if (!u || !state) return null;
+        var lists = [state.stocks, state.today, state.carryover, state.preview];
+        var i, j, list, s;
+        for (i = 0; i < lists.length; i++) {
+            list = lists[i] || [];
+            for (j = 0; j < list.length; j++) {
+                s = list[j];
+                if (s && String(s.symbol || "").toUpperCase() === u) return s;
+            }
+        }
+        return null;
+    }
+
+    function patchEntryDomForStock(stock) {
+        if (!stock || !stock.symbol) return;
+        var sym = String(stock.symbol).toUpperCase();
+        var card = document.querySelector('.dc-ready-card[data-symbol="' + sym + '"]');
+        if (card) {
+            try { patchReadyCard(card, stock); } catch (e) { /* ignore */ }
+        }
+        var watchCard = cardEls[sym] || document.querySelector('.dc-card[data-symbol="' + sym + '"]');
+        if (watchCard) {
+            try { patchTradeRow(watchCard, stock); } catch (e) { /* ignore */ }
+            var takeBtnW = watchCard.querySelector(".dc-take-trade");
+            if (takeBtnW && !stock.trade_taken && riskBlocksTakeTrade(stock) && isReadyState(stock.trade_state)) {
+                takeBtnW.disabled = true;
+                takeBtnW.title = takeDisableTitle(stock, riskDisableReason(stock));
+            }
+        }
+    }
+
+    function applyLiveEntryRow(row) {
+        if (!row || !row.symbol) return;
+        var stock = findStockBySymbol(row.symbol);
+        if (!stock) return;
+        var entry = row.entry != null ? Number(row.entry) : null;
+        if (entry == null || !isFinite(entry) || entry <= 0) return;
+        stock.trade_entry = entry;
+        stock.live_candle_ema5 = entry;
+        stock.trade_entry_source = "live_ema5";
+        stock.trade_entry_source_label = "Entry (EMA5)";
+        if (stock.trade_sl != null && stock.trade_lot != null) {
+            var pts = Math.abs(entry - Number(stock.trade_sl));
+            stock.trade_risk_inr = Math.round(pts * Number(stock.trade_lot));
+        }
+        applyClientRiskGate(stock);
+        patchEntryDomForStock(stock);
+    }
+
+    function checklistSymbolsForLive() {
+        var out = [];
+        var seen = {};
+        function add(sym) {
+            var u = String(sym || "").toUpperCase();
+            if (!u || seen[u]) return;
+            seen[u] = true;
+            out.push(u);
+        }
+        if (!state) return out;
+        (state.stocks || []).forEach(function (s) {
+            if (!s) return;
+            var st = s.trade_state || "";
+            if (
+                st === "READY" ||
+                st === "READY(RECHECK)" ||
+                st === "WAIT FOR PULLBACK" ||
+                st === "WATCHING" ||
+                s.trade_take_enabled === true ||
+                s.card_visible
+            ) {
+                add(s.symbol);
+            }
+        });
+        // Always include currently painted READY cards.
+        document.querySelectorAll(".dc-ready-card[data-symbol]").forEach(function (el) {
+            add(el.getAttribute("data-symbol"));
+        });
+        return out.slice(0, 40);
+    }
+
+    function pollLiveEntries() {
+        if (!state) return;
+        var syms = checklistSymbolsForLive();
+        if (!syms.length) return;
+        api("/live-entries?symbols=" + encodeURIComponent(syms.join(",")))
+            .then(function (payload) {
+                if (!payload || !payload.entries) return;
+                payload.entries.forEach(applyLiveEntryRow);
+            })
+            .catch(function () {});
+    }
+
     function nextTenMinBoundaryFromSecs(secs) {
         // Kavach 10m closes: minutes ending in 5
         var m = Math.floor(secs / 60) % (24 * 60);
@@ -1921,6 +2062,7 @@
             }
         }
         // Take Trade enablement must run even if badge rendering throws.
+        applyClientRiskGate(stock);
         var expired = stock.trade_state === "EXPIRED" || !!stock.trade_expiry_crossed;
         card.classList.toggle("dc-ready-card--expired", expired);
         var expLabel = card.querySelector(".dc-ready-expired-label");
@@ -1934,10 +2076,11 @@
                 confirmNote.hidden = false;
                 confirmNote.textContent = "Entry pending — awaiting valid price source";
                 confirmNote.classList.add("dc-ready-confirm-note--stale");
-            } else if (stock.trade_take_enabled !== true) {
+            } else if (stock.trade_take_enabled !== true || riskBlocksTakeTrade(stock)) {
                 confirmNote.hidden = false;
                 confirmNote.textContent =
                     stock.trade_take_disable_reason
+                    || (riskBlocksTakeTrade(stock) ? riskDisableReason(stock) : null)
                     || stock.trade_state_reason
                     || "Take Trade disabled";
                 confirmNote.classList.remove("dc-ready-confirm-note--stale");
@@ -1989,13 +2132,16 @@
                 && !stock.trade_taken
                 && !stock.stopped_out_today
                 && !stock.trade_exited
+                && !riskBlocksTakeTrade(stock)
             );
             takeBtn.disabled = !canTake;
             takeBtn.title = canTake
                 ? "Mark trade taken"
                 : takeDisableTitle(
                     stock,
-                    entryMissing ? "Entry pending — awaiting valid price source" : "Take Trade disabled"
+                    entryMissing
+                        ? "Entry pending — awaiting valid price source"
+                        : (riskBlocksTakeTrade(stock) ? riskDisableReason(stock) : "Take Trade disabled")
                 );
             card.classList.toggle("dc-ready-card--take-armed", canTake);
             var rem = win ? win.remaining : secsToNextTenMin();
@@ -2696,6 +2842,11 @@
     function takeTrade(symbol) {
         var stock = currentStock(symbol);
         if (!stock) return;
+        applyClientRiskGate(stock);
+        if (riskBlocksTakeTrade(stock)) {
+            toast(riskDisableReason(stock));
+            return;
+        }
         var dir = (stock.direction || "LONG").toUpperCase() === "SHORT" ? "SHORT" : "LONG";
         toast("Taking trade " + symbol + "…");
         api("/open-trades/take", {
@@ -2704,6 +2855,7 @@
             body: JSON.stringify({
                 symbol: symbol,
                 direction: dir,
+                entry_price: stock.trade_entry,
                 session_date: state && state.session_date,
                 context: {
                     confidence: stock.confidence || stock.dashboard_kavach,
@@ -3091,6 +3243,7 @@
         if (!s) return;
         if (s.error) { toast("Error: " + s.error); return; }
         state = s;
+        (state.stocks || []).forEach(applyClientRiskGate);
         if (s.checklist_config && $("dcGoAlertSound") && localStorage.getItem("dc_go_alert_sound") == null) {
             goAlertEnabled = !!s.checklist_config.go_alert_sound_enabled;
             $("dcGoAlertSound").checked = goAlertEnabled;
@@ -3492,6 +3645,10 @@
                 applyOpenTradesPanel(p);
             }).catch(function () {});
         }, 20000);
+        // Arm Upstox/rocket WS and poll live EMA5 → Entry while checklist is open.
+        api("/arm-feed", { method: "POST" }).catch(function () {});
+        pollLiveEntries();
+        setInterval(pollLiveEntries, 3000);
     }
 
     if (document.readyState === "loading") {
