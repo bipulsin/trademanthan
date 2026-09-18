@@ -33,6 +33,7 @@ _CONTRACT_MIGRATION = (
 _TRADE_MODE_MIGRATION = (
     Path(__file__).resolve().parents[1] / "migrations" / "add_stock_option_trade_mode_datetime.sql"
 )
+_NOTES_MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "add_stock_option_notes.sql"
 _ENSURED = False
 
 STATUS_RADAR = "Radar"
@@ -122,15 +123,26 @@ def ensure_stock_option_tables() -> None:
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS ema_fetch_ok BOOLEAN",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER'",
             "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS arm_caution BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS notes TEXT",
         ):
             conn.execute(text(stmt))
         if _CONTRACT_MIGRATION.is_file():
             conn.execute(text(_CONTRACT_MIGRATION.read_text(encoding="utf-8")))
         if _TRADE_MODE_MIGRATION.is_file():
             conn.execute(text(_TRADE_MODE_MIGRATION.read_text(encoding="utf-8")))
+        if _NOTES_MIGRATION.is_file():
+            conn.execute(text(_NOTES_MIGRATION.read_text(encoding="utf-8")))
     backfill_contract_mmm_yyyy()
     _ENSURED = True
     logger.info("stock_option tables ensured")
+
+
+def normalize_notes(value: Any) -> Optional[str]:
+    """Trim user notes; blank → None. Distinct from system remarks."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
 
 
 def normalize_trade_mode(value: Any) -> str:
@@ -3439,6 +3451,7 @@ def _row_public(r: Dict[str, Any]) -> Dict[str, Any]:
         "hard_stop": hs,
         "hard_stop_placed": bool(r.get("hard_stop_placed")),
         "remarks": r.get("remarks"),
+        "notes": r.get("notes"),
         "arm_caution": bool(r.get("arm_caution")),
     }
 
@@ -3483,7 +3496,7 @@ def list_workspace() -> Dict[str, Any]:
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,
-                       remarks, sell_ltp, buy_ltp, sell_instrument_key,
+                       remarks, notes, sell_ltp, buy_ltp, sell_instrument_key,
                        exit_date, sell_exit_price, buy_exit_price, realized_pnl,
                        trade_mode
                 FROM stock_option_signals
@@ -3577,7 +3590,7 @@ def list_live_completed_selling(
                        sell_strike, sell_delta, buy_strike, buy_delta,
                        date_traded, sell_cost, buy_cost,
                        user_sell_strike, user_buy_strike, hard_stop_placed,
-                       remarks, sell_ltp, buy_ltp, sell_instrument_key,
+                       remarks, notes, sell_ltp, buy_ltp, sell_instrument_key,
                        exit_date, sell_exit_price, buy_exit_price, realized_pnl,
                        trade_mode
                 FROM stock_option_signals
@@ -3622,6 +3635,7 @@ def _trade_for_selling_report(item: Dict[str, Any]) -> Dict[str, Any]:
         "pnl": item.get("combined_pnl_inr"),
         "pnl_points": item.get("combined_pnl"),
         "trade_mode": item.get("trade_mode"),
+        "notes": item.get("notes"),
     }
 
 
@@ -3898,12 +3912,14 @@ def submit_exit(
     sell_exit: float,
     buy_exit: float,
     trade_mode: Optional[str] = None,
+    notes: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Complete an Executed trade. Does not change status unless this Submit runs."""
     ensure_stock_option_tables()
     traded = _parse_iso_datetime(date_traded, "date_traded")
     exited = _parse_iso_datetime(exit_date, "exit_date")
     mode = normalize_trade_mode(trade_mode) if trade_mode is not None else TRADE_MODE_PAPER
+    note = normalize_notes(notes)
     pnl = realized_credit_pnl(sell_cost, buy_cost, sell_exit, buy_exit)
     if pnl is None:
         raise ValueError("entry and exit prices are required")
@@ -3913,7 +3929,7 @@ def submit_exit(
         row = db.execute(
             text(
                 """
-                SELECT id, status, date_traded, sell_cost, buy_cost, trade_mode
+                SELECT id, status, date_traded, sell_cost, buy_cost, trade_mode, notes
                 FROM stock_option_signals
                 WHERE id = :id
                 """
@@ -3926,6 +3942,9 @@ def submit_exit(
             raise ValueError("only Executed rows can be completed")
         if trade_mode is None:
             mode = normalize_trade_mode(row.get("trade_mode"))
+        # Omit notes from body → keep existing; blank string clears.
+        if notes is None:
+            note = normalize_notes(row.get("notes"))
         db.execute(
             text(
                 """
@@ -3941,6 +3960,7 @@ def submit_exit(
                     buy_exit_price = :buy_exit,
                     realized_pnl = :pnl,
                     trade_mode = :trade_mode,
+                    notes = :notes,
                     updated_at = :ts
                 WHERE id = :id AND status = :executed
                 """
@@ -3957,6 +3977,7 @@ def submit_exit(
                 "buy_exit": float(buy_exit),
                 "pnl": float(pnl),
                 "trade_mode": mode,
+                "notes": note,
                 "ts": now,
                 "id": signal_id,
                 "executed": STATUS_EXECUTED,
@@ -3976,6 +3997,7 @@ def submit_exit(
         "combined_pnl": pnl,
         "trade_mode": mode,
         "hard_stop": hard_stop_price(sell_cost),
+        "notes": note,
     }
 
 
@@ -4010,6 +4032,8 @@ def update_trade(
     sell_exit: Optional[float] = None,
     buy_exit: Optional[float] = None,
     trade_mode: Optional[str] = None,
+    notes: Optional[str] = None,
+    notes_provided: bool = False,
 ) -> Dict[str, Any]:
     """Edit Executed/Completed fields without changing status. Partial updates OK.
 
@@ -4028,7 +4052,10 @@ def update_trade(
         "buy_exit": buy_exit,
         "trade_mode": trade_mode,
     }
-    if all(v is None or (isinstance(v, str) and not str(v).strip()) for v in provided.values()):
+    other_empty = all(
+        v is None or (isinstance(v, str) and not str(v).strip()) for v in provided.values()
+    )
+    if other_empty and not notes_provided:
         raise ValueError("provide at least one field to update")
 
     now = now_ist_second()
@@ -4039,7 +4066,7 @@ def update_trade(
                 """
                 SELECT id, status, date_traded, user_buy_strike, user_sell_strike,
                        buy_cost, sell_cost, exit_date, sell_exit_price, buy_exit_price,
-                       realized_pnl, trade_mode
+                       realized_pnl, trade_mode, notes
                 FROM stock_option_signals
                 WHERE id = :id
                 """
@@ -4093,6 +4120,11 @@ def update_trade(
         else:
             mode = normalize_trade_mode(row.get("trade_mode"))
 
+        if notes_provided:
+            note = normalize_notes(notes)
+        else:
+            note = normalize_notes(row.get("notes"))
+
         pnl = realized_credit_pnl(sell_c, buy_c, sell_x, buy_x)
         if pnl is None:
             pnl = row.get("realized_pnl")
@@ -4112,6 +4144,7 @@ def update_trade(
                     buy_exit_price = :buy_exit,
                     realized_pnl = :pnl,
                     trade_mode = :trade_mode,
+                    notes = :notes,
                     remarks = CASE
                         WHEN status = :executed_status
                              AND remarks LIKE :expiry_like THEN NULL
@@ -4132,6 +4165,7 @@ def update_trade(
                 "buy_exit": float(buy_x) if buy_x is not None else None,
                 "pnl": float(pnl) if pnl is not None else None,
                 "trade_mode": mode,
+                "notes": note,
                 "ts": now,
                 "id": signal_id,
                 "status": status_const,
@@ -4153,6 +4187,7 @@ def update_trade(
             "combined_pnl": float(pnl) if pnl is not None else None,
             "trade_mode": mode,
             "hard_stop": hard_stop_price(sell_c),
+            "notes": note,
         }
     except Exception:
         db.rollback()

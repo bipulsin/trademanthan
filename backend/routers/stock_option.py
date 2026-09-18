@@ -69,6 +69,7 @@ class ExitBody(BaseModel):
     sell_exit: float = Field(..., ge=0)
     buy_exit: float = Field(..., ge=0)
     trade_mode: Optional[str] = Field(None, max_length=16)
+    notes: Optional[str] = Field(None, max_length=4000)
 
 
 class UpdateBody(BaseModel):
@@ -82,6 +83,7 @@ class UpdateBody(BaseModel):
     sell_exit: Optional[float] = Field(None, ge=0)
     buy_exit: Optional[float] = Field(None, ge=0)
     trade_mode: Optional[str] = Field(None, max_length=16)
+    notes: Optional[str] = Field(None, max_length=4000)
 
 
 async def _ingest(request: Request) -> JSONResponse:
@@ -249,6 +251,7 @@ async def stock_option_exit(
             sell_exit=body.sell_exit,
             buy_exit=body.buy_exit,
             trade_mode=body.trade_mode,
+            notes=body.notes,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -265,6 +268,7 @@ async def stock_option_update(
     _user: User = Depends(_auth_user),
 ) -> JSONResponse:
     try:
+        payload = body.model_dump(exclude_unset=True)
         out = update_trade(
             signal_id,
             date_traded=body.date_traded,
@@ -276,6 +280,8 @@ async def stock_option_update(
             sell_exit=body.sell_exit,
             buy_exit=body.buy_exit,
             trade_mode=body.trade_mode,
+            notes=body.notes,
+            notes_provided="notes" in payload,
         )
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

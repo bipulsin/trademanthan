@@ -817,6 +817,7 @@
       { key: "exit_px", label: "Exit prices", type: "num", sort: (r) => r.sell_exit_price },
       { key: "exit_date", label: "Exit date", type: "date", sort: (r) => r.exit_date },
       { key: "pnl", label: "P&amp;L ₹", type: "num", sort: (r) => (r.combined_pnl_inr != null ? r.combined_pnl_inr : r.combined_pnl) },
+      { key: "notes", label: "Notes", type: "str", sort: (r) => r.notes },
       { key: "edit", label: "" },
     ],
   };
@@ -991,6 +992,7 @@
       detailRow("LTP", num(r.sell_ltp) + "<br>" + num(r.buy_ltp)) +
       detailRow("P&amp;L ₹", '<span class="so-executed-pnl ' + pnl.cls + '" title="' + esc(pnl.title) + '">' + pnl.html + "</span>") +
       detailRow("Hard stop", '<span class="so-hs-cell">' + num(r.hard_stop) + hsBox + "</span>") +
+      (r.notes && String(r.notes).trim() ? detailRow("Notes", esc(String(r.notes).trim())) : "") +
       '<div class="so-mcard-actions so-row-actions">' +
       '<button type="button" class="so-edit-btn" data-edit="' + r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button>' +
       '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button></div>';
@@ -1017,6 +1019,13 @@
     return wrapDesktopMobile(table, cards);
   }
 
+  function notesCell(r) {
+    const raw = r && r.notes != null ? String(r.notes).trim() : "";
+    if (!raw) return "—";
+    const short = raw.length > 48 ? raw.slice(0, 45) + "…" : raw;
+    return '<span class="so-notes-cell" title="' + esc(raw) + '">' + esc(short) + "</span>";
+  }
+
   function reportRowHtml(r) {
     const pnl = pnlDisplay(r);
     return `
@@ -1030,12 +1039,14 @@
         <td class="so-exit-px">Sell ${num(r.sell_exit_price)}<br>Buy ${num(r.buy_exit_price)}</td>
         <td class="so-exit-date">${esc(formatDateTimeAmPm(r.exit_date))}</td>
         <td class="so-tight ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
+        <td class="so-notes">${notesCell(r)}</td>
         <td class="so-exit-cell"><button type="button" class="so-edit-btn" data-edit="${r.id}" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></td>
       </tr>`;
   }
 
   function reportCardHtml(r) {
     const pnl = pnlDisplay(r);
+    const notesRaw = r && r.notes != null ? String(r.notes).trim() : "";
     const summary =
       '<span class="so-mcard-sym">' + symbolCell(r) + "</span>" +
       modeChip(r.trade_mode) +
@@ -1048,6 +1059,7 @@
       detailRow("Entry costs", "Sell " + num(r.sell_cost) + "<br>Buy " + num(r.buy_cost)) +
       detailRow("Exit prices", "Sell " + num(r.sell_exit_price) + "<br>Buy " + num(r.buy_exit_price)) +
       detailRow("Exit date", esc(formatDateTimeAmPm(r.exit_date))) +
+      (notesRaw ? detailRow("Notes", esc(notesRaw)) : "") +
       '<div class="so-mcard-actions"><button type="button" class="so-edit-btn" data-edit="' +
       r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button></div>';
     return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
@@ -1259,6 +1271,8 @@
     document.getElementById("soExitSellEntry").value = row.sell_cost != null ? row.sell_cost : "";
     const modeEl = document.getElementById("soTradeMode");
     if (modeEl) modeEl.value = normalizeTradeMode(row.trade_mode);
+    const notesEl = document.getElementById("soExitNotes");
+    if (notesEl) notesEl.value = row.notes != null ? String(row.notes) : "";
 
     const hasExitDate = !!dateOnly(row.exit_date);
     const hasSellExit = row.sell_exit_price != null && row.sell_exit_price !== "";
@@ -1334,6 +1348,7 @@
     const sellExitRaw = document.getElementById("soExitSellPx").value;
     const buyExitRaw = document.getElementById("soExitBuyPx").value;
     const modeEl = document.getElementById("soTradeMode");
+    const notesEl = document.getElementById("soExitNotes");
     const body = {
       date_traded: entryDt.value || "",
       buy_strike: Number(document.getElementById("soExitBuyStrike").value),
@@ -1341,6 +1356,7 @@
       sell_strike: Number(document.getElementById("soExitSellStrike").value),
       sell_cost: Number(document.getElementById("soExitSellEntry").value),
       trade_mode: normalizeTradeMode(modeEl ? modeEl.value : "PAPER"),
+      notes: notesEl ? String(notesEl.value || "") : "",
     };
     const sellExit = sellExitRaw === "" ? null : Number(sellExitRaw);
     const buyExit = buyExitRaw === "" ? null : Number(buyExitRaw);
@@ -1378,6 +1394,8 @@
     if (buyExit != null) body.buy_exit = buyExit;
     const modeEl = document.getElementById("soTradeMode");
     if (modeEl && modeEl.value) body.trade_mode = normalizeTradeMode(modeEl.value);
+    const notesEl = document.getElementById("soExitNotes");
+    if (notesEl) body.notes = String(notesEl.value || "");
     return { error: null, body: body };
   }
 

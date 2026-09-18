@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS stock_option_signals (
     buy_exit_price DOUBLE PRECISION,
     realized_pnl DOUBLE PRECISION,
     trade_mode TEXT NOT NULL DEFAULT 'PAPER',
+    notes TEXT,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
 );
@@ -62,3 +63,4 @@ ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS sell_exit_price DOUBLE
 ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS buy_exit_price DOUBLE PRECISION;
 ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS realized_pnl DOUBLE PRECISION;
 ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER';
+ALTER TABLE stock_option_signals ADD COLUMN IF NOT EXISTS notes TEXT;

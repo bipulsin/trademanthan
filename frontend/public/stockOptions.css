@@ -565,6 +565,16 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
     padding-right: 2px;
 }
 
+.so-table-report .so-notes,
+.so-notes-cell {
+    max-width: 10rem;
+    font-size: 0.78rem;
+    line-height: 1.3;
+    color: var(--muted);
+    white-space: normal;
+    word-break: break-word;
+}
+
 .so-tight {
     white-space: nowrap;
     line-height: 1.25;
@@ -823,7 +833,21 @@ body.stock-options-page[data-theme="light"] .so-index-arrow {
     color: var(--text);
 }
 
-.so-field input:focus {
+.so-field textarea {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    resize: vertical;
+    min-height: 4.5rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.so-field input:focus,
+.so-field textarea:focus {
     outline: none;
     border-color: rgba(61, 186, 122, 0.55);
     box-shadow: 0 0 0 2px rgba(61, 186, 122, 0.15);
@@ -1253,7 +1277,8 @@ body.stock-options-page[data-theme="light"] .so-vix-value.so-vix-green {
     color: #1f7a4d;
 }
 
-body.stock-options-page[data-theme="light"] .so-field input {
+body.stock-options-page[data-theme="light"] .so-field input,
+body.stock-options-page[data-theme="light"] .so-field textarea {
     background: #fff;
     color: var(--text);
 }
