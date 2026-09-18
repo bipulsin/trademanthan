@@ -699,39 +699,62 @@ def exit_submit(
         db.close()
 
 
+def _manual_exit_presence(
+    exit_price: Any, exit_at: Any
+) -> tuple[bool, bool]:
+    """Return (has_exit_price, has_exit_at). Blank / null count as absent."""
+    has_price = exit_price is not None and str(exit_price).strip() != ""
+    has_at = exit_at is not None and str(exit_at).strip() != ""
+    return has_price, has_at
+
+
 def create_manual_history(
     *,
     commodity: str,
     direction: str,
     entry_price: float,
     trade_taken_at: Any,
-    exit_price: float,
-    exit_at: Any,
+    exit_price: Optional[float] = None,
+    exit_at: Any = None,
     trade_mode: Optional[str] = None,
     qty: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Insert a completed History row without webhook / DIV / GO flow.
+    Insert a manual trade without webhook / DIV / GO flow.
+
+    Exit omitted (both exit_price and exit_at empty) → In-Trade open row.
+    Partial exit → ValueError (require all exit fields or none).
+    Exit complete → History.
 
     Resolves MCX contract via mapping when the typed name matches an allowed
     underlying (optionally with month code). Unresolvable names still save with
-    the typed symbol text so CommDiv History works.
+    the typed symbol text.
 
-    LIVE: also upsert trade_log (same conventions as exit_submit).
-    PAPER: History only — never write trade_log.
+    LIVE History: upsert trade_log (same conventions as exit_submit).
+    LIVE In-Trade: no trade_log until exit_submit.
+    PAPER: never write trade_log.
     """
     symbol_raw = str(commodity or "").strip()
     if not symbol_raw:
         raise ValueError("commodity name is required")
     if entry_price is None or float(entry_price) <= 0:
         raise ValueError("entry_price must be > 0")
-    if exit_price is None or float(exit_price) <= 0:
-        raise ValueError("exit_price must be > 0")
+
+    has_exit_price, has_exit_at = _manual_exit_presence(exit_price, exit_at)
+    if has_exit_price ^ has_exit_at:
+        raise ValueError(
+            "provide both exit_price and exit_at, or omit both for an In-Trade open entry"
+        )
+    open_trade = not has_exit_price and not has_exit_at
+    exit_dt: Optional[datetime] = None
+    if not open_trade:
+        if float(exit_price) <= 0:
+            raise ValueError("exit_price must be > 0")
+        exit_dt = _parse_exit_at(exit_at)
 
     direction_tv = _normalize_direction(direction)
     mode = _normalize_trade_mode(trade_mode) if trade_mode else "PAPER"
     entry_dt = _parse_entry_at(trade_taken_at)
-    exit_dt = _parse_exit_at(exit_at)
 
     ensure_commodities_div_tables()
     now = now_ist_second()
@@ -773,6 +796,7 @@ def create_manual_history(
     tl_qty = _lot_qty(row_for_qty)
     tl_direction = "LONG" if direction_tv == "BULL" else "SHORT"
     session_date = entry_dt.date() if isinstance(entry_dt, datetime) else now.date()
+    status = STATUS_IN_TRADE if open_trade else STATUS_HISTORY
 
     notes_obj = {
         "commodities_div_manual": True,
@@ -799,7 +823,7 @@ def create_manual_history(
                     exit_submitted_at, exit_price, exit_at,
                     trade_log_id, trade_mode, updated_at
                 ) VALUES (
-                    :symbol_raw, :symbol_mapped, :direction, 'History',
+                    :symbol_raw, :symbol_mapped, :direction, :status,
                     :div_received_at, :trade_taken_at, :entry_price,
                     :instrument_key, :contract, :lot_size,
                     :exit_submitted_at, :exit_price, :exit_at,
@@ -812,24 +836,25 @@ def create_manual_history(
                 "symbol_raw": symbol_raw,
                 "symbol_mapped": symbol_mapped,
                 "direction": direction_tv,
+                "status": status,
                 "div_received_at": entry_dt,
                 "trade_taken_at": entry_dt,
                 "entry_price": float(entry_price),
                 "instrument_key": instrument_key,
                 "contract": contract,
                 "lot_size": lot_size,
-                "exit_submitted_at": now,
-                "exit_price": float(exit_price),
-                "exit_at": exit_dt,
+                "exit_submitted_at": None if open_trade else now,
+                "exit_price": None if open_trade else float(exit_price),
+                "exit_at": None if open_trade else exit_dt,
                 "trade_mode": mode,
             },
         ).scalar()
         signal_id = int(rid)
 
-        # PAPER stays on CommDiv History only — do not pollute trade_log /
-        # reports / dashboard (same rule as exit_submit).
+        # PAPER never writes trade_log. LIVE In-Trade waits for exit_submit.
+        # LIVE History upserts immediately (same conventions as exit_submit).
         trade_log_id: Optional[int] = None
-        if mode == "LIVE":
+        if not open_trade and mode == "LIVE":
             ensure_trade_log_table()
             notes_obj["commodities_div_signal_id"] = signal_id
             trade_log_id = upsert_trade(
@@ -867,9 +892,13 @@ def create_manual_history(
             text("SELECT * FROM commodities_div_signals WHERE id = :id"),
             {"id": signal_id},
         ).mappings().first()
-        out = serialize_signal(dict(updated), prefer_exit_pnl=True)
+        out = serialize_signal(
+            dict(updated), prefer_exit_pnl=(not open_trade)
+        )
         out["trade_log_id"] = int(trade_log_id) if trade_log_id is not None else None
         out["mapping_resolved"] = bool(instrument_key)
+        if open_trade:
+            _sync_ws_ltp_best_effort()
         return out
     except Exception:
         db.rollback()

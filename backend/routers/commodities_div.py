@@ -75,8 +75,12 @@ class ManualEntryBody(BaseModel):
     direction: str = Field(..., description="BULL | BEAR")
     entry_price: float = Field(..., gt=0)
     trade_taken_at: str = Field(..., min_length=8, description="YYYY-MM-DD HH:MM:SS IST")
-    exit_price: float = Field(..., gt=0)
-    exit_at: str = Field(..., min_length=8, description="YYYY-MM-DD HH:MM:SS IST")
+    exit_price: Optional[float] = Field(
+        None, gt=0, description="Optional; omit with exit_at for In-Trade open row"
+    )
+    exit_at: Optional[str] = Field(
+        None, description="Optional YYYY-MM-DD HH:MM:SS IST; omit with exit_price for In-Trade"
+    )
     trade_mode: Optional[str] = Field("PAPER", description="PAPER | LIVE")
     qty: Optional[int] = Field(None, gt=0, description="Optional lot qty override")
 
@@ -191,7 +195,12 @@ def commodities_div_manual_entry(
     body: ManualEntryBody,
     user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
-    """Create a completed History trade (optional LIVE trade_log upsert)."""
+    """
+    Manual trade entry.
+
+    - Exit omitted → In-Trade open row (no trade_log until exit_submit).
+    - Exit complete → History (+ LIVE trade_log upsert).
+    """
     try:
         row = create_manual_history(
             commodity=body.commodity,

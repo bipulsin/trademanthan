@@ -1087,8 +1087,9 @@
     $("cdManualEntryPrice").value = "";
     $("cdManualQty").value = "";
     $("cdManualQty").placeholder = "lot size";
-    $("cdManualExitDate").value = nowParts.date || "";
-    $("cdManualExitTime").value = nowParts.time ? nowParts.time.slice(0, 8) : "";
+    // Leave exit blank → open In-Trade; fill all three for History
+    $("cdManualExitDate").value = "";
+    $("cdManualExitTime").value = "";
     $("cdManualExitPrice").value = "";
     setManualResolveHint("");
     $("cdManualModal").hidden = false;
@@ -1295,11 +1296,16 @@
       ev.preventDefault();
       var commodity = String($("cdManualCommodity").value || "").trim();
       var entryAt = combineIst($("cdManualEntryDate"), $("cdManualEntryTime"));
+      var exitDateRaw = String(($("cdManualExitDate") && $("cdManualExitDate").value) || "").trim();
+      var exitTimeRaw = String(($("cdManualExitTime") && $("cdManualExitTime").value) || "").trim();
+      var exitPriceRaw = String(($("cdManualExitPrice") && $("cdManualExitPrice").value) || "").trim();
       var exitAt = combineIst($("cdManualExitDate"), $("cdManualExitTime"));
       var entryPrice = parseFloat($("cdManualEntryPrice").value);
-      var exitPrice = parseFloat($("cdManualExitPrice").value);
+      var exitPrice = exitPriceRaw !== "" ? parseFloat(exitPriceRaw) : NaN;
       var qtyRaw = String($("cdManualQty").value || "").trim();
       var qty = qtyRaw !== "" ? parseInt(qtyRaw, 10) : null;
+      var hasAnyExit = !!(exitDateRaw || exitTimeRaw || exitPriceRaw);
+      var hasAllExit = !!(exitDateRaw && exitTimeRaw && exitPriceRaw && exitPrice > 0);
       if (!commodity) {
         showBanner("Commodity name is required", true);
         return;
@@ -1308,8 +1314,11 @@
         showBanner("Entry date/time and price required", true);
         return;
       }
-      if (!exitAt || !(exitPrice > 0)) {
-        showBanner("Exit date/time and price required", true);
+      if (hasAnyExit && !hasAllExit) {
+        showBanner(
+          "Exit incomplete — fill exit date, time, and price, or clear all three for In Trade",
+          true
+        );
         return;
       }
       if (qtyRaw !== "" && (!(qty > 0) || !Number.isFinite(qty))) {
@@ -1322,9 +1331,11 @@
         trade_mode: $("cdManualMode").value || "PAPER",
         entry_price: entryPrice,
         trade_taken_at: entryAt,
-        exit_price: exitPrice,
-        exit_at: exitAt,
       };
+      if (hasAllExit) {
+        payload.exit_price = exitPrice;
+        payload.exit_at = exitAt;
+      }
       if (qty > 0) payload.qty = qty;
       try {
         var res = await api("/manual-entry", {
@@ -1332,12 +1343,23 @@
           body: JSON.stringify(payload),
         });
         closeManual();
-        var modeLabel = payload.trade_mode === "LIVE" ? "LIVE (Trade Log)" : "PAPER (History only)";
+        var status = (res.signal && res.signal.status) || (hasAllExit ? "History" : "In-Trade");
+        var isOpen = String(status) === "In-Trade";
+        var modeLabel;
+        if (isOpen) {
+          modeLabel =
+            payload.trade_mode === "LIVE"
+              ? "LIVE · In Trade (Trade Log on exit)"
+              : "PAPER · In Trade";
+        } else {
+          modeLabel =
+            payload.trade_mode === "LIVE" ? "LIVE (Trade Log)" : "PAPER (History only)";
+        }
         var sym =
           (res.signal && (res.signal.display_symbol || res.signal.symbol_mapped || res.signal.symbol_raw)) ||
           commodity;
         showBanner("Saved " + sym + " · " + modeLabel, false);
-        setTab("history");
+        setTab(isOpen ? "in_trade" : "history");
         await load();
       } catch (e) {
         showBanner(String(e.message || e), true);

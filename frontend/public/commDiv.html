@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=17" />
+    <link rel="stylesheet" href="commDiv.css?v=18" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -171,7 +171,7 @@
     <div class="cd-modal" id="cdManualModal" hidden>
         <div class="cd-modal-card cd-modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="cdManualTitle">
             <h2 id="cdManualTitle">Manual entry</h2>
-            <p class="cd-note" id="cdManualMeta">Log a completed trade that was not opened via webhook. PAPER stays on History only; LIVE also writes Trade Log.</p>
+            <p class="cd-note" id="cdManualMeta">Log a trade that was not opened via webhook. Leave exit blank to put it In Trade; fill all exit fields to save to History. PAPER stays on CommDiv; LIVE History also writes Trade Log (LIVE In-Trade waits until exit).</p>
             <form id="cdManualForm">
                 <div class="cd-modal-grid">
                     <label class="cd-modal-span-2">Commodity name
@@ -203,24 +203,24 @@
                         <input type="number" step="1" min="1" id="cdManualQty" placeholder="lot size" />
                     </label>
                     <label>Exit date
-                        <input type="date" id="cdManualExitDate" required />
+                        <input type="date" id="cdManualExitDate" />
                     </label>
                     <label>Exit time
-                        <input type="time" id="cdManualExitTime" step="1" required />
+                        <input type="time" id="cdManualExitTime" step="1" />
                     </label>
                     <label>Exit price
-                        <input type="number" step="any" id="cdManualExitPrice" required />
+                        <input type="number" step="any" id="cdManualExitPrice" />
                     </label>
                 </div>
                 <div class="cd-modal-actions">
                     <button type="button" class="cd-btn cd-btn-ghost" id="cdManualCancel">Cancel</button>
-                    <button type="submit" class="cd-btn cd-btn-primary">Save to History</button>
+                    <button type="submit" class="cd-btn cd-btn-primary">Save trade</button>
                 </div>
             </form>
         </div>
     </div>
 
     <script src="left-menu.js?v=3.48"></script>
-    <script src="commDiv.js?v=17"></script>
+    <script src="commDiv.js?v=18"></script>
 </body>
 </html>

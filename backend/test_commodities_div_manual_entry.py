@@ -310,3 +310,182 @@ def test_manual_rejects_bad_direction():
             exit_price=2.0,
             exit_at="2026-09-17 11:00:00",
         )
+
+
+def test_manual_rejects_partial_exit_price_only():
+    with pytest.raises(ValueError, match="exit_price and exit_at"):
+        create_manual_history(
+            commodity="CRUDEOIL",
+            direction="BULL",
+            entry_price=100.0,
+            trade_taken_at="2026-09-17 10:00:00",
+            exit_price=101.0,
+            exit_at=None,
+        )
+
+
+def test_manual_rejects_partial_exit_at_only():
+    with pytest.raises(ValueError, match="exit_price and exit_at"):
+        create_manual_history(
+            commodity="CRUDEOIL",
+            direction="BULL",
+            entry_price=100.0,
+            trade_taken_at="2026-09-17 10:00:00",
+            exit_price=None,
+            exit_at="2026-09-17 11:00:00",
+        )
+
+
+@patch("backend.services.commodities_div.actions._sync_ws_ltp_best_effort")
+@patch("backend.services.commodities_div.actions.ensure_commodities_div_tables")
+@patch("backend.services.commodities_div.actions.attach_instrument_fields")
+@patch("backend.services.commodities_div.actions.SessionLocal")
+@patch("backend.services.commodities_div.actions.upsert_trade")
+@patch("backend.services.commodities_div.actions.ensure_trade_log_table")
+def test_manual_open_paper_creates_in_trade_no_trade_log(
+    mock_ensure_tl, mock_upsert, mock_session, mock_attach, mock_ensure, mock_sync_ws
+):
+    mock_attach.return_value = {
+        "symbol_mapped": "NATURALGAS",
+        "underlying_matched": True,
+        "mapping_found": True,
+        "instrument_key": "MCX_FO|123",
+        "contract": "NATURALGAS25OCTFUT",
+        "trading_symbol": "NATURALGAS25OCTFUT",
+        "lot_size": 1250,
+    }
+    db = _scalar_then_row(
+        status="In-Trade",
+        exit_price=None,
+        exit_at=None,
+        exit_submitted_at=None,
+        trade_mode="PAPER",
+        trade_log_id=None,
+    )
+    mock_session.return_value = db
+
+    out = create_manual_history(
+        commodity="NATURALGAS",
+        direction="BULL",
+        entry_price=250.0,
+        trade_taken_at="2026-09-17 10:00:00",
+        exit_price=None,
+        exit_at=None,
+        trade_mode="PAPER",
+    )
+
+    assert out["status"] == "In-Trade"
+    assert out["trade_mode"] == "PAPER"
+    assert out["trade_log_id"] is None
+    mock_upsert.assert_not_called()
+    mock_ensure_tl.assert_not_called()
+    mock_sync_ws.assert_called_once()
+    insert_params = db.execute.call_args_list[0][0][1]
+    assert insert_params["status"] == "In-Trade"
+    assert insert_params["exit_price"] is None
+    assert insert_params["exit_at"] is None
+    assert insert_params["exit_submitted_at"] is None
+    assert insert_params["instrument_key"] == "MCX_FO|123"
+    assert insert_params["lot_size"] == 1250
+
+
+@patch("backend.services.commodities_div.actions._sync_ws_ltp_best_effort")
+@patch("backend.services.commodities_div.actions.ensure_commodities_div_tables")
+@patch("backend.services.commodities_div.actions.attach_instrument_fields")
+@patch("backend.services.commodities_div.actions.SessionLocal")
+@patch("backend.services.commodities_div.actions.upsert_trade")
+@patch("backend.services.commodities_div.actions.ensure_trade_log_table")
+def test_manual_open_live_skips_trade_log_until_exit(
+    mock_ensure_tl, mock_upsert, mock_session, mock_attach, mock_ensure, mock_sync_ws
+):
+    """LIVE open manual entry must NOT write trade_log (exit_submit does that)."""
+    mock_attach.return_value = {
+        "symbol_mapped": "COPPER",
+        "underlying_matched": True,
+        "mapping_found": True,
+        "instrument_key": "MCX_FO|CU_SEP",
+        "contract": "COPPER FUT 30 SEP 26",
+        "trading_symbol": "COPPER FUT 30 SEP 26",
+        "lot_size": 2500,
+        "parse_mode": "free_text",
+        "match_mode": "exact_month",
+        "contract_month": 9,
+        "contract_year": 2026,
+    }
+    db = _scalar_then_row(
+        signal_id=88,
+        symbol_raw="COPPER SEP FUT",
+        symbol_mapped="COPPER",
+        status="In-Trade",
+        entry_price=1387.55,
+        exit_price=None,
+        exit_at=None,
+        exit_submitted_at=None,
+        trade_mode="LIVE",
+        trade_log_id=None,
+        lot_size=2500,
+        contract="COPPER FUT 30 SEP 26",
+        instrument_key="MCX_FO|CU_SEP",
+    )
+    mock_session.return_value = db
+
+    out = create_manual_history(
+        commodity="COPPER SEP FUT",
+        direction="BULL",
+        entry_price=1387.55,
+        trade_taken_at="2026-09-17 10:00:00",
+        trade_mode="LIVE",
+    )
+
+    assert out["status"] == "In-Trade"
+    assert out["trade_mode"] == "LIVE"
+    assert out["trade_log_id"] is None
+    mock_upsert.assert_not_called()
+    mock_ensure_tl.assert_not_called()
+    mock_sync_ws.assert_called_once()
+    insert_params = db.execute.call_args_list[0][0][1]
+    assert insert_params["status"] == "In-Trade"
+    assert insert_params["contract"] == "COPPER FUT 30 SEP 26"
+    assert insert_params["lot_size"] == 2500
+    assert insert_params["instrument_key"] == "MCX_FO|CU_SEP"
+    mock_attach.assert_called_once()
+    assert mock_attach.call_args[0][0] == "COPPER SEP FUT"
+
+
+@patch("backend.services.commodities_div.actions._sync_ws_ltp_best_effort")
+@patch("backend.services.commodities_div.actions.ensure_commodities_div_tables")
+@patch("backend.services.commodities_div.actions.attach_instrument_fields")
+@patch("backend.services.commodities_div.actions.SessionLocal")
+@patch("backend.services.commodities_div.actions.upsert_trade")
+def test_manual_open_omitted_exit_args_defaults(
+    mock_upsert, mock_session, mock_attach, mock_ensure, mock_sync_ws
+):
+    """Calling without exit kwargs is equivalent to open In-Trade."""
+    mock_attach.return_value = {
+        "symbol_mapped": "CRUDEOIL",
+        "underlying_matched": True,
+        "mapping_found": True,
+        "instrument_key": "MCX_FO|999",
+        "contract": "CRUDEOIL25SEPFUT",
+        "trading_symbol": "CRUDEOIL25SEPFUT",
+        "lot_size": 100,
+    }
+    db = _scalar_then_row(
+        status="In-Trade",
+        exit_price=None,
+        exit_at=None,
+        exit_submitted_at=None,
+    )
+    mock_session.return_value = db
+
+    out = create_manual_history(
+        commodity="CRUDEOIL",
+        direction="BEAR",
+        entry_price=6200.0,
+        trade_taken_at="2026-09-17 11:00:00",
+        trade_mode="PAPER",
+    )
+
+    assert out["status"] == "In-Trade"
+    mock_upsert.assert_not_called()
+    mock_sync_ws.assert_called_once()
