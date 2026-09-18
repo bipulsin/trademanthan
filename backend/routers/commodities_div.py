@@ -54,6 +54,7 @@ class ExitSubmitBody(BaseModel):
     trade_taken_at: Optional[str] = Field(None, description="YYYY-MM-DD HH:MM:SS IST")
     direction: Optional[str] = Field(None, description="BULL | BEAR")
     trade_mode: Optional[str] = Field(None, description="PAPER | LIVE")
+    qty: Optional[int] = Field(None, gt=0, description="Optional lot qty override")
 
 
 class UpdateSignalBody(BaseModel):
@@ -61,9 +62,14 @@ class UpdateSignalBody(BaseModel):
     entry_price: Optional[float] = Field(None, gt=0)
     trade_taken_at: Optional[str] = Field(None, description="YYYY-MM-DD HH:MM:SS IST")
     direction: Optional[str] = Field(None, description="BULL | BEAR")
-    exit_price: Optional[float] = Field(None, gt=0)
-    exit_at: Optional[str] = Field(None, description="YYYY-MM-DD HH:MM:SS IST")
+    exit_price: Optional[float] = Field(
+        None, gt=0, description="Optional; omit with exit_at to keep/clear exit"
+    )
+    exit_at: Optional[str] = Field(
+        None, description="Optional YYYY-MM-DD HH:MM:SS IST; omit with exit_price"
+    )
     trade_mode: Optional[str] = Field(None, description="PAPER | LIVE")
+    qty: Optional[int] = Field(None, gt=0, description="Optional lot qty override")
 
 
 class DeleteSignalBody(BaseModel):
@@ -152,6 +158,7 @@ def commodities_div_exit_submit(
             trade_taken_at=body.trade_taken_at,
             direction=body.direction,
             trade_mode=body.trade_mode,
+            qty=body.qty,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -232,6 +239,7 @@ def commodities_div_update_signal(
             exit_price=body.exit_price,
             exit_at=body.exit_at,
             trade_mode=body.trade_mode,
+            qty=body.qty,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

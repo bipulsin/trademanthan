@@ -975,23 +975,46 @@
     var isHistory = String(row.status || "") === "History";
     var title = editMode === "exit" ? "Exit Trade" : "Edit Trade";
     $("cdEditTitle").textContent = title;
-    $("cdEditMeta").textContent =
-      displaySymbolFor(row) + " · " + (row.status || "");
+    var metaBits = [displaySymbolFor(row), row.status || ""];
+    if (editMode === "exit") {
+      metaBits.push("Exit date, time & price required");
+    } else if (!isHistory) {
+      metaBits.push("Save keeps In Trade (exit optional — use Submit to close)");
+    }
+    $("cdEditMeta").textContent = metaBits.join(" · ");
 
     var entry = splitIst(row.trade_taken_at);
     $("cdEditEntryDate").value = entry.date || "";
     $("cdEditEntryTime").value = entry.time ? entry.time.slice(0, 8) : "";
     $("cdEditEntryPrice").value = row.entry_price != null ? row.entry_price : "";
+    var qtyVal =
+      row.lot_size != null && row.lot_size !== ""
+        ? row.lot_size
+        : row.lot_qty != null && row.lot_qty !== ""
+          ? row.lot_qty
+          : row.qty != null && row.qty !== ""
+            ? row.qty
+            : "";
+    $("cdEditQty").value = qtyVal;
     $("cdEditDirection").value = String(row.direction || "BULL").toUpperCase() === "BEAR" ? "BEAR" : "BULL";
     $("cdEditMode").value = normalizeTradeMode(row.trade_mode);
 
     var exitParts = splitIst(row.exit_at);
-    if (editMode === "exit" && !exitParts.date) {
-      exitParts = toDatetimeLocalValue($("cdServerTime").textContent);
+    var exitPx = "";
+    if (editMode === "exit") {
+      if (!exitParts.date) {
+        exitParts = toDatetimeLocalValue($("cdServerTime").textContent);
+      }
+      exitPx = row.exit_price != null ? row.exit_price : row.ltp != null ? row.ltp : "";
+    } else if (isHistory) {
+      exitPx = row.exit_price != null ? row.exit_price : "";
+    } else {
+      // In-Trade / Exit Trade edit: leave exit blank so Save does not force exit.
+      exitParts = { date: "", time: "" };
+      exitPx = "";
     }
     $("cdEditExitDate").value = exitParts.date || "";
     $("cdEditExitTime").value = exitParts.time ? exitParts.time.slice(0, 8) : "";
-    var exitPx = row.exit_price != null ? row.exit_price : row.ltp != null ? row.ltp : "";
     $("cdEditExitPrice").value = exitPx;
 
     var saveBtn = $("cdEditSaveBtn");
@@ -1127,19 +1150,31 @@
 
   function collectEditPayload() {
     var entryAt = combineIst($("cdEditEntryDate"), $("cdEditEntryTime"));
+    var exitDateRaw = String(($("cdEditExitDate") && $("cdEditExitDate").value) || "").trim();
+    var exitTimeRaw = String(($("cdEditExitTime") && $("cdEditExitTime").value) || "").trim();
+    var exitPriceRaw = String(($("cdEditExitPrice") && $("cdEditExitPrice").value) || "").trim();
     var exitAt = combineIst($("cdEditExitDate"), $("cdEditExitTime"));
     var entryPrice = parseFloat($("cdEditEntryPrice").value);
-    var exitPriceRaw = $("cdEditExitPrice").value;
     var exitPrice = exitPriceRaw !== "" ? parseFloat(exitPriceRaw) : null;
-    return {
+    var qtyRaw = String(($("cdEditQty") && $("cdEditQty").value) || "").trim();
+    var qty = qtyRaw !== "" ? parseInt(qtyRaw, 10) : null;
+    var hasAnyExit = !!(exitDateRaw || exitTimeRaw || exitPriceRaw);
+    var hasAllExit = !!(exitDateRaw && exitTimeRaw && exitPriceRaw && exitPrice > 0);
+    var payload = {
       signal_id: editSignalId,
       entry_price: entryPrice,
       trade_taken_at: entryAt,
       direction: $("cdEditDirection").value,
       trade_mode: $("cdEditMode").value,
-      exit_price: exitPrice,
-      exit_at: exitAt || null,
+      hasAnyExit: hasAnyExit,
+      hasAllExit: hasAllExit,
     };
+    if (qty > 0) payload.qty = qty;
+    if (hasAllExit) {
+      payload.exit_price = exitPrice;
+      payload.exit_at = exitAt;
+    }
+    return payload;
   }
 
   async function load() {
@@ -1250,16 +1285,71 @@
         showBanner("Entry date/time and price required", true);
         return;
       }
+      if (!(payload.qty > 0)) {
+        showBanner("Qty must be a positive integer", true);
+        return;
+      }
+      var wasHistory =
+        !!(historyById[editSignalId] && historyById[editSignalId].status === "History");
+      if (payload.hasAnyExit && !payload.hasAllExit) {
+        showBanner(
+          "Exit incomplete — fill exit date, time, and price, or clear all three to stay In Trade",
+          true
+        );
+        return;
+      }
+      if (wasHistory && !payload.hasAllExit) {
+        showBanner("Exit date/time and price required for History edits", true);
+        return;
+      }
+      // Full exit on open trade → intentional close via exit-submit.
+      if (!wasHistory && payload.hasAllExit) {
+        try {
+          var exitBody = {
+            signal_id: payload.signal_id,
+            entry_price: payload.entry_price,
+            trade_taken_at: payload.trade_taken_at,
+            direction: payload.direction,
+            trade_mode: payload.trade_mode,
+            exit_price: payload.exit_price,
+            exit_at: payload.exit_at,
+            qty: payload.qty,
+          };
+          await api("/exit-submit", {
+            method: "POST",
+            body: JSON.stringify(exitBody),
+          });
+          closeEdit();
+          lastExitAudioForId = null;
+          showBanner("Trade moved to History", false);
+          setTab("history");
+          await load();
+        } catch (e) {
+          showBanner(String(e.message || e), true);
+        }
+        return;
+      }
       try {
-        var wasHistory =
-          !!(historyById[editSignalId] && historyById[editSignalId].status === "History");
+        var updateBody = {
+          signal_id: payload.signal_id,
+          entry_price: payload.entry_price,
+          trade_taken_at: payload.trade_taken_at,
+          direction: payload.direction,
+          trade_mode: payload.trade_mode,
+          qty: payload.qty,
+        };
+        if (payload.hasAllExit) {
+          updateBody.exit_price = payload.exit_price;
+          updateBody.exit_at = payload.exit_at;
+        }
         await api("/signal/update", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(updateBody),
         });
         closeEdit();
-        showBanner("Trade updated", false);
+        showBanner(wasHistory ? "Trade updated" : "Trade updated · still In Trade", false);
         if (wasHistory || currentTab === "history") setTab("history");
+        else setTab("in_trade");
         await load();
       } catch (e) {
         showBanner(String(e.message || e), true);
@@ -1274,14 +1364,27 @@
         showBanner("Entry date/time and price required", true);
         return;
       }
-      if (!payload.exit_at || !(payload.exit_price > 0)) {
+      if (!(payload.qty > 0)) {
+        showBanner("Qty must be a positive integer", true);
+        return;
+      }
+      if (!payload.hasAllExit) {
         showBanner("Exit date/time and price required to move to History", true);
         return;
       }
       try {
         await api("/exit-submit", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            signal_id: payload.signal_id,
+            entry_price: payload.entry_price,
+            trade_taken_at: payload.trade_taken_at,
+            direction: payload.direction,
+            trade_mode: payload.trade_mode,
+            exit_price: payload.exit_price,
+            exit_at: payload.exit_at,
+            qty: payload.qty,
+          }),
         });
         closeEdit();
         lastExitAudioForId = null;

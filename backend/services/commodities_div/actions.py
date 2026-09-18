@@ -428,8 +428,19 @@ def update_signal(
     exit_price: Optional[float] = None,
     exit_at: Any = None,
     trade_mode: Optional[str] = None,
+    qty: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Discretionary edit for In-Trade, Exit Trade, or History — does not change status."""
+    """
+    Discretionary edit for In-Trade, Exit Trade, or History.
+
+    Does not change status and does not write trade_log. Use exit_submit to close.
+
+    Exit fields are all-or-none (same as manual entry):
+    - Both omitted on In-Trade / Exit Trade → clear exit_price/exit_at so PnL uses LTP.
+    - Both omitted on History → leave exit unchanged.
+    - Both provided → update exit_price/exit_at in place (History corrections).
+    - Partial → ValueError.
+    """
     ensure_commodities_div_tables()
     db = SessionLocal()
     try:
@@ -442,6 +453,13 @@ def update_signal(
         if row["status"] not in EDITABLE_STATUSES:
             raise ValueError(
                 f"Edit only when In-Trade, Exit Trade, or History (got {row['status']})"
+            )
+
+        status = str(row["status"])
+        has_exit_price, has_exit_at = _manual_exit_presence(exit_price, exit_at)
+        if has_exit_price ^ has_exit_at:
+            raise ValueError(
+                "provide both exit_price and exit_at, or omit both"
             )
 
         sets: List[str] = ["updated_at = NOW()"]
@@ -462,16 +480,28 @@ def update_signal(
             sets.append("direction = :dir")
             params["dir"] = _normalize_direction(direction)
 
-        if exit_price is not None:
+        if qty is not None:
+            try:
+                q = int(qty)
+            except (TypeError, ValueError) as e:
+                raise ValueError("qty must be a positive integer") from e
+            if q <= 0:
+                raise ValueError("qty must be a positive integer")
+            sets.append("lot_size = :lot")
+            params["lot"] = q
+
+        if has_exit_price and has_exit_at:
             if float(exit_price) <= 0:
                 raise ValueError("exit_price must be > 0")
+            exit_dt = _parse_exit_at(exit_at)
             sets.append("exit_price = :xp")
             params["xp"] = float(exit_price)
-
-        if exit_at is not None and str(exit_at).strip():
-            exit_dt = _parse_exit_at(exit_at)
             sets.append("exit_at = :xa")
             params["xa"] = exit_dt
+        elif status in (STATUS_IN_TRADE, STATUS_EXIT_TRADE):
+            # Save without exit: stay open; clear any stale exit so mark uses LTP.
+            sets.append("exit_price = NULL")
+            sets.append("exit_at = NULL")
 
         if trade_mode is not None:
             sets.append("trade_mode = :mode")
@@ -559,10 +589,11 @@ def exit_submit(
     trade_taken_at: Any = None,
     direction: Optional[str] = None,
     trade_mode: Optional[str] = None,
+    qty: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Move In-Trade or Exit Trade → History and write trade_log.
-    Optional discretionary overrides for entry/side/mode applied before close.
+    Optional discretionary overrides for entry/side/mode/qty applied before close.
     """
     ensure_commodities_div_tables()
     if exit_price is None or float(exit_price) <= 0:
@@ -601,6 +632,14 @@ def exit_submit(
         # Re-resolve free-text / incomplete instrument before trade_log write so
         # LIVE exits never persist COPPERSEPFUT / qty=1 when MCX lot is known.
         resolved = _ensure_resolved_instrument(dict(row))
+        if qty is not None:
+            try:
+                q = int(qty)
+            except (TypeError, ValueError) as e:
+                raise ValueError("qty must be a positive integer") from e
+            if q <= 0:
+                raise ValueError("qty must be a positive integer")
+            resolved["lot_size"] = q
         qty = _lot_qty(resolved)
         tl_symbol = str(resolved.get("symbol_mapped") or row["symbol_mapped"]).strip().upper()
         tl_contract = resolved.get("contract") or row.get("contract")
