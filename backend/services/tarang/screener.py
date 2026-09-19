@@ -117,7 +117,11 @@ def _open_risk_for_bucket(db, bucket: str) -> float:
             """
             SELECT COALESCE(SUM(max_loss * COALESCE(lots_or_contracts, 1)), 0) AS risk
             FROM tarang_trades
-            WHERE risk_bucket = :b AND status IN ('open', 'ticket_taken', 'in_trade')
+            WHERE risk_bucket = :b
+              AND status IN (
+                'open', 'ticket_taken', 'in_trade',
+                'ENTRY_PENDING', 'IN_TRADE', 'EXIT_PENDING', 'PARTIAL_FILL', 'UNWINDING'
+              )
             """
         ),
         {"b": bucket},

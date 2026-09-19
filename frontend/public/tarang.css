@@ -463,6 +463,110 @@ body.tarang-page .mobile-logo {
 .tg-gate-pass { color: var(--accent); }
 .tg-gate-fail { color: var(--danger); }
 
+.tg-btn-danger {
+    border-color: rgba(224, 107, 107, 0.55) !important;
+    color: #f5a8a8 !important;
+    background: rgba(224, 107, 107, 0.12) !important;
+}
+
+.tg-status-IN_TRADE,
+.tg-status-ENTRY_PENDING,
+.tg-status-EXIT_PENDING { background: rgba(61, 186, 122, 0.18); border-color: rgba(61, 186, 122, 0.45); color: #8ef0b8; }
+.tg-status-REPORTED,
+.tg-status-CLOSED { background: rgba(100, 140, 180, 0.2); border-color: rgba(140, 180, 220, 0.4); color: #b8d4f0; }
+
+.tg-intrade-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    background: var(--card-inner);
+}
+
+.tg-intrade-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    margin-bottom: 6px;
+}
+
+.tg-pnl { font-family: var(--font-mono); font-size: 1.15rem; font-weight: 600; }
+.tg-pnl-pos { color: var(--accent); }
+.tg-pnl-neg { color: var(--danger); }
+
+.tg-triggers {
+    display: grid;
+    gap: 8px;
+    margin: 10px 0;
+}
+
+.tg-trigger {
+    font-size: 0.8rem;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: rgba(12, 18, 16, 0.5);
+}
+
+.tg-trigger-hit {
+    border-color: rgba(224, 107, 107, 0.5);
+    background: rgba(224, 107, 107, 0.1);
+}
+
+.tg-progress {
+    position: relative;
+    height: 16px;
+    background: rgba(143, 163, 152, 0.15);
+    border-radius: 999px;
+    margin: 4px 0 2px;
+    overflow: hidden;
+}
+
+.tg-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    border-radius: 999px;
+    min-width: 2px;
+}
+
+.tg-progress-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    color: var(--text);
+}
+
+.tg-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.tg-metric {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--card-inner);
+}
+
+.tg-metric span {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.tg-metric strong {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+}
+
 @media (max-width: 768px) {
     body.tarang-page .tg-page {
         padding: 16px 12px 40px;

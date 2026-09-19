@@ -1,20 +1,34 @@
-"""Kosmic Tarang API — Phase 2 screener + paper trade ticket (admin-only)."""
+"""Kosmic Tarang API — Phase 3 paper lifecycle, In-Trade, ExitEngine, Report (admin-only)."""
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.database import get_db
+from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.config import get_events, get_profiles, get_risk
+from backend.services.tarang.events import list_alerts
 from backend.services.tarang.health import build_health_payload
 from backend.services.tarang.iv_snapshots import capture_iv_snapshots
+from backend.services.tarang.lifecycle import (
+    add_trade_note,
+    build_in_trade_view,
+    dismiss_candidate,
+    exit_all_open,
+    exit_trade,
+    get_trade,
+    list_open_trades,
+    mark_taken_manual,
+    run_exit_engine_once,
+    take_trade_paper,
+)
+from backend.services.tarang.report import build_report, report_csv
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.screener import (
     get_candidate,
@@ -23,12 +37,7 @@ from backend.services.tarang.screener import (
     run_screener,
 )
 from backend.services.tarang.sizing import min_max_loss_table
-from backend.services.tarang.ticket import (
-    build_ticket,
-    dismiss_candidate,
-    mark_taken_manual,
-    take_trade_paper,
-)
+from backend.services.tarang.ticket import build_ticket
 
 router = APIRouter(tags=["tarang"])
 logger = logging.getLogger(__name__)
@@ -51,6 +60,15 @@ class TakeBody(BaseModel):
 class ManualBody(BaseModel):
     note: str = ""
     fills: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExitBody(BaseModel):
+    reason: str = "MANUAL"
+    note: str = ""
+
+
+class NoteBody(BaseModel):
+    note: str
 
 
 @router.get("/health")
@@ -97,7 +115,6 @@ def tarang_chain(
 
 @router.post("/iv-snapshots/run")
 def tarang_iv_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
-    """Manual IV snapshot kick (also runs on APScheduler)."""
     return capture_iv_snapshots()
 
 
@@ -113,10 +130,8 @@ def tarang_screener_run(
 
 @router.get("/screener")
 def tarang_screener_latest(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
-    """Latest candidates per profile (from recent runs)."""
     ensure_tarang_tables()
     cands = list_recent_candidates(80)
-    # keep newest per profile
     by: Dict[str, Any] = {}
     for c in cands:
         pid = c["profile_id"]
@@ -124,7 +139,7 @@ def tarang_screener_latest(_user: User = Depends(_require_admin)) -> Dict[str, A
             by[pid] = c
     return {
         "product": "Kosmic Tarang",
-        "phase": 2,
+        "phase": 3,
         "mode": "PAPER",
         "auto": False,
         "by_profile": by,
@@ -195,3 +210,126 @@ def tarang_ticket_manual(
     if not out.get("ok"):
         raise HTTPException(status_code=400, detail=out.get("error") or out)
     return out
+
+
+# --- Phase 3: In-Trade / Exit / Report ---
+
+
+@router.get("/trades/open")
+def tarang_trades_open(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    return {"mode": "PAPER", "trades": list_open_trades("PAPER")}
+
+
+@router.get("/trades/{trade_id}")
+def tarang_trade_get(trade_id: int, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    t = get_trade(trade_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    return t
+
+
+@router.get("/in-trade")
+def tarang_in_trade_list(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    opens = list_open_trades("PAPER")
+    views = []
+    for t in opens:
+        v = build_in_trade_view(int(t["id"]), refresh_quotes=True)
+        if v.get("ok"):
+            views.append(v)
+    db = SessionLocal()
+    try:
+        alerts = list_alerts(db, limit=30)
+    finally:
+        db.close()
+    return {
+        "product": "Kosmic Tarang",
+        "phase": 3,
+        "mode": "PAPER",
+        "trades": views,
+        "alerts": alerts,
+    }
+
+
+@router.get("/in-trade/{trade_id}")
+def tarang_in_trade_one(trade_id: int, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    v = build_in_trade_view(trade_id, refresh_quotes=True)
+    if not v.get("ok"):
+        raise HTTPException(status_code=404, detail=v.get("error") or "not found")
+    return v
+
+
+@router.post("/trades/{trade_id}/exit")
+def tarang_trade_exit(
+    trade_id: int,
+    body: ExitBody = ExitBody(),
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = exit_trade(trade_id, reason=body.reason or "MANUAL", actor="USER", note=body.note or "")
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out)
+    return out
+
+
+@router.post("/trades/exit-all")
+def tarang_exit_all(
+    body: ExitBody = ExitBody(),
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    return exit_all_open(reason=body.reason or "MANUAL", actor="USER")
+
+
+@router.post("/trades/{trade_id}/note")
+def tarang_trade_note(
+    trade_id: int,
+    body: NoteBody,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = add_trade_note(trade_id, body.note)
+    if not out.get("ok"):
+        raise HTTPException(status_code=404, detail=out.get("error"))
+    return out
+
+
+@router.post("/exit-engine/run")
+def tarang_exit_engine_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return run_exit_engine_once()
+
+
+@router.get("/alerts")
+def tarang_alerts(limit: int = 40, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    db = SessionLocal()
+    try:
+        return {"alerts": list_alerts(db, limit=min(limit, 100))}
+    finally:
+        db.close()
+
+
+@router.get("/report")
+def tarang_report(
+    mode: str = "PAPER",
+    profile_id: Optional[str] = None,
+    limit: int = 100,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    mode_u = (mode or "PAPER").upper()
+    if mode_u not in ("PAPER", "LIVE"):
+        raise HTTPException(status_code=400, detail="mode must be PAPER or LIVE")
+    return build_report(mode=mode_u, profile_id=profile_id, limit=min(limit, 500))
+
+
+@router.get("/report.csv")
+def tarang_report_csv(
+    mode: str = "PAPER",
+    _user: User = Depends(_require_admin),
+) -> Response:
+    ensure_tarang_tables()
+    csv_text = report_csv(mode=(mode or "PAPER").upper())
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="tarang_report_{mode}.csv"'},
+    )

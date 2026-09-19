@@ -126,6 +126,66 @@ CREATE TABLE IF NOT EXISTS tarang_alerts (
     meta JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+-- Phase 3: append-only trade lifecycle events
+CREATE TABLE IF NOT EXISTS tarang_trade_events (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trade_id BIGINT REFERENCES tarang_trades(id) ON DELETE SET NULL,
+    candidate_id BIGINT,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    actor TEXT NOT NULL
+        CHECK (actor IN ('USER', 'AUTO', 'SYSTEM')),
+    event_type TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS ix_tarang_trade_events_trade_time
+    ON tarang_trade_events (trade_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_tarang_trade_events_type_time
+    ON tarang_trade_events (event_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tarang_fills (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trade_id BIGINT REFERENCES tarang_trades(id) ON DELETE CASCADE,
+    order_id BIGINT REFERENCES tarang_orders(id) ON DELETE SET NULL,
+    leg_index INTEGER,
+    side TEXT,
+    symbol TEXT,
+    qty DOUBLE PRECISION,
+    price DOUBLE PRECISION,
+    fees DOUBLE PRECISION NOT NULL DEFAULT 0,
+    phase TEXT NOT NULL DEFAULT 'entry'
+        CHECK (phase IN ('entry', 'exit')),
+    raw JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS ix_tarang_fills_trade
+    ON tarang_fills (trade_id, phase);
+
+-- Phase 3 columns on tarang_trades (idempotent)
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS candidate_id BIGINT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS venue TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS structure TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS exit_reason TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS entry_at TIMESTAMPTZ;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS exit_at TIMESTAMPTZ;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS gross_pnl DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS net_pnl DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS fees_total DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS entry_iv_percentile DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS exit_iv_percentile DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS entry_debit_to_close DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS exit_debit_to_close DOUBLE PRECISION;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR';
+
+CREATE INDEX IF NOT EXISTS ix_tarang_trades_status_time
+    ON tarang_trades (status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS ix_tarang_trades_mode_status
+    ON tarang_trades (mode, status);
+
 -- Seed defaults (PAPER / AUTO off) if missing
 INSERT INTO tarang_settings (key, value)
 VALUES

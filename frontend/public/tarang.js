@@ -1,7 +1,8 @@
-/* Kosmic Tarang Phase 2 — screener + paper ticket + data health */
+/* Kosmic Tarang Phase 3 — screener, ticket, In-Trade, Trade Report, data health */
 (function () {
   const token = () => localStorage.getItem('trademanthan_token') || '';
   let currentTicketId = null;
+  let intradeTimer = null;
 
   async function api(path, opts = {}) {
     const res = await fetch(path, {
@@ -41,6 +42,13 @@
     }
   }
 
+  function fmtInr(n) {
+    if (n == null || Number.isNaN(Number(n))) return '—';
+    const v = Number(n);
+    const sign = v < 0 ? '−' : '';
+    return `${sign}₹${Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  }
+
   function fmtLoss(row) {
     if (row.currency === 'INR') return `₹${Number(row.max_loss_zero_credit).toLocaleString('en-IN')}`;
     return `$${Number(row.max_loss_zero_credit_usd).toFixed(2)}`;
@@ -53,6 +61,8 @@
     document.querySelectorAll('.tg-tab-panel').forEach((panel) => {
       panel.hidden = panel.id !== `tab-${name}`;
     });
+    if (name === 'intrade') loadInTrade();
+    if (name === 'report') loadReport();
   }
 
   document.querySelectorAll('.tg-tab').forEach((btn) => {
@@ -207,6 +217,142 @@
     });
   }
 
+  function progressBar(frac, label) {
+    const pct = Math.round((1 - Math.min(1, Math.max(0, frac == null ? 1 : frac))) * 100);
+    return `<div class="tg-progress" title="${label || ''}">
+      <div class="tg-progress-fill" style="width:${pct}%"></div>
+      <span class="tg-progress-label">${label || ''} ${pct}%</span>
+    </div>`;
+  }
+
+  function renderInTrade(data) {
+    const host = document.getElementById('intradeList');
+    const trades = data.trades || [];
+    if (!trades.length) {
+      host.innerHTML = '<p class="tg-muted">No open PAPER trades. Take a QUALIFIED candidate from Trade Ticket.</p>';
+    } else {
+      host.innerHTML = trades.map((v) => {
+        const t = v.trade || {};
+        const ev = v.exit_eval || {};
+        const triggers = (ev.triggers || []).map((tr) =>
+          `<div class="tg-trigger ${tr.hit ? 'tg-trigger-hit' : ''}">
+            <strong>${tr.reason}</strong> ${progressBar(tr.distance_frac, tr.hit ? 'HIT' : 'prox')}
+            <span class="tg-muted">${tr.detail || ''}</span>
+          </div>`
+        ).join('');
+        const legs = ((v.mtm && v.mtm.per_leg) || []).map((l) =>
+          `<tr>
+            <td>${l.side_open}</td><td>${l.right || ''} ${l.strike != null ? l.strike : ''}</td>
+            <td>${l.mid != null ? Number(l.mid).toFixed(2) : '—'}</td>
+            <td>${l.delta != null ? Number(l.delta).toFixed(3) : '—'}</td>
+            <td>${l.entry_price != null ? Number(l.entry_price).toFixed(2) : '—'}</td>
+          </tr>`
+        ).join('');
+        const g = v.net_greeks || {};
+        const secs = ev.seconds_to_hard_exit;
+        const cd = secs != null ? `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m` : '—';
+        const usdNote = (v.mtm && v.mtm.usd_note) ? `<span class="tg-muted"> · ${v.mtm.usd_note}</span>` : '';
+        return `<article class="tg-intrade-card" data-tid="${t.id}">
+          <header class="tg-intrade-head">
+            <div>
+              <strong>#${t.id}</strong> ${statusChip(t.status)} ${t.profile_id || ''} · ${t.structure || ''}
+              <span class="tg-muted">${t.venue || ''}</span>
+            </div>
+            <div class="tg-pnl ${Number(v.pnl_inr) >= 0 ? 'tg-pnl-pos' : 'tg-pnl-neg'}">${fmtInr(v.pnl_inr)}${usdNote}</div>
+          </header>
+          <p class="tg-note">Max profit ${v.pct_of_max_profit != null ? Number(v.pct_of_max_profit).toFixed(0) + '%' : '—'} ·
+            max loss used ${v.pct_of_max_loss != null ? Number(v.pct_of_max_loss).toFixed(0) + '%' : '—'} ·
+            hard exit ${ev.hard_exit_at_ist || '—'} IST · countdown ${cd}</p>
+          <p class="tg-note"><strong>Exit preview:</strong> ${v.exit_reason_preview || (ev.closest && ev.closest.reason) || '—'}</p>
+          <p class="tg-note">Greeks δ ${g.delta != null ? Number(g.delta).toFixed(3) : '—'} ·
+            θ ${g.theta != null ? Number(g.theta).toFixed(3) : '—'} ·
+            ν ${g.vega != null ? Number(g.vega).toFixed(3) : '—'}</p>
+          <div class="tg-triggers">${triggers}</div>
+          <div class="tg-table-wrap"><table class="tg-table">
+            <thead><tr><th>Side</th><th>Strike</th><th>Mark</th><th>δ</th><th>Entry</th></tr></thead>
+            <tbody>${legs || '<tr><td colspan="5">—</td></tr>'}</tbody>
+          </table></div>
+          <div class="tg-ticket-actions" style="display:flex;gap:8px;margin-top:10px;">
+            <button type="button" class="tg-btn tg-btn-danger tg-exit-one" data-id="${t.id}">Exit</button>
+            <button type="button" class="tg-btn tg-note-btn" data-id="${t.id}">Add note</button>
+          </div>
+        </article>`;
+      }).join('');
+      host.querySelectorAll('.tg-exit-one').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!window.confirm(`Exit PAPER trade #${btn.dataset.id}?`)) return;
+          const status = document.getElementById('statusLine');
+          try {
+            const out = await api(`/api/tarang/trades/${btn.dataset.id}/exit`, {
+              method: 'POST',
+              body: JSON.stringify({ reason: 'MANUAL', note: '' }),
+            });
+            status.textContent = `Closed #${out.trade_id} net ${fmtInr(out.net_pnl)}`;
+            await loadInTrade();
+          } catch (err) {
+            status.textContent = String(err.message || err);
+          }
+        });
+      });
+      host.querySelectorAll('.tg-note-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const note = window.prompt('Note:') || '';
+          if (!note) return;
+          await api(`/api/tarang/trades/${btn.dataset.id}/note`, {
+            method: 'POST',
+            body: JSON.stringify({ note }),
+          });
+          await loadInTrade();
+        });
+      });
+    }
+    const alertBody = document.getElementById('alertBody');
+    const alerts = data.alerts || [];
+    if (!alerts.length) {
+      alertBody.innerHTML = '<tr><td colspan="4" class="tg-muted">No alerts</td></tr>';
+    } else {
+      alertBody.innerHTML = alerts.slice(0, 25).map((a) => `<tr>
+        <td class="tg-muted">${(a.created_at || '').replace('T', ' ').slice(0, 19)}</td>
+        <td>${a.level}</td>
+        <td>${a.message}</td>
+        <td>${a.trade_id || '—'}</td>
+      </tr>`).join('');
+    }
+  }
+
+  function renderReport(rep) {
+    const m = rep.metrics || {};
+    const box = document.getElementById('reportMetrics');
+    const wr = m.win_rate != null ? `${(m.win_rate * 100).toFixed(0)}%` : '—';
+    const pf = m.profit_factor_infinite ? '∞' : (m.profit_factor != null ? Number(m.profit_factor).toFixed(2) : '—');
+    box.innerHTML = `
+      <div class="tg-metric"><span>Trades</span><strong>${m.count || 0}</strong></div>
+      <div class="tg-metric"><span>Win rate</span><strong>${wr}</strong></div>
+      <div class="tg-metric"><span>Avg win</span><strong>${fmtInr(m.avg_win)}</strong></div>
+      <div class="tg-metric"><span>Avg loss</span><strong>${fmtInr(m.avg_loss)}</strong></div>
+      <div class="tg-metric"><span>Profit factor</span><strong>${pf}</strong></div>
+      <div class="tg-metric"><span>Expectancy</span><strong>${fmtInr(m.expectancy)}</strong></div>
+      <div class="tg-metric"><span>Net total</span><strong>${fmtInr(m.net_total)}</strong></div>
+      <div class="tg-metric"><span>Max DD</span><strong>${fmtInr(m.max_drawdown)}</strong></div>
+    `;
+    const body = document.getElementById('reportBody');
+    const trades = rep.trades || [];
+    if (!trades.length) {
+      body.innerHTML = `<tr><td colspan="8" class="tg-muted">${rep.note || 'No closed trades'}</td></tr>`;
+      return;
+    }
+    body.innerHTML = trades.map((t) => `<tr>
+      <td>${t.id}</td>
+      <td>${t.profile_id || ''}</td>
+      <td>${t.structure || ''}</td>
+      <td>${t.exit_reason || '—'}</td>
+      <td>${fmtInr(t.gross_pnl)}</td>
+      <td class="${Number(t.net_pnl) >= 0 ? 'tg-pnl-pos' : 'tg-pnl-neg'}">${fmtInr(t.net_pnl)}</td>
+      <td>${fmtInr(t.fees_total)}</td>
+      <td class="tg-muted">${(t.exit_at || t.updated_at || '').replace('T', ' ').slice(0, 19)}</td>
+    </tr>`).join('');
+  }
+
   async function loadTicket(id) {
     const status = document.getElementById('statusLine');
     status.textContent = `Loading ticket ${id}…`;
@@ -216,6 +362,30 @@
       status.textContent = `Ticket ${id} loaded`;
     } catch (err) {
       renderTicket({ ok: false, error: String(err.message || err) });
+      status.textContent = String(err.message || err);
+    }
+  }
+
+  async function loadInTrade() {
+    const status = document.getElementById('statusLine');
+    try {
+      const data = await api('/api/tarang/in-trade');
+      renderInTrade(data);
+      status.textContent = `In-Trade: ${(data.trades || []).length} open`;
+    } catch (err) {
+      status.textContent = String(err.message || err);
+    }
+  }
+
+  async function loadReport() {
+    const mode = document.getElementById('reportMode').value || 'PAPER';
+    document.getElementById('btnCsv').href = `/api/tarang/report.csv?mode=${mode}`;
+    const status = document.getElementById('statusLine');
+    try {
+      const rep = await api(`/api/tarang/report?mode=${mode}&limit=100`);
+      renderReport(rep);
+      status.textContent = `Report ${mode}: ${(rep.metrics && rep.metrics.count) || 0} trades`;
+    } catch (err) {
       status.textContent = String(err.message || err);
     }
   }
@@ -294,15 +464,15 @@
   });
   document.getElementById('btnTake').addEventListener('click', async () => {
     if (!currentTicketId) return;
-    if (!window.confirm(`Take PAPER trade for candidate ${currentTicketId}? No live orders will be placed.`)) return;
+    if (!window.confirm(`Take PAPER trade for candidate ${currentTicketId}? Simulates fills — no live orders.`)) return;
     const status = document.getElementById('statusLine');
     try {
       const out = await api(`/api/tarang/ticket/${currentTicketId}/take`, {
         method: 'POST',
         body: JSON.stringify({ note: '' }),
       });
-      status.textContent = `PAPER trade #${out.trade_id} recorded`;
-      await loadTicket(currentTicketId);
+      status.textContent = `PAPER trade #${out.trade_id} → ${out.status}`;
+      switchTab('intrade');
     } catch (err) {
       status.textContent = String(err.message || err);
     }
@@ -326,10 +496,73 @@
         method: 'POST',
         body: JSON.stringify({ note, fills: {} }),
       });
-      status.textContent = `Manual PAPER trade #${out.trade_id} recorded`;
+      status.textContent = `Manual PAPER trade #${out.trade_id}`;
+      switchTab('intrade');
     } catch (err) {
       status.textContent = String(err.message || err);
     }
+  });
+
+  document.getElementById('btnRefreshIntrade').addEventListener('click', loadInTrade);
+  document.getElementById('btnRunExitEngine').addEventListener('click', async () => {
+    const status = document.getElementById('statusLine');
+    status.textContent = 'Running ExitEngine…';
+    try {
+      const out = await api('/api/tarang/exit-engine/run', { method: 'POST' });
+      status.textContent = `ExitEngine checked ${out.checked}`;
+      await loadInTrade();
+    } catch (err) {
+      status.textContent = String(err.message || err);
+    }
+  });
+  document.getElementById('btnExitAll').addEventListener('click', async () => {
+    if (!window.confirm('Exit ALL open PAPER Tarang trades?')) return;
+    const status = document.getElementById('statusLine');
+    try {
+      await api('/api/tarang/trades/exit-all', { method: 'POST', body: JSON.stringify({ reason: 'MANUAL' }) });
+      status.textContent = 'Exit all done';
+      await loadInTrade();
+    } catch (err) {
+      status.textContent = String(err.message || err);
+    }
+  });
+  document.getElementById('btnLoadReport').addEventListener('click', loadReport);
+  document.getElementById('reportMode').addEventListener('change', () => {
+    document.getElementById('btnCsv').href =
+      `/api/tarang/report.csv?mode=${document.getElementById('reportMode').value}`;
+  });
+
+  document.getElementById('btnCsv').addEventListener('click', async (e) => {
+    e.preventDefault();
+    const mode = document.getElementById('reportMode').value || 'PAPER';
+    try {
+      const res = await fetch(`/api/tarang/report.csv?mode=${mode}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (!res.ok) throw new Error('CSV download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tarang_report_${mode}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      document.getElementById('statusLine').textContent = String(err.message || err);
+    }
+  });
+
+  // Auto-refresh In-Trade when tab visible
+  document.querySelectorAll('.tg-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (intradeTimer) {
+        clearInterval(intradeTimer);
+        intradeTimer = null;
+      }
+      if (btn.dataset.tab === 'intrade') {
+        intradeTimer = setInterval(loadInTrade, 30000);
+      }
+    });
   });
 
   load();

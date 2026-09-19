@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=3" />
+    <link rel="stylesheet" href="tarang.css?v=4" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -40,7 +40,7 @@
                             <span class="tg-inline-badge tg-badge-paper" id="modeBadge" aria-live="polite">PAPER</span>
                             <span class="tg-inline-badge" id="autoBadge" aria-live="polite">AUTO OFF</span>
                         </h1>
-                        <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener &amp; paper trade ticket (admin)</p>
+                        <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener, paper In-Trade &amp; report (admin)</p>
                     </div>
                     <div class="tg-header-aside">
                         <button type="button" class="tg-btn" id="btnRefresh">Refresh</button>
@@ -54,6 +54,8 @@
                     <nav class="tg-tabs" aria-label="Kosmic Tarang views">
                         <button type="button" class="tg-tab active" data-tab="screener">Screener</button>
                         <button type="button" class="tg-tab" data-tab="ticket">Trade Ticket</button>
+                        <button type="button" class="tg-tab" data-tab="intrade">In-Trade</button>
+                        <button type="button" class="tg-tab" data-tab="report">Trade Report</button>
                         <button type="button" class="tg-tab" data-tab="health">Data health</button>
                     </nav>
 
@@ -109,6 +111,55 @@
                         </section>
                     </div>
 
+                    <div id="tab-intrade" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <div class="tg-ticket-bar">
+                                <h2 class="tg-section-title" style="margin:0;">Open PAPER trades</h2>
+                                <button type="button" class="tg-btn" id="btnRefreshIntrade">Refresh MTM</button>
+                                <button type="button" class="tg-btn" id="btnRunExitEngine">Run ExitEngine</button>
+                                <button type="button" class="tg-btn tg-btn-danger" id="btnExitAll">Exit all</button>
+                            </div>
+                            <p class="tg-note">Live mark-to-market · exit triggers · hard-exit countdown. Scheduler also flattens INTRADAY at venue hard exit.</p>
+                            <div id="intradeList"></div>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Alerts</h2>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead><tr><th>When</th><th>Level</th><th>Message</th><th>Trade</th></tr></thead>
+                                    <tbody id="alertBody"><tr><td colspan="4" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div id="tab-report" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <div class="tg-ticket-bar">
+                                <h2 class="tg-section-title" style="margin:0;">Trade Report</h2>
+                                <label for="reportMode">Mode</label>
+                                <select id="reportMode" class="tg-input">
+                                    <option value="PAPER" selected>PAPER</option>
+                                    <option value="LIVE">LIVE</option>
+                                </select>
+                                <button type="button" class="tg-btn" id="btnLoadReport">Load</button>
+                                <a class="tg-btn" id="btnCsv" href="/api/tarang/report.csv?mode=PAPER">CSV</a>
+                            </div>
+                            <div class="tg-metrics" id="reportMetrics"></div>
+                            <div class="tg-table-wrap" style="margin-top:12px;">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Id</th><th>Profile</th><th>Structure</th><th>Exit</th>
+                                            <th>Gross</th><th>Net</th><th>Fees</th><th>When</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="reportBody"><tr><td colspan="8" class="tg-muted">Load report</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+
                     <div id="tab-health" class="tg-tab-panel" hidden>
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Feed health</h2>
@@ -152,6 +203,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=3"></script>
+    <script src="tarang.js?v=4"></script>
 </body>
 </html>

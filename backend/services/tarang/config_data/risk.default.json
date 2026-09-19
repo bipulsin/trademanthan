@@ -23,6 +23,16 @@
     "delta_flat_ist": "17:00",
     "delta_expiry_ist": "17:30"
   },
+  "paper_fills": {
+    "spread_fraction": 0.40,
+    "usd_inr": 83.0,
+    "fees": {
+      "upstox_mcx_per_lot_roundtrip_inr": 80.0,
+      "delta_india_per_contract_roundtrip_usd": 0.10
+    },
+    "notes": "Fill at mid ± fraction of bid-ask (sells worse / buys worse). Fees are simple round-trip stubs until live charge APIs."
+  },
+  "alert_proximity_frac": 0.15,
   "upstox_ws": {
     "priority": "lower_than_commdiv",
     "provider_name": "tarang",
