@@ -92,6 +92,9 @@ def recent_gaps(limit: int = 40) -> List[Dict[str, Any]]:
         return out
     finally:
         db.close()
+
+
+def gaps_overlapping(start: datetime, end: datetime, venue: Optional[str] = None) -> List[Dict[str, Any]]:
     ensure_tarang_tables()
     db = SessionLocal()
     try:
