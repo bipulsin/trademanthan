@@ -39,6 +39,7 @@ import backend.routers.trap_ce_live_webhook as trap_ce_live_webhook
 import backend.routers.premium_futures_tv_webhook as premium_futures_tv_webhook
 import backend.routers.commodities_div_webhook as commodities_div_webhook
 import backend.routers.commodities_div as commodities_div
+import backend.routers.tarang as tarang
 import backend.routers.stock_option as stock_option
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
@@ -108,6 +109,10 @@ from backend.services.stock_option_scheduler import (
 from backend.services.commodities_div.scheduler import (
     start_commodities_div_ltp_scheduler,
     stop_commodities_div_ltp_scheduler,
+)
+from backend.services.tarang.scheduler import (
+    start_tarang_scheduler,
+    stop_tarang_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -295,6 +300,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Commodities Div LTP scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Commodities Div LTP scheduler")
 
+        try:
+            logger.info("Starting Kosmic Tarang IV snapshot scheduler...")
+            start_tarang_scheduler()
+            logger.info("✅ Kosmic Tarang scheduler: STARTED (IV snapshots IST)")
+        except Exception as e:
+            logger.error(f"❌ Kosmic Tarang scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Kosmic Tarang scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -434,6 +447,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping Commodities Div LTP scheduler: {e}", exc_info=True)
 
+    try:
+        stop_tarang_scheduler()
+        logger.info("✅ Kosmic Tarang scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Kosmic Tarang scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -505,6 +524,8 @@ app.include_router(premium_futures_tv_webhook.router)
 app.include_router(commodities_div_webhook.router)
 app.include_router(commodities_div.router, prefix="/api/commodities-div")
 app.include_router(commodities_div.router, prefix="/commodities-div")
+app.include_router(tarang.router, prefix="/api/tarang")
+app.include_router(tarang.router, prefix="/tarang")
 app.include_router(stock_option.router)
 app.include_router(stock_option.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")

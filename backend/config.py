@@ -165,4 +165,11 @@ class Settings(BaseSettings):
     # ISO timestamp in IST/UTC after which V2 logic applies to newly opened trades.
     DAILY_FUTURES_V2_DEPLOY_TS: str = os.getenv("DAILY_FUTURES_V2_DEPLOY_TS", "")
 
+    # Kosmic Tarang — Delta India (Tarang-specific; does not replace algo.py Delta keys)
+    DELTA_INDIA_API_KEY: str = os.getenv("DELTA_INDIA_API_KEY", "")
+    DELTA_INDIA_API_SECRET: str = os.getenv("DELTA_INDIA_API_SECRET", "")
+    DELTA_INDIA_API_URL: str = os.getenv(
+        "DELTA_INDIA_API_URL", "https://api.india.delta.exchange"
+    )
+
 settings = Settings()

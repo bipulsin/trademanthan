@@ -42,6 +42,7 @@ MENU_ITEMS: List[Dict[str, str]] = [
     {"key": "dailyfutures.html", "label": "Premium Futures"},
     {"key": "volumemismatchfutures.html", "label": "Volume Mismatch Futures"},
     {"key": "iron-condor.html", "label": "Iron Condor"},
+    {"key": "tarang.html", "label": "Kosmic Tarang"},
     {"key": "pivot-breakout.html", "label": "Pivot Breakout"},
     {"key": "arbitrage.html", "label": "Arbitrage Selection"},
     {"key": "cargpt.html", "label": "Composite Avg"},

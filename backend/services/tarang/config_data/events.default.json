@@ -1,0 +1,49 @@
+{
+  "product": "Kosmic Tarang",
+  "version": 1,
+  "blackout_hours_before": 2.5,
+  "events": [
+    {
+      "id": "eia_petroleum",
+      "label": "EIA Petroleum Status",
+      "applies_to": ["CL", "ENERGY"],
+      "recurrence": "weekly_wed_approx",
+      "notes": "Typically Wednesday; confirm live calendar. Skip/close 2–3h before."
+    },
+    {
+      "id": "eia_gas_storage",
+      "label": "EIA Natural Gas Storage",
+      "applies_to": ["NG", "ENERGY"],
+      "recurrence": "weekly_thu_approx",
+      "notes": "Typically Thursday; confirm live calendar."
+    },
+    {
+      "id": "opec_plus",
+      "label": "OPEC+",
+      "applies_to": ["CL", "ENERGY"],
+      "recurrence": "ad_hoc",
+      "notes": "Editable in platform calendar."
+    },
+    {
+      "id": "us_cpi",
+      "label": "US CPI",
+      "applies_to": ["CL", "NG", "BTC", "ETH", "ENERGY", "CRYPTO"],
+      "recurrence": "monthly",
+      "notes": "Macro blackout for energy + crypto."
+    },
+    {
+      "id": "fomc",
+      "label": "FOMC",
+      "applies_to": ["CL", "NG", "BTC", "ETH", "ENERGY", "CRYPTO"],
+      "recurrence": "ad_hoc",
+      "notes": "Macro blackout."
+    },
+    {
+      "id": "crypto_etf_flow",
+      "label": "Crypto ETF flow / exchange news",
+      "applies_to": ["BTC", "ETH", "CRYPTO"],
+      "recurrence": "ad_hoc",
+      "notes": "Operator-maintained."
+    }
+  ]
+}

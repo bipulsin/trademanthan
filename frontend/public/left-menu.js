@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|tarang/.test(path);
     }
 
     getCurrentPage() {
@@ -69,6 +69,7 @@ class LeftMenu {
         if (path.includes('divtest')) return 'divtest';
         if (path.includes('analysis')) return 'analysis';
         if (path.includes('iron-condor')) return 'iron-condor';
+        if (path.includes('tarang')) return 'tarang';
         return 'desktop';
     }
 
@@ -423,6 +424,10 @@ class LeftMenu {
                 <li class="nav-item" data-page="iron-condor.html">
                     <a class="nav-item-link" href="iron-condor.html"><i class="fas fa-layer-group"></i>
                     <span>Iron Condor</span></a>
+                </li>
+                <li class="nav-item nav-item-admin" data-page="tarang.html" style="display: none;" title="Administrator only through Phase 2">
+                    <a class="nav-item-link" href="tarang.html"><i class="fas fa-wave-square" style="color:#2dd4bf;"></i>
+                    <span>Kosmic Tarang</span></a>
                 </li>
                 <li class="nav-item" data-page="pivot-breakout.html">
                     <a class="nav-item-link" href="pivot-breakout.html"><i class="fas fa-bullseye"></i>
@@ -1132,6 +1137,7 @@ class LeftMenu {
             case 'havwap': return 'havwap.html';
             case 'divtest': return 'divtest.html';
             case 'iron-condor': return 'iron-condor.html';
+            case 'tarang': return 'tarang.html';
             case 'analysis': return 'analysis.html';
             case 'kavachIgnitionDiag': return 'kavachIgnitionDiag.html';
             case 'rs-journey': return 'rs-journey.html';

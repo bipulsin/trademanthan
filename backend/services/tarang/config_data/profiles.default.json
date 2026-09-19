@@ -1,0 +1,83 @@
+{
+  "product": "Kosmic Tarang",
+  "version": 1,
+  "contractFamily": "full",
+  "notes": "Starting hypotheses from strategy doc §4. Minis disabled (CRUDEOILM / NATGASMINI out of scope).",
+  "profiles": {
+    "CL": {
+      "label": "MCX Crude Oil",
+      "venue": "upstox_mcx",
+      "underlying_symbol": "CRUDEOIL",
+      "risk_bucket": "ENERGY",
+      "contract_family": "full",
+      "short_delta_min": 0.10,
+      "short_delta_max": 0.16,
+      "width_steps_min": 5,
+      "width_steps_max": 8,
+      "expiry_min_dte": 7,
+      "session": "mcx",
+      "enabled": true
+    },
+    "NG": {
+      "label": "MCX Natural Gas",
+      "venue": "upstox_mcx",
+      "underlying_symbol": "NATURALGAS",
+      "risk_bucket": "ENERGY",
+      "contract_family": "full",
+      "short_delta_min": 0.10,
+      "short_delta_max": 0.14,
+      "width_steps_min": 3,
+      "width_steps_max": 5,
+      "expiry_min_dte": 7,
+      "session": "mcx",
+      "seasonal_half_size_months": [11, 12, 1, 2, 3],
+      "enabled": true
+    },
+    "BTC": {
+      "label": "Delta India BTC",
+      "venue": "delta_india",
+      "underlying_symbol": "BTC",
+      "risk_bucket": "CRYPTO",
+      "short_delta_min": 0.10,
+      "short_delta_max": 0.16,
+      "width_steps_min": 2,
+      "width_steps_max": 4,
+      "expiry_dte_min": 3,
+      "expiry_dte_max": 7,
+      "expiry_style": "weekly",
+      "session": "24x7",
+      "enabled": true
+    },
+    "ETH": {
+      "label": "Delta India ETH",
+      "venue": "delta_india",
+      "underlying_symbol": "ETH",
+      "risk_bucket": "CRYPTO",
+      "short_delta_min": 0.10,
+      "short_delta_max": 0.16,
+      "width_steps_min": 2,
+      "width_steps_max": 4,
+      "expiry_dte_min": 3,
+      "expiry_dte_max": 7,
+      "expiry_style": "weekly",
+      "session": "24x7",
+      "enabled": true
+    },
+    "BTC_WEEKEND": {
+      "label": "Delta BTC Weekend Window",
+      "venue": "delta_india",
+      "underlying_symbol": "BTC",
+      "risk_bucket": "CRYPTO",
+      "enabled": false,
+      "experimental": true
+    },
+    "ETH_WEEKEND": {
+      "label": "Delta ETH Weekend Window",
+      "venue": "delta_india",
+      "underlying_symbol": "ETH",
+      "risk_bucket": "CRYPTO",
+      "enabled": false,
+      "experimental": true
+    }
+  }
+}

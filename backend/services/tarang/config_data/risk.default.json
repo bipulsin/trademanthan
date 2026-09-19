@@ -1,0 +1,49 @@
+{
+  "product": "Kosmic Tarang",
+  "version": 1,
+  "mode_default": "PAPER",
+  "auto_default": false,
+  "holding_mode_default": "INTRADAY",
+  "min_credit_fraction_of_width": 0.20,
+  "liquidity_max_spread_pct_of_mid": 15.0,
+  "iv_percentile_min": 50,
+  "iv_percentile_min_snapshots": 60,
+  "iv_vs_rv_relative_min": 0.10,
+  "profit_take_frac_of_credit": 0.40,
+  "credit_stop_multiple": 2.0,
+  "delta_stop_min": 0.30,
+  "delta_stop_max": 0.35,
+  "iv_stop_relative_rise": 0.25,
+  "free_margin_buffer_pct": 30.0,
+  "kill_consecutive_losses": 3,
+  "hard_exits": {
+    "mcx_warning_ist": "23:10",
+    "mcx_flat_ist": "23:15",
+    "delta_warning_ist": "16:55",
+    "delta_flat_ist": "17:00",
+    "delta_expiry_ist": "17:30"
+  },
+  "upstox_ws": {
+    "priority": "lower_than_commdiv",
+    "provider_name": "tarang",
+    "max_keys": 50,
+    "chunk_size_observed": 100,
+    "notes": "Phase 1 uses REST Option Greek primarily. Shared upstox_market_feed batches of 100; Tarang may register via set_feed_provider_keys('tarang', keys) capped at max_keys for screener-needed strikes only. Do not change CommDiv behaviour."
+  },
+  "buckets": {
+    "ENERGY": {
+      "per_trade_budget_inr": 40000,
+      "hard_cap_inr": 50000,
+      "portfolio_limit_multiple": 2,
+      "portfolio_limit_inr": 80000,
+      "rationale": "Full CRUDEOIL/NATURALGAS profile-min widths need ~₹18.75k (NG 3-step) to ₹25k (CL 5-step) per lot at zero credit; CL profile-max is ₹40k/lot. Default ₹40k allows ≥1 full lot at profile-min for both and at CL profile-max zero-credit when liquidity allows. Hard cap ₹50k. Portfolio open risk = 2× per-trade = ₹80k. Minis remain disabled (contractFamily=full)."
+    },
+    "CRYPTO": {
+      "per_trade_budget_inr": 3000,
+      "hard_cap_inr": 10000,
+      "portfolio_limit_multiple": 2,
+      "portfolio_limit_inr": 6000,
+      "rationale": "Delta BTC/ETH contract_value (0.001 / 0.01) keeps per-contract max loss well under ₹3k–10k at profile widths; keep strategy-doc default until live fills prove otherwise."
+    }
+  }
+}

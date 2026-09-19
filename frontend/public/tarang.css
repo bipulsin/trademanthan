@@ -1,0 +1,40 @@
+/* Kosmic Tarang — Phase 1 data-health */
+.tarang-page .tarang-shell { padding: 16px 20px 40px; max-width: 1100px; }
+.tarang-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
+.tarang-toolbar h1 { margin:0; font-size:1.35rem; }
+.tarang-muted { color: var(--text-muted, #94a3b8); font-size:0.85rem; }
+.tarang-badges { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.tarang-badge {
+  display:inline-block; padding:4px 10px; border-radius:4px; font-size:0.75rem; font-weight:700;
+  letter-spacing:0.04em; background:#1e293b; color:#e2e8f0; border:1px solid #334155;
+}
+.tarang-badge-paper { background:#0f766e; border-color:#14b8a6; color:#ecfdf5; }
+.tarang-badge-warn { background:#7c2d12; border-color:#ea580c; color:#ffedd5; }
+.tarang-badge-ok { background:#14532d; border-color:#22c55e; color:#dcfce7; }
+.tarang-badge-bad { background:#7f1d1d; border-color:#ef4444; color:#fee2e2; }
+.tarang-btn {
+  border:1px solid #475569; background:#1e293b; color:#e2e8f0; padding:6px 12px;
+  border-radius:4px; cursor:pointer; font-size:0.82rem;
+}
+.tarang-btn-primary { background:#0ea5e9; border-color:#0284c7; color:#0f172a; font-weight:600; }
+.tarang-section { margin: 18px 0 24px; }
+.tarang-section h2 { font-size:1rem; margin:0 0 10px; }
+.tarang-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
+.tarang-card {
+  border:1px solid #334155; border-radius:6px; padding:12px 14px; background: rgba(15,23,42,0.45);
+}
+.tarang-card h3 { margin:0 0 6px; font-size:0.9rem; }
+.tarang-pre {
+  margin:0; padding:12px; border-radius:6px; border:1px solid #334155;
+  background: rgba(15,23,42,0.55); font-size:0.78rem; overflow:auto; white-space:pre-wrap;
+}
+.tarang-table-wrap { overflow:auto; border:1px solid #334155; border-radius:6px; }
+.tarang-t { width:100%; border-collapse:collapse; font-size:0.82rem; }
+.tarang-t th, .tarang-t td { padding:8px 10px; border-bottom:1px solid #334155; text-align:left; }
+.tarang-t th { background: rgba(30,41,59,0.8); font-weight:600; }
+.tarang-banner {
+  margin-bottom:12px; padding:10px 12px; border-radius:6px;
+  background:#7c2d12; border:1px solid #ea580c; color:#ffedd5; font-size:0.85rem;
+}
+.tarang-fit-yes { color:#4ade80; font-weight:600; }
+.tarang-fit-no { color:#f87171; font-weight:600; }

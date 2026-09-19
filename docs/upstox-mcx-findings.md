@@ -88,32 +88,23 @@ Base `https://api.india.delta.exchange/v2`. Symbols `C|P-{BTC|ETH}-{strike}-{DDM
 ### Credential check (read-only)
 
 Script: `scripts/tarang_phase0_delta_creds_check.py`  
-Calls: `GET /v2/wallet/balances`, `GET /v2/positions` only (no orders).
+Calls: `GET /v2/wallet/balances`, `GET /v2/positions` (and margined) only (no orders).
 
-| Field | Value |
-|---|---|
-| Verdict | **`FAIL_IP_NOT_WHITELISTED`** |
-| Source | Existing keys in `backend/routers/algo.py` (no `DELTA_*` in paperclip `.env`) |
-| Error | `ip_not_whitelisted_for_api_key` |
-| Client IPs tried | Local workstation **and** paperclip `140.245.14.17` |
-| Read balances/positions | Not proven (blocked before payload) |
-| Trade perms | Not tested (by design) |
+**Phase 1 update:** Tarang-specific keys stored as `DELTA_INDIA_API_*` in paperclip `/home/ubuntu/twcto/.env` + local `.env` (never git). From paperclip egress `140.245.14.17`: **balances HTTP 200 success** (7 assets); **positions/margined HTTP 200** (0 positions). Plain `/v2/positions` may return `bad_schema` without product filter — use margined for health. Local workstation may still see `ip_not_whitelisted_for_api_key` if home IP is not whitelisted.
 
-**Blocking:** Whitelist paperclip IP (and/or issue new India keys with read access). Do not invent keys. Market-data screening can proceed on public endpoints; authenticated Delta adapter waits on this.
-
-### Crypto sizing (public)
+## Crypto sizing (public)
 
 See [`tarang-sizing-min-max-loss.md`](./tarang-sizing-min-max-loss.md). Per-contract max loss at profile widths is **well under** ₹3k–10k budget (often &lt; $1 / contract) because `contract_value` is 0.001 / 0.01.
 
 ---
 
-## Phase 1 planning notes (confirmed — do not implement yet)
+## Phase 1 notes
 
 - Tables: all `tarang_*` via `ensure_*`; IV history table name **`tarang_iv_snapshots`**.
 - Nav: **Kosmic Tarang** next to Iron Condor / CommDiv; **admin-only** through Phase 2.
 - Profiles: full CL/NG only (`contractFamily` default `full`).
-- Upstox infra: share limiter/WS with CommDiv, Tarang lower priority — ask before any CommDiv refactor.
-- Delta: reuse `delta_api`; paper + public India until keys work; testnet Phase 4.
+- Upstox infra: Tarang REST rate budget; shared WS via capped `set_feed_provider_keys('tarang')` later — CommDiv unchanged.
+- Delta: `DELTA_INDIA_API_*` env; paper + public India; authenticated read OK on paperclip; testnet Phase 4.
 
 ## Re-run commands
 

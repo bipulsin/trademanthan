@@ -1,0 +1,37 @@
+{
+  "product": "Kosmic Tarang",
+  "ran_at_utc": "2026-09-19T08:08:15.986247+00:00",
+  "upstox": {
+    "option_chain_api": "NOT available for MCX (documented); build from master + option-greek",
+    "option_greek": "v3 market-quote/option-greek \u2014 live only; no historical IV series from Upstox",
+    "historical_candles": {
+      "note": "No local Upstox token; candle probe skipped. Paperclip token used in production."
+    }
+  },
+  "delta_india": {
+    "/history/candles": {
+      "http": 200,
+      "success": true,
+      "result_type": "list",
+      "n": 90
+    },
+    "/tickers": {
+      "http": 200,
+      "success": true,
+      "n_tickers": 313
+    },
+    "option_symbol_candles_sample": {
+      "http": 200,
+      "success": true,
+      "error": null
+    }
+  },
+  "verdict": {
+    "mcx_option_chain_history": "NOT provided by Upstox MCX option-chain API (unavailable). Must own-snapshot ATM IV going forward; vendor chains may be needed for multi-year backtest.",
+    "mcx_futures_ohlc": "Upstox historical candle endpoints typically support MCX FUT instrument keys when token valid \u2014 use for realized vol; confirm on paperclip with live token.",
+    "mcx_option_iv_history": "NONE from Upstox \u2014 build via tarang_iv_snapshots starting Phase 1.",
+    "delta_spot_perp_ohlc": "Public /v2/history/candles available for underlying symbols (see probe).",
+    "delta_option_chain_history": "No dedicated IV history API; live tickers expose mark_vol. Snapshot locally. Option candle history may work for specific symbols when listed (sample probed).",
+    "phase6_implication": "Backtest needs either vendor MCX option history or months of own snapshots; Delta crypto can use public candles + own option snapshots for 6\u201312 months."
+  }
+}
