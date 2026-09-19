@@ -47,7 +47,7 @@ def build_health_payload() -> Dict[str, Any]:
     token_expired = token_state in ("missing", "expired")
     return {
         "product": "Kosmic Tarang",
-        "phase": 1,
+        "phase": 2,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "mode": settings.get("mode") or "PAPER",
         "auto": bool(settings.get("auto")),

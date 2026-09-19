@@ -14,7 +14,7 @@ class ChainBuilder:
         self._upstox = UpstoxMcxAdapter()
         self._delta = DeltaIndiaAdapter()
 
-    def build(self, profile_id: str, expiry: Optional[str] = None) -> OptionChain:
+    def build(self, profile_id: str, expiry: Optional[str] = None, atm_window: int = 8) -> OptionChain:
         profiles = (get_profiles().get("profiles") or {})
         prof = profiles.get(profile_id) or profiles.get(profile_id.upper())
         if not prof:
@@ -31,7 +31,7 @@ class ChainBuilder:
         venue = prof.get("venue")
         underlying = prof.get("underlying_symbol") or profile_id
         if venue == "upstox_mcx":
-            return self._upstox.build_chain(profile_id, underlying, expiry=expiry)
+            return self._upstox.build_chain(profile_id, underlying, expiry=expiry, atm_window=atm_window)
         if venue == "delta_india":
             return self._delta.build_chain(profile_id, underlying, expiry=expiry)
         return OptionChain(

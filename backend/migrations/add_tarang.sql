@@ -67,6 +67,23 @@ CREATE TABLE IF NOT EXISTS tarang_candidates (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE INDEX IF NOT EXISTS ix_tarang_candidates_profile_time
+    ON tarang_candidates (profile_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tarang_rejections (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    profile_id TEXT NOT NULL,
+    gate_name TEXT NOT NULL,
+    detail TEXT,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS ix_tarang_rejections_profile_time
+    ON tarang_rejections (profile_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_tarang_rejections_gate_time
+    ON tarang_rejections (gate_name, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS tarang_trades (
     id BIGSERIAL PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

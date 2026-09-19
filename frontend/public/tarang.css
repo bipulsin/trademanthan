@@ -365,6 +365,104 @@ body.tarang-page .mobile-logo {
     font-weight: 600;
 }
 
+/* Tabs — match stockOptions bf-tabs */
+.tg-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin: 0 0 1rem;
+    flex-wrap: wrap;
+}
+
+.tg-tab {
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    padding: 0.45rem 0.95rem;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-family: var(--font-body);
+    font-weight: 600;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tg-tab:hover {
+    background: rgba(61, 186, 122, 0.12);
+    border-color: rgba(61, 186, 122, 0.35);
+}
+
+.tg-tab.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #062015;
+}
+
+.tg-status-chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--muted);
+}
+
+.tg-status-QUALIFIED { background: rgba(61, 186, 122, 0.2); border-color: rgba(61, 186, 122, 0.5); color: #8ef0b8; }
+.tg-status-WATCHING { background: rgba(212, 160, 23, 0.16); border-color: rgba(212, 160, 23, 0.45); color: #f0d78c; }
+.tg-status-BLOCKED { background: rgba(224, 107, 107, 0.18); border-color: rgba(224, 107, 107, 0.45); color: #f5a8a8; }
+.tg-status-WARMING_UP { background: rgba(100, 140, 180, 0.2); border-color: rgba(140, 180, 220, 0.4); color: #b8d4f0; }
+
+.tg-input {
+    background: var(--card-inner);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 0.4rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    width: 7rem;
+}
+
+.tg-ticket-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.tg-ticket-bar label {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.tg-ticket-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.tg-gate-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.85rem;
+}
+
+.tg-gate-list li {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.tg-gate-pass { color: var(--accent); }
+.tg-gate-fail { color: var(--danger); }
+
 @media (max-width: 768px) {
     body.tarang-page .tg-page {
         padding: 16px 12px 40px;

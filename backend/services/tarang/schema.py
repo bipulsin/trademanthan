@@ -14,9 +14,9 @@ _MIGRATION = Path(__file__).resolve().parents[2] / "migrations" / "add_tarang.sq
 _ENSURED = False
 
 
-def ensure_tarang_tables() -> None:
+def ensure_tarang_tables(*, force: bool = False) -> None:
     global _ENSURED
-    if _ENSURED:
+    if _ENSURED and not force:
         return
     if not _MIGRATION.is_file():
         raise FileNotFoundError(f"migration missing: {_MIGRATION}")

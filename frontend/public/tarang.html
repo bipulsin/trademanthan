@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=2" />
+    <link rel="stylesheet" href="tarang.css?v=3" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -40,61 +40,118 @@
                             <span class="tg-inline-badge tg-badge-paper" id="modeBadge" aria-live="polite">PAPER</span>
                             <span class="tg-inline-badge" id="autoBadge" aria-live="polite">AUTO OFF</span>
                         </h1>
-                        <p class="settings-subtitle tg-subtitle">Phase 1 — data health · IV snapshots · read-only feeds</p>
+                        <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener &amp; paper trade ticket (admin)</p>
                     </div>
                     <div class="tg-header-aside">
                         <button type="button" class="tg-btn" id="btnRefresh">Refresh</button>
-                        <button type="button" class="tg-btn tg-btn-primary" id="btnIvSnap">Run IV snapshot</button>
+                        <button type="button" class="tg-btn tg-btn-primary" id="btnScreen">Run screener</button>
                     </div>
                 </div>
                 <div class="settings-content">
                     <p id="tokenBanner" class="tg-banner" hidden></p>
                     <p id="statusLine" class="tg-note">Loading…</p>
 
-                    <section class="tg-card tg-section">
-                        <h2 class="tg-section-title">Feed health</h2>
-                        <div class="tg-grid" id="feedGrid"></div>
-                    </section>
+                    <nav class="tg-tabs" aria-label="Kosmic Tarang views">
+                        <button type="button" class="tg-tab active" data-tab="screener">Screener</button>
+                        <button type="button" class="tg-tab" data-tab="ticket">Trade Ticket</button>
+                        <button type="button" class="tg-tab" data-tab="health">Data health</button>
+                    </nav>
 
-                    <section class="tg-card tg-section">
-                        <h2 class="tg-section-title">ENERGY / CRYPTO budgets</h2>
-                        <pre class="tg-pre" id="budgetBox">—</pre>
-                    </section>
+                    <div id="tab-screener" class="tg-tab-panel">
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Opportunities</h2>
+                            <p class="tg-note">CL / NG / BTC / ETH — QUALIFIED, WATCHING, BLOCKED, or WARMING UP. Admin-only · PAPER · AUTO OFF.</p>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table" id="screenTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Profile</th>
+                                            <th>Status</th>
+                                            <th>Structure</th>
+                                            <th>Credit / width</th>
+                                            <th>Lots</th>
+                                            <th>Failed gates</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="screenBody"><tr><td colspan="7" class="tg-muted">Run screener to load</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Recent rejections</h2>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr><th>When</th><th>Profile</th><th>Gate</th><th>Detail</th></tr>
+                                    </thead>
+                                    <tbody id="rejBody"><tr><td colspan="4" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
 
-                    <section class="tg-card tg-section">
-                        <h2 class="tg-section-title">Minimum max-loss per lot / contract</h2>
-                        <p class="tg-note">Zero-credit ceiling = width × multiplier. Source: Phase 0 sizing spike.</p>
-                        <div class="tg-table-wrap">
-                            <table class="tg-table">
-                                <thead>
-                                    <tr>
-                                        <th>Underlying</th>
-                                        <th>Width</th>
-                                        <th>Max loss</th>
-                                        <th>Budget</th>
-                                        <th>Fits?</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="lossBody"><tr><td colspan="5" class="tg-muted">—</td></tr></tbody>
-                            </table>
-                        </div>
-                    </section>
+                    <div id="tab-ticket" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Trade Ticket (PAPER)</h2>
+                            <p class="tg-note" id="ticketHint">Select a QUALIFIED candidate from Screener, or enter candidate id.</p>
+                            <div class="tg-ticket-bar">
+                                <label for="ticketId">Candidate id</label>
+                                <input id="ticketId" type="number" min="1" class="tg-input" />
+                                <button type="button" class="tg-btn" id="btnLoadTicket">Load</button>
+                            </div>
+                            <div id="ticketPanel" class="tg-ticket"></div>
+                            <div class="tg-ticket-actions" id="ticketActions" hidden>
+                                <button type="button" class="tg-btn tg-btn-primary" id="btnTake">Take trade (PAPER)</button>
+                                <button type="button" class="tg-btn" id="btnManual">Mark taken manually</button>
+                                <button type="button" class="tg-btn" id="btnDismiss">Dismiss</button>
+                            </div>
+                        </section>
+                    </div>
 
-                    <section class="tg-card tg-section">
-                        <h2 class="tg-section-title">IV snapshot counts</h2>
-                        <pre class="tg-pre" id="ivCounts">—</pre>
-                    </section>
-
-                    <section class="tg-card tg-section">
-                        <h2 class="tg-section-title">Upstox WS share (planning)</h2>
-                        <pre class="tg-pre" id="wsBox">—</pre>
-                    </section>
+                    <div id="tab-health" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Feed health</h2>
+                            <div class="tg-grid" id="feedGrid"></div>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">ENERGY / CRYPTO budgets</h2>
+                            <pre class="tg-pre" id="budgetBox">—</pre>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Minimum max-loss per lot / contract</h2>
+                            <p class="tg-note">Zero-credit ceiling = width × multiplier.</p>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Underlying</th>
+                                            <th>Width</th>
+                                            <th>Max loss</th>
+                                            <th>Budget</th>
+                                            <th>Fits?</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="lossBody"><tr><td colspan="5" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">IV snapshot counts</h2>
+                            <pre class="tg-pre" id="ivCounts">—</pre>
+                            <button type="button" class="tg-btn" id="btnIvSnap" style="margin-top:10px;">Run IV snapshot</button>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Upstox WS share (planning)</h2>
+                            <pre class="tg-pre" id="wsBox">—</pre>
+                        </section>
+                    </div>
                 </div>
             </div>
         </main>
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=2"></script>
+    <script src="tarang.js?v=3"></script>
 </body>
 </html>

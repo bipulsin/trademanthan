@@ -1,6 +1,6 @@
 # Kosmic Tarang — Architecture
 
-**Status:** Phase 1 complete (domain, config, DB, read-only adapters, ChainBuilder, Greeks, IV snapshots, data-health UI).  
+**Status:** Phase 2 complete (screener gates, rejections, candidates, Opportunities + PAPER Trade Ticket UI). Phase 3 (state machine / In-Trade / ExitEngine) not started.  
 **Product (user-facing):** **Kosmic Tarang** — IV-gated defined-risk options spreads (iron condor or single credit spread) for MCX Crude Oil / Natural Gas (Upstox) and BTC / ETH (Delta Exchange India).  
 **Internal code / routes / tables:** short prefix `tarang_` / `/tarang` (e.g. `tarang_iv_snapshots`).
 
@@ -29,11 +29,12 @@
 | Domain | `backend/services/tarang/domain/` |
 | Adapters | `backend/services/tarang/adapters/` (upstox_mcx, delta_india, rate_budget) |
 | Chain / Greeks / IV | `chain_builder.py`, `greeks.py`, `greeks_service.py`, `iv_normalize.py`, `iv_snapshots.py` |
-| Schema | `schema.py` + `backend/migrations/add_tarang.sql` |
+| Screener / ticket | `gates.py`, `structures.py`, `screener.py`, `ticket.py` |
+| Schema | `schema.py` + `backend/migrations/add_tarang.sql` (`tarang_rejections`, candidates, trades) |
 | API | `backend/routers/tarang.py` → `/api/tarang` + `/tarang` |
-| UI | `frontend/public/tarang.{html,js,css}` |
+| UI | `frontend/public/tarang.{html,js,css}` — Screener / Ticket / Data health tabs |
 | Scheduler | `backend/services/tarang/scheduler.py` |
-| Tests | `backend/test_tarang_greeks.py` |
+| Tests | `backend/test_tarang_greeks.py`, `backend/test_tarang_phase2.py` |
 | Docs | `docs/tarang-architecture.md`, `tarang-runbook.md`, `tarang-backtest-data.md`, `tarang-sizing-min-max-loss.md` |
 
 ## ENERGY budget (Phase 1)
@@ -59,8 +60,8 @@ CRYPTO remains ₹3k / ₹10k hard / ₹6k portfolio (2×).
 | Phase | Scope |
 |---|---|
 | **0** | Discovery, spikes (done) |
-| **1** | domain/config/DB/adapters read-only / ChainBuilder / Greeks / IV / data-health UI (**this**) |
-| **2** | Screener + Trade Ticket (paper) |
+| **1** | domain/config/DB/adapters read-only / ChainBuilder / Greeks / IV / data-health UI (**done**) |
+| **2** | Screener + Trade Ticket (paper) (**this**) |
 | **3** | State machine, paper broker, In-Trade, ExitEngine, Report |
 | **4** | Live brokers admin-gated |
 | **5** | AUTO / kill / hard-exit |
