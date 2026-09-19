@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,9 +12,11 @@ from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.tarang.backtest import run_backtest
+from backend.services.tarang.bhavcopy import checksum_from_html, import_bhavcopy_text
 from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.chain_snapshots import capture_chain_snapshots
 from backend.services.tarang.config import get_events, get_profiles, get_risk
+from backend.services.tarang.eod_reconstruct import liquidity_report, persist_reconstruction
 from backend.services.tarang.events import list_alerts
 from backend.services.tarang.expiry_eligibility import expiry_eligibility
 from backend.services.tarang.health import build_health_payload
@@ -143,13 +145,58 @@ def tarang_eligibility(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
 
 
 @router.get("/backtest")
-def tarang_backtest_get(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
-    return run_backtest()
+def tarang_backtest_get(
+    source: str = "snapshots",
+    fill_mode: str = "base",
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    return run_backtest(source=source, fill_mode=fill_mode)
 
 
 @router.post("/backtest/run")
-def tarang_backtest_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
-    return run_backtest()
+def tarang_backtest_run(
+    source: str = "snapshots",
+    fill_mode: str = "base",
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    return run_backtest(source=source, fill_mode=fill_mode)
+
+
+@router.post("/bhavcopy/import")
+async def tarang_bhavcopy_import(
+    file: UploadFile = File(...),
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    raw = await file.read()
+    text = raw.decode("utf-8", errors="replace")
+    return import_bhavcopy_text(text, filename=file.filename or "upload.csv")
+
+
+@router.post("/bhavcopy/checksum")
+async def tarang_bhavcopy_checksum(
+    file: Optional[UploadFile] = File(None),
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    if file is None:
+        return {
+            "skipped": True,
+            "note": "No Date Wise file uploaded; checksum parser is available. Unit tests cover the 1% threshold.",
+        }
+    raw = await file.read()
+    html = raw.decode("utf-8", errors="replace")
+    return checksum_from_html(html, filename=file.filename or "")
+
+
+@router.post("/bhavcopy/reconstruct")
+def tarang_bhavcopy_reconstruct(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return persist_reconstruction()
+
+
+@router.get("/bhavcopy/liquidity")
+def tarang_bhavcopy_liquidity(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return liquidity_report()
 
 
 @router.post("/settings/auto")

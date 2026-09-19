@@ -59,11 +59,15 @@ inbox/chartink_daily_futures/
 !backend/nse_holidays_2026.csv
 !scripts/ic_universe_sheet9.csv
 !data/trap_ce/*.csv
+!backend/test_fixtures/tarang_bhavcopy_tiny.csv
 *.xlsx
 data/*
 !data/nk_vm_bull_backtest_source.csv
 !data/trap_ce/
 !data/trap_ce/**
+!data/mcx_bhavcopy/
+!data/mcx_bhavcopy/README.md
+data/mcx_bhavcopy/raw/*.csv
 data/ha_vwap/cache/
 data/ha_vwap/cache/**
 !data/ha_vwap/

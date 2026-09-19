@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=6" />
+    <link rel="stylesheet" href="tarang.css?v=7" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -173,9 +173,10 @@
                                 <h2 class="tg-section-title" style="margin:0;">Replay harness</h2>
                                 <button type="button" class="tg-btn" id="btnRunBacktest">Run replay</button>
                             </div>
-                            <p class="tg-note">Same Screener structure rules, SizingService and ExitEngine on stored delta-window snapshots. narrow_window (ATM±10) rows are excluded from short/wing validation. Phase 4 is held.</p>
+                            <p class="tg-note">Same Screener structure rules, SizingService and ExitEngine. Snapshot replay skips narrow_window (ATM±10) for wing validation. MCX EOD path is labelled <strong>MCX EOD-reconstructed, modelled fills</strong>. INTRADAY cannot be tested on EOD. Phase 4 is held.</p>
                             <p id="backtestMsg" class="tg-note"></p>
                             <div class="tg-metrics" id="backtestMetrics"></div>
+                            <div id="eodLiqBox" class="tg-note"></div>
                             <div class="tg-table-wrap" style="margin-top:12px;">
                                 <table class="tg-table">
                                     <thead>
@@ -196,6 +197,11 @@
 
                     <div id="tab-health" class="tg-tab-panel" hidden>
                         <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">EOD liquidity (Bhavcopy)</h2>
+                            <p class="tg-note">Traded 10–16 |delta| strikes and iron-condor wing availability per date.</p>
+                            <pre class="tg-pre" id="eodLiqHealth">—</pre>
+                        </section>
+                        <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Phase 4 hold</h2>
                             <pre class="tg-pre" id="phase4Box">—</pre>
                         </section>
@@ -210,12 +216,13 @@
                                             <th>Expiry</th>
                                             <th>DTE</th>
                                             <th>Min</th>
+                                            <th>Max</th>
                                             <th>Time stop</th>
                                             <th>Tradable?</th>
                                             <th>Note</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="eligBody"><tr><td colspan="7" class="tg-muted">—</td></tr></tbody>
+                                            <tbody id="eligBody"><tr><td colspan="8" class="tg-muted">—</td></tr></tbody>
                                 </table>
                             </div>
                         </section>
@@ -284,6 +291,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=6"></script>
+    <script src="tarang.js?v=7"></script>
 </body>
 </html>

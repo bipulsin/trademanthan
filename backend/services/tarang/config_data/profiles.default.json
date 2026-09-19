@@ -23,6 +23,7 @@
       "width_steps_min": 5,
       "width_steps_max": 8,
       "expiry_min_dte": 7,
+      "expiry_dte_max": 35,
       "time_stop_dte": 5,
       "session": "mcx",
       "enabled": true
@@ -38,6 +39,7 @@
       "width_steps_min": 3,
       "width_steps_max": 5,
       "expiry_min_dte": 7,
+      "expiry_dte_max": 35,
       "time_stop_dte": 5,
       "session": "mcx",
       "seasonal_half_size_months": [11, 12, 1, 2, 3],

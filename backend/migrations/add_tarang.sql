@@ -256,3 +256,52 @@ CREATE INDEX IF NOT EXISTS ix_tarang_liq_probes_und_time
 
 ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS origin TEXT;
 
+CREATE TABLE IF NOT EXISTS tarang_hist_imports (
+    id BIGSERIAL PRIMARY KEY,
+    filename TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    report JSONB
+);
+
+CREATE TABLE IF NOT EXISTS tarang_hist_eod (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    expiry_date DATE NOT NULL,
+    option_type TEXT NOT NULL,
+    strike DOUBLE PRECISION NOT NULL,
+    trade_date DATE NOT NULL,
+    open DOUBLE PRECISION,
+    high DOUBLE PRECISION,
+    low DOUBLE PRECISION,
+    close DOUBLE PRECISION,
+    prev_close DOUBLE PRECISION,
+    volume_lots INTEGER,
+    value_lacs DOUBLE PRECISION,
+    oi_lots INTEGER,
+    instrument_name TEXT,
+    traded BOOLEAN NOT NULL DEFAULT FALSE,
+    source_filename TEXT,
+    import_id BIGINT REFERENCES tarang_hist_imports(id) ON DELETE SET NULL,
+    iv DOUBLE PRECISION,
+    delta DOUBLE PRECISION,
+    greeks_source TEXT,
+    underlying_price DOUBLE PRECISION,
+    underlying_source TEXT,
+    reconstruction_run_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tarang_hist_eod_key
+    ON tarang_hist_eod (symbol, expiry_date, option_type, strike, trade_date);
+CREATE INDEX IF NOT EXISTS ix_tarang_hist_eod_symbol_date
+    ON tarang_hist_eod (symbol, trade_date);
+CREATE INDEX IF NOT EXISTS ix_tarang_hist_eod_recon
+    ON tarang_hist_eod (reconstruction_run_id);
+
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS iv DOUBLE PRECISION;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS delta DOUBLE PRECISION;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS greeks_source TEXT;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_price DOUBLE PRECISION;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_source TEXT;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS reconstruction_run_id TEXT;
+

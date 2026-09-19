@@ -457,6 +457,12 @@
     }, null, 2);
     const p4 = document.getElementById('phase4Box');
     if (p4) p4.textContent = JSON.stringify(h.phase4 || {}, null, 2);
+    const eliq = document.getElementById('eodLiqHealth');
+    if (eliq) {
+      const liq = h.eod_liquidity || {};
+      const sample = (liq.rows || []).slice(0, 12);
+      eliq.textContent = JSON.stringify({ dates: liq.dates, sample, note: liq.note || liq.error }, null, 2);
+    }
     renderEligibility(h.expiry_eligibility);
     return h;
   }
@@ -466,7 +472,7 @@
     if (!body) return;
     const rows = (elig && elig.rows) || [];
     if (!rows.length) {
-      body.innerHTML = `<tr><td colspan="7" class="tg-muted">${(elig && elig.error) || 'No listed expiries'}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="8" class="tg-muted">${(elig && elig.error) || 'No listed expiries'}</td></tr>`;
       return;
     }
     body.innerHTML = rows.map((r) => `<tr>
@@ -474,6 +480,7 @@
       <td>${r.expiry || '—'}</td>
       <td>${r.dte != null ? r.dte : '—'}</td>
       <td>${r.min_dte != null ? r.min_dte : '—'}</td>
+      <td>${r.max_dte != null ? r.max_dte : '—'}</td>
       <td>${r.time_stop_dte != null ? r.time_stop_dte : '—'}</td>
       <td class="${r.tradable ? 'tg-fit-yes' : 'tg-fit-no'}">${r.tradable ? 'Yes' : 'No'}</td>
       <td class="tg-muted">${r.note || (r.reasons || []).join(', ') || ''}</td>
@@ -485,20 +492,29 @@
     const metrics = document.getElementById('backtestMetrics');
     const body = document.getElementById('backtestTimeline');
     if (!msg) return;
+    const label = bt.label || (bt.source === 'mcx_eod' ? 'MCX EOD-reconstructed, modelled fills' : '');
+    const nTrades = (bt.metrics && bt.metrics.count) || (bt.trades || []).length || 0;
+    const cycles = (bt.metrics && bt.metrics.expiry_cycles) || bt.expiry_cycles || 0;
     if (bt.insufficient_data) {
       msg.textContent = bt.message || 'Insufficient data.';
       msg.classList.add('tg-fit-no');
     } else {
-      msg.textContent = `Replay trades: ${(bt.metrics && bt.metrics.count) || 0}. ${bt.note || ''}`;
+      msg.textContent = `${label ? label + '. ' : ''}Expiry cycles: ${cycles}. Trades: ${nTrades}. ${bt.intraday_note || ''} ${bt.note || ''}`;
       msg.classList.remove('tg-fit-no');
     }
     const m = bt.metrics || {};
+    const gateHidden = bt.show_go_live_gate === false || nTrades < (bt.go_live_gate_hidden_until_trades || 40);
     metrics.innerHTML = `
-      <div class="tg-metric"><span>Wide days</span><strong>${bt.wide_days || 0}</strong></div>
-      <div class="tg-metric"><span>Need</span><strong>${bt.min_days_required || 5}</strong></div>
-      <div class="tg-metric"><span>Replay trades</span><strong>${m.count || 0}</strong></div>
-      <div class="tg-metric"><span>Gaps</span><strong>${(bt.data_gaps || []).length}</strong></div>
+      <div class="tg-metric"><span>Label</span><strong>${label || 'Snapshot replay'}</strong></div>
+      <div class="tg-metric"><span>Expiry cycles</span><strong>${cycles}</strong></div>
+      <div class="tg-metric"><span>Trades</span><strong>${nTrades}</strong></div>
+      <div class="tg-metric"><span>Fill mode</span><strong>${bt.fill_mode || '—'}</strong></div>
+      ${gateHidden ? '' : `<div class="tg-metric"><span>Go-live gate</span><strong>${bt.go_live_gate || 'n/a'}</strong></div>`}
     `;
+    const liq = document.getElementById('eodLiqBox');
+    if (liq && bt.intraday_note) {
+      liq.textContent = bt.intraday_note;
+    }
     const rows = bt.timeline || (bt.coverage && bt.coverage.underlyings) || [];
     if (!rows.length) {
       body.innerHTML = '<tr><td colspan="6" class="tg-muted">No coverage yet</td></tr>';
@@ -517,7 +533,7 @@
   async function loadBacktest() {
     const status = document.getElementById('statusLine');
     try {
-      const bt = await api('/api/tarang/backtest');
+      const bt = await api('/api/tarang/backtest?source=eod');
       renderBacktest(bt);
       status.textContent = bt.insufficient_data ? 'Backtest: insufficient data' : `Backtest: ${(bt.metrics && bt.metrics.count) || 0} trades`;
     } catch (err) {
@@ -668,7 +684,7 @@
       const status = document.getElementById('statusLine');
       status.textContent = 'Running replay…';
       try {
-        const bt = await api('/api/tarang/backtest/run', { method: 'POST' });
+        const bt = await api('/api/tarang/backtest/run?source=eod', { method: 'POST' });
         renderBacktest(bt);
         status.textContent = bt.insufficient_data ? 'Insufficient data' : `Replay ${((bt.metrics && bt.metrics.count) || 0)} trades`;
       } catch (err) {

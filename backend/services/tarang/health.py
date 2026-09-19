@@ -13,6 +13,7 @@ from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
 from backend.services.tarang.chain_snapshots import chain_coverage
 from backend.services.tarang.config import get_events, get_profiles, get_risk, validate_profiles
 from backend.services.tarang.data_gaps import recent_gaps
+from backend.services.tarang.eod_reconstruct import liquidity_report
 from backend.services.tarang.expiry_eligibility import expiry_eligibility
 from backend.services.tarang.iv_snapshots import recent_iv_snapshot_counts
 from backend.services.tarang.schema import ensure_tarang_tables
@@ -94,6 +95,10 @@ def build_health_payload() -> Dict[str, Any]:
         eligibility = expiry_eligibility()
     except Exception as e:
         eligibility = {"error": str(e)[:200], "rows": []}
+    try:
+        eod_liq = liquidity_report()
+    except Exception as e:
+        eod_liq = {"error": str(e)[:200], "rows": []}
     return {
         "product": "Kosmic Tarang",
         "phase": 3,
@@ -112,6 +117,7 @@ def build_health_payload() -> Dict[str, Any]:
         "chain_coverage": cov,
         "data_gaps": recent_gaps(20),
         "liquidity_probes": last_probes,
+        "eod_liquidity": eod_liq,
         "expiry_eligibility": eligibility,
         "profile_validation": validate_profiles(),
         "phase4": hold,

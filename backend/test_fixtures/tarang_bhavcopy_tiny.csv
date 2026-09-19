@@ -1,0 +1,5 @@
+Date,Instrument Name,Symbol,Expiry Date,Option Type,Strike Price,Open,High,Low,Close,Previous Close,Volume(Lots),Volume(In 000's),Value(Lacs),Open Interest(Lots)
+"17 Sep 2026","OPTFUT","CRUDEOILM    ","17NOV2026","CE","5500","12","13","11","12.5","10","20","1.2 BBL","1.00","100"
+"17 Sep 2026","OPTFUT","CRUDEOILM    ","17NOV2026","PE","5300","8","9","7","8.5","8","20","1.0 BBL","0.80","90"
+"17 Sep 2026","FUTCOM","CRUDEOILM    ","17NOV2026","XX","0","5400","5410","5390","5405","5400","50","5.0 BBL","10.00","200"
+"18 Sep 2026","OPTFUT","CRUDEOILM    ","17NOV2026","CE","5400","","","","0.05","0.05","0","0.000 BBL  ","0.00","0"

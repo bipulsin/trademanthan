@@ -1,9 +1,9 @@
-"""Replay Screener / Sizing / ExitEngine over stored full-chain snapshots."""
+"""Replay Screener / Sizing / ExitEngine over stored full-chain snapshots or MCX EOD."""
 from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
@@ -13,6 +13,8 @@ from backend.services.tarang.config import get_profiles, get_risk
 from backend.services.tarang.data_gaps import gaps_overlapping, recent_gaps, snapshot_in_gap
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
 from backend.services.tarang.exit_engine import evaluate_exits
+from backend.services.tarang.fee_gate import gate_fee_and_limits
+from backend.services.tarang.paper_broker import simulated_fill_price
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.structures import build_structure, max_loss_per_unit_inr, floor_units
 
@@ -94,8 +96,348 @@ def _load_snapshots(db, *, wide_only: bool = True) -> List[Dict[str, Any]]:
     return out
 
 
-def run_backtest(*, asof: Optional[datetime] = None) -> Dict[str, Any]:
-    """Replay available wide snapshots. Insufficient data → coverage timeline, no invented fills."""
+LOT_SIZE = {
+    "CRUDEOILM": 10,
+    "CRUDEOIL": 100,
+    "NATGASMINI": 250,
+    "NATURALGAS": 1250,
+}
+
+MODELLED_SPREAD_FRAC_OF_MID = 0.02
+GO_LIVE_GATE_MIN_TRADES = 40
+INTRADAY_EOD_MSG = "INTRADAY cannot be tested on EOD — this path is positional daily decisions only."
+
+
+def _dte(expiry: date, today: date) -> int:
+    return (expiry - today).days
+
+
+def mcx_entry_dte_ok(dte: int, min_dte: int = 7, max_dte: int = 35) -> bool:
+    return min_dte <= int(dte) <= max_dte
+
+
+def _model_bid_ask(close: Optional[float]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    if close is None or float(close) <= 0:
+        return None, None, None
+    c = float(close)
+    spr = max(0.05, c * MODELLED_SPREAD_FRAC_OF_MID)
+    return c - spr / 2.0, c + spr / 2.0, c
+
+
+def _eod_quote(row: Dict[str, Any], fill_close: Optional[float] = None) -> OptionQuote:
+    close = fill_close if fill_close is not None else row.get("close")
+    bid, ask, mid = _model_bid_ask(close)
+    return OptionQuote(
+        instrument_key=f"{row.get('symbol')}-{row.get('expiry_date')}-{row.get('option_type')}-{row.get('strike')}",
+        symbol=str(row.get("symbol") or ""),
+        underlying=str(row.get("symbol") or ""),
+        expiry=str(row.get("expiry_date"))[:10],
+        strike=float(row.get("strike") or 0),
+        right=str(row.get("option_type") or ""),
+        bid=bid,
+        ask=ask,
+        mid=mid,
+        last=close,
+        oi=row.get("oi_lots"),
+        volume=row.get("volume_lots"),
+        iv=row.get("iv"),
+        delta=row.get("delta"),
+        greeks_source=row.get("greeks_source") or "black76_otm",
+        lot_size=LOT_SIZE.get(str(row.get("symbol") or "").upper()),
+        meta={
+            "modelled_fills": True,
+            "high": row.get("high"),
+            "low": row.get("low"),
+            "close": row.get("close"),
+            "traded": row.get("traded"),
+        },
+    )
+
+
+def _strike_step(strikes: List[float]) -> Optional[float]:
+    uniq = sorted({float(s) for s in strikes if s is not None})
+    diffs = [round(uniq[i + 1] - uniq[i], 6) for i in range(len(uniq) - 1) if uniq[i + 1] > uniq[i]]
+    return min(diffs) if diffs else None
+
+
+def _load_eod_rows(db) -> List[Dict[str, Any]]:
+    q = """
+        SELECT symbol, expiry_date, option_type, strike, trade_date,
+               open, high, low, close, volume_lots, oi_lots, traded,
+               iv, delta, greeks_source, underlying_price, underlying_source
+        FROM tarang_hist_eod
+        WHERE option_type IN ('CE','PE','FUT')
+        ORDER BY trade_date, symbol, expiry_date, option_type, strike
+    """
+    return [dict(r) for r in db.execute(text(q)).mappings().all()]
+
+
+def _chain_for_day(
+    rows: List[Dict[str, Any]],
+    *,
+    profile_id: str,
+    close_override: Optional[Dict[Tuple[str, float], float]] = None,
+    require_traded: bool = True,
+) -> Optional[OptionChain]:
+    if not rows:
+        return None
+    opts = [r for r in rows if r.get("option_type") in ("CE", "PE")]
+    if require_traded:
+        opts = [r for r in opts if r.get("traded")]
+    if not opts:
+        return None
+    quotes = []
+    for r in opts:
+        key = (str(r["option_type"]), float(r["strike"]))
+        fill = (close_override or {}).get(key)
+        quotes.append(_eod_quote(r, fill_close=fill))
+    fut = next((r for r in rows if r.get("option_type") == "FUT"), None)
+    F = None
+    if fut and fut.get("close"):
+        F = float(fut["close"])
+    else:
+        F = next((float(r["underlying_price"]) for r in opts if r.get("underlying_price")), None)
+    step = _strike_step([q.strike for q in quotes])
+    und = str(opts[0]["symbol"])
+    return OptionChain(
+        profile_id=profile_id,
+        venue="upstox_mcx",
+        underlying=und,
+        expiry=str(opts[0]["expiry_date"])[:10],
+        futures_or_spot=F,
+        lot_size=LOT_SIZE.get(und.upper()),
+        strike_step=step,
+        quotes=quotes,
+        built_at=str(opts[0]["trade_date"]),
+        meta={"modelled_fills": True, "source": "mcx_eod"},
+    )
+
+
+def _credit_from_legs(legs: List[Dict[str, Any]], *, spread_fraction: float) -> Optional[float]:
+    credit = 0.0
+    for lg in legs:
+        px = simulated_fill_price(lg.get("side"), lg.get("bid"), lg.get("ask"), lg.get("mid"), spread_fraction=spread_fraction)
+        if px is None:
+            return None
+        if str(lg.get("side")).upper() == "SELL":
+            credit += px
+        else:
+            credit -= px
+    return credit
+
+
+def _debit_from_chain(chain: OptionChain, legs: List[Dict[str, Any]], *, spread_fraction: float, pessimistic_hl: bool = False) -> Optional[float]:
+    debit = 0.0
+    for lg in legs:
+        match = next(
+            (q for q in chain.quotes if q.right == lg.get("right") and abs(float(q.strike) - float(lg["strike"])) < 1e-6),
+            None,
+        )
+        if not match:
+            return None
+        if pessimistic_hl:
+            hi = (match.meta or {}).get("high")
+            lo = (match.meta or {}).get("low")
+            if str(lg.get("side")).upper() == "SELL":
+                px = float(hi) if hi else match.last
+            else:
+                px = float(lo) if lo else match.last
+            if px is None:
+                return None
+        else:
+            px = simulated_fill_price(
+                "BUY" if str(lg.get("side")).upper() == "SELL" else "SELL",
+                match.bid,
+                match.ask,
+                match.mid,
+                spread_fraction=spread_fraction,
+            )
+            if px is None:
+                return None
+        if str(lg.get("side")).upper() == "SELL":
+            debit += px
+        else:
+            debit -= px
+    return debit
+
+
+def run_eod_backtest(*, fill_mode: str = "base") -> Dict[str, Any]:
+    """Positional daily decisions on reconstructed MCX EOD. fill_mode: base | pessimistic."""
+    ensure_tarang_tables()
+    profiles = get_profiles().get("profiles") or {}
+    risk = get_risk()
+    frac = float((risk.get("paper_fills") or {}).get("spread_fraction") or 0.40)
+    db = SessionLocal()
+    try:
+        all_rows = _load_eod_rows(db)
+    finally:
+        db.close()
+    by_day_exp: Dict[Tuple[Any, Any, date], List[Dict[str, Any]]] = {}
+    dates_by_sym: Dict[str, List[date]] = {}
+    for r in all_rows:
+        td = r["trade_date"]
+        if not isinstance(td, date):
+            td = date.fromisoformat(str(td)[:10])
+            r["trade_date"] = td
+        exp = r["expiry_date"]
+        if not isinstance(exp, date):
+            exp = date.fromisoformat(str(exp)[:10])
+            r["expiry_date"] = exp
+        key = (str(r["symbol"]).upper(), exp, td)
+        by_day_exp.setdefault(key, []).append(r)
+        dates_by_sym.setdefault(str(r["symbol"]).upper(), []).append(td)
+
+    paper_trades: List[Dict[str, Any]] = []
+    cycles = set()
+    pid_by_und = {}
+    for pid, prof in profiles.items():
+        if not prof.get("enabled"):
+            continue
+        if prof.get("venue") != "upstox_mcx":
+            continue
+        pid_by_und[str(prof.get("underlying_symbol") or "").upper()] = (pid, prof)
+
+    for und, (pid, prof) in pid_by_und.items():
+        d_min = float(prof.get("short_delta_min") or 0.10)
+        d_max = float(prof.get("short_delta_max") or 0.16)
+        width_steps = int(prof.get("width_steps_min") or 2)
+        min_dte = int(prof.get("expiry_min_dte") or prof.get("expiry_dte_min") or 7)
+        max_dte = int(prof.get("expiry_dte_max") or 35)
+        dates = sorted(set(dates_by_sym.get(und, [])))
+        expiries = sorted({k[1] for k in by_day_exp if k[0] == und})
+        for exp in expiries:
+            cycles.add(f"{und}|{exp}")
+            open_trade = None
+            for i, td in enumerate(dates):
+                slice_rows = by_day_exp.get((und, exp, td)) or []
+                dte = _dte(exp, td)
+                chain = _chain_for_day(slice_rows, profile_id=pid)
+                if open_trade is None:
+                    if dte < min_dte or dte > max_dte:
+                        continue
+                    if not chain:
+                        continue
+                    built = build_structure(chain, "iron_condor", d_min, d_max, width_steps)
+                    if not built.get("ok"):
+                        continue
+                    fill_chain = chain
+                    if fill_mode == "pessimistic" and i + 1 < len(dates):
+                        nxt = dates[i + 1]
+                        nxt_rows = by_day_exp.get((und, exp, nxt)) or []
+                        nxt_chain = _chain_for_day(nxt_rows, profile_id=pid, require_traded=False)
+                        if nxt_chain:
+                            fill_chain = nxt_chain
+                    for lg in built["legs"]:
+                        mq = next(
+                            (q for q in fill_chain.quotes if q.right == lg["right"] and abs(q.strike - lg["strike"]) < 1e-6),
+                            None,
+                        )
+                        if mq:
+                            lg["bid"], lg["ask"], lg["mid"] = mq.bid, mq.ask, mq.mid
+                    credit = _credit_from_legs(built["legs"], spread_fraction=frac)
+                    if credit is None or credit <= 0:
+                        continue
+                    built["net_credit"] = credit
+                    ml = max_loss_per_unit_inr(
+                        float(built["width"]),
+                        float(credit),
+                        lot_size=built.get("lot_size") or chain.lot_size,
+                        venue="upstox_mcx",
+                    )
+                    budget = float(((risk.get("buckets") or {}).get("ENERGY") or {}).get("per_trade_budget_inr") or 0)
+                    units = floor_units(budget, ml)
+                    if units < 1:
+                        continue
+                    fg = gate_fee_and_limits(
+                        venue="upstox_mcx",
+                        legs=built["legs"],
+                        net_credit_pts=credit,
+                        units=units,
+                        lot_size=built.get("lot_size") or chain.lot_size,
+                        contract_value=None,
+                        underlying_price=chain.futures_or_spot,
+                    )
+                    if not fg["gate"].passed:
+                        continue
+                    open_trade = {
+                        "profile_id": pid,
+                        "expiry": str(exp),
+                        "entry_date": td.isoformat(),
+                        "entry_credit": credit,
+                        "legs": built["legs"],
+                        "units": units,
+                        "max_loss": ml,
+                        "budget_inr": budget,
+                        "venue": "upstox_mcx",
+                        "holding_mode": "POSITIONAL",
+                        "fill_mode": fill_mode,
+                        "fills_label": "MCX EOD-reconstructed, modelled fills",
+                        "atm_iv": None,
+                    }
+                    continue
+                if not chain:
+                    continue
+                debit = _debit_from_chain(
+                    chain,
+                    open_trade["legs"],
+                    spread_fraction=frac,
+                    pessimistic_hl=(fill_mode == "pessimistic"),
+                )
+                if debit is None:
+                    continue
+                now = datetime.combine(td, datetime.min.time()).replace(tzinfo=timezone.utc)
+                ev = evaluate_exits(
+                    entry_credit_pts=float(open_trade["entry_credit"]),
+                    debit_to_close_pts=float(debit),
+                    unrealized_pnl_inr=0.0,
+                    max_profit_inr=None,
+                    max_loss_inr=open_trade.get("max_loss"),
+                    budget_inr=open_trade.get("budget_inr"),
+                    short_deltas=[],
+                    entry_atm_iv=None,
+                    current_atm_iv=None,
+                    venue="upstox_mcx",
+                    profile_id=pid,
+                    holding_mode="POSITIONAL",
+                    expiry=open_trade["expiry"],
+                    now=now,
+                )
+                if ev.should_exit:
+                    open_trade["exit_date"] = td.isoformat()
+                    open_trade["exit_reason"] = ev.reason
+                    open_trade["origin"] = "BACKTEST_EOD"
+                    paper_trades.append(open_trade)
+                    open_trade = None
+            if open_trade:
+                open_trade["exit_reason"] = "OPEN"
+                open_trade["origin"] = "BACKTEST_EOD"
+                paper_trades.append(open_trade)
+
+    n = len(paper_trades)
+    return {
+        "product": "Kosmic Tarang",
+        "source": "mcx_eod",
+        "label": "MCX EOD-reconstructed, modelled fills",
+        "fill_mode": fill_mode,
+        "intraday_note": INTRADAY_EOD_MSG,
+        "expiry_cycles": len(cycles),
+        "trades": paper_trades,
+        "metrics": {"count": n, "expiry_cycles": len(cycles)},
+        "show_go_live_gate": n >= GO_LIVE_GATE_MIN_TRADES,
+        "go_live_gate_hidden_until_trades": GO_LIVE_GATE_MIN_TRADES,
+        "note": (
+            "EOD positional replay uses Screener structure rules, SizingService floor_units, fee gate 15% of credit, "
+            "and ExitEngine. Base fills: signal and fill at day-t close with modelled bid-ask haircut. "
+            "Pessimistic: fill at t+1 close; stops use short-leg High / long-leg Low. "
+            + INTRADAY_EOD_MSG
+        ),
+    }
+
+
+def run_backtest(*, asof: Optional[datetime] = None, source: str = "snapshots", fill_mode: str = "base") -> Dict[str, Any]:
+    """Replay available wide snapshots, or MCX EOD reconstruction when source=eod."""
+    if str(source).lower() in ("eod", "mcx_eod", "bhavcopy"):
+        return run_eod_backtest(fill_mode=fill_mode)
     ensure_tarang_tables()
     cov = chain_coverage()
     wide_days = max((u.get("days_wide") or 0) for u in (cov.get("underlyings") or [])) if cov.get("underlyings") else 0
@@ -103,6 +445,9 @@ def run_backtest(*, asof: Optional[datetime] = None) -> Dict[str, Any]:
     insufficient = wide_days < MIN_WIDE_DAYS_FOR_RUN
     out: Dict[str, Any] = {
         "product": "Kosmic Tarang",
+        "source": "snapshots",
+        "label": "Live snapshot replay (not EOD)",
+        "show_go_live_gate": False,
         "ran_at": datetime.now(timezone.utc).isoformat(),
         "coverage": cov,
         "wide_days": wide_days,
