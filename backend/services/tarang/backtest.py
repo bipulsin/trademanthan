@@ -621,18 +621,19 @@ def _run_eod_once(
                 if gate is None and not (built and built.get("ok") and units >= 1 and fee_ok):
                     gate = "data"
 
-                if record_rejections and gate:
-                    rejections.append(
-                        {
-                            "trade_date": td.isoformat(),
-                            "symbol": und,
-                            "expiry": exp.isoformat(),
-                            "gate": gate,
-                            "dte": dte,
-                            "detail": iv_res.get("detail") if gate == "iv_gate" else (structure_error or gate),
-                            "warmup_iv": iv_res.get("warmup"),
-                        }
-                    )
+                if gate:
+                    if record_rejections:
+                        rejections.append(
+                            {
+                                "trade_date": td.isoformat(),
+                                "symbol": und,
+                                "expiry": exp.isoformat(),
+                                "gate": gate,
+                                "dte": dte,
+                                "detail": iv_res.get("detail") if gate == "iv_gate" else (structure_error or gate),
+                                "warmup_iv": iv_res.get("warmup"),
+                            }
+                        )
                     continue
 
                 estimated = bool((chain.meta or {}).get("estimated_underlying")) if chain else True
