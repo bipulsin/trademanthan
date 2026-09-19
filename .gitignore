@@ -67,7 +67,12 @@ data/*
 !data/trap_ce/**
 !data/mcx_bhavcopy/
 !data/mcx_bhavcopy/README.md
+!data/mcx_bhavcopy/datewise/
+!data/mcx_bhavcopy/datewise/README.md
 data/mcx_bhavcopy/raw/*.csv
+data/mcx_bhavcopy/datewise/*.xls
+data/mcx_bhavcopy/datewise/*.xlsx
+data/mcx_bhavcopy/datewise/*.html
 data/ha_vwap/cache/
 data/ha_vwap/cache/**
 !data/ha_vwap/

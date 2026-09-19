@@ -29,6 +29,8 @@ EXPIRY_RE = re.compile(r"^(\d{1,2})([A-Za-z]{3})(\d{4})$")
 NUM_PREFIX_RE = re.compile(r"[-+]?\d*\.?\d+")
 
 RAW_DIR = Path(__file__).resolve().parents[3] / "data" / "mcx_bhavcopy" / "raw"
+DATEWISE_DIR = Path(__file__).resolve().parents[3] / "data" / "mcx_bhavcopy" / "datewise"
+DATEWISE_EXTS = {".xls", ".xlsx", ".html", ".htm"}
 
 
 def strip_cell(value: Any) -> str:
@@ -436,3 +438,40 @@ def checksum_from_html(html: str, *, filename: str = "") -> Dict[str, Any]:
     cmp_["filename"] = filename
     cmp_["datewise_rows"] = len(parsed)
     return cmp_
+
+
+def scan_datewise_dir(path: Optional[Path] = None) -> Dict[str, Any]:
+    """Scan Date Wise HTML/.xls drops. Empty folder is a valid result, not an error."""
+    root = Path(path) if path is not None else DATEWISE_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    files = sorted(
+        f for f in root.iterdir() if f.is_file() and f.suffix.lower() in DATEWISE_EXTS and not f.name.startswith(".")
+    )
+    payload: Dict[str, Any] = {
+        "path": str(root.resolve()),
+        "host_hint": "/Users/bipulsahay/TradeManthan/data/mcx_bhavcopy/datewise/",
+        "container_hint": "/app/data/mcx_bhavcopy/datewise/",
+        "paperclip_copy_hint": "scp files then: docker compose cp /tmp/mcx_datewise/. app:/app/data/mcx_bhavcopy/datewise/",
+        "empty": not files,
+        "files": [],
+        "ok": True,
+        "threshold_pct": 1.0,
+        "note": "Compare Date Wise Traded Contract (Lots) vs SUM(volume_lots) across all expiries for that commodity+date. Flag diffs > 1%.",
+    }
+    if not files:
+        payload["note"] = (
+            "No Date Wise files in the drop folder. Place HTML-as-.xls reports in "
+            f"{payload['host_hint']} (production container: {payload['container_hint']})."
+        )
+        return payload
+    reports = []
+    any_flags = False
+    for f in files:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        one = checksum_from_html(text, filename=f.name)
+        reports.append(one)
+        if one.get("flags"):
+            any_flags = True
+    payload["files"] = reports
+    payload["ok"] = not any_flags
+    return payload

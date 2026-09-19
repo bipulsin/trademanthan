@@ -4,13 +4,17 @@ from __future__ import annotations
 from datetime import date
 
 from backend.services.tarang.backtest import (
+    CREDIT_GRID_FRACS,
     INTRADAY_EOD_MSG,
+    classify_data_gate,
     cycle_is_expired,
     eod_iv_gate,
     first_entry_reject,
     iv_history_warmup,
     mcx_entry_dte_ok,
+    min_credit_frac_from_short_delta,
     run_eod_backtest,
+    _credit_pct,
 )
 from backend.services.tarang.eod_reconstruct import (
     match_futures_underlying,
@@ -25,6 +29,7 @@ from backend.services.tarang.bhavcopy import (
     parse_date_wise_html,
     parse_expiry,
     parse_trade_date,
+    scan_datewise_dir,
     strip_cell,
 )
 from backend.services.tarang.config import get_profiles
@@ -217,8 +222,8 @@ def test_expired_only_cycle_count_excludes_open_oct_nov():
 
 
 def test_first_reject_gate_order():
-    assert first_entry_reject(has_underlying=False, n_quotes=10, dte=20) == "data"
-    assert first_entry_reject(has_underlying=True, n_quotes=0, dte=20) == "data"
+    assert first_entry_reject(has_underlying=False, n_quotes=10, dte=20, n_option_rows=10, n_fut=0) == "no_futures"
+    assert first_entry_reject(has_underlying=True, n_quotes=0, dte=20, n_option_rows=0) == "insufficient_traded_strikes"
     assert first_entry_reject(has_underlying=True, n_quotes=4, dte=6) == "dte_window"
     assert first_entry_reject(has_underlying=True, n_quotes=4, dte=36) == "dte_window"
     assert first_entry_reject(has_underlying=True, n_quotes=4, dte=20, iv_passed=False) == "iv_gate"
@@ -301,3 +306,83 @@ def test_warmup_iv_vs_rv_skips_percentile():
     low_pct = eod_iv_gate(0.10, 0.05, full_hist, min_percentile=50.0, relative_min=0.10)
     assert low_pct["passed"] is False
     assert low_pct["mode"] == "percentile"
+
+
+def test_data_subreason_classification():
+    assert classify_data_gate(has_underlying=False, n_option_rows=0, n_traded=0, n_fut=0) == "insufficient_traded_strikes"
+    assert classify_data_gate(has_underlying=False, n_option_rows=12, n_traded=8, n_fut=0) == "no_futures"
+    assert (
+        classify_data_gate(
+            has_underlying=False,
+            n_option_rows=12,
+            n_traded=8,
+            n_fut=0,
+            parity_attempted=True,
+            parity_ok=False,
+        )
+        == "parity_failed"
+    )
+    assert (
+        classify_data_gate(
+            has_underlying=True,
+            n_option_rows=12,
+            n_traded=8,
+            n_fut=0,
+            structure_error="no_PE_short",
+            short_in_band_untraded=True,
+        )
+        == "short_not_traded"
+    )
+    assert first_entry_reject(
+        has_underlying=True,
+        n_quotes=8,
+        dte=20,
+        iv_passed=True,
+        structure_error="no_CE_short",
+        short_in_band_untraded=True,
+    ) == "short_not_traded"
+
+
+def test_min_credit_pct_and_grid_does_not_mutate_default():
+    from backend.services.tarang.config import get_risk
+
+    assert abs(_credit_pct(1.5, 10.0) - 15.0) < 1e-9
+    assert first_entry_reject(
+        has_underlying=True, n_quotes=4, dte=20, iv_passed=True, credit=1.5, width=10.0, units=1, fee_ok=True
+    ) == "min_credit"
+    assert first_entry_reject(
+        has_underlying=True,
+        n_quotes=4,
+        dte=20,
+        iv_passed=True,
+        credit=1.5,
+        width=10.0,
+        units=1,
+        fee_ok=True,
+        min_credit_frac=0.10,
+    ) is None
+    assert tuple(CREDIT_GRID_FRACS) == (0.10, 0.15, 0.20)
+    assert float(get_risk()["min_credit_fraction_of_width"]) == 0.20
+    assert abs(min_credit_frac_from_short_delta([-0.12, 0.14]) - 0.13) < 1e-9
+
+
+def test_counterfactual_qualifies_if_underlying_available():
+    missing_f = first_entry_reject(
+        has_underlying=False, n_quotes=8, dte=20, n_fut=0, n_option_rows=8, parity_attempted=False
+    )
+    assert missing_f == "no_futures"
+    subsequent = first_entry_reject(
+        has_underlying=True, n_quotes=8, dte=20, iv_passed=True, credit=3.0, width=10.0, units=1, fee_ok=True
+    )
+    assert subsequent is None
+    still_blocked = first_entry_reject(
+        has_underlying=True, n_quotes=8, dte=20, iv_passed=False, credit=3.0, width=10.0, units=1, fee_ok=True
+    )
+    assert still_blocked == "iv_gate"
+
+
+def test_datewise_scan_empty_folder(tmp_path):
+    out = scan_datewise_dir(tmp_path)
+    assert out["empty"] is True
+    assert out["ok"] is True
+    assert out["files"] == []

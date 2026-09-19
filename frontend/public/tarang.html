@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=9" />
+    <link rel="stylesheet" href="tarang.css?v=10" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -192,6 +192,41 @@
                                     <tbody id="backtestCycles"><tr><td colspan="4" class="tg-muted">Load replay</td></tr></tbody>
                                 </table>
                             </div>
+                            <h3 class="tg-section-title" style="margin-top:16px;">Data sub-reasons (expired cycles)</h3>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Expiry</th>
+                                            <th>No futures</th>
+                                            <th>Parity failed</th>
+                                            <th>Short not traded</th>
+                                            <th>Insufficient traded strikes</th>
+                                            <th>Would qualify if F</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="backtestDataSub"><tr><td colspan="6" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                            <h3 class="tg-section-title" style="margin-top:16px;">Min-credit rejects (default 20%)</h3>
+                            <p class="tg-note">Default screening is still risk.default.json min_credit_fraction_of_width (0.20). Grid below does not change that.</p>
+                            <div class="tg-table-wrap" style="max-height:220px; overflow:auto;">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Expiry</th>
+                                            <th>Credit % of width</th>
+                                            <th>Short deltas</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="backtestMinCredit"><tr><td colspan="4" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                            <h3 class="tg-section-title" style="margin-top:16px;">Credit grid (sensitivity only)</h3>
+                            <pre class="tg-pre" id="backtestCreditGrid">—</pre>
+                            <h3 class="tg-section-title" style="margin-top:16px;">Date Wise checksum</h3>
+                            <pre class="tg-pre" id="backtestDatewise">—</pre>
                             <h3 class="tg-section-title" style="margin-top:16px;">First-gate rejections</h3>
                             <div class="tg-table-wrap">
                                 <table class="tg-table">
@@ -329,6 +364,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=9"></script>
+    <script src="tarang.js?v=10"></script>
 </body>
 </html>

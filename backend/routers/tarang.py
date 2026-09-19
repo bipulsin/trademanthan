@@ -12,7 +12,7 @@ from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.tarang.backtest import run_backtest
-from backend.services.tarang.bhavcopy import checksum_from_html, import_bhavcopy_text
+from backend.services.tarang.bhavcopy import checksum_from_html, import_bhavcopy_text, scan_datewise_dir
 from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.chain_snapshots import capture_chain_snapshots
 from backend.services.tarang.config import get_events, get_profiles, get_risk
@@ -191,13 +191,16 @@ async def tarang_bhavcopy_checksum(
 ) -> Dict[str, Any]:
     ensure_tarang_tables()
     if file is None:
-        return {
-            "skipped": True,
-            "note": "No Date Wise file uploaded; checksum parser is available. Unit tests cover the 1% threshold.",
-        }
+        return scan_datewise_dir()
     raw = await file.read()
     html = raw.decode("utf-8", errors="replace")
     return checksum_from_html(html, filename=file.filename or "")
+
+
+@router.get("/bhavcopy/checksum/scan")
+def tarang_bhavcopy_checksum_scan(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    return scan_datewise_dir()
 
 
 @router.post("/bhavcopy/reconstruct")

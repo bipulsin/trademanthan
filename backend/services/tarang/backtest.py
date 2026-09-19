@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
 
@@ -12,6 +12,7 @@ from backend.services.tarang.chain_snapshots import chain_coverage, unpack_chain
 from backend.services.tarang.config import get_profiles, get_risk
 from backend.services.tarang.data_gaps import gaps_overlapping, recent_gaps, snapshot_in_gap
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
+from backend.services.tarang.eod_reconstruct import put_call_parity_F, reconstruct_slice
 from backend.services.tarang.exit_engine import evaluate_exits
 from backend.services.tarang.fee_gate import gate_fee_and_limits
 from backend.services.tarang.paper_broker import simulated_fill_price
@@ -106,6 +107,9 @@ LOT_SIZE = {
 MODELLED_SPREAD_FRAC_OF_MID = 0.02
 GO_LIVE_GATE_MIN_TRADES = 40
 IV_WARMUP_DAYS = 60
+CREDIT_GRID_FRACS = (0.10, 0.15, 0.20)
+DELTA_REL_CREDIT_FORMULA = "min_frac = clip(0.10, 0.25, mean(|δ_short|))"
+UNDERLYING_GATES = frozenset({"no_futures", "parity_failed", "missing_underlying"})
 INTRADAY_EOD_MSG = "INTRADAY cannot be tested on EOD — this path is positional daily decisions only."
 
 
@@ -213,9 +217,49 @@ def map_structure_error(err: Optional[str]) -> Optional[str]:
         return "liquidity"
     if "long" in e:
         return "traded_wings"
-    if "strike_step" in e or "mids" in e:
-        return "data"
+    if "strike_step" in e:
+        return "strike_step_missing"
+    if "mids" in e:
+        return "no_mids"
     return "liquidity"
+
+
+def min_credit_frac_from_short_delta(short_deltas: Sequence[Any]) -> float:
+    """Delta-relative min credit as a fraction of width: clip(0.10, 0.25, mean(|δ_short|))."""
+    vals = [abs(float(d)) for d in short_deltas if d is not None]
+    if not vals:
+        return 0.20
+    return min(0.25, max(0.10, sum(vals) / len(vals)))
+
+
+def classify_data_gate(
+    *,
+    has_underlying: bool,
+    n_option_rows: int,
+    n_traded: int,
+    n_fut: int,
+    parity_ok: Optional[bool] = None,
+    parity_attempted: bool = False,
+    structure_error: Optional[str] = None,
+    short_in_band_untraded: bool = False,
+) -> Optional[str]:
+    """Named data sub-reason, or None if this is not a data/F/quotes failure."""
+    err = str(structure_error or "")
+    if "strike_step" in err:
+        return "strike_step_missing"
+    if "mids" in err:
+        return "no_mids"
+    if "short" in err and short_in_band_untraded:
+        return "short_not_traded"
+    if n_option_rows <= 0 or n_traded <= 0:
+        return "insufficient_traded_strikes"
+    if not has_underlying:
+        if n_fut <= 0 and parity_attempted and parity_ok is False:
+            return "parity_failed"
+        if n_fut <= 0:
+            return "no_futures"
+        return "parity_failed" if parity_ok is False else "missing_underlying"
+    return None
 
 
 def first_entry_reject(
@@ -232,15 +276,38 @@ def first_entry_reject(
     min_credit_frac: float = 0.20,
     units: int = 0,
     fee_ok: Optional[bool] = None,
+    n_fut: int = 0,
+    n_option_rows: Optional[int] = None,
+    parity_ok: Optional[bool] = None,
+    parity_attempted: bool = False,
+    short_in_band_untraded: bool = False,
 ) -> Optional[str]:
-    """First rejecting gate, in the documented order. None = accepted."""
-    if not has_underlying or int(n_quotes) <= 0:
-        return "data"
+    """First rejecting gate. Data failures use named sub-reasons, not a lump 'data'. None = accepted."""
+    n_traded = int(n_quotes)
+    n_opt = int(n_option_rows) if n_option_rows is not None else n_traded
+    if n_opt <= 0 and not mcx_entry_dte_ok(dte, min_dte, max_dte):
+        return "dte_window"
+    data = classify_data_gate(
+        has_underlying=has_underlying,
+        n_option_rows=n_opt,
+        n_traded=n_traded,
+        n_fut=int(n_fut),
+        parity_ok=parity_ok,
+        parity_attempted=parity_attempted,
+        structure_error=structure_error,
+        short_in_band_untraded=short_in_band_untraded,
+    )
+    if data:
+        return data
+    if not has_underlying:
+        return "missing_underlying"
     if not mcx_entry_dte_ok(dte, min_dte, max_dte):
         return "dte_window"
     if iv_passed is False:
         return "iv_gate"
     mapped = map_structure_error(structure_error)
+    if mapped == "liquidity" and short_in_band_untraded:
+        return "short_not_traded"
     if mapped:
         return mapped
     if credit is None or credit <= 0:
@@ -410,6 +477,23 @@ def _debit_from_chain(chain: OptionChain, legs: List[Dict[str, Any]], *, spread_
     return debit
 
 
+def _band_short_untraded(rows: List[Dict[str, Any]], d_min: float, d_max: float) -> bool:
+    def in_band(r: Dict[str, Any]) -> bool:
+        d = r.get("delta")
+        return d is not None and d_min <= abs(float(d)) <= d_max
+
+    opts = [r for r in rows if r.get("option_type") in ("CE", "PE")]
+    un = [r for r in opts if not r.get("traded") and in_band(r)]
+    tr = [r for r in opts if r.get("traded") and in_band(r)]
+    return bool(un) and not tr
+
+
+def _credit_pct(credit: Optional[float], width: Optional[float]) -> Optional[float]:
+    if credit is None or width is None or width <= 0:
+        return None
+    return 100.0 * float(credit) / float(width)
+
+
 def _atm_iv(rows: List[Dict[str, Any]]) -> Optional[float]:
     ivs = [float(r["iv"]) for r in rows if r.get("iv") is not None]
     if not ivs:
@@ -471,6 +555,8 @@ def _run_eod_once(
     independent: List[Dict[str, Any]] = []
     open_cycles: List[Dict[str, Any]] = []
     rejections: List[Dict[str, Any]] = []
+    min_credit_days: List[Dict[str, Any]] = []
+    credit_grid_days: List[Dict[str, Any]] = []
     pid_by_und = {}
     for pid, prof in profiles.items():
         if not prof.get("enabled") or prof.get("venue") != "upstox_mcx":
@@ -491,6 +577,8 @@ def _run_eod_once(
             if not cycle_is_expired(exp, today):
                 open_cycles.append({**label, "status": "open", "excluded": True})
                 continue
+            cycle_gate_days: Dict[str, List[str]] = {}
+            cycle_cf: List[Dict[str, Any]] = []
             independent.append({**label, "status": "expired"})
             open_trade = None
             for i, td in enumerate(dates):
@@ -534,6 +622,9 @@ def _run_eod_once(
                     continue
 
                 opts = [r for r in slice_rows if r.get("option_type") in ("CE", "PE")]
+                futs = [r for r in slice_rows if r.get("option_type") == "FUT" and r.get("close")]
+                n_fut = len(futs)
+                n_option_rows = len(opts)
                 F = None
                 if chain and chain.futures_or_spot:
                     F = chain.futures_or_spot
@@ -541,6 +632,12 @@ def _run_eod_once(
                     F = next((float(r["underlying_price"]) for r in slice_rows if r.get("underlying_price")), None)
                 n_quotes = len([r for r in opts if r.get("traded")])
                 has_und = F is not None
+                calls = [r for r in opts if r.get("option_type") == "CE"]
+                puts = [r for r in opts if r.get("option_type") == "PE"]
+                parity_F = put_call_parity_F(calls, puts) if calls and puts else None
+                parity_attempted = bool(calls and puts)
+                parity_ok = parity_F is not None
+                short_untraded = _band_short_untraded(slice_rows, d_min, d_max)
 
                 prior_F = [F_by_sym_date[(und, d)] for d in F_series_dates if d <= td]
                 rv = realized_vol_from_closes(prior_F)
@@ -561,6 +658,8 @@ def _run_eod_once(
                 width = None
                 units = 0
                 fee_ok = None
+                ml = None
+                budget = float(((risk.get("buckets") or {}).get("ENERGY") or {}).get("per_trade_budget_inr") or 0)
                 if has_und and n_quotes > 0 and mcx_entry_dte_ok(dte, min_dte, max_dte) and iv_res["passed"] and chain:
                     built = build_structure(chain, "iron_condor", d_min, d_max, width_steps)
                     if not built.get("ok"):
@@ -587,7 +686,6 @@ def _run_eod_once(
                             lot_size=built.get("lot_size") or chain.lot_size,
                             venue="upstox_mcx",
                         )
-                        budget = float(((risk.get("buckets") or {}).get("ENERGY") or {}).get("per_trade_budget_inr") or 0)
                         units = floor_units(budget, ml) if credit and credit > 0 else 0
                         if units >= 1 and credit and credit > 0:
                             fg = gate_fee_and_limits(
@@ -603,7 +701,7 @@ def _run_eod_once(
                         elif credit and credit > 0:
                             fee_ok = None
 
-                gate = first_entry_reject(
+                reject_kwargs = dict(
                     has_underlying=has_und,
                     n_quotes=n_quotes,
                     dte=dte,
@@ -616,12 +714,108 @@ def _run_eod_once(
                     min_credit_frac=min_credit_frac,
                     units=units,
                     fee_ok=fee_ok,
+                    n_fut=n_fut,
+                    n_option_rows=n_option_rows,
+                    parity_ok=parity_ok,
+                    parity_attempted=parity_attempted,
+                    short_in_band_untraded=short_untraded,
                 )
-                # first_entry_reject treats iv_passed None as skip IV. Force iv after data+dte:
+                gate = first_entry_reject(**reject_kwargs)
                 if gate is None and not (built and built.get("ok") and units >= 1 and fee_ok):
-                    gate = "data"
+                    gate = "unclassified_entry"
+
+                short_d = list((built or {}).get("short_deltas") or [])
+                c_pct = _credit_pct(credit, width)
+                if record_rejections and (credit is not None or width is not None) and built and built.get("ok"):
+                    credit_grid_days.append(
+                        {
+                            "trade_date": td.isoformat(),
+                            "symbol": und,
+                            "expiry": exp.isoformat(),
+                            "credit": credit,
+                            "width": width,
+                            "credit_pct_of_width": c_pct,
+                            "short_deltas": short_d,
+                            "gate_at_default": gate,
+                            "delta_rel_frac": min_credit_frac_from_short_delta(short_d),
+                        }
+                    )
+
+                if gate == "min_credit" and record_rejections:
+                    min_credit_days.append(
+                        {
+                            "trade_date": td.isoformat(),
+                            "symbol": und,
+                            "expiry": exp.isoformat(),
+                            "credit": credit,
+                            "width": width,
+                            "credit_pct_of_width": c_pct,
+                            "short_deltas": short_d,
+                        }
+                    )
+
+                if gate in UNDERLYING_GATES:
+                    recs = reconstruct_slice(opts, futures_for_date=futs)
+                    cf_chain = _chain_for_day(recs, profile_id=pid) if recs else None
+                    cf_F = cf_chain.futures_or_spot if cf_chain else None
+                    subsequent = None
+                    if cf_F is not None and cf_chain:
+                        cf_built = build_structure(cf_chain, "iron_condor", d_min, d_max, width_steps)
+                        cf_err = None if cf_built.get("ok") else str(cf_built.get("error") or "structure")
+                        cf_credit = None
+                        cf_width = None
+                        cf_units = 0
+                        cf_fee = None
+                        if cf_built.get("ok"):
+                            cf_credit = _credit_from_legs(cf_built["legs"], spread_fraction=frac)
+                            cf_width = float(cf_built.get("width") or 0)
+                            cf_ml = max_loss_per_unit_inr(
+                                cf_width, float(cf_credit or 0), lot_size=cf_built.get("lot_size") or cf_chain.lot_size, venue="upstox_mcx"
+                            )
+                            cf_units = floor_units(budget, cf_ml) if cf_credit and cf_credit > 0 else 0
+                            if cf_units >= 1 and cf_credit and cf_credit > 0:
+                                cfg = gate_fee_and_limits(
+                                    venue="upstox_mcx",
+                                    legs=cf_built["legs"],
+                                    net_credit_pts=cf_credit,
+                                    units=cf_units,
+                                    lot_size=cf_built.get("lot_size") or cf_chain.lot_size,
+                                    contract_value=None,
+                                    underlying_price=cf_chain.futures_or_spot,
+                                )
+                                cf_fee = bool(cfg["gate"].passed)
+                        subsequent = first_entry_reject(
+                            has_underlying=True,
+                            n_quotes=n_quotes,
+                            dte=dte,
+                            min_dte=min_dte,
+                            max_dte=max_dte,
+                            iv_passed=iv_res["passed"] if mcx_entry_dte_ok(dte, min_dte, max_dte) else None,
+                            structure_error=cf_err,
+                            credit=cf_credit,
+                            width=cf_width,
+                            min_credit_frac=min_credit_frac,
+                            units=cf_units,
+                            fee_ok=cf_fee,
+                            n_fut=n_fut,
+                            n_option_rows=n_option_rows,
+                            parity_ok=True,
+                            parity_attempted=True,
+                            short_in_band_untraded=short_untraded,
+                        )
+                    if subsequent is None and cf_F is not None:
+                        cycle_cf.append(
+                            {
+                                "trade_date": td.isoformat(),
+                                "counterfactual": "parity_or_reconstructed_F",
+                                "note": "Only first-gate was missing futures/parity F; remaining gates pass with estimated F.",
+                            }
+                        )
+                    elif record_rejections:
+                        pass
 
                 if gate:
+                    cycle_gate_days.setdefault(gate, []).append(td.isoformat())
                     if record_rejections:
                         rejections.append(
                             {
@@ -632,6 +826,10 @@ def _run_eod_once(
                                 "dte": dte,
                                 "detail": iv_res.get("detail") if gate == "iv_gate" else (structure_error or gate),
                                 "warmup_iv": iv_res.get("warmup"),
+                                "credit_pct_of_width": c_pct,
+                                "short_deltas": short_d,
+                                "n_traded": n_quotes,
+                                "n_fut": n_fut,
                             }
                         )
                     continue
@@ -660,14 +858,74 @@ def _run_eod_once(
                 open_trade["exit_reason"] = "OPEN"
                 open_trade["origin"] = "BACKTEST_EOD"
                 paper_trades.append(open_trade)
+            independent[-1]["gate_days"] = {g: len(v) for g, v in cycle_gate_days.items()}
+            independent[-1]["gate_dates"] = cycle_gate_days
+            independent[-1]["data_subreasons"] = {
+                k: v for k, v in independent[-1]["gate_days"].items()
+                if k in ("no_futures", "parity_failed", "short_not_traded", "insufficient_traded_strikes", "strike_step_missing", "no_mids", "missing_underlying")
+            }
+            independent[-1]["would_qualify_if_underlying"] = cycle_cf
 
     counts = Counter(r["gate"] for r in rejections)
+    data_counts = {
+        k: counts.get(k, 0)
+        for k in (
+            "no_futures",
+            "parity_failed",
+            "short_not_traded",
+            "insufficient_traded_strikes",
+            "strike_step_missing",
+            "no_mids",
+            "missing_underlying",
+        )
+        if counts.get(k)
+    }
+    default_frac = min_credit_frac
+    grid: Dict[str, Any] = {
+        "default_frac": default_frac,
+        "default_unchanged": abs(default_frac - 0.20) < 1e-9,
+        "delta_rel_formula": DELTA_REL_CREDIT_FORMULA,
+        "by_frac": {},
+    }
+    failed_credit_only = [d for d in credit_grid_days if d.get("gate_at_default") == "min_credit"]
+    for f in CREDIT_GRID_FRACS:
+        key = f"{f:.2f}"
+        pass_only_credit = 0
+        qualify = 0
+        for d in credit_grid_days:
+            pct = d.get("credit_pct_of_width")
+            if pct is None:
+                continue
+            if (pct / 100.0) >= f:
+                qualify += 1
+                if d.get("gate_at_default") == "min_credit":
+                    pass_only_credit += 1
+        grid["by_frac"][key] = {
+            "min_frac": f,
+            "days_with_structure_passing_this_frac": qualify,
+            "min_credit_rejects_that_would_pass": pass_only_credit,
+            "min_credit_rejects_at_default": len(failed_credit_only),
+        }
+    delta_rel_pass = 0
+    for d in failed_credit_only:
+        pct = d.get("credit_pct_of_width")
+        need = d.get("delta_rel_frac")
+        if pct is not None and need is not None and (pct / 100.0) >= float(need):
+            delta_rel_pass += 1
+    grid["delta_rel"] = {
+        "formula": DELTA_REL_CREDIT_FORMULA,
+        "min_credit_rejects_that_would_pass": delta_rel_pass,
+        "min_credit_rejects_at_default": len(failed_credit_only),
+    }
     return {
         "trades": paper_trades,
         "independent_cycles": independent,
         "open_cycles_excluded": open_cycles,
         "rejections": rejections,
         "rejection_summary": dict(counts),
+        "data_subreasons": data_counts,
+        "min_credit_days": min_credit_days,
+        "credit_grid": grid,
         "metrics": {
             "count": len(paper_trades),
             "independent_cycles": len(independent),
@@ -699,6 +957,9 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
     pess = by_mode.get("pessimistic")
     n = int(base["metrics"]["count"])
     n_pess = int(pess["metrics"]["count"]) if pess else None
+    from backend.services.tarang.bhavcopy import scan_datewise_dir
+
+    datewise = scan_datewise_dir()
     return {
         "product": "Kosmic Tarang",
         "source": "mcx_eod",
@@ -714,6 +975,11 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
         "trades_pessimistic": (pess or {}).get("trades") if pess else [],
         "rejection_log": (shared_rej or base)["rejections"],
         "rejection_summary": (shared_rej or base)["rejection_summary"],
+        "data_subreasons": (shared_rej or base).get("data_subreasons") or {},
+        "min_credit_days": (shared_rej or base).get("min_credit_days") or [],
+        "credit_grid": (shared_rej or base).get("credit_grid") or {},
+        "datewise_checksum": datewise,
+        "datewise_drop_path": datewise.get("path"),
         "metrics": {
             "count": n,
             "count_base": n,

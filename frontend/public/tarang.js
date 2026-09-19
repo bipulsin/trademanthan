@@ -541,6 +541,36 @@
       const keys = Object.keys(sum);
       sumBody.innerHTML = keys.length ? keys.map((k) => `<tr><td>${k}</td><td>${sum[k]}</td></tr>`).join('') : '<tr><td colspan="2" class="tg-muted">No rejections</td></tr>';
     }
+    const subBody = document.getElementById('backtestDataSub');
+    if (subBody) {
+      const cycles = bt.independent_cycles || [];
+      subBody.innerHTML = cycles.length ? cycles.map((c) => {
+        const d = c.data_subreasons || {};
+        const wq = (c.would_qualify_if_underlying || []).length;
+        return `<tr>
+          <td>${c.expiry || ''}</td>
+          <td>${d.no_futures || 0}</td>
+          <td>${d.parity_failed || 0}</td>
+          <td>${d.short_not_traded || 0}</td>
+          <td>${d.insufficient_traded_strikes || 0}</td>
+          <td>${wq}</td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="6" class="tg-muted">—</td></tr>';
+    }
+    const mcBody = document.getElementById('backtestMinCredit');
+    if (mcBody) {
+      const days = bt.min_credit_days || [];
+      mcBody.innerHTML = days.length ? days.map((r) => `<tr>
+        <td>${r.trade_date || ''}</td>
+        <td>${r.expiry || ''}</td>
+        <td>${r.credit_pct_of_width != null ? Number(r.credit_pct_of_width).toFixed(1) : '—'}</td>
+        <td class="tg-muted">${(r.short_deltas || []).map((x) => x == null ? '—' : Number(x).toFixed(3)).join(', ')}</td>
+      </tr>`).join('') : '<tr><td colspan="4" class="tg-muted">None</td></tr>';
+    }
+    const gridEl = document.getElementById('backtestCreditGrid');
+    if (gridEl) gridEl.textContent = JSON.stringify(bt.credit_grid || {}, null, 2);
+    const dwEl = document.getElementById('backtestDatewise');
+    if (dwEl) dwEl.textContent = JSON.stringify(bt.datewise_checksum || { note: 'not run' }, null, 2);
     const logBody = document.getElementById('backtestRejLog');
     if (logBody) {
       const log = (bt.rejection_log || []).slice(0, 250);
