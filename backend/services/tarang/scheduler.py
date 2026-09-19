@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 
 
-def _tick_snapshots_delta() -> None:
+def _tick_snapshots_delta(*, force: bool = False) -> None:
     try:
-        if not should_run_delta_snapshot():
+        if not force and not should_run_delta_snapshot():
             return
         ensure_tarang_tables()
         out = capture_chain_snapshots(venues=["delta_india"], respect_mcx_session=False)
@@ -196,7 +196,13 @@ def start_tarang_scheduler() -> None:
     _scheduler = sch
     logger.info("Kosmic Tarang scheduler started (chain snapshots + ExitEngine + hard-exit IST)")
     try:
-        sch.add_job(_tick_snapshots_delta, "date", id="tarang_chain_boot_delta", replace_existing=True)
+        sch.add_job(
+            _tick_snapshots_delta,
+            "date",
+            id="tarang_chain_boot_delta",
+            replace_existing=True,
+            kwargs={"force": True},
+        )
         if mcx_session_open():
             sch.add_job(_tick_snapshots_mcx, "date", id="tarang_chain_boot_mcx", replace_existing=True)
     except Exception:
