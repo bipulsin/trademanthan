@@ -13,9 +13,12 @@ from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.config import crypto_budget, energy_budget, get_events, get_profiles, get_risk
 from backend.services.tarang.fee_gate import gate_fee_and_limits
 from backend.services.tarang.gates import (
+    EVAL_FAILED,
+    EVAL_NOT_EVALUABLE,
     GateResult,
     aggregate_status,
     compute_iv_percentile,
+    not_evaluable,
     decide_structure_from_skew,
     gate_credit_fraction,
     gate_event_blackout,
@@ -66,6 +69,11 @@ def _load_iv_history(db, profile_id: str, limit: int = 120) -> List[float]:
 
 
 def _latest_rv(db, profile_id: str) -> Optional[float]:
+    from backend.services.tarang.rv import rv_for_profile
+
+    from_candles = rv_for_profile(profile_id)
+    if from_candles is not None:
+        return from_candles
     row = db.execute(
         text(
             """
@@ -236,16 +244,17 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
             # no dated events in DB — blackout clear (templates in events.default.json are recurrence-only)
             cal = []
 
-        gates.append(
-            gate_stale_data(chain.built_at, max_age_sec=180.0)
-            if not (chain.meta or {}).get("error")
-            else GateResult(
-                name="stale_data",
-                passed=False,
-                detail=str((chain.meta or {}).get("error")),
-                status_hint="BLOCKED",
+        chain_err = (chain.meta or {}).get("error")
+        if chain_err or not (chain.quotes or []):
+            gates.append(
+                not_evaluable(
+                    "chain",
+                    f"chain missing: {chain_err or 'no quotes'}",
+                    actual={"error": chain_err, "n_quotes": len(chain.quotes or [])},
+                )
             )
-        )
+        else:
+            gates.append(gate_stale_data(chain.built_at, max_age_sec=180.0))
 
         dte_min = prof.get("expiry_min_dte") or prof.get("expiry_dte_min")
         dte_max = prof.get("expiry_dte_max")
@@ -305,6 +314,7 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
                     actual=built.get("error"),
                     detail=f"could not build {struct_dec['structure']}: {built.get('error')}",
                     status_hint="WATCHING",
+                    evaluability=EVAL_FAILED,
                 )
             )
             status = aggregate_status(gates)
@@ -313,12 +323,24 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
                 "gates": [g.to_dict() for g in gates],
                 "skew": skew,
                 "structure_decision": struct_dec,
+                "structure": struct_dec.get("structure"),
+                "legs": [],
                 "chain_meta": chain.meta,
+                "expiry": chain.expiry,
+                "underlying": chain.underlying,
+                "venue": chain.venue,
+                "futures_or_spot": chain.futures_or_spot,
+                "atm_iv": atm,
+                "rv_20d": rv,
+                "iv_percentile": percentile,
+                "snapshot_count": snap_n,
+                "failed_gates": [g.name for g in gates if g.evaluability == EVAL_FAILED],
+                "not_evaluable_gates": [g.name for g in gates if g.evaluability == EVAL_NOT_EVALUABLE],
                 "evaluated_at": datetime.now(timezone.utc).isoformat(),
             }
             for g in gates:
-                if not g.passed:
-                    _persist_rejection(db, profile_id, g, {"status": status})
+                if g.evaluability in (EVAL_FAILED, EVAL_NOT_EVALUABLE):
+                    _persist_rejection(db, profile_id, g, {"status": status, "evaluability": g.evaluability})
             cand_id = _persist_candidate(db, profile_id, struct_dec["structure"], status.lower(), payload)
             db.commit()
             return {"profile_id": profile_id, "candidate_id": cand_id, **payload}
@@ -411,16 +433,20 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
             "atm_iv": atm,
             "rv_20d": rv,
             "snapshot_count": snap_n,
-            "qualified_reasons": [g.name for g in gates if g.passed],
-            "failed_gates": [g.name for g in gates if not g.passed],
+            "qualified_reasons": [g.name for g in gates if g.evaluability == "passed"],
+            "failed_gates": [g.name for g in gates if g.evaluability == EVAL_FAILED],
+            "not_evaluable_gates": [g.name for g in gates if g.evaluability == EVAL_NOT_EVALUABLE],
+            "chain_meta": chain.meta,
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
             "mode_default": "PAPER",
             "auto_default": False,
         }
 
         for g in gates:
-            if not g.passed:
-                _persist_rejection(db, profile_id, g, {"status": status, "structure": built.get("structure")})
+            if g.evaluability in (EVAL_FAILED, EVAL_NOT_EVALUABLE):
+                _persist_rejection(
+                    db, profile_id, g, {"status": status, "structure": built.get("structure"), "evaluability": g.evaluability}
+                )
 
         cand_status = "qualified" if status == "QUALIFIED" else status.lower()
         cand_id = _persist_candidate(db, profile_id, built.get("structure") or struct_dec["structure"], cand_status, payload)

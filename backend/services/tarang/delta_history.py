@@ -102,18 +102,74 @@ def probe_candle_reach(symbol: str = "BTCUSD", resolution: str = "1h") -> Dict[s
     }
 
 
-def load_underlying_1h(*, lookback_days: int = 120) -> Dict[str, Any]:
+def load_underlying_1h(*, lookback_days: int = 800, chunk_days: int = 160) -> Dict[str, Any]:
+    """Walk backward in chunks until the public endpoint returns empty. Max ~4000 bars/call."""
     ensure_tarang_tables()
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
     now = int(datetime.now(timezone.utc).timestamp())
-    start = now - lookback_days * 86400
+    earliest_wanted = now - lookback_days * 86400
     out = []
     for und, sym in UNDERLYINGS:
-        resp = fetch_candles(sym, "1h", start, now)
-        body = resp.get("body") or {}
-        bars = body.get("result") or []
-        n = persist_underlying_candles(sym, "1h", bars if isinstance(bars, list) else [])
-        probe = probe_candle_reach(sym, "1h")
-        out.append({"underlying": und, "symbol": sym, "inserted_or_seen": n, "probe": probe, "http": resp.get("http_status")})
+        end = now
+        seen = 0
+        chunks = []
+        errors = []
+        while end > earliest_wanted:
+            start = max(earliest_wanted, end - chunk_days * 86400)
+            resp = fetch_candles(sym, "1h", start, end)
+            body = resp.get("body") or {}
+            bars = body.get("result") if isinstance(body.get("result"), list) else []
+            raw = RAW_DIR / f"{sym}_1h_{start}_{end}.json"
+            raw.write_text(json.dumps({"http": resp.get("http_status"), "n": len(bars), "url": resp.get("url")}, default=str), encoding="utf-8")
+            if resp.get("http_status") != 200:
+                errors.append({"http": resp.get("http_status"), "start": start, "end": end, "error": str(body.get("error") or "")[:200]})
+                break
+            if not bars:
+                chunks.append({"start": start, "end": end, "n": 0, "note": "empty_page_stop"})
+                break
+            n = persist_underlying_candles(sym, "1h", bars)
+            seen += n
+            times = []
+            for bar in bars:
+                if isinstance(bar, dict) and bar.get("time"):
+                    times.append(int(bar["time"]))
+                elif isinstance(bar, (list, tuple)) and bar:
+                    times.append(int(bar[0]))
+            if times and max(times) > 10_000_000_000:
+                times = [t // 1000 for t in times]
+            oldest = min(times) if times else start
+            chunks.append({"start": start, "end": end, "n": len(bars), "oldest": oldest, "http": resp.get("http_status")})
+            if oldest >= end:
+                break
+            end = oldest - 1
+            if len(chunks) >= 12:
+                break
+        db = SessionLocal()
+        try:
+            rng = db.execute(
+                text(
+                    """
+                    SELECT MIN(bar_at) AS first, MAX(bar_at) AS last, COUNT(*)::int AS n
+                    FROM tarang_hist_underlying WHERE symbol = :s AND resolution = '1h'
+                    """
+                ),
+                {"s": sym},
+            ).mappings().first()
+        finally:
+            db.close()
+        out.append(
+            {
+                "underlying": und,
+                "symbol": sym,
+                "inserted_or_seen": seen,
+                "stored_first": rng["first"].isoformat() if rng and rng.get("first") else None,
+                "stored_last": rng["last"].isoformat() if rng and rng.get("last") else None,
+                "stored_n": int((rng or {}).get("n") or 0),
+                "chunks": chunks,
+                "errors": errors,
+                "http_bar_cap_note": "Delta /history/candles returns at most ~4000 bars per call; we walk backward.",
+            }
+        )
     return {"ok": True, "results": out}
 
 

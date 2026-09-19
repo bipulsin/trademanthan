@@ -136,10 +136,11 @@ Operator renews the token **manually every day before 09:00 IST**. Tarang never 
 
 ## MCX Bhavcopy endpoints
 
-- Daily: `POST https://www.mcxindia.com/backpage.aspx/GetDateWiseBhavCopy` (`Date=YYYYMMDD`, `InstrumentName=OPTFUT|FUTCOM`).
-- Date Wise checksums: `POST .../GetHistoricalDataDetails` (date range, max 365d, **aggregated volumes**, not per-expiry OHLC).
-- **No single expiry date-range bhavcopy.** Admin backfill loops calendar days (`POST /api/tarang/bhavcopy/backfill`).
-- If MCX blocks automation: stop; use drag-and-drop upload.
+**Automated download is STOPPED.** `robots.txt` (`User-agent: *` / `Disallow: /`, Googlebot `Disallow: /backpage.aspx`) and [terms](https://www.mcxindia.com/terms-and-conditions-of-usage-for-website) clause 10 forbid systematic automated collection without written consent. Use admin drag-and-drop only.
+
+- Daily contract-wise (if ever consented): `POST https://www.mcxindia.com/backpage.aspx/GetDateWiseBhavCopy` — has strikes/OHLC/OI.
+- Date Wise checksums: `GetHistoricalDataDetails` — **aggregated volumes, no strikes**.
+- Throttle if re-enabled: **one request every 3–5 seconds**, resumable overnight batches; stop + private Telegram on 403/429/captcha.
 
 ## Health checks
 

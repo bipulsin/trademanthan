@@ -19,6 +19,7 @@ EXIT_THROTTLE_SEC = 300
 BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME") or "Tradewithcto"
 
 OPS_KINDS = {
+    "test_alert",
     "exit_trigger",
     "hard_exit_warning",
     "stale_feed",
@@ -251,6 +252,34 @@ def handle_telegram_update(update: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         db.rollback()
         return {"ok": False, "error": str(e)[:200]}
+    finally:
+        db.close()
+
+
+def send_test_alert() -> Dict[str, Any]:
+    from backend.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        ensure_tarang_tables()
+        cid = private_chat_id(db)
+        if not cid:
+            return {
+                "ok": False,
+                "sent": False,
+                "linked": False,
+                "error": "private_chat_not_linked",
+                "how_to": "Open Link my chat, press Start, then Poll.",
+            }
+        out = notify_critical(
+            db,
+            kind="test_alert",
+            message="Kosmic Tarang test alert — private chat is linked.",
+            dedupe_key="telegram_test_alert",
+            throttle_sec=0,
+        )
+        db.commit()
+        return {"ok": True, "linked": True, "chat_id_suffix": str(cid)[-4:], "telegram": out}
     finally:
         db.close()
 

@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=11" />
+    <link rel="stylesheet" href="tarang.css?v=12" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -277,11 +277,28 @@
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Screener (last 24h)</h2>
                             <pre class="tg-pre" id="screener24Box">—</pre>
+                            <h3 class="tg-section-title" style="margin-top:12px;">ATM IV vs realized vol</h3>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Underlying</th>
+                                            <th>ATM IV</th>
+                                            <th>RV 20d</th>
+                                            <th>(IV−RV)/RV</th>
+                                            <th>Threshold</th>
+                                            <th>Gate</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ivRvBody"><tr><td colspan="6" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
                         </section>
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Telegram (private ops)</h2>
                             <p class="tg-note" id="tgHowTo">Open the bot, press Start, then Poll link. The bot cannot DM by @username.</p>
-                            <p><a id="tgStartLink" href="#" target="_blank" rel="noopener">Link my chat</a></p>
+                            <p><a id="tgStartLink" href="#" target="_blank" rel="noopener">Link my chat</a>
+                            <button type="button" class="tg-btn" id="btnTgTest">Send test alert</button></p>
                             <label><input type="checkbox" id="tgPublicSignals" /> Also post forward-test signals to @Tradewithcto</label>
                             <button type="button" class="tg-btn" id="btnTgPoll">I've pressed Start — poll</button>
                             <button type="button" class="tg-btn" id="btnTgSave">Save setting</button>
@@ -409,6 +426,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=11"></script>
+    <script src="tarang.js?v=12"></script>
 </body>
 </html>

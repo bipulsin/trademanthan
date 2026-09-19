@@ -92,18 +92,21 @@ def _insert_iv_row(db, chain, atm: Dict[str, Any], clock: Dict[str, Any]) -> Non
         "ist_weekend_window": clock["ist_weekend_window"],
         "full_chain": True,
     }
+    from backend.services.tarang.rv import rv_for_profile
+
+    rv = rv_for_profile(chain.profile_id)
     db.execute(
         text(
             """
             INSERT INTO tarang_iv_snapshots (
                 profile_id, venue, underlying_symbol, expiry_date,
                 futures_or_spot, atm_strike, atm_iv, atm_iv_raw, atm_iv_unit,
-                source, meta
+                realized_vol_20d, source, meta
             ) VALUES (
                 :profile_id, :venue, :underlying_symbol,
                 CAST(:expiry_date AS date),
                 :futures_or_spot, :atm_strike, :atm_iv, :atm_iv_raw, :atm_iv_unit,
-                :source, CAST(:meta AS jsonb)
+                :realized_vol_20d, :source, CAST(:meta AS jsonb)
             )
             """
         ),
@@ -118,6 +121,7 @@ def _insert_iv_row(db, chain, atm: Dict[str, Any], clock: Dict[str, Any]) -> Non
             "atm_iv_raw": atm.get("atm_iv_raw"),
             "atm_iv_unit": atm.get("atm_iv_unit"),
             "source": atm.get("source"),
+            "realized_vol_20d": rv,
             "meta": json.dumps(meta),
         },
     )

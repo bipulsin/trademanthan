@@ -149,20 +149,14 @@ def _tick_premarket_token(escalate: str = "0845") -> None:
 
 
 def _tick_mcx_bhavcopy() -> None:
-    from backend.services.tarang.calendar import to_ist
-
-    ist = to_ist()
-    if ist.weekday() >= 5:
-        return
-    if ist.hour > 12 or (ist.hour == 12 and ist.minute > 5):
-        return
-
     def _run():
-        from backend.services.tarang.mcx_download import run_mcx_bhavcopy_download
+        from backend.services.tarang.mcx_download import AUTOMATION_ALLOWED, AUTOMATION_STOP_REASON, run_mcx_bhavcopy_download
 
+        if not AUTOMATION_ALLOWED:
+            return {"ok": False, "stopped_by_robots": True, "reason": AUTOMATION_STOP_REASON}
         return run_mcx_bhavcopy_download()
 
-    _locked("mcx_bhavcopy", _run, "00:30 then hourly until 12:00 IST")
+    _locked("mcx_bhavcopy", _run, "stopped (robots/terms) — drag-drop only")
 
 
 def _tick_delta_candles() -> None:

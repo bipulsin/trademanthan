@@ -6,6 +6,11 @@ from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 
+EVAL_PASSED = "passed"
+EVAL_FAILED = "failed"
+EVAL_NOT_EVALUABLE = "not_evaluable"
+
+
 @dataclass
 class GateResult:
     name: str
@@ -13,10 +18,34 @@ class GateResult:
     actual: Any = None
     threshold: Any = None
     detail: str = ""
-    status_hint: str = ""  # WATCHING | BLOCKED | WARMING_UP | ""
+    status_hint: str = ""  # WATCHING | BLOCKED | WARMING_UP | NOT_EVALUABLE | ""
+    evaluability: str = ""  # passed | failed | not_evaluable
+
+    def __post_init__(self) -> None:
+        if self.evaluability:
+            return
+        if self.status_hint == "NOT_EVALUABLE":
+            self.evaluability = EVAL_NOT_EVALUABLE
+        elif self.passed:
+            self.evaluability = EVAL_PASSED
+        else:
+            self.evaluability = EVAL_FAILED
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def not_evaluable(name: str, detail: str, *, actual: Any = None, threshold: Any = None) -> GateResult:
+    """Missing data — never a strategy fail."""
+    return GateResult(
+        name=name,
+        passed=True,
+        actual=actual,
+        threshold=threshold,
+        detail=detail,
+        status_hint="NOT_EVALUABLE",
+        evaluability=EVAL_NOT_EVALUABLE,
+    )
 
 
 def spread_pct_of_mid(bid: Optional[float], ask: Optional[float], mid: Optional[float] = None) -> Optional[float]:
@@ -74,13 +103,11 @@ def gate_iv_percentile(
             status_hint="WARMING_UP",
         )
     if percentile is None:
-        return GateResult(
-            name="iv_percentile",
-            passed=False,
-            actual=None,
-            threshold=min_percentile,
-            detail="percentile unavailable",
-            status_hint="WATCHING",
+        return not_evaluable(
+            "iv_percentile",
+            "percentile unavailable (missing ATM IV or history)",
+            actual={"percentile": None, "snapshots": snapshot_count},
+            threshold={"min_percentile": min_percentile, "min_snapshots": min_snapshots},
         )
     ok = float(percentile) >= float(min_percentile)
     return GateResult(
@@ -100,13 +127,11 @@ def gate_iv_vs_rv(
 ) -> GateResult:
     """ATM IV exceeds RV by at least relative_min (relative)."""
     if atm_iv is None or rv_20d is None or rv_20d <= 0:
-        return GateResult(
-            name="iv_vs_rv",
-            passed=False,
+        return not_evaluable(
+            "iv_vs_rv",
+            "ATM IV or RV missing — not a strategy rejection",
             actual={"atm_iv": atm_iv, "rv_20d": rv_20d},
             threshold=relative_min,
-            detail="ATM IV or RV missing",
-            status_hint="WATCHING",
         )
     rel = (float(atm_iv) - float(rv_20d)) / float(rv_20d)
     ok = rel >= float(relative_min)
@@ -316,14 +341,7 @@ def gate_stale_data(
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     if not built_at:
-        return GateResult(
-            name="stale_data",
-            passed=False,
-            actual=None,
-            threshold=max_age_sec,
-            detail="no chain timestamp",
-            status_hint="BLOCKED",
-        )
+        return not_evaluable("stale_data", "no chain timestamp", threshold=max_age_sec)
     try:
         ts = datetime.fromisoformat(str(built_at).replace("Z", "+00:00"))
         if ts.tzinfo is None:
@@ -413,17 +431,19 @@ def decide_structure_from_skew(
 
 
 def aggregate_status(gates: Sequence[GateResult]) -> str:
-    """QUALIFIED | WATCHING | BLOCKED | WARMING_UP."""
-    if any(g.status_hint == "BLOCKED" and not g.passed for g in gates):
+    """QUALIFIED | WATCHING | BLOCKED | WARMING_UP | NOT_EVALUABLE."""
+    if any(g.status_hint == "BLOCKED" and g.evaluability == EVAL_FAILED for g in gates):
         return "BLOCKED"
+    failed = [g for g in gates if g.evaluability == EVAL_FAILED]
+    if failed:
+        return "WATCHING"
     warming = any(g.status_hint == "WARMING_UP" for g in gates)
-    failed = [g for g in gates if not g.passed]
-    if not failed:
-        return "WARMING_UP" if warming else "QUALIFIED"
-    if warming and all(g.name != "iv_percentile" or g.passed for g in failed):
-        # still have other failures
-        pass
-    return "WATCHING"
+    missing = any(g.evaluability == EVAL_NOT_EVALUABLE for g in gates)
+    if missing:
+        return "NOT_EVALUABLE"
+    if warming:
+        return "WARMING_UP"
+    return "QUALIFIED"
 
 
 def compute_iv_percentile(history: Sequence[float], current: Optional[float]) -> Optional[float]:

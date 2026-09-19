@@ -29,7 +29,19 @@ UA = "TradeManthan-KosmicTarang/1.0 (operator archival; +https://www.tradewithct
 MINI_SYMBOLS = ("CRUDEOILM", "NATGASMINI")
 FULL_SYMBOLS = ("CRUDEOIL", "NATURALGAS")
 INSTRUMENTS = ("OPTFUT", "FUTCOM")
-SLEEP_SEC = 1.6
+SLEEP_SEC = 4.0  # 3–5s if automation is ever re-enabled with written consent
+# robots.txt User-agent: * Disallow: /  AND Googlebot Disallow: /backpage.aspx
+# Terms §10 forbid systematic automated data collection without written consent.
+AUTOMATION_ALLOWED = False
+AUTOMATION_STOP_REASON = (
+    "MCX robots.txt (https://www.mcxindia.com/robots.txt) has 'User-agent: *' / 'Disallow: /' "
+    "and Googlebot 'Disallow: /backpage.aspx'. Terms of use clause 10 "
+    "(https://www.mcxindia.com/terms-and-conditions-of-usage-for-website) states: "
+    "'User may not conduct any systematic or automated data collection activities "
+    "(including scraping, data mining, data extraction and data harvesting) on or in "
+    "relation to the website with MCX’s written consent.' Automated bhavcopy download is STOPPED. "
+    "Use admin drag-and-drop only."
+)
 
 
 def _headers() -> Dict[str, str]:
@@ -267,8 +279,17 @@ def run_mcx_bhavcopy_download(
     backfill_start: Optional[date] = None,
     include_full: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """Scheduled download. Independent of Upstox. Stop if MCX blocks automation."""
+    """Scheduled download. Independent of Upstox. Stopped: robots.txt + terms forbid scraping."""
     assert "upstox" not in BHAVCOPY_URL.lower()
+    if not AUTOMATION_ALLOWED:
+        return {
+            "ok": False,
+            "blocked": True,
+            "stopped_by_robots": True,
+            "upstox_used": False,
+            "reason": AUTOMATION_STOP_REASON,
+            "fallback": "Admin drag-and-drop CSV/XLS on Tarang Backtest.",
+        }
     probe = probe_endpoints() if force_probe else {"ok": True, "blocked": False}
     if probe.get("blocked") or not probe.get("ok"):
         logger.warning("MCX bhavcopy automation blocked/unclear: %s", probe)

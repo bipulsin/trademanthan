@@ -50,6 +50,9 @@ def test_iv_percentile_warmup():
 def test_iv_vs_rv():
     assert gate_iv_vs_rv(0.40, 0.30, 0.10).passed
     assert not gate_iv_vs_rv(0.31, 0.30, 0.10).passed
+    missing = gate_iv_vs_rv(0.40, None, 0.10)
+    assert missing.evaluability == "not_evaluable"
+    assert missing.passed is True
 
 
 def test_expiry_dte():

@@ -91,6 +91,24 @@ def test_live_still_locked():
     assert live_send_allowed() is False
 
 
+def test_iv_vs_rv_missing_is_not_evaluable():
+    from backend.services.tarang.gates import EVAL_NOT_EVALUABLE, aggregate_status, gate_iv_percentile, gate_iv_vs_rv
+
+    g = gate_iv_vs_rv(0.28, None, 0.10)
+    assert g.evaluability == EVAL_NOT_EVALUABLE
+    assert g.passed is True
+    assert "missing" in g.detail.lower()
+    g2 = gate_iv_percentile(None, snapshot_count=80, min_percentile=50, min_snapshots=60)
+    assert g2.evaluability == EVAL_NOT_EVALUABLE
+    warm = gate_iv_percentile(40.0, snapshot_count=10, min_percentile=50, min_snapshots=60)
+    assert warm.status_hint == "WARMING_UP"
+    assert warm.passed
+    assert aggregate_status([g, warm]) == "NOT_EVALUABLE"
+    fail = gate_iv_vs_rv(0.31, 0.30, 0.10)
+    assert fail.evaluability == "failed"
+    assert aggregate_status([fail, g]) == "WATCHING"
+
+
 def test_job_lock_key_stable():
     from backend.services.tarang.job_lock import _lock_key
 

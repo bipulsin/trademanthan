@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from sqlalchemy import text
 
 from backend.database import SessionLocal
+from backend.services.tarang.evals import analyze_candidates_24h, latest_iv_rv_panel
 from backend.services.tarang.job_runs import list_job_runs
 from backend.services.tarang.schema import ensure_tarang_tables
 
@@ -45,12 +46,17 @@ def screener_stats_24h() -> Dict[str, Any]:
         rej = db.execute(
             text(
                 """
-                SELECT gate_name, COUNT(*)::int AS n
+                SELECT gate_name,
+                       COUNT(*) FILTER (WHERE COALESCE(payload->'gate'->>'evaluability','failed') = 'failed'
+                                           OR (payload->'gate'->>'evaluability' IS NULL
+                                               AND COALESCE(payload->>'evaluability','') <> 'not_evaluable'))::int AS failed,
+                       COUNT(*) FILTER (WHERE COALESCE(payload->'gate'->>'evaluability', payload->>'evaluability') = 'not_evaluable')::int AS not_evaluable,
+                       COUNT(*)::int AS n
                 FROM tarang_rejections
                 WHERE created_at >= :s
                 GROUP BY gate_name
                 ORDER BY n DESC
-                LIMIT 12
+                LIMIT 16
                 """
             ),
             {"s": since},
@@ -118,7 +124,12 @@ def screener_stats_24h() -> Dict[str, Any]:
                 for r in last_run
             ],
             "status_counts_24h": {r["status"]: r["n"] for r in statuses},
-            "top_rejection_reasons": [{"gate": r["gate_name"], "n": r["n"]} for r in rej],
+            "top_rejection_reasons": [
+                {"gate": r["gate_name"], "failed": r.get("failed"), "not_evaluable": r.get("not_evaluable"), "n": r["n"]}
+                for r in rej
+            ],
+            "iv_rv_panel": latest_iv_rv_panel(),
+            "counterfactual_24h": analyze_candidates_24h(),
             "forward_test_total": n_ft,
             "forward_test_per_day": [{"date": str(r["d"]), "n": r["n"]} for r in ft_days],
             "skipped_24h": [{"reason": r["reason"], "n": r["n"]} for r in skipped],

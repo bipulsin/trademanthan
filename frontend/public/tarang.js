@@ -477,7 +477,24 @@
     }
     renderEligibility(h.expiry_eligibility);
     const s24 = document.getElementById('screener24Box');
-    if (s24) s24.textContent = JSON.stringify(h.screener_24h || {}, null, 2);
+    if (s24) {
+      const s = h.screener_24h || {};
+      const slim = { ...s };
+      delete slim.iv_rv_panel;
+      s24.textContent = JSON.stringify(slim, null, 2);
+    }
+    const ivBody = document.getElementById('ivRvBody');
+    if (ivBody) {
+      const panel = (h.screener_24h && h.screener_24h.iv_rv_panel) || [];
+      ivBody.innerHTML = panel.length ? panel.map((r) => `<tr>
+        <td>${r.underlying || r.profile_id || ''}</td>
+        <td>${r.atm_iv != null ? Number(r.atm_iv).toFixed(4) : '—'}</td>
+        <td>${r.realized_vol_20d != null ? Number(r.realized_vol_20d).toFixed(4) : '—'}</td>
+        <td>${r.iv_minus_rv_over_rv != null ? (Number(r.iv_minus_rv_over_rv) * 100).toFixed(1) + '%' : '—'}</td>
+        <td>${r.threshold != null ? (Number(r.threshold) * 100).toFixed(0) + '%' : '—'}</td>
+        <td class="${r.gate === 'pass' ? 'tg-fit-yes' : 'tg-fit-no'}">${r.gate || '—'}</td>
+      </tr>`).join('') : '<tr><td colspan="6" class="tg-muted">No evaluations yet</td></tr>';
+    }
     const pipe = (h.pipeline && h.pipeline.jobs) || [];
     const pbody = document.getElementById('pipelineBody');
     if (pbody) {
@@ -801,6 +818,21 @@
         });
         const out = await res.json();
         status.textContent = res.ok ? `Imported ${out.inserted || 0} rows` : JSON.stringify(out);
+      } catch (err) {
+        status.textContent = String(err.message || err);
+      }
+    });
+  }
+  const btnTgTest = document.getElementById('btnTgTest');
+  if (btnTgTest) {
+    btnTgTest.addEventListener('click', async () => {
+      const status = document.getElementById('statusLine');
+      try {
+        const out = await api('/api/tarang/telegram/test', { method: 'POST', body: '{}' });
+        document.getElementById('tgBox').textContent = JSON.stringify(out, null, 2);
+        status.textContent = out.sent || (out.telegram && out.telegram.sent)
+          ? 'Test alert sent'
+          : (out.error || 'Test alert not sent (chat may be unlinked)');
       } catch (err) {
         status.textContent = String(err.message || err);
       }

@@ -617,6 +617,25 @@ def tarang_telegram_poll(_user: User = Depends(_require_admin)) -> Dict[str, Any
     return poll_and_link()
 
 
+@router.post("/telegram/test")
+def tarang_telegram_test(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.alerts_telegram import send_test_alert
+
+    return send_test_alert()
+
+
+@router.get("/evals/first-session")
+def tarang_first_session(
+    after: str,
+    underlying: Optional[str] = None,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    from backend.services.tarang.evals import first_in_session_evals
+
+    unds = [u.strip() for u in underlying.split(",")] if underlying else None
+    return first_in_session_evals(after_date=after, underlyings=unds)
+
+
 @router.post("/telegram/webhook")
 async def tarang_telegram_webhook(
     request: Request,
