@@ -35,6 +35,7 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
             "by_exit_reason": {},
             "by_profile": {},
             "by_holding_mode": {"INTRADAY": {"count": 0}, "POSITIONAL": {"count": 0}},
+            "by_origin": {"AUTO": {"count": 0}, "USER": {"count": 0}},
         }
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
@@ -86,6 +87,14 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     holding_metrics = {k: _slice_metrics(v) for k, v in by_holding.items()}
 
+    by_origin: Dict[str, List[Dict[str, Any]]] = {"AUTO": [], "USER": [], "BACKTEST": []}
+    for t in trades:
+        orig = str(t.get("origin") or ("AUTO" if t.get("auto_managed") else "USER")).upper()
+        if orig not in by_origin:
+            by_origin[orig] = []
+        by_origin[orig].append(t)
+    origin_metrics = {k: _slice_metrics(v) for k, v in by_origin.items()}
+
     return {
         "count": len(pnls),
         "win_rate": win_rate,
@@ -102,6 +111,7 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "by_exit_reason": by_reason,
         "by_profile": by_profile,
         "by_holding_mode": holding_metrics,
+        "by_origin": origin_metrics,
     }
 
 
@@ -123,7 +133,8 @@ def build_report(
         "trades": trades,
         "metrics": metrics,
         "live_trades": live_empty if mode == "PAPER" else trades,
-        "note": "LIVE book empty until Phase 4." if mode == "PAPER" else None,
+        "note": "LIVE book empty until Phase 4 (held until you approve: 4 weeks clean snapshots + 20 paper trades reviewed)." if mode == "PAPER" else None,
+        "auto_label": "AUTO trades are labelled origin=AUTO. LIVE is never auto.",
     }
 
 
@@ -137,6 +148,8 @@ def report_csv(mode: str = "PAPER", limit: int = 500) -> str:
         "mode",
         "holding_mode",
         "status",
+        "origin",
+        "auto_managed",
         "entry_at",
         "exit_at",
         "exit_reason",

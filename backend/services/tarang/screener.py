@@ -11,6 +11,7 @@ from sqlalchemy import text
 from backend.database import SessionLocal
 from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.config import crypto_budget, energy_budget, get_events, get_profiles, get_risk
+from backend.services.tarang.fee_gate import gate_fee_and_limits
 from backend.services.tarang.gates import (
     GateResult,
     aggregate_status,
@@ -26,6 +27,7 @@ from backend.services.tarang.gates import (
     gate_short_delta,
     gate_sizing,
     gate_stale_data,
+    gate_two_sided_quotes,
 )
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.structures import (
@@ -180,8 +182,23 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
     portfolio_cap = float(budget.get("portfolio_limit_inr") or 0)
 
     builder = builder or ChainBuilder()
-    # Wider window for 10–16δ shorts
-    chain = builder.build(profile_id, atm_window=14)
+    dte_min = prof.get("expiry_min_dte") or prof.get("expiry_dte_min")
+    dte_max = prof.get("expiry_dte_max")
+    chosen_expiry = None
+    try:
+        for exp in builder.snapshot_expiries(profile_id):
+            gexp = gate_expiry_dte(
+                exp,
+                None,
+                min_dte=int(dte_min) if dte_min is not None else None,
+                max_dte=int(dte_max) if dte_max is not None else None,
+            )
+            if gexp.passed:
+                chosen_expiry = exp
+                break
+    except Exception:
+        chosen_expiry = None
+    chain = builder.build(profile_id, expiry=chosen_expiry)
 
     gates: List[GateResult] = []
     db = SessionLocal()
@@ -289,6 +306,7 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
             return {"profile_id": profile_id, "candidate_id": cand_id, **payload}
 
         legs = built["legs"]
+        gates.append(gate_two_sided_quotes(legs))
         gates.append(
             gate_liquidity(
                 legs,
@@ -315,6 +333,16 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
         )
         units = floor_units(per_trade, ml)
         gates.append(gate_sizing(ml, per_trade, units))
+        fee_info = gate_fee_and_limits(
+            venue=chain.venue,
+            legs=legs,
+            net_credit_pts=float(built.get("net_credit") or 0),
+            units=max(units, 1),
+            lot_size=built.get("lot_size") or chain.lot_size,
+            contract_value=built.get("contract_value"),
+            underlying_price=chain.futures_or_spot,
+        )
+        gates.append(fee_info["gate"])
 
         candidate_risk = float(ml or 0) * max(units, 0)
         open_risk = _open_risk_for_bucket(db, bucket)
@@ -332,6 +360,7 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
             "credit_stop_multiple": float(risk.get("credit_stop_multiple") or 2.0),
             "delta_stop_min": float(risk.get("delta_stop_min") or 0.30),
             "delta_stop_max": float(risk.get("delta_stop_max") or 0.35),
+            "time_stop_dte": int(prof.get("time_stop_dte") or (5 if chain.venue != "delta_india" else 1)),
         }
 
         payload = {
@@ -350,6 +379,12 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
             "budget_inr": per_trade,
             "max_profit_approx_inr": max_profit if units >= 1 else None,
             "exit_levels": exit_levels,
+            "fees_frac_of_credit": fee_info.get("fees_frac_of_credit"),
+            "round_trip_fees_inr": fee_info.get("round_trip_fees_inr"),
+            "gross_credit_inr": fee_info.get("gross_credit_inr"),
+            "net_credit_per_contract_inr": fee_info.get("net_credit_per_contract_inr"),
+            "max_contracts_per_order": fee_info.get("max_contracts_per_order"),
+            "max_contracts_per_trade": fee_info.get("max_contracts_per_trade"),
             "expiry": built.get("expiry"),
             "underlying": built.get("underlying"),
             "venue": chain.venue,
@@ -390,12 +425,15 @@ def run_screener(profile_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     results = []
     for pid in profile_ids:
         results.append(screen_profile(pid, builder=builder))
+    from backend.services.tarang.lifecycle import get_mode_auto
+
+    ma = get_mode_auto()
     return {
         "product": "Kosmic Tarang",
         "phase": 2,
         "run_at": datetime.now(timezone.utc).isoformat(),
-        "mode": "PAPER",
-        "auto": False,
+        "mode": ma.get("mode") or "PAPER",
+        "auto": bool(ma.get("auto")),
         "results": results,
     }
 

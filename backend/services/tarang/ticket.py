@@ -37,7 +37,13 @@ def build_ticket(candidate_id: int) -> Dict[str, Any]:
         "underlying": p.get("underlying"),
         "venue": p.get("venue"),
         "iv_percentile": p.get("iv_percentile"),
-        "note": "Phase 3: Take trade simulates PAPER fills via PaperBroker — no live broker orders.",
+        "fees_frac_of_credit": p.get("fees_frac_of_credit"),
+        "round_trip_fees_inr": p.get("round_trip_fees_inr"),
+        "gross_credit_inr": p.get("gross_credit_inr"),
+        "net_credit_per_contract_inr": p.get("net_credit_per_contract_inr"),
+        "max_contracts_per_order": p.get("max_contracts_per_order"),
+        "max_contracts_per_trade": p.get("max_contracts_per_trade"),
+        "note": "Phase 3: Take trade simulates PAPER fills via PaperBroker — no live broker orders. Fees are round-trip estimates vs gross credit.",
     }
 
 

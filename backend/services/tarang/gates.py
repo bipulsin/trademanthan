@@ -120,6 +120,31 @@ def gate_iv_vs_rv(
     )
 
 
+def gate_two_sided_quotes(legs: Sequence[Dict[str, Any]]) -> GateResult:
+    """Reject any leg without a live bid and ask. Model/last prices are not tradable."""
+    fails: List[str] = []
+    for leg in legs:
+        bid, ask = leg.get("bid"), leg.get("ask")
+        label = f"{leg.get('right')}@{leg.get('strike')}"
+        try:
+            ok = bid is not None and ask is not None and float(bid) > 0 and float(ask) > 0
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            fails.append(f"{label}: missing two-sided quote")
+        src = str(leg.get("greeks_source") or "")
+        if src in ("black76", "bs") and not ok:
+            fails.append(f"{label}: model-only (not a trade price)")
+    ok = not fails
+    return GateResult(
+        name="two_sided_quotes",
+        passed=ok,
+        actual={"fails": fails} if fails else "ok",
+        detail="; ".join(fails) if fails else "all legs two-sided",
+        status_hint="" if ok else "BLOCKED",
+    )
+
+
 def gate_expiry_dte(
     expiry: Optional[str],
     dte: Optional[int],

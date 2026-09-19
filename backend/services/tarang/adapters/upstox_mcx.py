@@ -14,6 +14,7 @@ from backend.services.tarang.adapters.rate_budget import get_tarang_upstox_budge
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
 from backend.services.tarang.greeks_service import enrich_quote
 from backend.services.tarang.iv_normalize import normalize_iv
+from backend.services.tarang.strike_window import select_strikes, years_to_expiry
 from backend.services.upstox_service import UpstoxService
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,13 @@ class UpstoxMcxAdapter:
         rows = self.list_option_rows(underlying)
         return [_expiry_iso(ms) for ms in self._nearest_expiries(rows, n)]
 
+    def all_future_expiries(self, underlying: str) -> List[str]:
+        """Every listed option expiry still in the future (MCX snapshot universe)."""
+        rows = self.list_option_rows(underlying)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        exps = sorted({e for e in (_expiry_ms(r) for r in rows) if e and e > now_ms})
+        return [_expiry_iso(ms) for ms in exps]
+
     def contract_spec(self, underlying: str) -> Dict[str, Any]:
         """Lot size + modal strike step from the instrument master."""
         rows = self.list_option_rows(underlying)
@@ -231,11 +239,14 @@ class UpstoxMcxAdapter:
                 buys = depth.get("buy") or []
                 sells = depth.get("sell") or []
                 bid = ask = None
+                bid_qty = ask_qty = None
                 try:
                     if buys:
                         bid = float(buys[0].get("price"))
+                        bid_qty = buys[0].get("quantity") or buys[0].get("qty")
                     if sells:
                         ask = float(sells[0].get("price"))
+                        ask_qty = sells[0].get("quantity") or sells[0].get("qty")
                 except (TypeError, ValueError, IndexError):
                     pass
                 last = qd.get("last_price")
@@ -243,14 +254,18 @@ class UpstoxMcxAdapter:
                     last_f = float(last) if last is not None else None
                 except (TypeError, ValueError):
                     last_f = None
-                mid = 0.5 * (bid + ask) if bid is not None and ask is not None else None
+                two_sided = bid is not None and ask is not None and float(bid) > 0 and float(ask) > 0
+                mid = 0.5 * (bid + ask) if two_sided else None
                 out[ik] = {
                     "bid": bid,
                     "ask": ask,
+                    "bid_qty": bid_qty,
+                    "ask_qty": ask_qty,
                     "mid": mid,
                     "last": last_f,
                     "oi": qd.get("oi") or qd.get("open_interest"),
                     "volume": qd.get("volume"),
+                    "two_sided": two_sided,
                 }
         return out
 
@@ -259,7 +274,8 @@ class UpstoxMcxAdapter:
         profile_id: str,
         underlying: str,
         expiry: Optional[str] = None,
-        atm_window: int = 8,
+        atm_window: int = 10,
+        window_cfg: Optional[Dict[str, Any]] = None,
     ) -> OptionChain:
         us = (underlying or _FAMILY_MINI.get(profile_id.upper()) or "").upper()
         rows = self.list_option_rows(us)
@@ -292,13 +308,20 @@ class UpstoxMcxAdapter:
             diffs = sorted({round(strikes[i + 1] - strikes[i], 6) for i in range(len(strikes) - 1) if strikes[i + 1] > strikes[i]})
             strike_step = diffs[0] if diffs else None
 
-        # ATM window
-        if F and strikes:
-            atm = min(strikes, key=lambda s: abs(s - F))
-            idx = strikes.index(atm)
-            lo = max(0, idx - atm_window)
-            hi = min(len(strikes), idx + atm_window + 1)
-            keep = set(strikes[lo:hi])
+        cfg = dict(window_cfg or {})
+        min_atm = int(cfg.get("min_atm_window") or atm_window or 10)
+        T = years_to_expiry(_expiry_iso(exp_ms))
+        keep, win_meta = select_strikes(
+            strikes,
+            F=F,
+            atm_iv=cfg.get("atm_iv"),
+            years=T,
+            delta_abs_min=float(cfg.get("delta_abs_min") or 0.03),
+            delta_abs_max=float(cfg.get("delta_abs_max") or 0.97),
+            sigma_mult=float(cfg.get("sigma_mult") or 2.5),
+            min_atm_window=min_atm,
+        )
+        if keep:
             rows = [r for r in rows if float(r.get("strike_price") or r.get("strike") or 0) in keep]
 
         keys = [str(r["instrument_key"]) for r in rows]
@@ -349,6 +372,11 @@ class UpstoxMcxAdapter:
                 vega=gd.get("vega"),
                 greeks_source="venue" if iv_dec and delta is not None else None,
                 lot_size=lot,
+                meta={
+                    "bid_qty": qd.get("bid_qty"),
+                    "ask_qty": qd.get("ask_qty"),
+                    "two_sided": bool(qd.get("two_sided")),
+                },
             )
             if F:
                 enrich_quote(q, F_or_S=F, model="black76")
@@ -364,5 +392,5 @@ class UpstoxMcxAdapter:
             strike_step=strike_step,
             quotes=out_quotes,
             built_at=datetime.now(timezone.utc).isoformat(),
-            meta={"futures": fut_meta, "n_quotes": len(out_quotes)},
+            meta={"futures": fut_meta, "n_quotes": len(out_quotes), "window": win_meta},
         )

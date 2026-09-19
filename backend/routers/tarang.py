@@ -11,9 +11,12 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.tarang.backtest import run_backtest
 from backend.services.tarang.chain_builder import ChainBuilder
+from backend.services.tarang.chain_snapshots import capture_chain_snapshots
 from backend.services.tarang.config import get_events, get_profiles, get_risk
 from backend.services.tarang.events import list_alerts
+from backend.services.tarang.expiry_eligibility import expiry_eligibility
 from backend.services.tarang.health import build_health_payload
 from backend.services.tarang.iv_snapshots import capture_iv_snapshots
 from backend.services.tarang.lifecycle import (
@@ -25,7 +28,9 @@ from backend.services.tarang.lifecycle import (
     get_trade,
     list_open_trades,
     mark_taken_manual,
+    run_auto_paper_once,
     run_exit_engine_once,
+    set_paper_auto,
     take_trade_paper,
 )
 from backend.services.tarang.report import build_report, report_csv
@@ -70,6 +75,10 @@ class ExitBody(BaseModel):
 
 class NoteBody(BaseModel):
     note: str
+
+
+class AutoBody(BaseModel):
+    enabled: bool = False
 
 
 @router.get("/health")
@@ -119,6 +128,48 @@ def tarang_iv_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     return capture_iv_snapshots()
 
 
+@router.post("/chain-snapshots/run")
+def tarang_chain_snap_run(
+    venue: Optional[str] = None,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    venues = [venue] if venue else None
+    return capture_chain_snapshots(venues=venues, respect_mcx_session=True)
+
+
+@router.get("/eligibility")
+def tarang_eligibility(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return expiry_eligibility()
+
+
+@router.get("/backtest")
+def tarang_backtest_get(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return run_backtest()
+
+
+@router.post("/backtest/run")
+def tarang_backtest_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return run_backtest()
+
+
+@router.post("/settings/auto")
+def tarang_set_auto(body: AutoBody, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    out = set_paper_auto(bool(body.enabled))
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out)
+    return out
+
+
+@router.post("/auto/run")
+def tarang_auto_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    out = run_auto_paper_once()
+    if not out.get("ok") and out.get("error") not in ("auto_paper_only",):
+        # auto_off is ok True; kill_switch returns ok False
+        if out.get("error") == "kill_switch":
+            raise HTTPException(status_code=409, detail="kill_switch")
+    return out
+
+
 @router.post("/screener/run")
 def tarang_screener_run(
     profile_id: Optional[str] = None,
@@ -138,11 +189,14 @@ def tarang_screener_latest(_user: User = Depends(_require_admin)) -> Dict[str, A
         pid = c["profile_id"]
         if pid not in by:
             by[pid] = c
+    from backend.services.tarang.lifecycle import get_mode_auto
+
+    ma = get_mode_auto()
     return {
         "product": "Kosmic Tarang",
         "phase": 3,
-        "mode": "PAPER",
-        "auto": False,
+        "mode": ma.get("mode") or "PAPER",
+        "auto": bool(ma.get("auto")),
         "by_profile": by,
         "recent": cands[:20],
     }

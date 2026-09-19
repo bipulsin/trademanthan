@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=5" />
+    <link rel="stylesheet" href="tarang.css?v=6" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -43,6 +43,7 @@
                         <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener, paper In-Trade &amp; report (admin)</p>
                     </div>
                     <div class="tg-header-aside">
+                        <button type="button" class="tg-btn" id="btnAutoToggle">AUTO PAPER: off</button>
                         <button type="button" class="tg-btn" id="btnRefresh">Refresh</button>
                         <button type="button" class="tg-btn tg-btn-primary" id="btnScreen">Run screener</button>
                     </div>
@@ -56,13 +57,14 @@
                         <button type="button" class="tg-tab" data-tab="ticket">Trade Ticket</button>
                         <button type="button" class="tg-tab" data-tab="intrade">In-Trade</button>
                         <button type="button" class="tg-tab" data-tab="report">Trade Report</button>
+                        <button type="button" class="tg-tab" data-tab="backtest">Backtest</button>
                         <button type="button" class="tg-tab" data-tab="health">Data health</button>
                     </nav>
 
                     <div id="tab-screener" class="tg-tab-panel">
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Opportunities</h2>
-                            <p class="tg-note">CL / NG / BTC / ETH — QUALIFIED, WATCHING, BLOCKED, or WARMING UP. Admin-only · PAPER · AUTO OFF.</p>
+                            <p class="tg-note">CL / NG / BTC / ETH — QUALIFIED, WATCHING, BLOCKED, or WARMING UP. Admin-only · PAPER. AUTO is PAPER-only; LIVE stays admin-gated.</p>
                             <div class="tg-table-wrap">
                                 <table class="tg-table" id="screenTable">
                                     <thead>
@@ -155,7 +157,7 @@
                                 <table class="tg-table">
                                     <thead>
                                         <tr>
-                                            <th>Id</th><th>Profile</th><th>Hold</th><th>Structure</th><th>Exit</th>
+                                            <th>Id</th><th>Origin</th><th>Profile</th><th>Hold</th><th>Structure</th><th>Exit</th>
                                             <th>Gross</th><th>Net</th><th>Fees</th><th>When</th>
                                         </tr>
                                     </thead>
@@ -165,7 +167,58 @@
                         </section>
                     </div>
 
+                    <div id="tab-backtest" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <div class="tg-ticket-bar">
+                                <h2 class="tg-section-title" style="margin:0;">Replay harness</h2>
+                                <button type="button" class="tg-btn" id="btnRunBacktest">Run replay</button>
+                            </div>
+                            <p class="tg-note">Same Screener structure rules, SizingService and ExitEngine on stored delta-window snapshots. narrow_window (ATM±10) rows are excluded from short/wing validation. Phase 4 is held.</p>
+                            <p id="backtestMsg" class="tg-note"></p>
+                            <div class="tg-metrics" id="backtestMetrics"></div>
+                            <div class="tg-table-wrap" style="margin-top:12px;">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Underlying</th>
+                                            <th>Days (all)</th>
+                                            <th>Days wide</th>
+                                            <th>Narrow rows</th>
+                                            <th>Earliest</th>
+                                            <th>6m ready on</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="backtestTimeline"><tr><td colspan="6" class="tg-muted">Load replay</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+
                     <div id="tab-health" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Phase 4 hold</h2>
+                            <pre class="tg-pre" id="phase4Box">—</pre>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Expiry eligibility (7-day rule)</h2>
+                            <p class="tg-note">Never trade an expiry below min DTE. Never trade without two-sided quotes. Black-76 fills Greeks only — not prices.</p>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Underlying</th>
+                                            <th>Expiry</th>
+                                            <th>DTE</th>
+                                            <th>Min</th>
+                                            <th>Time stop</th>
+                                            <th>Tradable?</th>
+                                            <th>Note</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="eligBody"><tr><td colspan="7" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Feed health</h2>
                             <div class="tg-grid" id="feedGrid"></div>
@@ -203,6 +256,8 @@
                                         <tr>
                                             <th>Underlying</th>
                                             <th>Days</th>
+                                            <th>Wide days</th>
+                                            <th>Narrow</th>
                                             <th>Earliest</th>
                                             <th>Backtest start</th>
                                             <th>6m ready on</th>
@@ -229,6 +284,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=5"></script>
+    <script src="tarang.js?v=6"></script>
 </body>
 </html>

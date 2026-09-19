@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 _LOCK = threading.Lock()
 _CACHE: Dict[str, Any] = {}
@@ -66,6 +66,20 @@ def resolve_energy_underlying(profile_id: str, profile: Optional[Dict[str, Any]]
     return explicit or mapped or pid
 
 
-def reload_config() -> None:
-    with _LOCK:
-        _CACHE.clear()
+def validate_profiles() -> List[str]:
+    """Entry min DTE must exceed time-stop DTE by at least 2."""
+    errors: List[str] = []
+    profiles = (get_profiles().get("profiles") or {})
+    for pid, p in profiles.items():
+        if not p.get("enabled"):
+            continue
+        min_dte = p.get("expiry_min_dte") if p.get("expiry_min_dte") is not None else p.get("expiry_dte_min")
+        ts = p.get("time_stop_dte")
+        if min_dte is None or ts is None:
+            errors.append(f"{pid}: missing expiry_min_dte/time_stop_dte")
+            continue
+        if int(min_dte) - int(ts) < 2:
+            errors.append(
+                f"{pid}: expiry min DTE {min_dte} must exceed time_stop_dte {ts} by at least 2"
+            )
+    return errors

@@ -6,13 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
 
 
-def _mid(q: OptionQuote) -> Optional[float]:
-    if q.mid is not None:
-        return float(q.mid)
-    if q.bid is not None and q.ask is not None:
+def _trade_mid(q: OptionQuote) -> Optional[float]:
+    """Tradable mid requires a live two-sided book. Never use last or model-only prices."""
+    if q.bid is not None and q.ask is not None and float(q.bid) > 0 and float(q.ask) > 0:
         return 0.5 * (float(q.bid) + float(q.ask))
-    if q.last is not None:
-        return float(q.last)
     return None
 
 
@@ -69,8 +66,8 @@ def credit_spread_legs(
     long: OptionQuote,
 ) -> Tuple[List[Dict[str, Any]], float, float]:
     """Return legs, net_credit (pts), width (pts). Credit = short mid − long mid."""
-    s_mid = _mid(short)
-    l_mid = _mid(long)
+    s_mid = _trade_mid(short)
+    l_mid = _trade_mid(long)
     if s_mid is None or l_mid is None:
         return [], 0.0, abs(short.strike - long.strike)
     width = abs(short.strike - long.strike)

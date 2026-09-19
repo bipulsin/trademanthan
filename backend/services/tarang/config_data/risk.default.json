@@ -49,10 +49,35 @@
   },
   "chain_snapshots": {
     "atm_window": 10,
+    "min_atm_window": 10,
+    "delta_abs_min": 0.03,
+    "delta_abs_max": 0.97,
+    "sigma_mult": 2.5,
     "near_expiries": 2,
     "retention_days": 400,
     "iv_warmup_days": 60,
     "backtest_horizon_days": 180
+  },
+  "fee_gate": {
+    "max_fees_frac_of_credit": 0.15,
+    "min_net_credit_per_contract_inr": 1.0
+  },
+  "position_limits": {
+    "delta_india": {
+      "max_contracts_per_order": 4000,
+      "max_contracts_per_trade": 4000,
+      "source": "Delta India options typical order/position cap; override from ticker position_size when present"
+    },
+    "upstox_mcx": {
+      "max_contracts_per_order": 50,
+      "max_contracts_per_trade": 50,
+      "source": "MCX freeze / broker max lots — conservative default; do not exceed exchange freeze qty"
+    }
+  },
+  "phase4_hold": {
+    "min_clean_snapshot_weeks": 4,
+    "min_paper_trades_reviewed": 20,
+    "approved": false
   },
   "quote_stale_sec": 180,
   "telegram": {

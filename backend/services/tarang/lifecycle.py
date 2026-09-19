@@ -54,6 +54,50 @@ def _settings_mode(db) -> str:
     return str(v or "PAPER")
 
 
+def _settings_auto(db) -> bool:
+    row = db.execute(text("SELECT value FROM tarang_settings WHERE key = 'auto'")).mappings().first()
+    if not row:
+        return False
+    v = row["value"]
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return bool(v)
+
+
+def set_paper_auto(enabled: bool) -> Dict[str, Any]:
+    """AUTO may only be on in PAPER. LIVE stays admin-gated and never auto."""
+    ensure_tarang_tables()
+    db = SessionLocal()
+    try:
+        mode = _settings_mode(db)
+        if str(mode).upper() != "PAPER" and enabled:
+            return {"ok": False, "error": "auto_paper_only", "mode": mode, "auto": False}
+        db.execute(
+            text(
+                """
+                INSERT INTO tarang_settings (key, value) VALUES ('auto', CAST(:v AS jsonb))
+                ON CONFLICT (key) DO UPDATE SET value = CAST(:v AS jsonb)
+                """
+            ),
+            {"v": "true" if enabled else "false"},
+        )
+        db.commit()
+        return {"ok": True, "mode": "PAPER", "auto": bool(enabled)}
+    finally:
+        db.close()
+
+
+def get_mode_auto() -> Dict[str, Any]:
+    ensure_tarang_tables()
+    db = SessionLocal()
+    try:
+        return {"mode": _settings_mode(db), "auto": _settings_auto(db)}
+    finally:
+        db.close()
+
+
 def _row_to_trade(r) -> Dict[str, Any]:
     d = dict(r)
     for k in ("legs", "meta"):
@@ -236,8 +280,16 @@ def take_trade_paper(
             return {
                 "ok": False,
                 "error": "live_placement_disabled_phase3",
-                "detail": "Phase 3 only supports PAPER fills. LIVE is Phase 4.",
+                "detail": "Phase 4 is held until you approve. LIVE is separately admin-gated.",
             }
+        actor_u = str(actor or "USER").upper()
+        if actor_u == "AUTO":
+            if str(mode).upper() != "PAPER":
+                return {"ok": False, "error": "auto_paper_only", "mode": mode}
+            if not _settings_auto(db):
+                return {"ok": False, "error": "auto_disabled"}
+            if _kill_switch_tripped(db):
+                return {"ok": False, "error": "kill_switch"}
 
         fill_res = simulate_entry_fills(
             legs,
@@ -301,12 +353,12 @@ def take_trade_paper(
                     profile_id, risk_bucket, mode, holding_mode, status,
                     auto_managed, entry_credit, max_loss, lots_or_contracts, legs, meta,
                     candidate_id, venue, structure, entry_at, fees_total,
-                    entry_iv_percentile, notes, currency, entry_debit_to_close
+                    entry_iv_percentile, notes, currency, entry_debit_to_close, origin
                 ) VALUES (
                     :profile_id, :risk_bucket, 'PAPER', :holding_mode, :status,
-                    FALSE, :entry_credit, :max_loss, :lots, CAST(:legs AS jsonb), CAST(:meta AS jsonb),
+                    :auto_managed, :entry_credit, :max_loss, :lots, CAST(:legs AS jsonb), CAST(:meta AS jsonb),
                     :candidate_id, :venue, :structure, :entry_at, :fees,
-                    :iv_pct, :notes, 'INR', :entry_credit
+                    :iv_pct, :notes, 'INR', :entry_credit, :origin
                 )
                 RETURNING id
                 """
@@ -316,6 +368,8 @@ def take_trade_paper(
                 "risk_bucket": bucket,
                 "holding_mode": holding,
                 "status": ENTRY_PENDING,
+                "auto_managed": str(actor).upper() == "AUTO",
+                "origin": "AUTO" if str(actor).upper() == "AUTO" else "USER",
                 "entry_credit": fill_res["net_credit_pts"],
                 "max_loss": p.get("max_loss_per_unit_inr"),
                 "lots": units,
@@ -1037,3 +1091,59 @@ def check_feed_alerts() -> Dict[str, Any]:
     finally:
         db.close()
     return {"ok": True, "fired": fired}
+
+
+def _kill_switch_tripped(db) -> bool:
+    from backend.services.tarang.config import get_risk
+
+    kill_n = int(get_risk().get("kill_consecutive_losses") or 3)
+    closed = db.execute(
+        text(
+            """
+            SELECT net_pnl FROM tarang_trades
+            WHERE status IN ('CLOSED', 'REPORTED') AND mode = 'PAPER'
+            ORDER BY COALESCE(exit_at, updated_at) DESC
+            LIMIT :n
+            """
+        ),
+        {"n": kill_n},
+    ).mappings().all()
+    return len(closed) >= kill_n and all(float(r["net_pnl"] or 0) < 0 for r in closed)
+
+
+def run_auto_paper_once() -> Dict[str, Any]:
+    """PAPER AUTO entries. LIVE is never auto. ExitEngine still runs separately."""
+    ensure_tarang_tables()
+    db = SessionLocal()
+    try:
+        mode = _settings_mode(db)
+        auto = _settings_auto(db)
+        if str(mode).upper() != "PAPER":
+            return {"ok": False, "error": "auto_paper_only", "mode": mode, "taken": []}
+        if not auto:
+            return {"ok": True, "skipped": "auto_off", "taken": []}
+        if _kill_switch_tripped(db):
+            return {"ok": False, "error": "kill_switch", "taken": []}
+    finally:
+        db.close()
+
+    from backend.services.tarang.screener import run_screener
+
+    screen = run_screener()
+    taken: List[Dict[str, Any]] = []
+    open_pids = {str(t.get("profile_id") or "").upper() for t in list_open_trades("PAPER")}
+    for row in screen.get("results") or []:
+        if str(row.get("status") or "").upper() != "QUALIFIED":
+            continue
+        pid = str(row.get("profile_id") or "").upper()
+        if pid in open_pids:
+            continue
+        cid = row.get("candidate_id")
+        if not cid:
+            continue
+        holding = "POSITIONAL" if (row.get("venue") or "") != "delta_india" else "INTRADAY"
+        out = take_trade_paper(int(cid), note="AUTO PAPER", actor="AUTO", holding_mode=holding)
+        taken.append({"profile_id": pid, "candidate_id": cid, **out})
+        if out.get("ok"):
+            open_pids.add(pid)
+    return {"ok": True, "mode": "PAPER", "auto": True, "screened": len(screen.get("results") or []), "taken": taken}

@@ -23,8 +23,12 @@ def _tick_snapshots_delta(*, force: bool = False) -> None:
         ensure_tarang_tables()
         out = capture_chain_snapshots(venues=["delta_india"], respect_mcx_session=False)
         logger.info("tarang Delta chain snapshot: %s", out.get("results"))
+        _record_expected_misses("delta_india", out)
     except Exception as e:
         logger.exception("tarang Delta chain snapshot failed: %s", e)
+        from backend.services.tarang.data_gaps import record_data_gap
+
+        record_data_gap(venue="delta_india", reason="tick_exception", detail={"error": str(e)[:200]})
 
 
 def _tick_snapshots_mcx() -> None:
@@ -34,8 +38,29 @@ def _tick_snapshots_mcx() -> None:
         ensure_tarang_tables()
         out = capture_chain_snapshots(venues=["upstox_mcx"], respect_mcx_session=True)
         logger.info("tarang MCX chain snapshot: %s", out.get("results"))
+        _record_expected_misses("upstox_mcx", out)
     except Exception as e:
         logger.exception("tarang MCX chain snapshot failed: %s", e)
+        from backend.services.tarang.data_gaps import record_data_gap
+
+        record_data_gap(venue="upstox_mcx", reason="tick_exception", detail={"error": str(e)[:200]})
+
+
+def _record_expected_misses(venue: str, out: dict) -> None:
+    from backend.services.tarang.data_gaps import record_data_gap
+
+    for row in out.get("results") or []:
+        if row.get("ok") or row.get("skipped") in ("mcx_session_closed",):
+            continue
+        if row.get("skipped") == "no_valid_quotes" or row.get("error"):
+            # capture_chain_snapshots already inserts a gap in the same txn
+            continue
+        record_data_gap(
+            venue=venue,
+            profile_id=row.get("profile_id"),
+            reason=str(row.get("skipped") or row.get("error") or "missed_snapshot"),
+            detail=row,
+        )
 
 
 def _tick_exit_engine_delta() -> None:
@@ -87,6 +112,39 @@ def _tick_feed_health() -> None:
         check_feed_alerts()
     except Exception as e:
         logger.exception("tarang feed health tick failed: %s", e)
+
+
+def _tick_premarket_token() -> None:
+    try:
+        from backend.services.tarang.token_check import check_upstox_token
+
+        out = check_upstox_token()
+        logger.info("tarang 08:45 Upstox token check expired=%s analytics=%s", out.get("expired"), (out.get("analytics") or {}).get("works_for_mcx"))
+    except Exception as e:
+        logger.exception("tarang premarket token check failed: %s", e)
+
+
+def _tick_liquidity_probe() -> None:
+    try:
+        if not mcx_session_open():
+            return
+        from backend.services.tarang.liquidity_probe import run_mcx_liquidity_probe
+
+        out = run_mcx_liquidity_probe()
+        logger.info("tarang MCX liquidity probe: %s underlyings skipped=%s", len(out.get("underlyings") or []), out.get("skipped"))
+    except Exception as e:
+        logger.exception("tarang liquidity probe failed: %s", e)
+
+
+def _tick_auto_paper() -> None:
+    try:
+        from backend.services.tarang.lifecycle import run_auto_paper_once
+
+        out = run_auto_paper_once()
+        if out.get("taken"):
+            logger.info("tarang AUTO PAPER: %s", out)
+    except Exception as e:
+        logger.exception("tarang AUTO PAPER tick failed: %s", e)
 
 
 def start_tarang_scheduler() -> None:
@@ -149,6 +207,30 @@ def start_tarang_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    sch.add_job(
+        _tick_premarket_token,
+        CronTrigger(hour=8, minute=45, timezone="Asia/Kolkata"),
+        id="tarang_premarket_token",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    sch.add_job(
+        _tick_liquidity_probe,
+        CronTrigger(hour="10,15,19,22", minute=0, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="tarang_mcx_liquidity_probe",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    sch.add_job(
+        _tick_auto_paper,
+        CronTrigger(minute="*/5", timezone="Asia/Kolkata"),
+        id="tarang_auto_paper",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
 
     risk = get_risk()
     he = risk.get("hard_exits") or {}
@@ -194,7 +276,7 @@ def start_tarang_scheduler() -> None:
 
     sch.start()
     _scheduler = sch
-    logger.info("Kosmic Tarang scheduler started (chain snapshots + ExitEngine + hard-exit IST)")
+    logger.info("Kosmic Tarang scheduler started (delta-window snapshots + ExitEngine + AUTO PAPER + 08:45 token + Mon liquidity IST)")
     try:
         sch.add_job(
             _tick_snapshots_delta,

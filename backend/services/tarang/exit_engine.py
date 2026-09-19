@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timezone
 from typing import Any, Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
-from backend.services.tarang.config import get_events, get_risk
+from backend.services.tarang.config import get_events, get_profiles, get_risk
 from backend.services.tarang.gates import gate_event_blackout
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -226,6 +226,39 @@ def evaluate_exits(
         )
     )
 
+    # Time stop: DTE <= profile time_stop_dte
+    ts_dte = None
+    if expiry:
+        try:
+            exp_d = date.fromisoformat(str(expiry)[:10])
+            now_ist = (now or datetime.now(timezone.utc)).astimezone(IST)
+            ts_dte = (exp_d - now_ist.date()).days
+        except ValueError:
+            ts_dte = None
+    profiles = get_profiles().get("profiles") or {}
+    prof = profiles.get(profile_id) or profiles.get(str(profile_id).upper()) or {}
+    default_ts = 5 if venue != "delta_india" else 1
+    stop_at = levels.get("time_stop_dte")
+    if stop_at is None:
+        stop_at = prof.get("time_stop_dte")
+    if stop_at is None:
+        stop_at = default_ts
+    stop_at_i = int(stop_at)
+    ts_hit = ts_dte is not None and ts_dte <= stop_at_i
+    ts_dist = 0.0 if ts_hit else (
+        _clamp01((float(ts_dte) - stop_at_i) / max(float(ts_dte or 1), 1.0)) if ts_dte is not None else 1.0
+    )
+    triggers.append(
+        ExitTrigger(
+            reason="TIME_STOP",
+            hit=ts_hit,
+            distance_frac=ts_dist,
+            detail=f"DTE={ts_dte} (time-stop ≤{stop_at_i})",
+            value=ts_dte,
+            threshold=stop_at_i,
+        )
+    )
+
     now_utc = now or datetime.now(timezone.utc)
     hard_at = hard_exit_datetime(venue, holding_mode=holding_mode, expiry=expiry, now=now_utc)
     secs = None
@@ -266,6 +299,7 @@ def evaluate_exits(
     priority = [
         "HARD_EXIT",
         "BUDGET_STOP",
+        "TIME_STOP",
         "CREDIT_STOP",
         "DELTA_STOP",
         "IV_STOP",

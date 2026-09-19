@@ -225,3 +225,34 @@ CREATE TABLE IF NOT EXISTS tarang_alert_dedupe (
     last_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_message TEXT
 );
+
+-- Tag ATM±10 rows captured before the delta-window change.
+UPDATE tarang_chain_snapshots
+SET meta = COALESCE(meta, '{}'::jsonb) || '{"window_kind":"narrow_window"}'::jsonb
+WHERE COALESCE(meta->>'window_kind', '') NOT IN ('delta_window', 'narrow_window');
+
+CREATE TABLE IF NOT EXISTS tarang_data_gaps (
+    id BIGSERIAL PRIMARY KEY,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    venue TEXT NOT NULL,
+    profile_id TEXT,
+    expected_at TIMESTAMPTZ,
+    reason TEXT NOT NULL,
+    detail JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS ix_tarang_data_gaps_venue_time
+    ON tarang_data_gaps (venue, expected_at DESC);
+
+CREATE TABLE IF NOT EXISTS tarang_liquidity_probes (
+    id BIGSERIAL PRIMARY KEY,
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ist_hour SMALLINT,
+    underlying_symbol TEXT NOT NULL,
+    expiry_date DATE,
+    payload JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_tarang_liq_probes_und_time
+    ON tarang_liquidity_probes (underlying_symbol, captured_at DESC);
+
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS origin TEXT;
+

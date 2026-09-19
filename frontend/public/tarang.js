@@ -40,6 +40,11 @@
       autoEl.textContent = autoText;
       autoEl.classList.toggle('tg-badge-warn', !!auto);
     }
+    const autoBtn = document.getElementById('btnAutoToggle');
+    if (autoBtn) {
+      autoBtn.textContent = auto ? 'AUTO PAPER: on' : 'AUTO PAPER: off';
+      autoBtn.dataset.on = auto ? '1' : '0';
+    }
   }
 
   function fmtInr(n) {
@@ -63,6 +68,7 @@
     });
     if (name === 'intrade') loadInTrade();
     if (name === 'report') loadReport();
+    if (name === 'backtest') loadBacktest();
   }
 
   document.querySelectorAll('.tg-tab').forEach((btn) => {
@@ -113,12 +119,14 @@
     if (!body) return;
     const rows = (cov && cov.underlyings) || [];
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="6" class="tg-muted">No full-chain snapshots yet — collection starts now.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="tg-muted">No full-chain snapshots yet — collection starts now.</td></tr>';
       return;
     }
     body.innerHTML = rows.map((r) => `<tr>
       <td>${r.underlying}</td>
       <td>${r.days}</td>
+      <td>${r.days_wide != null ? r.days_wide : '—'}</td>
+      <td>${r.n_narrow != null ? r.n_narrow : '—'}</td>
       <td class="tg-muted">${(r.earliest || '').replace('T', ' ').slice(0, 16)}</td>
       <td>${r.earliest_backtest_start || '—'}</td>
       <td>${r.six_month_backtest_ready_on || '—'}</td>
@@ -221,6 +229,10 @@
       <p class="tg-note">Net credit ${t.net_credit != null ? Number(t.net_credit).toFixed(3) : '—'} · width ${t.width != null ? Number(t.width).toFixed(2) : '—'} ·
         lots ${t.lots_or_contracts ?? '—'} · max loss/unit ₹${t.max_loss_per_unit_inr != null ? Number(t.max_loss_per_unit_inr).toLocaleString('en-IN') : '—'} ·
         risk ₹${t.candidate_risk_inr != null ? Number(t.candidate_risk_inr).toLocaleString('en-IN') : '—'}</p>
+      <p class="tg-note">Round-trip fees ${t.fees_frac_of_credit != null ? (Number(t.fees_frac_of_credit) * 100).toFixed(1) + '% of gross credit' : '—'}
+        (${t.round_trip_fees_inr != null ? '₹' + Number(t.round_trip_fees_inr).toFixed(0) : '—'} / credit ${t.gross_credit_inr != null ? '₹' + Number(t.gross_credit_inr).toFixed(0) : '—'})
+        · net/contract ${t.net_credit_per_contract_inr != null ? '₹' + Number(t.net_credit_per_contract_inr).toFixed(2) : '—'}
+        · max contracts order/trade ${t.max_contracts_per_order ?? '—'} / ${t.max_contracts_per_trade ?? '—'}</p>
       <p class="tg-note">${t.note || ''}</p>
       <div class="tg-table-wrap"><table class="tg-table">
         <thead><tr><th>Side</th><th>Strike</th><th>Symbol</th><th>Mid</th><th>Conserv.</th><th></th></tr></thead>
@@ -277,7 +289,9 @@
         return `<article class="tg-intrade-card" data-tid="${t.id}">
           <header class="tg-intrade-head">
             <div>
-              <strong>#${t.id}</strong> ${statusChip(t.status)} <span class="tg-muted">${t.holding_mode || 'INTRADAY'}</span> ${t.profile_id || ''} · ${t.structure || ''}
+              <strong>#${t.id}</strong> ${statusChip(t.status)} <span class="tg-muted">${t.holding_mode || 'INTRADAY'}</span>
+              ${t.origin || t.auto_managed ? `<span class="tg-inline-badge">${t.origin || (t.auto_managed ? 'AUTO' : 'USER')}</span>` : ''}
+              ${t.profile_id || ''} · ${t.structure || ''}
               <span class="tg-muted">${t.venue || ''}</span>
             </div>
             <div class="tg-pnl ${Number(v.pnl_inr) >= 0 ? 'tg-pnl-pos' : 'tg-pnl-neg'}">${fmtInr(v.pnl_inr)}${usdNote}</div>
@@ -359,15 +373,18 @@
       <div class="tg-metric"><span>Max DD</span><strong>${fmtInr(m.max_drawdown)}</strong></div>
       <div class="tg-metric"><span>INTRADAY</span><strong>${(m.by_holding_mode && m.by_holding_mode.INTRADAY && m.by_holding_mode.INTRADAY.count) || 0}</strong></div>
       <div class="tg-metric"><span>POSITIONAL</span><strong>${(m.by_holding_mode && m.by_holding_mode.POSITIONAL && m.by_holding_mode.POSITIONAL.count) || 0}</strong></div>
+      <div class="tg-metric"><span>AUTO</span><strong>${(m.by_origin && m.by_origin.AUTO && m.by_origin.AUTO.count) || 0}</strong></div>
+      <div class="tg-metric"><span>USER</span><strong>${(m.by_origin && m.by_origin.USER && m.by_origin.USER.count) || 0}</strong></div>
     `;
     const body = document.getElementById('reportBody');
     const trades = rep.trades || [];
     if (!trades.length) {
-      body.innerHTML = `<tr><td colspan="9" class="tg-muted">${rep.note || 'No closed trades'}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="10" class="tg-muted">${rep.note || 'No closed trades'}</td></tr>`;
       return;
     }
     body.innerHTML = trades.map((t) => `<tr>
       <td>${t.id}</td>
+      <td>${t.origin || (t.auto_managed ? 'AUTO' : 'USER')}</td>
       <td>${t.profile_id || ''}</td>
       <td>${t.holding_mode || 'INTRADAY'}</td>
       <td>${t.structure || ''}</td>
@@ -433,8 +450,79 @@
     renderLoss(h.min_max_loss);
     renderCoverage(h.chain_coverage);
     document.getElementById('ivCounts').textContent = JSON.stringify(h.iv_snapshot_counts || {}, null, 2);
-    document.getElementById('wsBox').textContent = JSON.stringify(h.upstox_ws || {}, null, 2);
+    document.getElementById('wsBox').textContent = JSON.stringify({
+      ws: h.upstox_ws || {},
+      analytics: h.upstox_analytics_token || {},
+      profile_validation: h.profile_validation || [],
+    }, null, 2);
+    const p4 = document.getElementById('phase4Box');
+    if (p4) p4.textContent = JSON.stringify(h.phase4 || {}, null, 2);
+    renderEligibility(h.expiry_eligibility);
     return h;
+  }
+
+  function renderEligibility(elig) {
+    const body = document.getElementById('eligBody');
+    if (!body) return;
+    const rows = (elig && elig.rows) || [];
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="7" class="tg-muted">${(elig && elig.error) || 'No listed expiries'}</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((r) => `<tr>
+      <td>${r.underlying || r.profile_id || ''}</td>
+      <td>${r.expiry || '—'}</td>
+      <td>${r.dte != null ? r.dte : '—'}</td>
+      <td>${r.min_dte != null ? r.min_dte : '—'}</td>
+      <td>${r.time_stop_dte != null ? r.time_stop_dte : '—'}</td>
+      <td class="${r.tradable ? 'tg-fit-yes' : 'tg-fit-no'}">${r.tradable ? 'Yes' : 'No'}</td>
+      <td class="tg-muted">${r.note || (r.reasons || []).join(', ') || ''}</td>
+    </tr>`).join('');
+  }
+
+  function renderBacktest(bt) {
+    const msg = document.getElementById('backtestMsg');
+    const metrics = document.getElementById('backtestMetrics');
+    const body = document.getElementById('backtestTimeline');
+    if (!msg) return;
+    if (bt.insufficient_data) {
+      msg.textContent = bt.message || 'Insufficient data.';
+      msg.classList.add('tg-fit-no');
+    } else {
+      msg.textContent = `Replay trades: ${(bt.metrics && bt.metrics.count) || 0}. ${bt.note || ''}`;
+      msg.classList.remove('tg-fit-no');
+    }
+    const m = bt.metrics || {};
+    metrics.innerHTML = `
+      <div class="tg-metric"><span>Wide days</span><strong>${bt.wide_days || 0}</strong></div>
+      <div class="tg-metric"><span>Need</span><strong>${bt.min_days_required || 5}</strong></div>
+      <div class="tg-metric"><span>Replay trades</span><strong>${m.count || 0}</strong></div>
+      <div class="tg-metric"><span>Gaps</span><strong>${(bt.data_gaps || []).length}</strong></div>
+    `;
+    const rows = bt.timeline || (bt.coverage && bt.coverage.underlyings) || [];
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="6" class="tg-muted">No coverage yet</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map((r) => `<tr>
+      <td>${r.underlying}</td>
+      <td>${r.days}</td>
+      <td>${r.days_wide != null ? r.days_wide : '—'}</td>
+      <td>${r.n_narrow != null ? r.n_narrow : '—'}</td>
+      <td class="tg-muted">${(r.earliest || '').replace('T', ' ').slice(0, 16)}</td>
+      <td>${r.six_month_backtest_ready_on || '—'}</td>
+    </tr>`).join('');
+  }
+
+  async function loadBacktest() {
+    const status = document.getElementById('statusLine');
+    try {
+      const bt = await api('/api/tarang/backtest');
+      renderBacktest(bt);
+      status.textContent = bt.insufficient_data ? 'Backtest: insufficient data' : `Backtest: ${(bt.metrics && bt.metrics.count) || 0} trades`;
+    } catch (err) {
+      status.textContent = String(err.message || err);
+    }
   }
 
   async function loadScreenerView() {
@@ -460,6 +548,23 @@
   }
 
   document.getElementById('btnRefresh').addEventListener('click', load);
+  const autoBtn = document.getElementById('btnAutoToggle');
+  if (autoBtn) {
+    autoBtn.addEventListener('click', async () => {
+      const on = autoBtn.dataset.on === '1';
+      const status = document.getElementById('statusLine');
+      try {
+        const out = await api('/api/tarang/settings/auto', {
+          method: 'POST',
+          body: JSON.stringify({ enabled: !on }),
+        });
+        setModeBadges(out.mode || 'PAPER', out.auto);
+        status.textContent = out.auto ? 'AUTO PAPER on — LIVE stays admin-gated' : 'AUTO PAPER off';
+      } catch (err) {
+        status.textContent = String(err.message || err);
+      }
+    });
+  }
   document.getElementById('btnScreen').addEventListener('click', async () => {
     const status = document.getElementById('statusLine');
     status.textContent = 'Running screener (live chains)…';
@@ -478,8 +583,8 @@
     const status = document.getElementById('statusLine');
     status.textContent = 'Running IV snapshot…';
     try {
-      const out = await api('/api/tarang/iv-snapshots/run', { method: 'POST' });
-      status.textContent = `IV snapshot done: ${JSON.stringify(out.results || out)}`;
+      const out = await api('/api/tarang/chain-snapshots/run', { method: 'POST' });
+      status.textContent = `Full-chain snapshot done: ${JSON.stringify(out.results || out)}`;
       await loadHealth();
     } catch (err) {
       status.textContent = String(err.message || err);
@@ -557,6 +662,20 @@
     }
   });
   document.getElementById('btnLoadReport').addEventListener('click', loadReport);
+  const btnBt = document.getElementById('btnRunBacktest');
+  if (btnBt) {
+    btnBt.addEventListener('click', async () => {
+      const status = document.getElementById('statusLine');
+      status.textContent = 'Running replay…';
+      try {
+        const bt = await api('/api/tarang/backtest/run', { method: 'POST' });
+        renderBacktest(bt);
+        status.textContent = bt.insufficient_data ? 'Insufficient data' : `Replay ${((bt.metrics && bt.metrics.count) || 0)} trades`;
+      } catch (err) {
+        status.textContent = String(err.message || err);
+      }
+    });
+  }
   document.getElementById('reportMode').addEventListener('change', () => {
     document.getElementById('btnCsv').href =
       `/api/tarang/report.csv?mode=${document.getElementById('reportMode').value}`;

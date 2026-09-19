@@ -14,6 +14,7 @@ from backend.database import SessionLocal
 from backend.services.tarang.calendar import ist_clock, mcx_session_open
 from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.config import get_profiles, get_risk
+from backend.services.tarang.data_gaps import insert_data_gap
 from backend.services.tarang.iv_snapshots import _atm_iv_from_chain
 from backend.services.tarang.schema import ensure_tarang_tables
 
@@ -24,6 +25,8 @@ BACKTEST_HORIZON_DAYS_DEFAULT = 180
 RETENTION_DAYS_DEFAULT = 400
 ATM_WINDOW_DEFAULT = 10
 NEAR_EXPIRIES_DEFAULT = 2
+DELTA_ABS_MIN_DEFAULT = 0.03
+DELTA_ABS_MAX_DEFAULT = 0.97
 
 
 def _snapshot_cfg() -> Dict[str, Any]:
@@ -51,6 +54,8 @@ def _quote_row(q) -> Dict[str, Any]:
         "right": d.get("right"),
         "bid": d.get("bid"),
         "ask": d.get("ask"),
+        "bid_qty": (d.get("meta") or {}).get("bid_qty") if isinstance(d.get("meta"), dict) else d.get("bid_qty"),
+        "ask_qty": (d.get("meta") or {}).get("ask_qty") if isinstance(d.get("meta"), dict) else d.get("ask_qty"),
         "mark": mark,
         "last": d.get("last"),
         "iv": d.get("iv"),
@@ -58,6 +63,7 @@ def _quote_row(q) -> Dict[str, Any]:
         "oi": d.get("oi"),
         "volume": d.get("volume"),
         "greeks_source": d.get("greeks_source"),
+        "two_sided": bool((d.get("meta") or {}).get("two_sided")) if isinstance(d.get("meta"), dict) else bool(d.get("bid") and d.get("ask")),
     }
 
 
@@ -117,6 +123,20 @@ def _insert_iv_row(db, chain, atm: Dict[str, Any], clock: Dict[str, Any]) -> Non
     )
 
 
+def tag_narrow_window_snapshots(db) -> int:
+    """Mark pre-widening ATM±10 rows so backtests skip them for short/wing validation."""
+    res = db.execute(
+        text(
+            """
+            UPDATE tarang_chain_snapshots
+            SET meta = COALESCE(meta, '{}'::jsonb) || '{"window_kind":"narrow_window"}'::jsonb
+            WHERE COALESCE(meta->>'window_kind', '') NOT IN ('delta_window', 'narrow_window')
+            """
+        )
+    )
+    return int(res.rowcount or 0)
+
+
 def capture_chain_snapshots(
     profile_ids: Optional[List[str]] = None,
     *,
@@ -124,11 +144,10 @@ def capture_chain_snapshots(
     respect_mcx_session: bool = True,
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    """Persist compressed ~ATM±10 full chains for each underlying / near expiry."""
+    """Persist compressed delta-window chains for each in-scope expiry."""
     ensure_tarang_tables()
     cfg = _snapshot_cfg()
-    atm_window = int(cfg.get("atm_window") or ATM_WINDOW_DEFAULT)
-    n_exp = int(cfg.get("near_expiries") or NEAR_EXPIRIES_DEFAULT)
+    min_atm = int(cfg.get("min_atm_window") or cfg.get("atm_window") or ATM_WINDOW_DEFAULT)
     profiles = get_profiles().get("profiles") or {}
     if profile_ids is None:
         profile_ids = [k for k, v in profiles.items() if v.get("enabled")]
@@ -138,6 +157,7 @@ def capture_chain_snapshots(
     results: List[Dict[str, Any]] = []
     db = SessionLocal()
     try:
+        tag_narrow_window_snapshots(db)
         for pid in profile_ids:
             prof = profiles.get(pid) or profiles.get(str(pid).upper()) or {}
             venue = str(prof.get("venue") or "")
@@ -153,16 +173,59 @@ def capture_chain_snapshots(
                 )
                 continue
             try:
-                expiries = builder.near_expiries(pid, n=n_exp) or [None]
+                expiries = builder.snapshot_expiries(pid) or [None]
             except Exception as e:
-                logger.warning("tarang near expiries failed %s: %s", pid, e)
+                logger.warning("tarang snapshot expiries failed %s: %s", pid, e)
                 expiries = [None]
             for expiry in expiries:
                 try:
-                    chain = builder.build(pid, expiry=expiry, atm_window=atm_window)
+                    chain = builder.build(pid, expiry=expiry, atm_window=min_atm)
+                    n_quotes = len(chain.quotes or [])
+                    two_sided_n = sum(
+                        1
+                        for q in (chain.quotes or [])
+                        if q.bid is not None and q.ask is not None and float(q.bid) > 0 and float(q.ask) > 0
+                    )
+                    if n_quotes == 0 or two_sided_n == 0:
+                        insert_data_gap(
+                            db,
+                            venue=venue,
+                            profile_id=pid,
+                            reason="no_valid_quotes",
+                            detail={"expiry": chain.expiry or expiry, "n_quotes": n_quotes, "n_two_sided": two_sided_n},
+                        )
+                        results.append(
+                            {
+                                "profile_id": pid,
+                                "underlying": chain.underlying,
+                                "expiry": chain.expiry or expiry,
+                                "ok": False,
+                                "skipped": "no_valid_quotes",
+                                "n_quotes": n_quotes,
+                                "n_two_sided": two_sided_n,
+                            }
+                        )
+                        continue
                     atm = _atm_iv_from_chain(chain)
                     payload = _chain_payload(chain, clock)
                     blob = pack_chain_payload(payload)
+                    n_strikes = len({q.strike for q in (chain.quotes or [])})
+                    win_meta = dict((chain.meta or {}).get("window") or {})
+                    win_meta.update(
+                        {
+                            "window_kind": "delta_window",
+                            "delta_abs_min": float(cfg.get("delta_abs_min") or DELTA_ABS_MIN_DEFAULT),
+                            "delta_abs_max": float(cfg.get("delta_abs_max") or DELTA_ABS_MAX_DEFAULT),
+                            "sigma_mult": float(cfg.get("sigma_mult") or 2.5),
+                            "min_atm_window": min_atm,
+                            "n_strikes": n_strikes,
+                            "n_quotes": n_quotes,
+                            "n_two_sided": two_sided_n,
+                            "payload_bytes": len(blob),
+                            "error": (chain.meta or {}).get("error"),
+                            "ist_dow_name": clock["ist_dow_name"],
+                        }
+                    )
                     db.execute(
                         text(
                             """
@@ -191,16 +254,9 @@ def capture_chain_snapshots(
                             "ist_dow": clock["ist_dow"],
                             "ist_hour": clock["ist_hour"],
                             "ist_weekend_window": clock["ist_weekend_window"],
-                            "n_quotes": len(chain.quotes or []),
+                            "n_quotes": n_quotes,
                             "payload_gzip": blob,
-                            "meta": json.dumps(
-                                {
-                                    "error": (chain.meta or {}).get("error"),
-                                    "ist_dow_name": clock["ist_dow_name"],
-                                    "atm_window": atm_window,
-                                    "payload_bytes": len(blob),
-                                }
-                            ),
+                            "meta": json.dumps(win_meta),
                         },
                     )
                     _insert_iv_row(db, chain, atm, clock)
@@ -209,14 +265,27 @@ def capture_chain_snapshots(
                             "profile_id": pid,
                             "underlying": chain.underlying,
                             "expiry": chain.expiry,
-                            "ok": atm.get("atm_iv") is not None or bool(chain.quotes),
-                            "n_quotes": len(chain.quotes or []),
+                            "ok": True,
+                            "n_quotes": n_quotes,
+                            "n_strikes": n_strikes,
+                            "n_two_sided": two_sided_n,
                             "atm_iv": atm.get("atm_iv"),
                             "payload_bytes": len(blob),
+                            "window_kind": "delta_window",
                         }
                     )
                 except Exception as e:
                     logger.exception("tarang chain snapshot failed %s %s: %s", pid, expiry, e)
+                    try:
+                        insert_data_gap(
+                            db,
+                            venue=venue,
+                            profile_id=pid,
+                            reason="capture_exception",
+                            detail={"expiry": expiry, "error": str(e)[:200]},
+                        )
+                    except Exception:
+                        logger.exception("data_gap insert failed after snapshot error")
                     results.append(
                         {
                             "profile_id": pid,
@@ -268,7 +337,11 @@ def chain_coverage(*, warmup_days: Optional[int] = None, horizon_days: Optional[
                     MIN(captured_at) AS earliest,
                     MAX(captured_at) AS latest,
                     COUNT(*)::int AS n_snapshots,
-                    COUNT(DISTINCT (captured_at AT TIME ZONE 'Asia/Kolkata')::date)::int AS days
+                    COUNT(*) FILTER (WHERE COALESCE(meta->>'window_kind','') = 'delta_window')::int AS n_wide,
+                    COUNT(*) FILTER (WHERE COALESCE(meta->>'window_kind','') = 'narrow_window')::int AS n_narrow,
+                    COUNT(DISTINCT (captured_at AT TIME ZONE 'Asia/Kolkata')::date)::int AS days,
+                    COUNT(DISTINCT (captured_at AT TIME ZONE 'Asia/Kolkata')::date)
+                        FILTER (WHERE COALESCE(meta->>'window_kind','') = 'delta_window')::int AS days_wide
                 FROM tarang_chain_snapshots
                 GROUP BY underlying_symbol
                 ORDER BY underlying_symbol
@@ -282,6 +355,7 @@ def chain_coverage(*, warmup_days: Optional[int] = None, horizon_days: Optional[
         earliest = r["earliest"]
         latest = r["latest"]
         days = int(r["days"] or 0)
+        days_wide = int(r["days_wide"] or 0)
         earliest_date = earliest.date() if hasattr(earliest, "date") else None
         backtest_start = (earliest_date + timedelta(days=warmup)) if earliest_date else None
         six_month_ready_on = (earliest_date + timedelta(days=warmup + horizon)) if earliest_date else None
@@ -289,14 +363,17 @@ def chain_coverage(*, warmup_days: Optional[int] = None, horizon_days: Optional[
             {
                 "underlying": r["underlying_symbol"],
                 "days": days,
+                "days_wide": days_wide,
                 "n_snapshots": int(r["n_snapshots"] or 0),
+                "n_wide": int(r["n_wide"] or 0),
+                "n_narrow": int(r["n_narrow"] or 0),
                 "earliest": earliest.isoformat() if earliest is not None else None,
                 "latest": latest.isoformat() if latest is not None else None,
                 "iv_warmup_days": warmup,
                 "earliest_backtest_start": backtest_start.isoformat() if backtest_start else None,
                 "six_month_backtest_ready_on": six_month_ready_on.isoformat() if six_month_ready_on else None,
                 "days_needed_for_6m": warmup + horizon,
-                "ready_for_6m_backtest": days >= (warmup + horizon),
+                "ready_for_6m_backtest": days_wide >= (warmup + horizon),
             }
         )
     return {

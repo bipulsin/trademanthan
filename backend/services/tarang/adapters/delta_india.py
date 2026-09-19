@@ -18,6 +18,7 @@ import requests
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
 from backend.services.tarang.greeks_service import enrich_quote
 from backend.services.tarang.iv_normalize import normalize_iv
+from backend.services.tarang.strike_window import delta_snapshot_expiries, select_strikes, years_to_expiry
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,13 @@ class DeltaIndiaAdapter:
         return []
 
     def near_expiries(self, underlying: str, n: int = 2) -> List[str]:
+        return self._listed_expiries(underlying)[:n]
+
+    def snapshot_expiries(self, underlying: str) -> List[str]:
+        """3 dailies + next 2 Friday weeklies that are listed."""
+        return delta_snapshot_expiries(self._listed_expiries(underlying))
+
+    def _listed_expiries(self, underlying: str) -> List[str]:
         us = underlying.upper()
         tickers = self._products(us)
         today = datetime.now(timezone.utc).date().isoformat()
@@ -164,7 +172,19 @@ class DeltaIndiaAdapter:
                 continue
             if exp_iso >= today:
                 exps.add(exp_iso)
-        return sorted(exps)[:n]
+        return sorted(exps)
+
+    def position_limits(self, underlying: str) -> Dict[str, Any]:
+        """Best-effort exchange limits from a live ticker."""
+        tickers = self._products(underlying.upper())
+        limits: Dict[str, Any] = {"max_contracts_per_order": None, "max_contracts_per_trade": None}
+        for t in tickers[:20]:
+            for key in ("position_size", "position_limit", "max_leverage_notional", "order_size"):
+                if t.get(key) is not None:
+                    limits[key] = t.get(key)
+            if t.get("contract_value") is not None:
+                limits["contract_value"] = t.get("contract_value")
+        return limits
 
     def build_chain(
         self,
@@ -172,6 +192,7 @@ class DeltaIndiaAdapter:
         underlying: str,
         expiry: Optional[str] = None,
         atm_window: int = 10,
+        window_cfg: Optional[Dict[str, Any]] = None,
     ) -> OptionChain:
         us = underlying.upper()
         tickers = self._products(us)
@@ -208,12 +229,15 @@ class DeltaIndiaAdapter:
             quotes = t.get("quotes") or {}
             bid = quotes.get("best_bid") or t.get("bid")
             ask = quotes.get("best_ask") or t.get("ask")
+            bid_qty = quotes.get("bid_size") or quotes.get("best_bid_size") or t.get("bid_size")
+            ask_qty = quotes.get("ask_size") or quotes.get("best_ask_size") or t.get("ask_size")
             try:
                 bid_f = float(bid) if bid is not None else None
                 ask_f = float(ask) if ask is not None else None
             except (TypeError, ValueError):
                 bid_f = ask_f = None
-            mid = 0.5 * (bid_f + ask_f) if bid_f is not None and ask_f is not None else None
+            two_sided = bid_f is not None and ask_f is not None and bid_f > 0 and ask_f > 0
+            mid = 0.5 * (bid_f + ask_f) if two_sided else None
             try:
                 last = float(mark) if mark is not None else None
             except (TypeError, ValueError):
@@ -236,12 +260,16 @@ class DeltaIndiaAdapter:
                     "delta": delta,
                     "bid": bid_f,
                     "ask": ask_f,
+                    "bid_qty": bid_qty,
+                    "ask_qty": ask_qty,
                     "mid": mid,
                     "last": last,
                     "contract_value": contract_value,
                     "spot": float(spot) if spot is not None else None,
                     "oi": t.get("oi") or t.get("open_interest"),
                     "volume": t.get("volume"),
+                    "two_sided": two_sided,
+                    "position_size": t.get("position_size") or t.get("position_limit"),
                 }
             )
 
@@ -269,12 +297,32 @@ class DeltaIndiaAdapter:
         if len(strikes) >= 2:
             diffs = sorted({round(strikes[i + 1] - strikes[i], 8) for i in range(len(strikes) - 1) if strikes[i + 1] > strikes[i]})
             strike_step = diffs[0] if diffs else None
-        if S and strikes:
-            atm = min(strikes, key=lambda s: abs(s - S))
-            idx = strikes.index(atm)
-            lo = max(0, idx - atm_window)
-            hi = min(len(strikes), idx + atm_window + 1)
-            keep = set(strikes[lo:hi])
+        cfg = dict(window_cfg or {})
+        min_atm = int(cfg.get("min_atm_window") or atm_window or 10)
+        T = years_to_expiry(chosen)
+        atm_iv = None
+        if S and rows:
+            atm_row = min(rows, key=lambda p: abs(p["strike"] - S))
+            atm_iv = atm_row.get("iv")
+        deltas_by_strike: Dict[float, float] = {}
+        for p in rows:
+            if p.get("delta") is not None:
+                prev = deltas_by_strike.get(p["strike"])
+                ad = abs(float(p["delta"]))
+                if prev is None or ad > abs(float(prev)):
+                    deltas_by_strike[p["strike"]] = p["delta"]
+        keep, win_meta = select_strikes(
+            strikes,
+            F=S,
+            atm_iv=atm_iv,
+            years=T,
+            deltas_by_strike=deltas_by_strike,
+            delta_abs_min=float(cfg.get("delta_abs_min") or 0.03),
+            delta_abs_max=float(cfg.get("delta_abs_max") or 0.97),
+            sigma_mult=float(cfg.get("sigma_mult") or 2.5),
+            min_atm_window=min_atm,
+        )
+        if keep:
             rows = [p for p in rows if p["strike"] in keep]
 
         quotes_out: List[OptionQuote] = []
@@ -299,6 +347,12 @@ class DeltaIndiaAdapter:
                 delta=p["delta"],
                 greeks_source="venue" if p["iv"] and p["delta"] is not None else None,
                 contract_value=p.get("contract_value"),
+                meta={
+                    "bid_qty": p.get("bid_qty"),
+                    "ask_qty": p.get("ask_qty"),
+                    "two_sided": bool(p.get("two_sided")),
+                    "position_size": p.get("position_size"),
+                },
             )
             if S:
                 enrich_quote(q, F_or_S=S, model="bs", r=0.0)
@@ -314,5 +368,5 @@ class DeltaIndiaAdapter:
             strike_step=strike_step,
             quotes=quotes_out,
             built_at=datetime.now(timezone.utc).isoformat(),
-            meta={"n_quotes": len(quotes_out), "contract_value": cv0},
+            meta={"n_quotes": len(quotes_out), "contract_value": cv0, "window": win_meta},
         )
