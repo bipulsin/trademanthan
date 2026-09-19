@@ -1,0 +1,245 @@
+{
+  "ran": "2026-09-19T12:23:04.662212+00:00",
+  "per_symbol": [
+    {
+      "symbol": "C-BTC-81000-150926",
+      "30m": {
+        "http": 200,
+        "n": 224,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-14T20:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "P-BTC-81000-150926",
+      "30m": {
+        "http": 200,
+        "n": 224,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-14T20:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "C-BTC-80800-150926",
+      "30m": {
+        "http": 200,
+        "n": 224,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-14T20:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "P-BTC-80800-150926",
+      "30m": {
+        "http": 200,
+        "n": 224,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-14T20:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "C-BTC-74200-160926",
+      "30m": {
+        "http": 200,
+        "n": 167,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-16T01:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 3
+      }
+    },
+    {
+      "symbol": "P-BTC-74200-160926",
+      "30m": {
+        "http": 200,
+        "n": 173,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T22:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 3
+      }
+    },
+    {
+      "symbol": "C-BTC-73600-160926",
+      "30m": {
+        "http": 200,
+        "n": 179,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T19:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 3
+      }
+    },
+    {
+      "symbol": "P-BTC-73600-160926",
+      "30m": {
+        "http": 200,
+        "n": 180,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T18:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 3
+      }
+    },
+    {
+      "symbol": "C-BTC-74200-170926",
+      "30m": {
+        "http": 200,
+        "n": 133,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-16T18:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 2
+      }
+    },
+    {
+      "symbol": "P-BTC-74200-170926",
+      "30m": {
+        "http": 200,
+        "n": 134,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-16T17:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 2
+      }
+    },
+    {
+      "symbol": "C-BTC-74600-170926",
+      "30m": {
+        "http": 200,
+        "n": 173,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T22:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 3
+      }
+    },
+    {
+      "symbol": "P-BTC-74600-170926",
+      "30m": {
+        "http": 200,
+        "n": 173,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T22:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 3
+      }
+    },
+    {
+      "symbol": "C-BTC-79800-180926",
+      "30m": {
+        "http": 200,
+        "n": 54,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T09:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 1
+      }
+    },
+    {
+      "symbol": "P-BTC-79800-180926",
+      "30m": {
+        "http": 200,
+        "n": 54,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T09:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 1
+      }
+    },
+    {
+      "symbol": "C-BTC-79600-180926",
+      "30m": {
+        "http": 200,
+        "n": 55,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T09:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 1
+      }
+    },
+    {
+      "symbol": "P-BTC-79600-180926",
+      "30m": {
+        "http": 200,
+        "n": 55,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T09:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 1
+      }
+    },
+    {
+      "symbol": "C-ETH-2430-150926",
+      "30m": {
+        "http": 200,
+        "n": 198,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T09:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "P-ETH-2430-150926",
+      "30m": {
+        "http": 200,
+        "n": 201,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-15T08:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "C-ETH-2630-150926",
+      "30m": {
+        "http": 200,
+        "n": 224,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-14T20:30:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    },
+    {
+      "symbol": "P-ETH-2630-150926",
+      "30m": {
+        "http": 200,
+        "n": 221,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-14T22:00:00+00:00",
+        "latest": "2026-09-19T12:00:00+00:00",
+        "span_days": 4
+      }
+    }
+  ]
+}

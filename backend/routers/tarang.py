@@ -55,6 +55,7 @@ def _require_admin(user: User = Depends(_auth)) -> User:
 
 class TakeBody(BaseModel):
     note: str = ""
+    holding_mode: str = "INTRADAY"
 
 
 class ManualBody(BaseModel):
@@ -186,7 +187,7 @@ def tarang_ticket_take(
     body: TakeBody = TakeBody(),
     _user: User = Depends(_require_admin),
 ) -> Dict[str, Any]:
-    out = take_trade_paper(candidate_id, note=body.note or "")
+    out = take_trade_paper(candidate_id, note=body.note or "", holding_mode=body.holding_mode or "INTRADAY")
     if not out.get("ok"):
         raise HTTPException(status_code=400, detail=out.get("error") or out)
     return out

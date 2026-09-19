@@ -2,7 +2,9 @@
 
 **Product:** Kosmic Tarang  
 **Internal:** `tarang_*` / `/tarang` / `tarang.html`  
-**Defaults:** PAPER mode, AUTO off. Phase 3 = paper fills + In-Trade + ExitEngine + Trade Report. **No live orders.**
+**Defaults:** PAPER mode, AUTO off. Phase 3 = paper fills + In-Trade + ExitEngine + Trade Report. **No live orders.**  
+**ENERGY contracts:** minis (`CRUDEOILM` / `NATGASMINI`). Full CL/NG stay behind `contractFamily: full`.  
+**Weekend window profiles (`BTC_WEEKEND` / `ETH_WEEKEND`):** **disabled by default.**
 
 ## Secrets (never commit)
 
@@ -11,6 +13,9 @@
 | `DELTA_INDIA_API_KEY` | local `.env` (gitignored) + paperclip `/home/ubuntu/twcto/.env` | Tarang Delta India auth |
 | `DELTA_INDIA_API_SECRET` | same | Tarang Delta India auth |
 | `DELTA_INDIA_API_URL` | same (default `https://api.india.delta.exchange`) | India REST host |
+| `TARANG_TELEGRAM_CHAT_ID` | same | Critical Tarang alerts (separate chat or topic) |
+| `TARANG_TELEGRAM_THREAD_ID` | same, optional | Forum topic id |
+| `TELEGRAM_BOT_TOKEN` | same | Shared bot |
 
 These are **Tarang-specific**. Existing algo Delta keys in `backend/routers/algo.py` are untouched (IP-whitelisted separately).
 
@@ -20,17 +25,25 @@ After editing paperclip `.env`, recreate the app container so compose re-injects
 
 1. Admin → [Kosmic Tarang](https://www.tradewithcto.com/tarang.html) (PAPER badge).
 2. **Screener** → Run screener → open a **QUALIFIED** row → **Trade Ticket**.
-3. **Take trade (PAPER)** → fills simulated (mid ± fraction of bid-ask + fee stub) → jumps to **In-Trade**.
-4. In-Trade: MTM, trigger progress, hard-exit countdown, alerts. **Exit** or wait for ExitEngine / hard-exit job.
-5. **Trade Report** → closed PAPER trades + metrics; LIVE filter stays empty until Phase 4. CSV via button (auth).
+3. Pick **INTRADAY** or **POSITIONAL** on the ticket, then **Take trade (PAPER)** → fills simulated (mid ± fraction of bid-ask + venue fee schedule) → jumps to **In-Trade**.
+4. In-Trade: MTM, trigger progress, hard-exit countdown, alerts. **Exit** or wait for ExitEngine / hard-exit job. Exits are **not** evaluated on stale quotes; MCX 23:30–09:00 IST is skipped and the overnight gap is logged at the next open.
+5. **Trade Report** → closed PAPER trades + metrics split by INTRADAY vs POSITIONAL. LIVE filter stays empty until Phase 4.
 
 ## Scheduler (IST)
 
-- IV snapshots: every 30m 09:00–23:30 + 08:05 + boot
-- ExitEngine: every minute 09–23, every 5m overnight
+- **Delta full-chain snapshots:** 24×7 every 30 minutes; every **15 minutes** Friday 18:00 → Sunday 17:00 IST. Boot job on process start.
+- **MCX full-chain snapshots:** in-session only (09:00–23:30 IST weekdays), skip weekends and `holiday` table dates, every 30 minutes.
+- **ExitEngine:** Delta **every 1 minute, 24×7**. MCX every 1 minute in-session; 5-minute overnight job is a no-op while MCX is closed.
 - Hard-exit warning/flatten from `risk.default.json` (`mcx_*` 23:10/23:15, `delta_*` 16:55/17:00)
 
-Manual: `POST /api/tarang/exit-engine/run`
+Manual: `POST /api/tarang/exit-engine/run` or **Run full-chain snapshot** on data-health.
+
+## Hard-exit rules
+
+| Venue | Clock | Applies to | Does **not** flatten |
+|---|---|---|---|
+| Delta India | **17:00 IST** | (a) **INTRADAY** trades, and (b) **any** position **on its expiry day** | **POSITIONAL** trades on non-expiry days |
+| MCX | **23:15 IST** | **INTRADAY** only | **POSITIONAL** energy (holds the 23:30–09:00 IST closed period) |
 
 ## Upstox token refresh
 
@@ -38,32 +51,27 @@ Tarang MCX chains use the shared Upstox OAuth token (`data/upstox_token.json` / 
 
 1. Open the platform Upstox connect / OAuth callback flow used by other desks.
 2. Confirm token file on paperclip: `/home/ubuntu/twcto/data/upstox_token.json` (mounted into the app container).
-3. Data-health page (`/tarang.html`) shows a banner when token is missing/expired or MCX master looks empty.
+3. Data-health page (`/tarang.html`) shows a banner when token is missing/expired or MCX master looks empty. Critical alert also goes to the Tarang Telegram chat.
 4. Re-check: admin → Kosmic Tarang → Refresh, or `GET /api/tarang/health`.
 
-## IV snapshots
+## Full-chain snapshots (start now)
 
-APScheduler (Asia/Kolkata): every 30 minutes 09:00–23:30, plus 08:05, plus one boot job.  
-Manual: **Run IV snapshot** on the data-health page or `POST /api/tarang/iv-snapshots/run` (admin JWT).
+Compressed rows in `tarang_chain_snapshots` (gzip BYTEA, ~10 strikes either side of ATM, CE+PE, bid/ask/mark/IV/delta/OI/volume/underlying/timestamp). Tagged with IST weekday + hour so weekday vs weekend baselines stay separate. Retention: 400 days (`risk.chain_snapshots.retention_days`). ATM IV is still written to `tarang_iv_snapshots` for the percentile gate.
 
-Table: `tarang_iv_snapshots`. Events: `tarang_trade_events` (append-only).
+Data-health **Full-chain coverage** shows days of history per underlying and the earliest date a 6-month backtest could start given the 60-day IV warm-up.
 
-## Delta auth verify (read-only)
+## ENERGY / CRYPTO budgets (operator-set — do not auto-raise)
 
-From paperclip (keys already in `.env`): balances / margined positions only — never place orders from ops scripts.  
-If `ip_not_whitelisted_for_api_key`, whitelist egress **140.245.14.17**.
+| Bucket | Per-trade | Hard cap | Portfolio |
+|---|---:|---:|---:|
+| ENERGY | ₹5,000 | ₹10,000 | ₹10,000 |
+| CRYPTO | ₹3,000 | ₹10,000 | ₹6,000 |
 
-## ENERGY budget (defaults)
+If a **mini** width cannot fit the ₹10,000 hard cap, report it — **do not raise the budget**. Full lots remain available only by switching `contractFamily` to `full`.
 
-See `backend/services/tarang/config_data/risk.default.json`:
+## Telegram critical alerts
 
-- ENERGY per-trade **₹40,000**, hard cap **₹50,000**, portfolio **₹80,000** (2×)
-- CRYPTO per-trade **₹3,000**, hard cap **₹10,000**, portfolio **₹6,000** (2×)
-- `contractFamily: full` — minis not enabled
-
-## Upstox WS share
-
-Phase 1–3 uses REST Option Greek (≤50 keys) via Tarang rate budget. Shared feed chunks instruments in batches of **100**. Tarang may later register `set_feed_provider_keys('tarang', keys)` capped at 50 — CommDiv behaviour unchanged.
+Kinds: exit trigger hit, hard-exit warning, stale feed, Upstox token expired, kill switch (3 consecutive PAPER losses). Dedupe + 15-minute throttle (5 minutes for exit triggers). Set `TARANG_TELEGRAM_CHAT_ID` (and optional `TARANG_TELEGRAM_THREAD_ID`).
 
 ## Health checks
 
@@ -75,6 +83,7 @@ https://www.tradewithcto.com/tarang.html
 
 ## Changelog
 
+- **Follow-up (pre-Phase 4):** mini ENERGY, operator risk budgets, full-chain snapshots 24×7 (Delta) / in-session (MCX), coverage counter, ExitEngine cadence split, POSITIONAL overnight paper, real fee schedules, Telegram critical alerts.
 - **Phase 3:** state machine + `tarang_trade_events`, PaperBroker, In-Trade + Trade Report tabs, ExitEngine + hard-exit scheduler, in-app alerts.
 - **Phase 2:** screener gates, Opportunities + PAPER ticket.
 - **Phase 1:** domain/config/DB/adapters/IV/data-health.

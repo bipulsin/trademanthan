@@ -27,10 +27,38 @@
     "spread_fraction": 0.40,
     "usd_inr": 83.0,
     "fees": {
-      "upstox_mcx_per_lot_roundtrip_inr": 80.0,
-      "delta_india_per_contract_roundtrip_usd": 0.10
+      "upstox_mcx_options": {
+        "brokerage_per_order_inr": 20.0,
+        "ctt_sell_frac": 0.0005,
+        "exchange_premium_frac": 0.000418,
+        "sebi_frac": 0.000001,
+        "gst_frac": 0.18,
+        "stamp_buy_frac": 0.00003,
+        "source": "Upstox help: commodity options — ₹20/order, MCX txn 0.0418% of premium, CTT 0.05% sell, stamp 0.003% buy, SEBI ₹10/crore, GST 18% on brokerage+txn+SEBI"
+      },
+      "delta_india_options": {
+        "taker_notional_frac": 0.0003,
+        "maker_notional_frac": 0.0001,
+        "premium_cap_frac": 0.035,
+        "gst_frac": 0.18,
+        "assume_taker_in_paper": true,
+        "source": "https://www.delta.exchange/fees — options taker 0.03% / maker 0.010% of notional, cap 3.5% of premium, +18% GST"
+      }
     },
-    "notes": "Fill at mid ± fraction of bid-ask (sells worse / buys worse). Fees are simple round-trip stubs until live charge APIs."
+    "notes": "Fill at mid ± fraction of bid-ask. Missing quotes reject the spread (all-or-none); exits never invent prices. Fees use venue schedules, not round-trip stubs."
+  },
+  "chain_snapshots": {
+    "atm_window": 10,
+    "near_expiries": 2,
+    "retention_days": 400,
+    "iv_warmup_days": 60,
+    "backtest_horizon_days": 180
+  },
+  "quote_stale_sec": 180,
+  "telegram": {
+    "chat_id_env": "TARANG_TELEGRAM_CHAT_ID",
+    "thread_id_env": "TARANG_TELEGRAM_THREAD_ID",
+    "throttle_sec": 900
   },
   "alert_proximity_frac": 0.15,
   "upstox_ws": {
@@ -42,11 +70,11 @@
   },
   "buckets": {
     "ENERGY": {
-      "per_trade_budget_inr": 40000,
-      "hard_cap_inr": 50000,
+      "per_trade_budget_inr": 5000,
+      "hard_cap_inr": 10000,
       "portfolio_limit_multiple": 2,
-      "portfolio_limit_inr": 80000,
-      "rationale": "Full CRUDEOIL/NATURALGAS profile-min widths need ~₹18.75k (NG 3-step) to ₹25k (CL 5-step) per lot at zero credit; CL profile-max is ₹40k/lot. Default ₹40k allows ≥1 full lot at profile-min for both and at CL profile-max zero-credit when liquidity allows. Hard cap ₹50k. Portfolio open risk = 2× per-trade = ₹80k. Minis remain disabled (contractFamily=full)."
+      "portfolio_limit_inr": 10000,
+      "rationale": "Operator-set: default ₹5,000 / hard cap ₹10,000 / portfolio ₹10,000. ENERGY trades minis (CRUDEOILM / NATGASMINI). Do not raise these numbers if a candidate cannot fit."
     },
     "CRYPTO": {
       "per_trade_budget_inr": 3000,

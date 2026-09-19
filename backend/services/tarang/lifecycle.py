@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
 from backend.database import SessionLocal
+from backend.services.tarang.calendar import mcx_feed_closed, to_ist
 from backend.services.tarang.config import get_profiles, get_risk
 from backend.services.tarang.events import append_event, create_alert, list_alerts, list_events
 from backend.services.tarang.exit_engine import evaluate_exits, net_greeks_from_legs
@@ -186,7 +188,12 @@ def _load_entry_fills(db, trade_id: int, meta: Dict[str, Any]) -> List[Dict[str,
     return list((meta.get("entry_fills") or []))
 
 
-def take_trade_paper(candidate_id: int, note: str = "", actor: str = "USER") -> Dict[str, Any]:
+def take_trade_paper(
+    candidate_id: int,
+    note: str = "",
+    actor: str = "USER",
+    holding_mode: str = "INTRADAY",
+) -> Dict[str, Any]:
     """QUALIFIED → ENTRY_PENDING → paper fills → IN_TRADE. Never places live orders."""
     ensure_tarang_tables()
     cand = get_candidate(candidate_id)
@@ -218,6 +225,9 @@ def take_trade_paper(candidate_id: int, note: str = "", actor: str = "USER") -> 
     # fallback from structure payload
     lot_size = lot_size or p.get("lot_size")
     contract_value = contract_value or p.get("contract_value")
+    holding = str(holding_mode or "INTRADAY").upper()
+    if holding not in ("INTRADAY", "POSITIONAL"):
+        holding = "INTRADAY"
 
     db = SessionLocal()
     try:
@@ -237,10 +247,32 @@ def take_trade_paper(candidate_id: int, note: str = "", actor: str = "USER") -> 
             contract_value=float(contract_value) if contract_value else None,
         )
         if not fill_res.get("ok"):
-            # stub reject path
-            create_alert(db, f"Paper entry rejected for candidate {candidate_id}", level="warn", meta=fill_res)
+            db.execute(
+                text(
+                    """
+                    INSERT INTO tarang_orders (client_order_id, venue, side, status, raw)
+                    VALUES (:coid, :venue, 'ENTRY', 'REJECTED', CAST(:raw AS jsonb))
+                    """
+                ),
+                {
+                    "coid": f"tarang-paper-reject-{uuid.uuid4().hex[:16]}",
+                    "venue": venue,
+                    "raw": json.dumps(fill_res),
+                },
+            )
+            create_alert(
+                db,
+                f"Paper entry rejected for candidate {candidate_id}: {fill_res.get('error')}",
+                level="warn",
+                meta=fill_res,
+            )
             db.commit()
-            return {"ok": False, "error": fill_res.get("error") or "entry_rejected", "detail": fill_res}
+            return {
+                "ok": False,
+                "error": fill_res.get("error") or "entry_rejected",
+                "detail": fill_res,
+                "fill_status": fill_res.get("fill_status") or "REJECTED",
+            }
 
         now = datetime.now(timezone.utc)
         meta = {
@@ -271,7 +303,7 @@ def take_trade_paper(candidate_id: int, note: str = "", actor: str = "USER") -> 
                     candidate_id, venue, structure, entry_at, fees_total,
                     entry_iv_percentile, notes, currency, entry_debit_to_close
                 ) VALUES (
-                    :profile_id, :risk_bucket, 'PAPER', 'INTRADAY', :status,
+                    :profile_id, :risk_bucket, 'PAPER', :holding_mode, :status,
                     FALSE, :entry_credit, :max_loss, :lots, CAST(:legs AS jsonb), CAST(:meta AS jsonb),
                     :candidate_id, :venue, :structure, :entry_at, :fees,
                     :iv_pct, :notes, 'INR', :entry_credit
@@ -282,6 +314,7 @@ def take_trade_paper(candidate_id: int, note: str = "", actor: str = "USER") -> 
             {
                 "profile_id": cand["profile_id"],
                 "risk_bucket": bucket,
+                "holding_mode": holding,
                 "status": ENTRY_PENDING,
                 "entry_credit": fill_res["net_credit_pts"],
                 "max_loss": p.get("max_loss_per_unit_inr"),
@@ -423,18 +456,30 @@ def mark_taken_manual(
 
 
 def _refresh_quotes_for_trade(trade: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Best-effort live chain quotes for open legs; empty on failure."""
+    bundle = _refresh_quote_bundle(trade)
+    return list(bundle.get("quotes") or [])
+
+
+def _refresh_quote_bundle(trade: Dict[str, Any]) -> Dict[str, Any]:
+    """Live chain quotes plus freshness metadata. Never synthesizes prices."""
     meta = trade.get("meta") or {}
     profile_id = trade.get("profile_id")
-    expiry = meta.get("expiry") or trade.get("meta", {}).get("expiry")
+    expiry = meta.get("expiry")
     try:
         from backend.services.tarang.chain_builder import ChainBuilder
 
         chain = ChainBuilder().build(profile_id, expiry=expiry)
-        return [q.to_dict() for q in (chain.quotes or [])]
+        quotes = [q.to_dict() for q in (chain.quotes or [])]
+        return {
+            "quotes": quotes,
+            "built_at": chain.built_at,
+            "underlying_price": chain.futures_or_spot,
+            "error": (chain.meta or {}).get("error"),
+            "ok": bool(quotes) and not (chain.meta or {}).get("error"),
+        }
     except Exception as e:
         logger.warning("quote refresh failed trade=%s: %s", trade.get("id"), e)
-        return []
+        return {"quotes": [], "built_at": None, "underlying_price": None, "error": str(e)[:200], "ok": False}
 
 
 def build_in_trade_view(trade_id: int, *, refresh_quotes: bool = True) -> Dict[str, Any]:
@@ -449,10 +494,32 @@ def build_in_trade_view(trade_id: int, *, refresh_quotes: bool = True) -> Dict[s
     db = SessionLocal()
     try:
         entry_fills = _load_entry_fills(db, trade_id, meta)
-        live = _refresh_quotes_for_trade(trade) if refresh_quotes else []
-        # If no live quotes, synthesize from legs
-        if not live:
-            live = legs
+        bundle = _refresh_quote_bundle(trade) if refresh_quotes else {"quotes": [], "ok": False, "built_at": None, "underlying_price": None}
+        live = bundle.get("quotes") or []
+        quotes_fresh = False
+        quotes_status = "missing"
+        stale_sec = float((get_risk().get("quote_stale_sec") or 180))
+        if venue == "upstox_mcx" and mcx_feed_closed():
+            quotes_status = "mcx_closed"
+        elif live and bundle.get("ok"):
+            age = None
+            if bundle.get("built_at"):
+                try:
+                    bt = datetime.fromisoformat(str(bundle["built_at"]).replace("Z", "+00:00"))
+                    if bt.tzinfo is None:
+                        bt = bt.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - bt).total_seconds()
+                except Exception:
+                    age = None
+            if age is None or age <= stale_sec:
+                quotes_fresh = True
+                quotes_status = "live"
+            else:
+                quotes_status = "stale"
+        else:
+            quotes_status = "stale" if live else "missing"
+        # MTM may use last live quotes when present; never evaluate exits on stale/closed.
+        mtm_quotes = live if live else None
         mtm = mark_to_market(
             legs,
             entry_fills,
@@ -460,7 +527,7 @@ def build_in_trade_view(trade_id: int, *, refresh_quotes: bool = True) -> Dict[s
             venue=venue,
             lot_size=meta.get("lot_size"),
             contract_value=meta.get("contract_value"),
-            live_quotes=live,
+            live_quotes=mtm_quotes,
         )
         short_deltas = []
         for pl in mtm.get("per_leg") or []:
@@ -472,40 +539,72 @@ def build_in_trade_view(trade_id: int, *, refresh_quotes: bool = True) -> Dict[s
         max_loss = None
         if trade.get("max_loss") is not None:
             max_loss = float(trade["max_loss"]) * units
-        eval_ = evaluate_exits(
-            entry_credit_pts=float(mtm.get("entry_credit_pts") or trade.get("entry_credit") or 0),
-            debit_to_close_pts=float(mtm.get("debit_to_close_pts") or 0),
-            unrealized_pnl_inr=float(mtm.get("unrealized_pnl_inr") or 0),
-            max_profit_inr=max_profit,
-            max_loss_inr=max_loss,
-            budget_inr=meta.get("budget_inr") or max_loss,
-            short_deltas=short_deltas,
-            entry_atm_iv=meta.get("atm_iv_entry"),
-            current_atm_iv=None,
-            venue=venue,
-            profile_id=trade.get("profile_id") or "",
-            risk_bucket=trade.get("risk_bucket") or "ENERGY",
-            holding_mode=trade.get("holding_mode") or "INTRADAY",
-            expiry=meta.get("expiry"),
-            exit_levels=meta.get("exit_levels"),
-        )
+        eval_ = None
+        skip_exits = quotes_status in ("stale", "mcx_closed", "missing")
+        if not skip_exits:
+            eval_ = evaluate_exits(
+                entry_credit_pts=float(mtm.get("entry_credit_pts") or trade.get("entry_credit") or 0),
+                debit_to_close_pts=float(mtm.get("debit_to_close_pts") or 0),
+                unrealized_pnl_inr=float(mtm.get("unrealized_pnl_inr") or 0),
+                max_profit_inr=max_profit,
+                max_loss_inr=max_loss,
+                budget_inr=meta.get("budget_inr") or max_loss,
+                short_deltas=short_deltas,
+                entry_atm_iv=meta.get("atm_iv_entry"),
+                current_atm_iv=None,
+                venue=venue,
+                profile_id=trade.get("profile_id") or "",
+                risk_bucket=trade.get("risk_bucket") or "ENERGY",
+                holding_mode=trade.get("holding_mode") or "INTRADAY",
+                expiry=meta.get("expiry"),
+                exit_levels=meta.get("exit_levels"),
+            )
         greeks = net_greeks_from_legs(mtm.get("per_leg") or [], units)
         pnl = float(mtm.get("unrealized_pnl_inr") or 0)
         pct_max_profit = (pnl / max_profit * 100.0) if max_profit else None
         pct_max_loss = (abs(min(pnl, 0)) / max_loss * 100.0) if max_loss else None
         alerts = list_alerts(db, trade_id=trade_id, limit=20)
+        gap = None
+        new_meta = dict(meta)
+        if quotes_status == "live" and venue == "upstox_mcx":
+            prev = meta.get("last_underlying_price")
+            cur = bundle.get("underlying_price")
+            if prev is not None and cur is not None and meta.get("last_quote_status") == "mcx_closed":
+                gap = {"previous": prev, "current": cur, "abs": abs(float(cur) - float(prev))}
+                append_event(
+                    db,
+                    trade_id=trade_id,
+                    from_status=IN_TRADE,
+                    to_status=IN_TRADE,
+                    actor="SYSTEM",
+                    event_type="gap_at_open",
+                    payload=gap,
+                    enforce_transition=False,
+                )
+        new_meta["last_quote_status"] = quotes_status
+        if bundle.get("underlying_price") is not None:
+            new_meta["last_underlying_price"] = bundle.get("underlying_price")
+        db.execute(
+            text("UPDATE tarang_trades SET meta = CAST(:meta AS jsonb), updated_at = NOW() WHERE id = :id"),
+            {"meta": json.dumps(new_meta), "id": trade_id},
+        )
+        db.commit()
         return {
             "ok": True,
             "product": "Kosmic Tarang",
             "mode": trade.get("mode") or "PAPER",
+            "holding_mode": trade.get("holding_mode") or "INTRADAY",
             "trade": trade,
             "mtm": mtm,
             "pnl_inr": pnl,
             "pct_of_max_profit": pct_max_profit,
             "pct_of_max_loss": pct_max_loss,
             "net_greeks": greeks,
-            "exit_eval": eval_.to_dict(),
-            "exit_reason_preview": (eval_.closest.reason if eval_.closest else None),
+            "exit_eval": eval_.to_dict() if eval_ else None,
+            "exit_reason_preview": (eval_.closest.reason if eval_ and eval_.closest else None),
+            "skip_exits": skip_exits,
+            "quotes_status": quotes_status,
+            "gap_at_open": gap,
             "alerts": alerts,
             "events": list_events(db, trade_id, limit=50),
         }
@@ -542,9 +641,16 @@ def exit_trade(
     db = SessionLocal()
     try:
         entry_fills = _load_entry_fills(db, trade_id, meta)
-        live = _refresh_quotes_for_trade(trade) if refresh_quotes else legs
-        if not live:
-            live = legs
+        bundle = _refresh_quote_bundle(trade) if refresh_quotes else {"quotes": [], "ok": False}
+        live = bundle.get("quotes") or []
+        if venue == "upstox_mcx" and mcx_feed_closed():
+            return {"ok": False, "error": "mcx_closed", "quotes_status": "mcx_closed"}
+        if not live or not bundle.get("ok"):
+            return {
+                "ok": False,
+                "error": "exit_deferred_stale_or_missing_quote",
+                "quotes_status": "stale",
+            }
         exit_res = simulate_exit_fills(
             legs,
             entry_fills,
@@ -554,6 +660,13 @@ def exit_trade(
             contract_value=meta.get("contract_value"),
             live_quotes=live,
         )
+        if not exit_res.get("ok"):
+            return {
+                "ok": False,
+                "error": exit_res.get("error") or "exit_rejected",
+                "detail": exit_res,
+                "fill_status": exit_res.get("fill_status") or "REJECTED",
+            }
         entry_fees = float(trade.get("fees_total") or meta.get("fees_entry_inr") or 0)
         exit_fees = float(exit_res.get("fees_inr") or 0)
         fees_total = entry_fees + exit_fees
@@ -705,22 +818,71 @@ def add_trade_note(trade_id: int, note: str, actor: str = "USER") -> Dict[str, A
         db.close()
 
 
-def run_exit_engine_once() -> Dict[str, Any]:
-    """Evaluate all open PAPER trades; flatten when a trigger fires."""
+def run_exit_engine_once(venues: Optional[List[str]] = None) -> Dict[str, Any]:
+    """Evaluate all open PAPER trades; flatten when a trigger fires.
+
+    Never evaluates exits on stale quotes. MCX closed period (23:30–09:00 IST,
+    weekends, holidays) is skipped; overnight gap is logged at the next open.
+    """
     ensure_tarang_tables()
+    venue_filter = {str(v) for v in venues} if venues else None
     outcomes = []
     for t in list_open_trades("PAPER"):
         tid = int(t["id"])
+        venue = t.get("venue") or (t.get("meta") or {}).get("venue") or "upstox_mcx"
+        if venue_filter and venue not in venue_filter:
+            continue
         if normalize_status(t.get("status")) != IN_TRADE:
             continue
         view = build_in_trade_view(tid, refresh_quotes=True)
         if not view.get("ok"):
             outcomes.append({"trade_id": tid, "error": view.get("error")})
             continue
+        if view.get("skip_exits"):
+            if view.get("quotes_status") == "stale":
+                db = SessionLocal()
+                try:
+                    from backend.services.tarang.alerts_telegram import notify_critical
+
+                    notify_critical(
+                        db,
+                        kind="stale_feed",
+                        message=f"Trade #{tid} ExitEngine skipped — stale/missing quotes ({venue})",
+                        trade_id=tid,
+                        dedupe_key=f"stale_feed:{tid}",
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+            if view.get("gap_at_open"):
+                logger.info("tarang gap_at_open trade=%s %s", tid, view.get("gap_at_open"))
+            outcomes.append(
+                {
+                    "trade_id": tid,
+                    "should_exit": False,
+                    "skipped": view.get("quotes_status"),
+                    "gap_at_open": view.get("gap_at_open"),
+                }
+            )
+            continue
         ev = view.get("exit_eval") or {}
         if ev.get("should_exit") and ev.get("reason"):
-            # proximity alerts
             out = exit_trade(tid, reason=ev["reason"], actor="SYSTEM", note="ExitEngine")
+            db = SessionLocal()
+            try:
+                from backend.services.tarang.alerts_telegram import notify_critical
+
+                notify_critical(
+                    db,
+                    kind="exit_trigger",
+                    message=f"Trade #{tid} exit trigger {ev['reason']}",
+                    trade_id=tid,
+                    dedupe_key=f"exit_trigger:{tid}:{ev['reason']}",
+                    meta={"reason": ev["reason"]},
+                )
+                db.commit()
+            finally:
+                db.close()
             outcomes.append(out)
         else:
             closest = (ev.get("closest") or {})
@@ -743,55 +905,135 @@ def run_exit_engine_once() -> Dict[str, Any]:
 
 
 def run_hard_exit_warnings() -> Dict[str, Any]:
-    from backend.services.tarang.exit_engine import warning_datetime
+    from backend.services.tarang.alerts_telegram import notify_critical
+    from backend.services.tarang.exit_engine import hard_exit_applies, warning_datetime
 
     now = datetime.now(timezone.utc)
     alerts = []
     for t in list_open_trades("PAPER"):
         venue = t.get("venue") or "upstox_mcx"
+        meta = t.get("meta") or {}
+        if not hard_exit_applies(
+            venue,
+            holding_mode=t.get("holding_mode") or "INTRADAY",
+            expiry=meta.get("expiry"),
+            now=now,
+        ):
+            continue
         warn_at = warning_datetime(venue, now=now)
         secs = (warn_at - now.astimezone(warn_at.tzinfo)).total_seconds()
-        # Fire when within 60s after warning time or at warning
         if -60 <= secs <= 60:
             db = SessionLocal()
             try:
-                aid = create_alert(
+                out = notify_critical(
                     db,
-                    f"Hard-exit warning for trade #{t['id']} ({venue})",
-                    level="critical",
+                    kind="hard_exit_warning",
+                    message=f"Hard-exit warning for trade #{t['id']} ({venue})",
                     trade_id=int(t["id"]),
+                    dedupe_key=f"hard_exit_warning:{t['id']}:{to_ist(now).date().isoformat()}",
                     meta={"venue": venue},
                 )
                 db.commit()
-                alerts.append(aid)
+                alerts.append(out.get("alert_id"))
             finally:
                 db.close()
     return {"ok": True, "alerts": alerts}
 
 
 def run_hard_exit_flatten() -> Dict[str, Any]:
-    """Flatten INTRADAY PAPER trades past venue hard-exit time."""
-    from backend.services.tarang.exit_engine import hard_exit_datetime
+    """Flatten PAPER trades only when the venue hard-exit rule applies."""
+    from backend.services.tarang.exit_engine import hard_exit_applies, hard_exit_datetime
 
     now = datetime.now(timezone.utc)
     results = []
     for t in list_open_trades("PAPER"):
-        if str(t.get("holding_mode") or "INTRADAY").upper() != "INTRADAY":
-            # Delta expiry day still flatten
-            meta = t.get("meta") or {}
-            venue = t.get("venue") or ""
-            if not (venue == "delta_india" and meta.get("expiry")):
-                continue
         venue = t.get("venue") or "upstox_mcx"
         meta = t.get("meta") or {}
+        holding = t.get("holding_mode") or "INTRADAY"
+        if not hard_exit_applies(venue, holding_mode=holding, expiry=meta.get("expiry"), now=now):
+            continue
         hard = hard_exit_datetime(
             venue,
-            holding_mode=t.get("holding_mode") or "INTRADAY",
+            holding_mode=holding,
             expiry=meta.get("expiry"),
             now=now,
         )
-        if now.astimezone(hard.tzinfo) >= hard:
+        if hard is not None and now.astimezone(hard.tzinfo) >= hard:
             results.append(
                 exit_trade(int(t["id"]), reason="HARD_EXIT", actor="SYSTEM", note="scheduler hard exit")
             )
     return {"ok": True, "results": results}
+
+
+def check_feed_alerts() -> Dict[str, Any]:
+    """Stale feed / expired Upstox token / kill-switch consecutive losses."""
+    ensure_tarang_tables()
+    from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
+    from backend.services.tarang.alerts_telegram import notify_critical
+    from backend.services.tarang.chain_snapshots import chain_coverage
+
+    fired = []
+    db = SessionLocal()
+    try:
+        ux = UpstoxMcxAdapter().health()
+        token_state = ux.get("token") or "unknown"
+        if token_state in ("missing", "expired") or not ux.get("ok"):
+            if token_state in ("missing", "expired"):
+                notify_critical(
+                    db,
+                    kind="upstox_token_expired",
+                    message=f"Upstox token {token_state} — MCX chain snapshots blocked",
+                    dedupe_key="upstox_token_expired",
+                )
+                fired.append("upstox_token_expired")
+        cov = chain_coverage()
+        now = datetime.now(timezone.utc)
+        for row in cov.get("underlyings") or []:
+            latest = row.get("latest")
+            if not latest:
+                continue
+            try:
+                lt = datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+                if lt.tzinfo is None:
+                    lt = lt.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            age_min = (now - lt).total_seconds() / 60.0
+            us = row.get("underlying")
+            limit = 90 if us in ("BTC", "ETH") else 180
+            if us in ("BTC", "ETH") and age_min > limit:
+                notify_critical(
+                    db,
+                    kind="stale_feed",
+                    message=f"Delta full-chain snapshot for {us} is {age_min:.0f}m old",
+                    dedupe_key=f"stale_feed:{us}",
+                )
+                fired.append(f"stale:{us}")
+        # Kill switch: consecutive closed losses
+        kill_n = int(get_risk().get("kill_consecutive_losses") or 3)
+        closed = db.execute(
+            text(
+                """
+                SELECT net_pnl FROM tarang_trades
+                WHERE status IN ('CLOSED', 'REPORTED') AND mode = 'PAPER'
+                ORDER BY COALESCE(exit_at, updated_at) DESC
+                LIMIT :n
+                """
+            ),
+            {"n": kill_n},
+        ).mappings().all()
+        if len(closed) >= kill_n and all(float(r["net_pnl"] or 0) < 0 for r in closed):
+            notify_critical(
+                db,
+                kind="kill_switch",
+                message=f"Kill switch: {kill_n} consecutive PAPER losses",
+                dedupe_key="kill_switch_consecutive",
+            )
+            fired.append("kill_switch")
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("check_feed_alerts failed")
+    finally:
+        db.close()
+    return {"ok": True, "fired": fired}

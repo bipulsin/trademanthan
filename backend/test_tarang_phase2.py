@@ -120,13 +120,13 @@ def test_compute_iv_percentile():
     assert p == 60.0
 
 
-def test_energy_budget_unchanged():
+def test_energy_budget_operator_set():
     from backend.services.tarang.config import energy_budget
 
     e = energy_budget()
-    assert e["per_trade_budget_inr"] == 40000
-    assert e["hard_cap_inr"] == 50000
-    assert e["portfolio_limit_inr"] == 80000
+    assert e["per_trade_budget_inr"] == 5000
+    assert e["hard_cap_inr"] == 10000
+    assert e["portfolio_limit_inr"] == 10000
 
 
 def test_delta_sizing_usd_to_inr():

@@ -1,0 +1,569 @@
+{
+  "ran_at_utc": "2026-09-19T12:22:01.089632+00:00",
+  "base": "https://api.india.delta.exchange",
+  "symbols": [],
+  "notes": [],
+  "expired_products_btc": {
+    "http": 200,
+    "success": true,
+    "n": 50,
+    "error": null
+  },
+  "expired_products_eth": {
+    "http": 200,
+    "success": true,
+    "n": 50
+  },
+  "symbols_considered": [
+    "C-BTC-83000-190926",
+    "P-BTC-83000-190926",
+    "P-BTC-82800-190926",
+    "C-BTC-82600-190926",
+    "P-BTC-82600-190926",
+    "C-BTC-82800-190926",
+    "C-BTC-82200-190926",
+    "P-BTC-82200-190926",
+    "P-BTC-82400-190926",
+    "C-BTC-82400-190926",
+    "C-BTC-81800-190926",
+    "P-BTC-81800-190926",
+    "C-BTC-81400-190926",
+    "P-BTC-81400-190926",
+    "C-BTC-81000-190926",
+    "P-BTC-81000-190926"
+  ],
+  "per_symbol": [
+    {
+      "symbol": "C-BTC-83000-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 1,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-19T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 1,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-19T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 17.0,
+          "low": 0.1,
+          "open": 15.0,
+          "time": 1789776000,
+          "volume": 561776.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-83000-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 1,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-19T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 1,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-19T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 1708.0,
+          "high": 1976.0,
+          "low": 1508.0,
+          "open": 1850.0,
+          "time": 1789776000,
+          "volume": 359.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-82800-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 1527.0,
+          "high": 1847.0,
+          "low": 1124.0,
+          "open": 1178.0,
+          "time": 1789776000,
+          "volume": 234.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-82600-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 86.0,
+          "low": 0.1,
+          "open": 6.0,
+          "time": 1789776000,
+          "volume": 774505.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-82600-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 1315.0,
+          "high": 1625.0,
+          "low": 991.0,
+          "open": 991.0,
+          "time": 1789776000,
+          "volume": 2386.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-82800-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 77.0,
+          "low": 0.1,
+          "open": 4.0,
+          "time": 1789776000,
+          "volume": 1511718.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-82200-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 126.0,
+          "low": 0.1,
+          "open": 16.0,
+          "time": 1789776000,
+          "volume": 880230.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-82200-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 923.0,
+          "high": 1339.0,
+          "low": 593.0,
+          "open": 1339.0,
+          "time": 1789776000,
+          "volume": 42056.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-82400-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 1125.0,
+          "high": 1459.0,
+          "low": 833.0,
+          "open": 966.0,
+          "time": 1789776000,
+          "volume": 9698.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-82400-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 102.0,
+          "low": 0.1,
+          "open": 9.0,
+          "time": 1789776000,
+          "volume": 596874.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-81800-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 250.0,
+          "low": 0.1,
+          "open": 36.0,
+          "time": 1789776000,
+          "volume": 1044006.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-81800-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 514.0,
+          "high": 988.0,
+          "low": 300.0,
+          "open": 988.0,
+          "time": 1789776000,
+          "volume": 123292.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-81400-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 486.0,
+          "low": 0.1,
+          "open": 61.0,
+          "time": 1789776000,
+          "volume": 2196472.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-81400-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 116.0,
+          "high": 596.5,
+          "low": 55.0,
+          "open": 543.0,
+          "time": 1789776000,
+          "volume": 689632.0
+        }
+      }
+    },
+    {
+      "symbol": "C-BTC-81000-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 279.0,
+          "high": 834.0,
+          "low": 116.0,
+          "open": 166.0,
+          "time": 1789776000,
+          "volume": 755048.0
+        }
+      }
+    },
+    {
+      "symbol": "P-BTC-81000-190926",
+      "expiry": "2026-09-19",
+      "resolutions": {
+        "1d": {
+          "http": 200,
+          "n": 2,
+          "success": true,
+          "error": null,
+          "earliest": "2026-09-18T00:00:00+00:00",
+          "latest": "2026-09-19T00:00:00+00:00",
+          "gaps": 0
+        }
+      },
+      "best": {
+        "resolution": "1d",
+        "http": 200,
+        "n": 2,
+        "success": true,
+        "error": null,
+        "earliest": "2026-09-18T00:00:00+00:00",
+        "latest": "2026-09-19T00:00:00+00:00",
+        "gaps": 0,
+        "sample_bar": {
+          "close": 0.1,
+          "high": 290.0,
+          "low": 0.1,
+          "open": 265.0,
+          "time": 1789776000,
+          "volume": 2918417.0
+        }
+      }
+    }
+  ],
+  "symbols_with_bars": 16,
+  "symbols_tried": 16,
+  "reconstruct_from_candles": "VIABLE_IF_CHAIN_COMPLETE",
+  "reconstruct_note": "Candle history exists for some expired option symbols, but a full chain (~10 strikes either side, both types, every snapshot) is not guaranteed. Own full-chain snapshots remain required for the backtest."
+}

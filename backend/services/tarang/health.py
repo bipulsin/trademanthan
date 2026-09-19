@@ -10,6 +10,7 @@ from sqlalchemy import text
 from backend.database import SessionLocal
 from backend.services.tarang.adapters.delta_india import DeltaIndiaAdapter
 from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
+from backend.services.tarang.chain_snapshots import chain_coverage
 from backend.services.tarang.config import get_events, get_profiles, get_risk
 from backend.services.tarang.iv_snapshots import recent_iv_snapshot_counts
 from backend.services.tarang.schema import ensure_tarang_tables
@@ -58,6 +59,7 @@ def build_health_payload() -> Dict[str, Any]:
             "delta_india": delta,
         },
         "iv_snapshot_counts": iv_counts,
+        "chain_coverage": chain_coverage(),
         "risk": risk,
         "profiles": get_profiles(),
         "events": get_events(),

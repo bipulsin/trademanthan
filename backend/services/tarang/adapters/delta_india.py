@@ -148,6 +148,24 @@ class DeltaIndiaAdapter:
             return [r for r in result if isinstance(r, dict)]
         return []
 
+    def near_expiries(self, underlying: str, n: int = 2) -> List[str]:
+        us = underlying.upper()
+        tickers = self._products(us)
+        today = datetime.now(timezone.utc).date().isoformat()
+        exps = set()
+        for t in tickers:
+            sym = str(t.get("symbol") or "")
+            parts = sym.split("-")
+            if len(parts) < 4:
+                continue
+            try:
+                exp_iso = datetime.strptime(parts[3], "%d%m%y").date().isoformat()
+            except ValueError:
+                continue
+            if exp_iso >= today:
+                exps.add(exp_iso)
+        return sorted(exps)[:n]
+
     def build_chain(
         self,
         profile_id: str,

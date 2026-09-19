@@ -1,4 +1,4 @@
-"""Upstox MCX adapter — full CRUDEOIL / NATURALGAS only (no minis)."""
+"""Upstox MCX adapter — minis by default; full CRUDEOIL / NATURALGAS behind config."""
 from __future__ import annotations
 
 import logging
@@ -21,7 +21,9 @@ logger = logging.getLogger(__name__)
 GREEK_URL = "https://api.upstox.com/v3/market-quote/option-greek"
 QUOTES_URL = "https://api.upstox.com/v2/market-quote/quotes"
 
-_FAMILY = {"CL": "CRUDEOIL", "NG": "NATURALGAS"}
+_FAMILY_MINI = {"CL": "CRUDEOILM", "NG": "NATGASMINI"}
+_FAMILY_FULL = {"CL": "CRUDEOIL", "NG": "NATURALGAS"}
+_ALL_ENERGY = ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI")
 
 
 def _norm_key(k: str) -> str:
@@ -76,22 +78,17 @@ class UpstoxMcxAdapter:
         # Lightweight instrument master touch
         try:
             rows = ensure_instrument_master()
-            cl = sum(
-                1
-                for r in rows
-                if _is_mcx_fo(r)
-                and str(r.get("underlying_symbol") or "").upper() == "CRUDEOIL"
-                and str(r.get("instrument_type") or "").upper() in ("CE", "PE")
-            )
-            ng = sum(
-                1
-                for r in rows
-                if _is_mcx_fo(r)
-                and str(r.get("underlying_symbol") or "").upper() == "NATURALGAS"
-                and str(r.get("instrument_type") or "").upper() in ("CE", "PE")
-            )
-            out["detail"] = {"crudeoil_option_rows": cl, "naturalgas_option_rows": ng}
-            out["ok"] = cl > 0 and ng > 0
+            counts = {}
+            for us in _ALL_ENERGY:
+                counts[f"{us.lower()}_option_rows"] = sum(
+                    1
+                    for r in rows
+                    if _is_mcx_fo(r)
+                    and str(r.get("underlying_symbol") or "").upper() == us
+                    and str(r.get("instrument_type") or "").upper() in ("CE", "PE")
+                )
+            out["detail"] = counts
+            out["ok"] = counts.get("crudeoilm_option_rows", 0) > 0 and counts.get("natgasmini_option_rows", 0) > 0
             out["status"] = "ok" if out["ok"] else "master_incomplete"
         except Exception as e:
             out["status"] = "error"
@@ -139,6 +136,34 @@ class UpstoxMcxAdapter:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         exps = sorted({e for e in (_expiry_ms(r) for r in rows) if e and e > now_ms})
         return exps[:n]
+
+    def near_expiries(self, underlying: str, n: int = 2) -> List[str]:
+        rows = self.list_option_rows(underlying)
+        return [_expiry_iso(ms) for ms in self._nearest_expiries(rows, n)]
+
+    def contract_spec(self, underlying: str) -> Dict[str, Any]:
+        """Lot size + modal strike step from the instrument master."""
+        rows = self.list_option_rows(underlying)
+        lot = None
+        if rows:
+            try:
+                lot = int(rows[0].get("lot_size") or rows[0].get("quantity_limit") or 0) or None
+            except (TypeError, ValueError):
+                lot = None
+        strikes = sorted(
+            {
+                float(r.get("strike_price") or r.get("strike") or 0)
+                for r in rows
+                if r.get("strike_price") or r.get("strike")
+            }
+        )
+        step = None
+        if len(strikes) >= 2:
+            diffs = sorted(
+                {round(strikes[i + 1] - strikes[i], 6) for i in range(len(strikes) - 1) if strikes[i + 1] > strikes[i]}
+            )
+            step = diffs[0] if diffs else None
+        return {"underlying": underlying.upper(), "lot_size": lot, "strike_step": step, "n_options": len(rows)}
 
     def _futures_ltp(self, underlying: str, expiry_ms: int) -> Tuple[Optional[float], Dict[str, Any]]:
         rows = ensure_instrument_master()
@@ -236,7 +261,7 @@ class UpstoxMcxAdapter:
         expiry: Optional[str] = None,
         atm_window: int = 8,
     ) -> OptionChain:
-        us = (_FAMILY.get(profile_id.upper()) or underlying).upper()
+        us = (underlying or _FAMILY_MINI.get(profile_id.upper()) or "").upper()
         rows = self.list_option_rows(us)
         if expiry:
             # filter to matching date

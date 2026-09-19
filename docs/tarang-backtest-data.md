@@ -30,7 +30,7 @@
 
 ## Phase 1 action
 
-IV snapshot scheduler writes ATM IV (and later skew) into **`tarang_iv_snapshots`** on an IST cadence so the percentile gate has data by Phase 2+.
+Full-chain snapshot scheduler writes compressed ~ATM±10 chains into **`tarang_chain_snapshots`** (IST weekday + hour tags) and ATM IV into **`tarang_iv_snapshots`** so the percentile gate and Phase 6 backtest have data. **Start now — chains cannot be recreated later.**
 
 ## Phase 6 note
 

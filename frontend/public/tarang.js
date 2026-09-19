@@ -90,19 +90,40 @@
     const body = document.getElementById('lossBody');
     const rows = (table && table.rows) || [];
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="5" class="tg-muted">No rows</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" class="tg-muted">No rows</td></tr>';
       return;
     }
     body.innerHTML = rows.map((r) => {
       const fit = r.currency === 'INR' ? r.fits_energy_budget : r.fits_crypto_budget;
+      const hard = r.currency === 'INR' ? r.fits_hard_cap : true;
       return `<tr>
         <td>${r.underlying} <span class="tg-muted">(${r.profile_id})</span></td>
+        <td>${r.contract_family || '—'}</td>
         <td>${r.width_label}</td>
         <td>${fmtLoss(r)}</td>
         <td>₹${Number(r.budget_ref_inr).toLocaleString('en-IN')}</td>
         <td class="${fit ? 'tg-fit-yes' : 'tg-fit-no'}">${fit ? 'Yes' : 'No'}</td>
+        <td class="${hard ? 'tg-fit-yes' : 'tg-fit-no'}">${r.currency === 'INR' ? (hard ? 'Yes' : 'No') : '—'}</td>
       </tr>`;
     }).join('');
+  }
+
+  function renderCoverage(cov) {
+    const body = document.getElementById('coverageBody');
+    if (!body) return;
+    const rows = (cov && cov.underlyings) || [];
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="6" class="tg-muted">No full-chain snapshots yet — collection starts now.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map((r) => `<tr>
+      <td>${r.underlying}</td>
+      <td>${r.days}</td>
+      <td class="tg-muted">${(r.earliest || '').replace('T', ' ').slice(0, 16)}</td>
+      <td>${r.earliest_backtest_start || '—'}</td>
+      <td>${r.six_month_backtest_ready_on || '—'}</td>
+      <td class="${r.ready_for_6m_backtest ? 'tg-fit-yes' : 'tg-fit-no'}">${r.ready_for_6m_backtest ? 'Yes' : 'No'}</td>
+    </tr>`).join('');
   }
 
   function statusChip(st) {
@@ -234,6 +255,7 @@
       host.innerHTML = trades.map((v) => {
         const t = v.trade || {};
         const ev = v.exit_eval || {};
+        const skip = v.skip_exits ? `<p class="tg-note tg-fit-no">Exits paused: ${v.quotes_status || 'stale quotes'}${v.gap_at_open ? ' · gap at open logged' : ''}</p>` : '';
         const triggers = (ev.triggers || []).map((tr) =>
           `<div class="tg-trigger ${tr.hit ? 'tg-trigger-hit' : ''}">
             <strong>${tr.reason}</strong> ${progressBar(tr.distance_frac, tr.hit ? 'HIT' : 'prox')}
@@ -255,7 +277,7 @@
         return `<article class="tg-intrade-card" data-tid="${t.id}">
           <header class="tg-intrade-head">
             <div>
-              <strong>#${t.id}</strong> ${statusChip(t.status)} ${t.profile_id || ''} · ${t.structure || ''}
+              <strong>#${t.id}</strong> ${statusChip(t.status)} <span class="tg-muted">${t.holding_mode || 'INTRADAY'}</span> ${t.profile_id || ''} · ${t.structure || ''}
               <span class="tg-muted">${t.venue || ''}</span>
             </div>
             <div class="tg-pnl ${Number(v.pnl_inr) >= 0 ? 'tg-pnl-pos' : 'tg-pnl-neg'}">${fmtInr(v.pnl_inr)}${usdNote}</div>
@@ -264,6 +286,7 @@
             max loss used ${v.pct_of_max_loss != null ? Number(v.pct_of_max_loss).toFixed(0) + '%' : '—'} ·
             hard exit ${ev.hard_exit_at_ist || '—'} IST · countdown ${cd}</p>
           <p class="tg-note"><strong>Exit preview:</strong> ${v.exit_reason_preview || (ev.closest && ev.closest.reason) || '—'}</p>
+          ${skip}
           <p class="tg-note">Greeks δ ${g.delta != null ? Number(g.delta).toFixed(3) : '—'} ·
             θ ${g.theta != null ? Number(g.theta).toFixed(3) : '—'} ·
             ν ${g.vega != null ? Number(g.vega).toFixed(3) : '—'}</p>
@@ -334,16 +357,19 @@
       <div class="tg-metric"><span>Expectancy</span><strong>${fmtInr(m.expectancy)}</strong></div>
       <div class="tg-metric"><span>Net total</span><strong>${fmtInr(m.net_total)}</strong></div>
       <div class="tg-metric"><span>Max DD</span><strong>${fmtInr(m.max_drawdown)}</strong></div>
+      <div class="tg-metric"><span>INTRADAY</span><strong>${(m.by_holding_mode && m.by_holding_mode.INTRADAY && m.by_holding_mode.INTRADAY.count) || 0}</strong></div>
+      <div class="tg-metric"><span>POSITIONAL</span><strong>${(m.by_holding_mode && m.by_holding_mode.POSITIONAL && m.by_holding_mode.POSITIONAL.count) || 0}</strong></div>
     `;
     const body = document.getElementById('reportBody');
     const trades = rep.trades || [];
     if (!trades.length) {
-      body.innerHTML = `<tr><td colspan="8" class="tg-muted">${rep.note || 'No closed trades'}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="tg-muted">${rep.note || 'No closed trades'}</td></tr>`;
       return;
     }
     body.innerHTML = trades.map((t) => `<tr>
       <td>${t.id}</td>
       <td>${t.profile_id || ''}</td>
+      <td>${t.holding_mode || 'INTRADAY'}</td>
       <td>${t.structure || ''}</td>
       <td>${t.exit_reason || '—'}</td>
       <td>${fmtInr(t.gross_pnl)}</td>
@@ -405,6 +431,7 @@
     const c = (h.risk && h.risk.buckets && h.risk.buckets.CRYPTO) || {};
     document.getElementById('budgetBox').textContent = JSON.stringify({ ENERGY: e, CRYPTO: c }, null, 2);
     renderLoss(h.min_max_loss);
+    renderCoverage(h.chain_coverage);
     document.getElementById('ivCounts').textContent = JSON.stringify(h.iv_snapshot_counts || {}, null, 2);
     document.getElementById('wsBox').textContent = JSON.stringify(h.upstox_ws || {}, null, 2);
     return h;
@@ -469,7 +496,10 @@
     try {
       const out = await api(`/api/tarang/ticket/${currentTicketId}/take`, {
         method: 'POST',
-        body: JSON.stringify({ note: '' }),
+        body: JSON.stringify({
+          note: '',
+          holding_mode: (document.getElementById('holdingMode') || {}).value || 'INTRADAY',
+        }),
       });
       status.textContent = `PAPER trade #${out.trade_id} → ${out.status}`;
       switchTab('intrade');

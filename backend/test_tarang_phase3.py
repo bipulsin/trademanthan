@@ -183,7 +183,49 @@ def test_exit_hard_exit_mcx():
     assert ev.reason == "HARD_EXIT"
 
 
-def test_report_metrics():
+def test_exit_hard_exit_delta_intraday_not_positional():
+    # 12:00 UTC = 17:30 IST — past 17:00
+    now = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
+    kwargs = dict(
+        entry_credit_pts=1.0,
+        debit_to_close_pts=0.9,
+        unrealized_pnl_inr=100,
+        max_profit_inr=1000,
+        max_loss_inr=4000,
+        budget_inr=4000,
+        short_deltas=[0.12],
+        venue="delta_india",
+        profile_id="BTC",
+        expiry="2026-10-01",
+        now=now,
+        exit_levels={"profit_take_frac": 0.90, "credit_stop_multiple": 5.0, "delta_stop_min": 0.90},
+    )
+    ev_in = evaluate_exits(holding_mode="INTRADAY", **kwargs)
+    assert ev_in.should_exit
+    assert ev_in.reason == "HARD_EXIT"
+    ev_pos = evaluate_exits(holding_mode="POSITIONAL", **kwargs)
+    assert not ev_pos.should_exit or ev_pos.reason != "HARD_EXIT"
+
+
+def test_exit_hard_exit_delta_positional_on_expiry_day():
+    now = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)  # 17:30 IST
+    ev = evaluate_exits(
+        entry_credit_pts=1.0,
+        debit_to_close_pts=0.9,
+        unrealized_pnl_inr=100,
+        max_profit_inr=1000,
+        max_loss_inr=4000,
+        budget_inr=4000,
+        short_deltas=[0.12],
+        venue="delta_india",
+        profile_id="BTC",
+        holding_mode="POSITIONAL",
+        expiry="2026-09-19",
+        now=now,
+        exit_levels={"profit_take_frac": 0.90, "credit_stop_multiple": 5.0, "delta_stop_min": 0.90},
+    )
+    assert ev.should_exit
+    assert ev.reason == "HARD_EXIT"
     trades = [
         {"net_pnl": 500, "gross_pnl": 550, "fees_total": 50, "exit_reason": "PROFIT_TARGET", "profile_id": "CL"},
         {"net_pnl": -800, "gross_pnl": -750, "fees_total": 50, "exit_reason": "CREDIT_STOP", "profile_id": "CL"},
@@ -336,7 +378,11 @@ def test_paper_lifecycle_with_db_fixtures():
     with patch.object(lc, "SessionLocal", return_value=db2), patch.object(
         lc, "get_trade", return_value=trade_row
     ), patch.object(lc, "ensure_tarang_tables"), patch.object(
-        lc, "_refresh_quotes_for_trade", return_value=legs
+        lc, "mcx_feed_closed", return_value=False
+    ), patch.object(
+        lc,
+        "_refresh_quote_bundle",
+        return_value={"quotes": legs, "ok": True, "built_at": "2026-09-19T10:00:00+00:00", "underlying_price": 280},
     ):
         closed = lc.exit_trade(501, reason="MANUAL", actor="USER")
         assert closed["ok"] is True

@@ -1,0 +1,120 @@
+{
+  "CRUDEOIL": {
+    "n_options": 784,
+    "n_futures": 10,
+    "lot_size_mode": [
+      100,
+      784
+    ],
+    "lot_size_all": [
+      [
+        100,
+        784
+      ]
+    ],
+    "strike_step_min": 50.0,
+    "n_expiries": 2,
+    "next_expiries_iso": [
+      "2026-10-15",
+      "2026-11-17"
+    ],
+    "sample_opt": [
+      "CRUDEOIL 12500 CE 17 NOV 26",
+      "MCX_FO|584900",
+      100
+    ],
+    "sample_fut": [
+      "CRUDEOIL FUT 17 DEC 27",
+      "MCX_FO|584777"
+    ]
+  },
+  "CRUDEOILM": {
+    "n_options": 784,
+    "n_futures": 10,
+    "lot_size_mode": [
+      10,
+      784
+    ],
+    "lot_size_all": [
+      [
+        10,
+        784
+      ]
+    ],
+    "strike_step_min": 50.0,
+    "n_expiries": 2,
+    "next_expiries_iso": [
+      "2026-10-15",
+      "2026-11-17"
+    ],
+    "sample_opt": [
+      "CRUDEOILM 12700 CE 15 OCT 26",
+      "MCX_FO|584953",
+      10
+    ],
+    "sample_fut": [
+      "CRUDEOILM FUT 21 JUN 27",
+      "MCX_FO|584778"
+    ]
+  },
+  "NATURALGAS": {
+    "n_options": 522,
+    "n_futures": 6,
+    "lot_size_mode": [
+      1250,
+      522
+    ],
+    "lot_size_all": [
+      [
+        1250,
+        522
+      ]
+    ],
+    "strike_step_min": 5.0,
+    "n_expiries": 3,
+    "next_expiries_iso": [
+      "2026-09-23",
+      "2026-10-23",
+      "2026-11-20"
+    ],
+    "sample_opt": [
+      "NATURALGAS 130 CE 20 NOV 26",
+      "MCX_FO|584827",
+      1250
+    ],
+    "sample_fut": [
+      "NATURALGAS FUT 27 OCT 26",
+      "MCX_FO|570750"
+    ]
+  },
+  "NATGASMINI": {
+    "n_options": 520,
+    "n_futures": 6,
+    "lot_size_mode": [
+      250,
+      520
+    ],
+    "lot_size_all": [
+      [
+        250,
+        520
+      ]
+    ],
+    "strike_step_min": 5.0,
+    "n_expiries": 3,
+    "next_expiries_iso": [
+      "2026-09-23",
+      "2026-10-23",
+      "2026-11-20"
+    ],
+    "sample_opt": [
+      "NATGASMINI 130 PE 20 NOV 26",
+      "MCX_FO|584872",
+      250
+    ],
+    "sample_fut": [
+      "NATGASMINI FUT 27 OCT 26",
+      "MCX_FO|570751"
+    ]
+  }
+}

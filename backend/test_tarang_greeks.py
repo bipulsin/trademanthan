@@ -67,9 +67,15 @@ def test_bs_roundtrip():
 
 
 def test_energy_budget_defaults():
-    from backend.services.tarang.config import energy_budget
+    from backend.services.tarang.config import energy_budget, get_profiles
 
     e = energy_budget()
-    assert e["per_trade_budget_inr"] == 40000
-    assert e["hard_cap_inr"] == 50000
-    assert e["portfolio_limit_inr"] == 80000
+    assert e["per_trade_budget_inr"] == 5000
+    assert e["hard_cap_inr"] == 10000
+    assert e["portfolio_limit_inr"] == 10000
+    profiles = get_profiles()
+    assert profiles.get("contractFamily") == "mini"
+    assert profiles["profiles"]["CL"]["underlying_symbol"] == "CRUDEOILM"
+    assert profiles["profiles"]["NG"]["underlying_symbol"] == "NATGASMINI"
+    assert profiles["profiles"]["BTC_WEEKEND"]["enabled"] is False
+    assert profiles["profiles"]["ETH_WEEKEND"]["enabled"] is False

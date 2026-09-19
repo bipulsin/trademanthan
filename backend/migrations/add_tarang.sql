@@ -193,3 +193,35 @@ VALUES
     ('auto', 'false'::jsonb),
     ('holding_mode', '"INTRADAY"'::jsonb)
 ON CONFLICT (key) DO NOTHING;
+
+-- Full-chain snapshots (gzip BYTEA). ATM IV rows remain in tarang_iv_snapshots.
+CREATE TABLE IF NOT EXISTS tarang_chain_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    profile_id TEXT NOT NULL,
+    venue TEXT NOT NULL,
+    underlying_symbol TEXT NOT NULL,
+    expiry_date DATE,
+    futures_or_spot DOUBLE PRECISION,
+    atm_strike DOUBLE PRECISION,
+    atm_iv DOUBLE PRECISION,
+    ist_dow SMALLINT NOT NULL,
+    ist_hour SMALLINT NOT NULL,
+    ist_weekend_window BOOLEAN NOT NULL DEFAULT FALSE,
+    n_quotes INTEGER NOT NULL DEFAULT 0,
+    payload_gzip BYTEA NOT NULL,
+    meta JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS ix_tarang_chain_snapshots_underlying_time
+    ON tarang_chain_snapshots (underlying_symbol, captured_at DESC);
+CREATE INDEX IF NOT EXISTS ix_tarang_chain_snapshots_profile_time
+    ON tarang_chain_snapshots (profile_id, captured_at DESC);
+CREATE INDEX IF NOT EXISTS ix_tarang_chain_snapshots_venue_dow
+    ON tarang_chain_snapshots (venue, ist_dow, ist_hour);
+
+CREATE TABLE IF NOT EXISTS tarang_alert_dedupe (
+    dedupe_key TEXT PRIMARY KEY,
+    last_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_message TEXT
+);

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 _LOCK = threading.Lock()
 _CACHE: Dict[str, Any] = {}
@@ -45,6 +45,25 @@ def energy_budget() -> Dict[str, Any]:
 
 def crypto_budget() -> Dict[str, Any]:
     return dict((get_risk().get("buckets") or {}).get("CRYPTO") or {})
+
+
+def contract_family() -> str:
+    fam = str((get_profiles().get("contractFamily") or "mini")).strip().lower()
+    return fam if fam in ("mini", "full") else "mini"
+
+
+def resolve_energy_underlying(profile_id: str, profile: Optional[Dict[str, Any]] = None) -> str:
+    """Map CL/NG to mini or full underlying; honour explicit underlying_symbol."""
+    pid = (profile_id or "").upper()
+    prof = profile if profile is not None else (get_profiles().get("profiles") or {}).get(pid) or {}
+    explicit = str(prof.get("underlying_symbol") or "").strip().upper()
+    fam = str(prof.get("contract_family") or contract_family()).strip().lower()
+    maps = get_profiles()
+    table = (maps.get("mini_underlyings") if fam != "full" else maps.get("full_underlyings")) or {}
+    mapped = str(table.get(pid) or "").strip().upper()
+    if fam == "full":
+        return mapped or explicit or pid
+    return explicit or mapped or pid
 
 
 def reload_config() -> None:

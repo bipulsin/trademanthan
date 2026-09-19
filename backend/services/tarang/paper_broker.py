@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
 from backend.services.tarang.config import get_risk
+from backend.services.tarang.fees import fees_for_fills_inr
 
 
 def _now_iso() -> str:
@@ -63,12 +64,23 @@ def _multiplier(venue: str, lot_size: Optional[float], contract_value: Optional[
 
 
 def fee_for_units(venue: str, units: int, cfg: Optional[Dict[str, Any]] = None) -> float:
+    """Deprecated stub kept for tests that called the old round-trip number.
+
+    Prefer fees_for_fills_inr with actual fill prices.
+    """
     cfg = cfg or paper_fill_config()
     fees = cfg.get("fees") or {}
     usd_inr = float(cfg.get("usd_inr") or 83.0)
+    # Legacy keys no longer in config — approximate a 1-lot round trip for tests only.
     if venue == "delta_india":
-        return float(fees.get("delta_india_per_contract_roundtrip_usd") or 0.10) * usd_inr * max(units, 0)
-    return float(fees.get("upstox_mcx_per_lot_roundtrip_inr") or 80.0) * max(units, 0)
+        stub = fees.get("delta_india_per_contract_roundtrip_usd")
+        if stub is not None:
+            return float(stub) * usd_inr * max(units, 0)
+        return 0.0
+    stub = fees.get("upstox_mcx_per_lot_roundtrip_inr")
+    if stub is not None:
+        return float(stub) * max(units, 0)
+    return 0.0
 
 
 def simulate_entry_fills(
@@ -103,7 +115,14 @@ def simulate_entry_fills(
             spread_fraction=spread_fraction,
         )
         if px is None:
-            return {"ok": False, "error": "missing_quote", "leg": leg, "status": "REJECTED"}
+            return {
+                "ok": False,
+                "error": "missing_quote",
+                "leg": leg,
+                "status": "REJECTED",
+                "fill_status": "REJECTED",
+                "reason": "all_or_none_missing_quote",
+            }
         signed = -px if side == "BUY" else px  # credit positive when we sell
         credit_pts += signed
         coid = f"tarang-paper-{uuid.uuid4().hex[:16]}"
@@ -122,7 +141,12 @@ def simulate_entry_fills(
                 "filled_at": _now_iso(),
             }
         )
-    fees = fee_for_units(venue, units, cfg) * 0.5  # half of round-trip on entry
+    fees = fees_for_fills_inr(
+        fills,
+        venue=venue,
+        lot_size=lot_size,
+        contract_value=contract_value,
+    )
     max_credit_inr = credit_pts * mult * units if mult else None
     return {
         "ok": True,
@@ -134,6 +158,7 @@ def simulate_entry_fills(
         "entry_credit_inr": max_credit_inr,
         "venue": venue,
         "mode": "PAPER",
+        "fill_status": "FILLED",
         "order_order": "buy_longs_first",
     }
 
@@ -185,9 +210,14 @@ def simulate_exit_fills(
             spread_fraction=spread_fraction,
         )
         if px is None:
-            # last resort: reverse entry price with small adverse slip
-            ep = float(ef.get("price") or 0)
-            px = ep * 1.02 if side_out == "BUY" else ep * 0.98
+            return {
+                "ok": False,
+                "error": "missing_quote",
+                "status": "DEFERRED",
+                "fill_status": "REJECTED",
+                "reason": "exit_missing_or_stale_quote",
+                "leg": src,
+            }
         # Cost to unwind shorts (buy back) adds to debit; sell longs reduces debit
         if side_out == "BUY":
             debit_pts += px
@@ -217,7 +247,12 @@ def simulate_exit_fills(
 
     gross_pts = entry_credit_pts - debit_pts
     gross_inr = gross_pts * mult * units if mult else 0.0
-    exit_fees = fee_for_units(venue, units, cfg) * 0.5
+    exit_fees = fees_for_fills_inr(
+        fills,
+        venue=venue,
+        lot_size=lot_size,
+        contract_value=contract_value,
+    )
     return {
         "ok": True,
         "fills": fills,

@@ -34,6 +34,7 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
             "worst_trade": None,
             "by_exit_reason": {},
             "by_profile": {},
+            "by_holding_mode": {"INTRADAY": {"count": 0}, "POSITIONAL": {"count": 0}},
         }
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
@@ -57,6 +58,7 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     by_reason: Dict[str, int] = {}
     by_profile: Dict[str, Dict[str, Any]] = {}
+    by_holding: Dict[str, List[Dict[str, Any]]] = {"INTRADAY": [], "POSITIONAL": []}
     for t, p in zip(trades, pnls):
         er = t.get("exit_reason") or "UNKNOWN"
         by_reason[er] = by_reason.get(er, 0) + 1
@@ -64,6 +66,25 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         bucket = by_profile.setdefault(pid, {"count": 0, "net": 0.0})
         bucket["count"] += 1
         bucket["net"] += p
+        hm = str(t.get("holding_mode") or "INTRADAY").upper()
+        if hm not in by_holding:
+            by_holding[hm] = []
+        by_holding[hm].append(t)
+
+    def _slice_metrics(subset: List[Dict[str, Any]]) -> Dict[str, Any]:
+        sp = [_safe(t.get("net_pnl")) for t in subset]
+        if not sp:
+            return {"count": 0, "net_total": 0.0, "win_rate": None}
+        wins = [x for x in sp if x > 0]
+        return {
+            "count": len(sp),
+            "net_total": sum(sp),
+            "win_rate": (len(wins) / len(sp)) if sp else None,
+            "avg_win": (sum(wins) / len(wins)) if wins else None,
+            "avg_loss": (sum([x for x in sp if x < 0]) / max(len([x for x in sp if x < 0]), 1)) if any(x < 0 for x in sp) else None,
+        }
+
+    holding_metrics = {k: _slice_metrics(v) for k, v in by_holding.items()}
 
     return {
         "count": len(pnls),
@@ -80,6 +101,7 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "worst_trade": worst,
         "by_exit_reason": by_reason,
         "by_profile": by_profile,
+        "by_holding_mode": holding_metrics,
     }
 
 
@@ -113,6 +135,7 @@ def report_csv(mode: str = "PAPER", limit: int = 500) -> str:
         "profile_id",
         "structure",
         "mode",
+        "holding_mode",
         "status",
         "entry_at",
         "exit_at",

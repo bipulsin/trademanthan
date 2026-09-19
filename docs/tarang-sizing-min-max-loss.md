@@ -5,8 +5,8 @@
 **Zero-credit ceiling:** `width × multiplier` (conservative floor of “how bad can one lot be”).  
 **Widths:** strategy profile strike steps — CL **5–8**, NG **3–5**, BTC/ETH **2–4**; also show **1-step** theoretical minimum.
 
-Budget reference: **₹3,000** default / **₹10,000** hard cap (strategy doc).  
-Crypto USD↔INR rough: $36 ≈ ₹3k, $120 ≈ ₹10k (illustrative).
+Budget reference: ENERGY **₹5,000** default / **₹10,000** hard cap / **₹10,000** portfolio (operator-set). CRYPTO **₹3,000 / ₹10,000 / ₹6,000**.  
+ENERGY trades **minis** (`CRUDEOILM` lot 10, `NATGASMINI` lot 250) with lot sizes from the Upstox master. Full lots stay behind `contractFamily: full`. **Do not raise the budget** if a mini width cannot fit ₹10,000.
 
 Source spikes: `docs/_spike_upstox_mcx_raw.json`, `docs/_spike_delta_sizing_raw.json` (ran 2026-09-19 UTC).
 
@@ -37,6 +37,23 @@ Source spikes: `docs/_spike_upstox_mcx_raw.json`, `docs/_spike_delta_sizing_raw.
 
 ---
 
+## MCX mini contracts (now the ENERGY default)
+
+Fallback lot/step (master overrides on the data-health page): **CRUDEOILM** lot 10 / step 50; **NATGASMINI** lot 250 / step 5.
+
+| Underlying | Width | Width (pts) | Max loss / lot (₹), zero credit | Fits ₹5,000 default? | Fits ₹10,000 hard? |
+|---|---|---:|---:|:---:|:---:|
+| CRUDEOILM | 1 step | 50 | **500** | Yes | Yes |
+| CRUDEOILM | profile min 5 | 250 | **2,500** | Yes | Yes |
+| CRUDEOILM | profile max 8 | 400 | **4,000** | Yes | Yes |
+| NATGASMINI | 1 step | 5 | **1,250** | Yes | Yes |
+| NATGASMINI | profile min 3 | 15 | **3,750** | Yes | Yes |
+| NATGASMINI | profile max 5 | 25 | **6,250** | **No** | Yes |
+
+NG mini profile-max (5-step) **cannot fit the ₹5,000 default** but **does fit the ₹10,000 hard cap**. Do **not** raise the budget. Screener should refuse that width if it cannot size ≥1 lot inside the per-trade default (or require the hard-cap path only when the operator explicitly allows it).
+
+---
+
 ## Delta India (public tickers)
 
 Max loss / contract (USD) = `(width_points − credit) × contract_value`  
@@ -55,6 +72,6 @@ Crypto can size **many contracts** inside ₹3k–10k; MCX full lots cannot at p
 
 ## Phase 1 implications
 
-1. Surface this table on the data-health page.
-2. Decide budget raise vs allow 1-step widths vs enable mini later — **blocking product question**.
+1. Surface mini **and** full tables on the data-health page.
+2. ENERGY default is minis at operator budgets ₹5k / ₹10k / ₹10k — never auto-raise if a candidate cannot fit.
 3. Delta sizing is fine under current budget once IP whitelist / keys work.

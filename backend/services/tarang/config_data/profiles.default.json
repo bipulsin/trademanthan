@@ -1,15 +1,23 @@
 {
   "product": "Kosmic Tarang",
-  "version": 1,
-  "contractFamily": "full",
-  "notes": "Starting hypotheses from strategy doc §4. Minis disabled (CRUDEOILM / NATGASMINI out of scope).",
+  "version": 2,
+  "contractFamily": "mini",
+  "notes": "ENERGY trades CRUDEOILM / NATGASMINI. Full CRUDEOIL / NATURALGAS stay available by setting contractFamily to full (or per-profile contract_family). Weekend window profiles remain disabled.",
+  "mini_underlyings": {
+    "CL": "CRUDEOILM",
+    "NG": "NATGASMINI"
+  },
+  "full_underlyings": {
+    "CL": "CRUDEOIL",
+    "NG": "NATURALGAS"
+  },
   "profiles": {
     "CL": {
-      "label": "MCX Crude Oil",
+      "label": "MCX Crude Oil Mini",
       "venue": "upstox_mcx",
-      "underlying_symbol": "CRUDEOIL",
+      "underlying_symbol": "CRUDEOILM",
       "risk_bucket": "ENERGY",
-      "contract_family": "full",
+      "contract_family": "mini",
       "short_delta_min": 0.10,
       "short_delta_max": 0.16,
       "width_steps_min": 5,
@@ -19,11 +27,11 @@
       "enabled": true
     },
     "NG": {
-      "label": "MCX Natural Gas",
+      "label": "MCX Natural Gas Mini",
       "venue": "upstox_mcx",
-      "underlying_symbol": "NATURALGAS",
+      "underlying_symbol": "NATGASMINI",
       "risk_bucket": "ENERGY",
-      "contract_family": "full",
+      "contract_family": "mini",
       "short_delta_min": 0.10,
       "short_delta_max": 0.14,
       "width_steps_min": 3,

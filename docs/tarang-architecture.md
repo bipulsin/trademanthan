@@ -1,6 +1,6 @@
 # Kosmic Tarang — Architecture
 
-**Status:** Phase 3 complete (state machine, PaperBroker, In-Trade, ExitEngine, alerts, Trade Report). Phase 4 (live brokers) not started.  
+**Status:** Phase 3 complete + pre-Phase 4 follow-up (minis, full-chain snapshots, POSITIONAL paper, real fees). Phase 4 (live brokers) not started.  
 **Product (user-facing):** **Kosmic Tarang** — IV-gated defined-risk options spreads (iron condor or single credit spread) for MCX Crude Oil / Natural Gas (Upstox) and BTC / ETH (Delta Exchange India).  
 **Internal code / routes / tables:** short prefix `tarang_` / `/tarang` (e.g. `tarang_iv_snapshots`).
 
@@ -15,11 +15,11 @@
 3. **Closest analogues:** Commodities Div (`backend/services/commodities_div/`, MCX via Upstox master), Stock Options (`stock_option_*`), Iron Condor advisory (`iron_condor_*` + `upstox_iron_condor.py`) — Tarang follows CommDiv/Iron Condor desk shape.
 4. **Auth:** JWT Bearer; UI uses same token as other desks. Admin-gated nav via `nav-item-admin` + left-menu visibility API. **Nav label: “Kosmic Tarang”** next to Iron Condor / CommDiv; **admin-only through Phase 3**.
 5. **DB:** Postgres; `backend/migrations/add_tarang.sql` + `ensure_tarang_tables()`. All tables `tarang_*` including **`tarang_iv_snapshots`**, **`tarang_trade_events`**, **`tarang_fills`**.
-6. **Jobs:** APScheduler `BackgroundScheduler(timezone="Asia/Kolkata")` — IV snapshots every 30m 09:00–23:30 IST + 08:05 + boot; ExitEngine every minute in session; hard-exit warn/flat from config.
+6. **Jobs:** APScheduler `BackgroundScheduler(timezone="Asia/Kolkata")` — Delta full-chain snapshots 24×7 (30m, 15m in the Fri 18:00–Sun 17:00 IST window); MCX snapshots in-session only; ExitEngine every minute 24×7 for Delta, MCX in-session (+ 5m overnight no-op); hard-exit warn/flat from config.
 7. **Upstox:** `UpstoxService` + token manager; MCX chain from master + Option Greek. Tarang REST rate budget (`adapters/rate_budget.py`); WS share planned via `set_feed_provider_keys('tarang', …)` capped (max 50), lower priority than CommDiv — CommDiv unchanged in Phase 1.
 8. **Delta:** Tarang-specific env `DELTA_INDIA_API_*` (not algo.py hard-coded keys). Public India REST + authenticated read-only when IP-whitelisted. **PaperBroker (Phase 3)** simulates fills; client order ids `tarang-`. Testnet / LIVE Phase 4 only.
 9. **Secrets:** root `.env` via `backend/env_bootstrap.py`; paperclip `/home/ubuntu/twcto/.env`. Never ship secrets to the browser.
-10. **Defaults:** PAPER mode, AUTO off; ENERGY budget raised for full CL/NG lots (see risk.default.json).
+10. **Defaults:** PAPER mode, AUTO off; ENERGY **minis** at operator budgets ₹5k / ₹10k / ₹10k (see risk.default.json). Weekend profiles remain disabled.
 
 ## Phase 1 file map
 
@@ -38,16 +38,16 @@
 | Tests | `backend/test_tarang_greeks.py`, `backend/test_tarang_phase2.py`, `backend/test_tarang_phase3.py` |
 | Docs | `docs/tarang-architecture.md`, `tarang-runbook.md`, `tarang-backtest-data.md`, `tarang-sizing-min-max-loss.md` |
 
-## ENERGY budget (Phase 1)
+## ENERGY budget (operator-set)
 
 | Setting | Value | Rationale |
 |---|---:|---|
-| Per-trade | ₹40,000 | ≥1 full lot at CL/NG profile-min (₹18.75k–25k) and CL profile-max zero-credit (₹40k) |
-| Hard cap | ₹50,000 | Headroom |
-| Portfolio | ₹80,000 | 2 × per-trade |
-| Minis | Off | `contractFamily: full` |
+| Per-trade | ₹5,000 | Operator default — do not auto-raise |
+| Hard cap | ₹10,000 | Operator hard cap |
+| Portfolio | ₹10,000 | Operator portfolio cap |
+| Contracts | **Minis** | `CRUDEOILM` / `NATGASMINI`, `contractFamily: mini`. Full stays behind config. |
 
-CRYPTO remains ₹3k / ₹10k hard / ₹6k portfolio (2×).
+CRYPTO remains ₹3k / ₹10k hard / ₹6k portfolio (2×). Weekend window profiles stay **disabled**.
 
 ## Spike / follow-up results
 

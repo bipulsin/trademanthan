@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=4" />
+    <link rel="stylesheet" href="tarang.css?v=5" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -104,6 +104,11 @@
                             </div>
                             <div id="ticketPanel" class="tg-ticket"></div>
                             <div class="tg-ticket-actions" id="ticketActions" hidden>
+                                <label for="holdingMode">Holding</label>
+                                <select id="holdingMode" class="tg-input">
+                                    <option value="INTRADAY" selected>INTRADAY</option>
+                                    <option value="POSITIONAL">POSITIONAL overnight</option>
+                                </select>
                                 <button type="button" class="tg-btn tg-btn-primary" id="btnTake">Take trade (PAPER)</button>
                                 <button type="button" class="tg-btn" id="btnManual">Mark taken manually</button>
                                 <button type="button" class="tg-btn" id="btnDismiss">Dismiss</button>
@@ -119,7 +124,7 @@
                                 <button type="button" class="tg-btn" id="btnRunExitEngine">Run ExitEngine</button>
                                 <button type="button" class="tg-btn tg-btn-danger" id="btnExitAll">Exit all</button>
                             </div>
-                            <p class="tg-note">Live mark-to-market · exit triggers · hard-exit countdown. Scheduler also flattens INTRADAY at venue hard exit.</p>
+                            <p class="tg-note">Live mark-to-market · exit triggers · hard-exit countdown. Delta 17:00 IST hard-exits INTRADAY and expiry-day positions only — POSITIONAL holds other days. MCX 23:15 IST is INTRADAY only.</p>
                             <div id="intradeList"></div>
                         </section>
                         <section class="tg-card tg-section">
@@ -150,7 +155,7 @@
                                 <table class="tg-table">
                                     <thead>
                                         <tr>
-                                            <th>Id</th><th>Profile</th><th>Structure</th><th>Exit</th>
+                                            <th>Id</th><th>Profile</th><th>Hold</th><th>Structure</th><th>Exit</th>
                                             <th>Gross</th><th>Net</th><th>Fees</th><th>When</th>
                                         </tr>
                                     </thead>
@@ -177,10 +182,12 @@
                                     <thead>
                                         <tr>
                                             <th>Underlying</th>
+                                            <th>Family</th>
                                             <th>Width</th>
                                             <th>Max loss</th>
                                             <th>Budget</th>
-                                            <th>Fits?</th>
+                                            <th>Fits default?</th>
+                                            <th>Fits hard cap?</th>
                                         </tr>
                                     </thead>
                                     <tbody id="lossBody"><tr><td colspan="5" class="tg-muted">—</td></tr></tbody>
@@ -188,9 +195,28 @@
                             </div>
                         </section>
                         <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">IV snapshot counts</h2>
+                            <h2 class="tg-section-title">Full-chain coverage</h2>
+                            <p class="tg-note">Days of compressed chain history per underlying. 6-month backtest needs 60-day IV warmup first. Earliest start = first snapshot + 60d.</p>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Underlying</th>
+                                            <th>Days</th>
+                                            <th>Earliest</th>
+                                            <th>Backtest start</th>
+                                            <th>6m ready on</th>
+                                            <th>Ready?</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="coverageBody"><tr><td colspan="6" class="tg-muted">—</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">IV / chain snapshot counts</h2>
                             <pre class="tg-pre" id="ivCounts">—</pre>
-                            <button type="button" class="tg-btn" id="btnIvSnap" style="margin-top:10px;">Run IV snapshot</button>
+                            <button type="button" class="tg-btn" id="btnIvSnap" style="margin-top:10px;">Run full-chain snapshot</button>
                         </section>
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Upstox WS share (planning)</h2>
@@ -203,6 +229,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=4"></script>
+    <script src="tarang.js?v=5"></script>
 </body>
 </html>

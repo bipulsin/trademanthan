@@ -50,33 +50,49 @@ def _parse_hhmm(s: str) -> time:
     return time(int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
 
 
+def hard_exit_applies(
+    venue: str,
+    *,
+    holding_mode: str = "INTRADAY",
+    expiry: Optional[str] = None,
+    now: Optional[datetime] = None,
+) -> bool:
+    """
+    Delta 17:00 IST hard exit applies only to INTRADAY trades and to any
+    position on its expiry day. POSITIONAL trades on other days are not flattened.
+    MCX 23:15 IST hard exit applies to INTRADAY only (POSITIONAL holds overnight).
+    """
+    now_ist = (now or datetime.now(timezone.utc)).astimezone(IST)
+    mode = str(holding_mode or "INTRADAY").upper()
+    if venue == "delta_india":
+        if mode == "INTRADAY":
+            return True
+        if expiry:
+            try:
+                return date.fromisoformat(str(expiry)[:10]) == now_ist.date()
+            except ValueError:
+                return False
+        return False
+    return mode == "INTRADAY"
+
+
 def hard_exit_datetime(
     venue: str,
     *,
     holding_mode: str = "INTRADAY",
     expiry: Optional[str] = None,
     now: Optional[datetime] = None,
-) -> datetime:
-    """Next/today hard-exit instant in IST (as timezone-aware datetime)."""
+) -> Optional[datetime]:
+    """Today's venue hard-exit instant in IST, or None if the rule does not apply."""
+    if not hard_exit_applies(venue, holding_mode=holding_mode, expiry=expiry, now=now):
+        return None
     risk = get_risk()
     he = risk.get("hard_exits") or {}
     now_ist = (now or datetime.now(timezone.utc)).astimezone(IST)
     if venue == "delta_india":
         hhmm = he.get("delta_flat_ist") or "17:00"
-        # On expiry day always apply; otherwise INTRADAY uses same clock
-        t = _parse_hhmm(hhmm)
-        target = now_ist.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
-        if expiry:
-            try:
-                exp_d = date.fromisoformat(str(expiry)[:10])
-                if exp_d == now_ist.date() or holding_mode.upper() == "INTRADAY":
-                    return target
-                # POSITIONAL non-expiry: still use daily flat for paper Phase 3 simplicity
-                return target
-            except ValueError:
-                pass
-        return target
-    hhmm = he.get("mcx_flat_ist") or "23:15"
+    else:
+        hhmm = he.get("mcx_flat_ist") or "23:15"
     t = _parse_hhmm(hhmm)
     return now_ist.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
 
@@ -212,25 +228,20 @@ def evaluate_exits(
 
     now_utc = now or datetime.now(timezone.utc)
     hard_at = hard_exit_datetime(venue, holding_mode=holding_mode, expiry=expiry, now=now_utc)
-    secs = (hard_at - now_utc.astimezone(IST)).total_seconds()
-    he_hit = secs <= 0 and holding_mode.upper() == "INTRADAY"
-    # Delta expiry day always
-    if venue == "delta_india" and expiry:
-        try:
-            if date.fromisoformat(str(expiry)[:10]) == now_utc.astimezone(IST).date() and secs <= 0:
-                he_hit = True
-        except ValueError:
-            pass
-    # Distance: within 2h window
-    he_dist = 0.0 if he_hit else _clamp01(secs / 7200.0) if secs is not None else 1.0
+    secs = None
+    he_hit = False
+    if hard_at is not None:
+        secs = (hard_at - now_utc.astimezone(IST)).total_seconds()
+        he_hit = secs <= 0
+    he_dist = 0.0 if he_hit else (_clamp01(secs / 7200.0) if secs is not None else 1.0)
     triggers.append(
         ExitTrigger(
             reason="HARD_EXIT",
             hit=he_hit,
             distance_frac=he_dist,
-            detail=f"hard exit {hard_at.strftime('%H:%M')} IST ({secs:.0f}s)",
+            detail=f"hard exit {hard_at.strftime('%H:%M') if hard_at else 'n/a'} IST ({secs if secs is not None else 'n/a'}s)",
             value=secs,
-            threshold=hard_at.isoformat(),
+            threshold=hard_at.isoformat() if hard_at else None,
         )
     )
 
@@ -273,7 +284,7 @@ def evaluate_exits(
         reason=reason,
         triggers=triggers,
         closest=closest,
-        hard_exit_at_ist=hard_at.strftime("%H:%M"),
+        hard_exit_at_ist=hard_at.strftime("%H:%M") if hard_at else None,
         seconds_to_hard_exit=secs,
     )
 
