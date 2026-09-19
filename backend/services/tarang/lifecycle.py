@@ -14,9 +14,17 @@ from backend.services.tarang.calendar import mcx_feed_closed, to_ist
 from backend.services.tarang.config import get_profiles, get_risk
 from backend.services.tarang.events import append_event, create_alert, list_alerts, list_events
 from backend.services.tarang.exit_engine import evaluate_exits, net_greeks_from_legs
+from backend.services.tarang.labels import (
+    FILL_SIMULATED,
+    FILL_USER,
+    RECORD_FORWARD_TEST,
+    RECORD_LIVE,
+    decorate_trade,
+)
 from backend.services.tarang.paper_broker import mark_to_market, simulate_entry_fills, simulate_exit_fills
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.screener import get_candidate
+from backend.services.tarang.signal_key import canonical_signal_key
 from backend.services.tarang.state_machine import (
     CLOSED,
     DISMISSED,
@@ -72,8 +80,14 @@ def set_paper_auto(enabled: bool) -> Dict[str, Any]:
     db = SessionLocal()
     try:
         mode = _settings_mode(db)
-        if str(mode).upper() != "PAPER" and enabled:
-            return {"ok": False, "error": "auto_paper_only", "mode": mode, "auto": False}
+        if enabled:
+            return {
+                "ok": False,
+                "error": "auto_orders_locked",
+                "mode": mode,
+                "auto": False,
+                "display_auto": "Auto orders: locked",
+            }
         db.execute(
             text(
                 """
@@ -84,7 +98,13 @@ def set_paper_auto(enabled: bool) -> Dict[str, Any]:
             {"v": "true" if enabled else "false"},
         )
         db.commit()
-        return {"ok": True, "mode": "PAPER", "auto": bool(enabled)}
+        return {
+            "ok": True,
+            "mode": mode or "PAPER",
+            "auto": False,
+            "display_mode": "Forward test",
+            "display_auto": "Auto orders: locked",
+        }
     finally:
         db.close()
 
@@ -93,7 +113,15 @@ def get_mode_auto() -> Dict[str, Any]:
     ensure_tarang_tables()
     db = SessionLocal()
     try:
-        return {"mode": _settings_mode(db), "auto": _settings_auto(db)}
+        from backend.services.tarang.labels import auto_lock_label, mode_badge
+
+        mode = _settings_mode(db)
+        return {
+            "mode": mode,
+            "auto": False,
+            "display_mode": mode_badge(mode),
+            "display_auto": auto_lock_label(),
+        }
     finally:
         db.close()
 
@@ -105,7 +133,7 @@ def _row_to_trade(r) -> Dict[str, Any]:
     for ts in ("created_at", "updated_at", "entry_at", "exit_at"):
         if d.get(ts) is not None:
             d[ts] = d[ts].isoformat()
-    return d
+    return decorate_trade(d)
 
 
 def get_trade(trade_id: int) -> Optional[Dict[str, Any]]:
@@ -118,20 +146,32 @@ def get_trade(trade_id: int) -> Optional[Dict[str, Any]]:
         db.close()
 
 
-def list_open_trades(mode: str = "PAPER") -> List[Dict[str, Any]]:
+def list_open_trades(mode: Optional[str] = None) -> List[Dict[str, Any]]:
     ensure_tarang_tables()
     db = SessionLocal()
     try:
-        rows = db.execute(
-            text(
-                """
-                SELECT * FROM tarang_trades
-                WHERE mode = :mode AND status = ANY(:statuses)
-                ORDER BY id DESC
-                """
-            ),
-            {"mode": mode, "statuses": list(OPEN_STATUSES)},
-        ).mappings().all()
+        if mode:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT * FROM tarang_trades
+                    WHERE mode = :mode AND status = ANY(:statuses)
+                    ORDER BY id DESC
+                    """
+                ),
+                {"mode": mode, "statuses": list(OPEN_STATUSES)},
+            ).mappings().all()
+        else:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT * FROM tarang_trades
+                    WHERE status = ANY(:statuses)
+                    ORDER BY id DESC
+                    """
+                ),
+                {"statuses": list(OPEN_STATUSES)},
+            ).mappings().all()
         return [_row_to_trade(r) for r in rows]
     finally:
         db.close()
@@ -170,16 +210,25 @@ def list_closed_trades(mode: Optional[str] = None, limit: int = 100) -> List[Dic
         db.close()
 
 
-def _persist_fills(db, trade_id: int, fills: List[Dict[str, Any]], phase: str) -> None:
+def _persist_fills(
+    db,
+    trade_id: int,
+    fills: List[Dict[str, Any]],
+    phase: str,
+    *,
+    record_type: str = RECORD_FORWARD_TEST,
+    fill_source: str = FILL_SIMULATED,
+) -> None:
     for f in fills:
         db.execute(
             text(
                 """
                 INSERT INTO tarang_fills (
-                    trade_id, leg_index, side, symbol, qty, price, fees, phase, raw
+                    trade_id, leg_index, side, symbol, qty, price, fees, phase, raw,
+                    record_type, fill_source
                 ) VALUES (
                     :trade_id, :leg_index, :side, :symbol, :qty, :price, :fees, :phase,
-                    CAST(:raw AS jsonb)
+                    CAST(:raw AS jsonb), :record_type, :fill_source
                 )
                 """
             ),
@@ -193,6 +242,8 @@ def _persist_fills(db, trade_id: int, fills: List[Dict[str, Any]], phase: str) -
                 "fees": float(f.get("fees") or 0),
                 "phase": phase,
                 "raw": json.dumps(f),
+                "record_type": record_type,
+                "fill_source": fill_source,
             },
         )
         coid = f.get("client_order_id")
@@ -237,8 +288,13 @@ def take_trade_paper(
     note: str = "",
     actor: str = "USER",
     holding_mode: str = "INTRADAY",
+    *,
+    record_type: str = RECORD_FORWARD_TEST,
+    fill_source: str = FILL_SIMULATED,
+    signal_key: Optional[str] = None,
+    snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """QUALIFIED → ENTRY_PENDING → paper fills → IN_TRADE. Never places live orders."""
+    """QUALIFIED → ENTRY_PENDING → simulated fills → IN_TRADE. Never places live orders."""
     ensure_tarang_tables()
     cand = get_candidate(candidate_id)
     if not cand:
@@ -266,30 +322,28 @@ def take_trade_paper(
             lot_size = leg.get("lot_size")
         if leg.get("contract_value"):
             contract_value = leg.get("contract_value")
-    # fallback from structure payload
     lot_size = lot_size or p.get("lot_size")
     contract_value = contract_value or p.get("contract_value")
     holding = str(holding_mode or "INTRADAY").upper()
     if holding not in ("INTRADAY", "POSITIONAL"):
         holding = "INTRADAY"
+    sk = signal_key or canonical_signal_key(
+        underlying=p.get("underlying"),
+        expiry=p.get("expiry"),
+        structure=cand.get("structure") or p.get("structure"),
+        legs=legs,
+    )
+    from backend.services.tarang.forward_record import build_immutable_snapshot
+
+    snap = snapshot or build_immutable_snapshot(p)
 
     db = SessionLocal()
     try:
-        mode = _settings_mode(db)
-        if str(mode).upper() == "LIVE":
-            return {
-                "ok": False,
-                "error": "live_placement_disabled_phase3",
-                "detail": "Phase 4 is held until you approve. LIVE is separately admin-gated.",
-            }
         actor_u = str(actor or "USER").upper()
+        if actor_u not in ("USER", "AUTO", "SYSTEM"):
+            actor_u = "USER"
         if actor_u == "AUTO":
-            if str(mode).upper() != "PAPER":
-                return {"ok": False, "error": "auto_paper_only", "mode": mode}
-            if not _settings_auto(db):
-                return {"ok": False, "error": "auto_disabled"}
-            if _kill_switch_tripped(db):
-                return {"ok": False, "error": "kill_switch"}
+            return {"ok": False, "error": "auto_orders_locked", "display_auto": "Auto orders: locked"}
 
         fill_res = simulate_entry_fills(
             legs,
@@ -353,12 +407,14 @@ def take_trade_paper(
                     profile_id, risk_bucket, mode, holding_mode, status,
                     auto_managed, entry_credit, max_loss, lots_or_contracts, legs, meta,
                     candidate_id, venue, structure, entry_at, fees_total,
-                    entry_iv_percentile, notes, currency, entry_debit_to_close, origin
+                    entry_iv_percentile, notes, currency, entry_debit_to_close, origin,
+                    record_type, fill_source, signal_key, snapshot_immutable
                 ) VALUES (
                     :profile_id, :risk_bucket, 'PAPER', :holding_mode, :status,
                     :auto_managed, :entry_credit, :max_loss, :lots, CAST(:legs AS jsonb), CAST(:meta AS jsonb),
                     :candidate_id, :venue, :structure, :entry_at, :fees,
-                    :iv_pct, :notes, 'INR', :entry_credit, :origin
+                    :iv_pct, :notes, 'INR', :entry_credit, :origin,
+                    :record_type, :fill_source, :signal_key, CAST(:snapshot AS jsonb)
                 )
                 RETURNING id
                 """
@@ -368,8 +424,8 @@ def take_trade_paper(
                 "risk_bucket": bucket,
                 "holding_mode": holding,
                 "status": ENTRY_PENDING,
-                "auto_managed": str(actor).upper() == "AUTO",
-                "origin": "AUTO" if str(actor).upper() == "AUTO" else "USER",
+                "auto_managed": actor_u in ("AUTO", "SYSTEM"),
+                "origin": "AUTO" if actor_u in ("AUTO", "SYSTEM") else "USER",
                 "entry_credit": fill_res["net_credit_pts"],
                 "max_loss": p.get("max_loss_per_unit_inr"),
                 "lots": units,
@@ -382,20 +438,40 @@ def take_trade_paper(
                 "fees": fill_res.get("fees_inr") or 0,
                 "iv_pct": p.get("iv_percentile"),
                 "notes": note or None,
+                "record_type": record_type or RECORD_FORWARD_TEST,
+                "fill_source": fill_source or FILL_SIMULATED,
+                "signal_key": sk,
+                "snapshot": json.dumps(snap),
             },
         ).mappings().first()
         trade_id = int(row["id"])
+        db.execute(
+            text(
+                """
+                INSERT INTO tarang_signal_snapshots (trade_id, signal_key, snapshot)
+                VALUES (:tid, :k, CAST(:snap AS jsonb))
+                """
+            ),
+            {"tid": trade_id, "k": sk, "snap": json.dumps(snap)},
+        )
         append_event(
             db,
             trade_id=trade_id,
             candidate_id=candidate_id,
             from_status=QUALIFIED,
             to_status=ENTRY_PENDING,
-            actor=actor,
+            actor=actor_u,
             event_type="take_trade",
-            payload={"mode": "PAPER", "note": note},
+            payload={"mode": "PAPER", "record_type": record_type, "note": note},
         )
-        _persist_fills(db, trade_id, fill_res["fills"], "entry")
+        _persist_fills(
+            db,
+            trade_id,
+            fill_res["fills"],
+            "entry",
+            record_type=record_type or RECORD_FORWARD_TEST,
+            fill_source=fill_source or FILL_SIMULATED,
+        )
         # ENTRY_PENDING → IN_TRADE (paper fills immediate)
         db.execute(
             text(
@@ -414,7 +490,7 @@ def take_trade_paper(
             from_status=ENTRY_PENDING,
             to_status=IN_TRADE,
             actor="SYSTEM",
-            event_type="paper_fill_entry",
+            event_type="simulated_fill_entry",
             payload={"fills": fill_res["fills"], "net_credit_pts": fill_res["net_credit_pts"]},
         )
         db.execute(
@@ -423,7 +499,7 @@ def take_trade_paper(
         )
         create_alert(
             db,
-            f"PAPER trade #{trade_id} entered ({cand['profile_id']})",
+            f"Forward test #{trade_id} entered ({cand['profile_id']})",
             level="info",
             trade_id=trade_id,
             meta={"candidate_id": candidate_id},
@@ -433,10 +509,14 @@ def take_trade_paper(
             "ok": True,
             "trade_id": trade_id,
             "mode": "PAPER",
+            "display_mode": "Forward test",
+            "record_type": record_type or RECORD_FORWARD_TEST,
+            "fill_source": fill_source or FILL_SIMULATED,
+            "signal_key": sk,
             "status": IN_TRADE,
             "entry_credit_pts": fill_res["net_credit_pts"],
             "fees_inr": fill_res.get("fees_inr"),
-            "message": "PAPER fills simulated. No live orders placed.",
+            "message": "Forward test fills simulated. No live orders placed.",
         }
     except InvalidTransition as e:
         db.rollback()
@@ -507,6 +587,118 @@ def mark_taken_manual(
         finally:
             db.close()
     return out
+
+
+def record_live_user_trade(
+    candidate_id: int,
+    *,
+    fills: List[Dict[str, Any]],
+    note: str = "",
+    holding_mode: str = "INTRADAY",
+) -> Dict[str, Any]:
+    """User placed at broker; store USER_ENTERED fills only. Never sends orders."""
+    ensure_tarang_tables()
+    cand = get_candidate(candidate_id)
+    if not cand:
+        return {"ok": False, "error": "candidate_not_found"}
+    p = cand.get("payload") or {}
+    legs = list(p.get("legs") or [])
+    if not fills:
+        return {"ok": False, "error": "fills_required"}
+    units = int(p.get("lots_or_contracts") or 1)
+    venue = p.get("venue") or "upstox_mcx"
+    credit = 0.0
+    for f in fills:
+        side = str(f.get("side") or "").upper()
+        px = float(f.get("price") or 0)
+        credit += -px if side == "BUY" else px
+    now = datetime.now(timezone.utc)
+    sk = canonical_signal_key(
+        underlying=p.get("underlying"),
+        expiry=p.get("expiry"),
+        structure=cand.get("structure") or p.get("structure"),
+        legs=legs,
+    )
+    from backend.services.tarang.forward_record import build_immutable_snapshot
+
+    snap = build_immutable_snapshot(p, extra={"user_entered": True})
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                INSERT INTO tarang_trades (
+                    profile_id, risk_bucket, mode, holding_mode, status,
+                    auto_managed, entry_credit, max_loss, lots_or_contracts, legs, meta,
+                    candidate_id, venue, structure, entry_at, origin,
+                    record_type, fill_source, signal_key, snapshot_immutable, notes, currency
+                ) VALUES (
+                    :profile_id, :risk_bucket, 'LIVE', :holding_mode, :status,
+                    FALSE, :entry_credit, :max_loss, :lots, CAST(:legs AS jsonb), CAST(:meta AS jsonb),
+                    :candidate_id, :venue, :structure, :entry_at, 'USER',
+                    :record_type, :fill_source, :signal_key, CAST(:snapshot AS jsonb), :notes, 'INR'
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "profile_id": cand["profile_id"],
+                "risk_bucket": (get_profiles().get("profiles") or {}).get(cand["profile_id"], {}).get("risk_bucket")
+                or "ENERGY",
+                "holding_mode": str(holding_mode or "INTRADAY").upper(),
+                "status": IN_TRADE,
+                "entry_credit": credit,
+                "max_loss": p.get("max_loss_per_unit_inr"),
+                "lots": units,
+                "legs": json.dumps(legs),
+                "meta": json.dumps(
+                    {
+                        "entry_fills": fills,
+                        "source": "user_broker",
+                        "note": note,
+                        "expiry": p.get("expiry"),
+                        "underlying": p.get("underlying"),
+                    }
+                ),
+                "candidate_id": candidate_id,
+                "venue": venue,
+                "structure": cand.get("structure") or p.get("structure"),
+                "entry_at": now,
+                "record_type": RECORD_LIVE,
+                "fill_source": FILL_USER,
+                "signal_key": sk,
+                "snapshot": json.dumps(snap),
+                "notes": note or None,
+            },
+        ).mappings().first()
+        trade_id = int(row["id"])
+        _persist_fills(db, trade_id, fills, "entry", record_type=RECORD_LIVE, fill_source=FILL_USER)
+        append_event(
+            db,
+            trade_id=trade_id,
+            candidate_id=candidate_id,
+            from_status=QUALIFIED,
+            to_status=IN_TRADE,
+            actor="USER",
+            event_type="live_user_entered",
+            payload={"fills": fills},
+            enforce_transition=False,
+        )
+        db.commit()
+        return {
+            "ok": True,
+            "trade_id": trade_id,
+            "record_type": RECORD_LIVE,
+            "fill_source": FILL_USER,
+            "display_mode": "Live",
+            "message": "Live fill recorded. No broker order was sent.",
+            "placed": False,
+        }
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)[:300]}
+    finally:
+        db.close()
 
 
 def _refresh_quotes_for_trade(trade: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -684,8 +876,11 @@ def exit_trade(
         if st in (CLOSED, REPORTED):
             return {"ok": False, "error": "already_closed", "status": st}
         return {"ok": False, "error": "not_in_trade", "status": st}
-    if str(trade.get("mode") or "").upper() != "PAPER":
-        return {"ok": False, "error": "live_exit_disabled_phase3"}
+    if str(trade.get("mode") or "").upper() == "LIVE" and str(trade.get("record_type") or "").upper() == "LIVE":
+        # User must supply exit fills separately; system never places.
+        pass
+    elif str(trade.get("mode") or "").upper() != "PAPER":
+        return {"ok": False, "error": "live_exit_disabled", "detail": "Broker exit is locked; record user exit fills."}
 
     meta = dict(trade.get("meta") or {})
     legs = trade.get("legs") or []
@@ -740,7 +935,14 @@ def exit_trade(
             event_type="exit_requested",
             payload={"reason": reason, "note": note},
         )
-        _persist_fills(db, trade_id, exit_res["fills"], "exit")
+        _persist_fills(
+            db,
+            trade_id,
+            exit_res["fills"],
+            "exit",
+            record_type=str(trade.get("record_type") or RECORD_FORWARD_TEST),
+            fill_source=FILL_SIMULATED if str(trade.get("record_type") or RECORD_FORWARD_TEST) == RECORD_FORWARD_TEST else FILL_USER,
+        )
         now = datetime.now(timezone.utc)
         meta["exit_fills"] = exit_res["fills"]
         meta["exit_note"] = note
@@ -780,7 +982,7 @@ def exit_trade(
             from_status=EXIT_PENDING,
             to_status=CLOSED,
             actor=actor if actor != "SYSTEM" else "SYSTEM",
-            event_type="paper_fill_exit",
+            event_type="simulated_fill_exit",
             payload={
                 "reason": reason,
                 "gross_pnl": gross,
@@ -833,7 +1035,7 @@ def exit_trade(
 
 def exit_all_open(*, reason: str = "MANUAL", actor: str = "USER") -> Dict[str, Any]:
     results = []
-    for t in list_open_trades("PAPER"):
+    for t in list_open_trades():
         if normalize_status(t.get("status")) in (IN_TRADE, ENTRY_PENDING, EXIT_PENDING):
             results.append(exit_trade(int(t["id"]), reason=reason, actor=actor))
     return {"ok": True, "results": results}
@@ -873,7 +1075,7 @@ def add_trade_note(trade_id: int, note: str, actor: str = "USER") -> Dict[str, A
 
 
 def run_exit_engine_once(venues: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Evaluate all open PAPER trades; flatten when a trigger fires.
+    """Evaluate all open forward-test trades; flatten when a trigger fires.
 
     Never evaluates exits on stale quotes. MCX closed period (23:30–09:00 IST,
     weekends, holidays) is skipped; overnight gap is logged at the next open.
@@ -881,7 +1083,12 @@ def run_exit_engine_once(venues: Optional[List[str]] = None) -> Dict[str, Any]:
     ensure_tarang_tables()
     venue_filter = {str(v) for v in venues} if venues else None
     outcomes = []
-    for t in list_open_trades("PAPER"):
+    from backend.services.tarang.heartbeat import beat
+
+    beat("exit_engine", {"venues": venues})
+    for t in list_open_trades():
+        if str(t.get("record_type") or RECORD_FORWARD_TEST).upper() != RECORD_FORWARD_TEST:
+            continue
         tid = int(t["id"])
         venue = t.get("venue") or (t.get("meta") or {}).get("venue") or "upstox_mcx"
         if venue_filter and venue not in venue_filter:
@@ -964,7 +1171,7 @@ def run_hard_exit_warnings() -> Dict[str, Any]:
 
     now = datetime.now(timezone.utc)
     alerts = []
-    for t in list_open_trades("PAPER"):
+    for t in list_open_trades():
         venue = t.get("venue") or "upstox_mcx"
         meta = t.get("meta") or {}
         if not hard_exit_applies(
@@ -1000,7 +1207,7 @@ def run_hard_exit_flatten() -> Dict[str, Any]:
 
     now = datetime.now(timezone.utc)
     results = []
-    for t in list_open_trades("PAPER"):
+    for t in list_open_trades():
         venue = t.get("venue") or "upstox_mcx"
         meta = t.get("meta") or {}
         holding = t.get("holding_mode") or "INTRADAY"
@@ -1080,7 +1287,7 @@ def check_feed_alerts() -> Dict[str, Any]:
             notify_critical(
                 db,
                 kind="kill_switch",
-                message=f"Kill switch: {kill_n} consecutive PAPER losses",
+                message=f"Kill switch: {kill_n} consecutive forward-test losses",
                 dedupe_key="kill_switch_consecutive",
             )
             fired.append("kill_switch")
@@ -1112,38 +1319,16 @@ def _kill_switch_tripped(db) -> bool:
 
 
 def run_auto_paper_once() -> Dict[str, Any]:
-    """PAPER AUTO entries. LIVE is never auto. ExitEngine still runs separately."""
-    ensure_tarang_tables()
-    db = SessionLocal()
-    try:
-        mode = _settings_mode(db)
-        auto = _settings_auto(db)
-        if str(mode).upper() != "PAPER":
-            return {"ok": False, "error": "auto_paper_only", "mode": mode, "taken": []}
-        if not auto:
-            return {"ok": True, "skipped": "auto_off", "taken": []}
-        if _kill_switch_tripped(db):
-            return {"ok": False, "error": "kill_switch", "taken": []}
-    finally:
-        db.close()
-
+    """Scheduled screener tick: always record forward tests. Auto live orders stay locked."""
+    from backend.services.tarang.heartbeat import beat
     from backend.services.tarang.screener import run_screener
 
+    beat("scheduler", {"job": "forward_test_tick"})
     screen = run_screener()
-    taken: List[Dict[str, Any]] = []
-    open_pids = {str(t.get("profile_id") or "").upper() for t in list_open_trades("PAPER")}
-    for row in screen.get("results") or []:
-        if str(row.get("status") or "").upper() != "QUALIFIED":
-            continue
-        pid = str(row.get("profile_id") or "").upper()
-        if pid in open_pids:
-            continue
-        cid = row.get("candidate_id")
-        if not cid:
-            continue
-        holding = "POSITIONAL" if (row.get("venue") or "") != "delta_india" else "INTRADAY"
-        out = take_trade_paper(int(cid), note="AUTO PAPER", actor="AUTO", holding_mode=holding)
-        taken.append({"profile_id": pid, "candidate_id": cid, **out})
-        if out.get("ok"):
-            open_pids.add(pid)
-    return {"ok": True, "mode": "PAPER", "auto": True, "screened": len(screen.get("results") or []), "taken": taken}
+    return {
+        "ok": True,
+        "display_auto": "Auto orders: locked",
+        "screened": len(screen.get("results") or []),
+        "forward_tests": screen.get("forward_tests") or {},
+        "taken": (screen.get("forward_tests") or {}).get("recorded") or [],
+    }

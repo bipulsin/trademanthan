@@ -428,13 +428,20 @@ def run_screener(profile_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     from backend.services.tarang.lifecycle import get_mode_auto
 
     ma = get_mode_auto()
+    from backend.services.tarang.forward_record import record_forward_tests_from_screen
+    from backend.services.tarang.labels import auto_lock_label, mode_badge
+
+    fwd = record_forward_tests_from_screen(results)
     return {
         "product": "Kosmic Tarang",
         "phase": 2,
         "run_at": datetime.now(timezone.utc).isoformat(),
         "mode": ma.get("mode") or "PAPER",
-        "auto": bool(ma.get("auto")),
+        "display_mode": mode_badge(ma.get("mode")),
+        "display_auto": auto_lock_label(),
+        "auto": False,
         "results": results,
+        "forward_tests": fwd,
     }
 
 

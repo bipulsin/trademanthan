@@ -89,7 +89,7 @@ def build_health_payload() -> Dict[str, Any]:
     hold["conditions_met"] = weeks_clean >= float(hold["min_clean_snapshot_weeks"]) and paper_n >= int(hold["min_paper_trades_reviewed"]) and bool(hold.get("approved"))
     hold["note"] = (
         "Phase 4 is held until you approve. Conditions: at least 4 weeks of clean (delta-window) snapshots "
-        "and at least 20 paper trades reviewed. LIVE stays separately admin-gated."
+        "and at least 20 forward-test trades reviewed. Live broker send stays locked (TARANG_LIVE_ENABLED defaults false)."
     )
     try:
         eligibility = expiry_eligibility()
@@ -104,9 +104,11 @@ def build_health_payload() -> Dict[str, Any]:
         "phase": 3,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "mode": settings.get("mode") or "PAPER",
-        "auto": bool(settings.get("auto")),
-        "auto_paper_only": True,
-        "paper_badge": True,
+        "display_mode": "Forward test",
+        "display_auto": "Auto orders: locked",
+        "auto": False,
+        "auto_orders_locked": True,
+        "live_enabled": False,
         "token_expired": token_expired,
         "feeds": {
             "upstox_mcx": upstox,

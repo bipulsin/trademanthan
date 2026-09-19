@@ -1,10 +1,27 @@
-# Kosmic Tarang — Runbook (Phase 3)
+# Kosmic Tarang — Runbook
 
 **Product:** Kosmic Tarang  
 **Internal:** `tarang_*` / `/tarang` / `tarang.html`  
-**Defaults:** PAPER mode, AUTO off. Phase 3 = paper fills + In-Trade + ExitEngine + Trade Report. **No live orders.**  
+**Defaults:** Forward-test book (internal `mode=PAPER`), auto live orders locked. **No live orders.** `TARANG_LIVE_ENABLED` defaults false.  
 **ENERGY contracts:** minis (`CRUDEOILM` / `NATGASMINI`). Full CL/NG stay behind `contractFamily: full`.  
 **Weekend window profiles (`BTC_WEEKEND` / `ETH_WEEKEND`):** **disabled by default.**
+
+## Enabling stages (Phase 4–5, built locked)
+
+1. **Shadow** — payloads logged to `tarang_shadow_orders`, `sent=false`. Current production.
+2. **Live with manual confirm** — user records fills via “I placed this at my broker”; system still does not place.
+3. **Live auto exit** — requires `TARANG_LIVE_ENABLED`, Phase 4 `approved`, arming phrase, same-day expiry. Not enabled.
+4. **Live auto entry** — separate arming switch. Not enabled.
+
+Do not add trade-permission credentials to production. Do not raise ENERGY/CRYPTO budgets.
+
+## Forward-test lifecycle
+
+1. Admin → [Kosmic Tarang](https://www.tradewithcto.com/tarang.html) (Forward test badge).
+2. **Screener** → Run screener (or 5-minute scheduler). Every **QUALIFIED** row is recorded as a forward-test trade (no click). Same signal key (underlying+expiry+structure+sorted strikes) is not duplicated while open. After close, cooldown **6 hours** (`risk.forward_test.cooldown_hours`).
+3. Optional ticket: **Record forward test** (manual) or **I placed this at my broker** (Live, user-entered fills).
+4. In-Trade: MTM + ExitEngine on forward-test rows. Live user rows are not auto-flattened by the broker.
+5. **Trade Report** tabs: Forward test / Live / All. All never blends metrics.
 
 ## Secrets (never commit)
 
@@ -23,11 +40,11 @@ After editing paperclip `.env`, recreate the app container so compose re-injects
 
 ## Paper lifecycle (how to try on prod)
 
-1. Admin → [Kosmic Tarang](https://www.tradewithcto.com/tarang.html) (PAPER badge).
-2. **Screener** → Run screener → open a **QUALIFIED** row → **Trade Ticket**.
-3. Pick **INTRADAY** or **POSITIONAL** on the ticket, then **Take trade (PAPER)** → fills simulated (mid ± fraction of bid-ask + venue fee schedule) → jumps to **In-Trade**.
+1. Admin → [Kosmic Tarang](https://www.tradewithcto.com/tarang.html) (Forward test badge).
+2. **Screener** → Run screener → QUALIFIED auto-records a forward-test trade.
+3. Pick **INTRADAY** or **POSITIONAL** on the ticket, then **Record forward test** (optional manual) → fills simulated (mid ± fraction of bid-ask + venue fee schedule) → **In-Trade**.
 4. In-Trade: MTM, trigger progress, hard-exit countdown, alerts. **Exit** or wait for ExitEngine / hard-exit job. Exits are **not** evaluated on stale quotes; MCX 23:30–09:00 IST is skipped and the overnight gap is logged at the next open.
-5. **Trade Report** → closed PAPER trades + metrics split by INTRADAY vs POSITIONAL. LIVE filter stays empty until Phase 4.
+5. **Trade Report** → Forward test / Live / All. All view shows both counts beside every metric.
 
 ## Scheduler (IST)
 
@@ -71,7 +88,7 @@ If a **mini** width cannot fit the ₹10,000 hard cap, report it — **do not ra
 
 ## Telegram critical alerts
 
-Kinds: exit trigger hit, hard-exit warning, stale feed, Upstox token expired, kill switch (3 consecutive PAPER losses). Dedupe + 15-minute throttle (5 minutes for exit triggers). Set `TARANG_TELEGRAM_CHAT_ID` (and optional `TARANG_TELEGRAM_THREAD_ID`).
+Kinds: exit trigger hit, hard-exit warning, stale feed, Upstox token expired, kill switch (3 consecutive forward-test losses), heartbeat silence > 3 minutes. Dedupe + 15-minute throttle (5 minutes for exit triggers). Set `TARANG_TELEGRAM_CHAT_ID` (and optional `TARANG_TELEGRAM_THREAD_ID`).
 
 ## Health checks
 
@@ -85,5 +102,5 @@ https://www.tradewithcto.com/tarang.html
 
 - **Follow-up (pre-Phase 4):** mini ENERGY, operator risk budgets, full-chain snapshots 24×7 (Delta) / in-session (MCX), coverage counter, ExitEngine cadence split, POSITIONAL overnight paper, real fee schedules, Telegram critical alerts.
 - **Phase 3:** state machine + `tarang_trade_events`, PaperBroker, In-Trade + Trade Report tabs, ExitEngine + hard-exit scheduler, in-app alerts.
-- **Phase 2:** screener gates, Opportunities + PAPER ticket.
+- **Phase 2:** screener gates, Opportunities + ticket.
 - **Phase 1:** domain/config/DB/adapters/IV/data-health.

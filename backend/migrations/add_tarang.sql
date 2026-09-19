@@ -311,3 +311,90 @@ ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_fut_symbol TEXT;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_fut_expiry DATE;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_estimated BOOLEAN;
 
+-- Forward-test / live bookkeeping (internal mode enum stays PAPER|LIVE)
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS record_type TEXT DEFAULT 'FORWARD_TEST';
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS fill_source TEXT DEFAULT 'SIMULATED';
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS signal_key TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS snapshot_immutable JSONB;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS broker_verified BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS verify_diff JSONB;
+
+ALTER TABLE tarang_fills ADD COLUMN IF NOT EXISTS record_type TEXT DEFAULT 'FORWARD_TEST';
+ALTER TABLE tarang_fills ADD COLUMN IF NOT EXISTS fill_source TEXT DEFAULT 'SIMULATED';
+
+UPDATE tarang_trades SET record_type = 'FORWARD_TEST' WHERE record_type IS NULL;
+UPDATE tarang_trades SET fill_source = 'SIMULATED' WHERE fill_source IS NULL AND COALESCE(mode, 'PAPER') = 'PAPER';
+UPDATE tarang_trades SET record_type = 'LIVE' WHERE mode = 'LIVE' AND (record_type IS NULL OR record_type = 'FORWARD_TEST') AND fill_source IS DISTINCT FROM 'SIMULATED';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tarang_open_ft_signal_key
+    ON tarang_trades (signal_key)
+    WHERE record_type = 'FORWARD_TEST'
+      AND signal_key IS NOT NULL
+      AND status IN ('ENTRY_PENDING', 'IN_TRADE', 'EXIT_PENDING', 'open');
+
+CREATE TABLE IF NOT EXISTS tarang_signal_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trade_id BIGINT REFERENCES tarang_trades(id) ON DELETE SET NULL,
+    signal_key TEXT NOT NULL,
+    snapshot JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_tarang_signal_snapshots_key
+    ON tarang_signal_snapshots (signal_key, created_at DESC);
+
+CREATE OR REPLACE FUNCTION tarang_snapshot_immutable_guard()
+RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' AND NEW.snapshot_immutable IS DISTINCT FROM OLD.snapshot_immutable THEN
+        NEW.snapshot_immutable := OLD.snapshot_immutable;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_tarang_snapshot_immutable ON tarang_trades;
+CREATE TRIGGER trg_tarang_snapshot_immutable
+    BEFORE UPDATE ON tarang_trades
+    FOR EACH ROW
+    EXECUTE PROCEDURE tarang_snapshot_immutable_guard();
+
+CREATE TABLE IF NOT EXISTS tarang_skipped_signals (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    signal_key TEXT,
+    profile_id TEXT,
+    reason TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS ix_tarang_skipped_signals_time
+    ON tarang_skipped_signals (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tarang_shadow_orders (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trade_id BIGINT,
+    venue TEXT,
+    client_order_id TEXT,
+    action TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sent BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS ix_tarang_shadow_orders_time
+    ON tarang_shadow_orders (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tarang_live_arming (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    kind TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    confirmation TEXT,
+    armed_by TEXT,
+    active BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS tarang_heartbeat (
+    key TEXT PRIMARY KEY,
+    last_beat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    detail JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+

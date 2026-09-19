@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=8" />
+    <link rel="stylesheet" href="tarang.css?v=9" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -25,7 +25,7 @@
             <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
             <h1 class="mobile-title">
                 Kosmic Tarang
-                <span class="tg-inline-badge tg-badge-paper" id="modeBadgeMobile" aria-live="polite">PAPER</span>
+                <span class="tg-inline-badge tg-badge-paper" id="modeBadgeMobile" aria-live="polite">Forward test</span>
             </h1>
         </div>
     </div>
@@ -37,13 +37,13 @@
                     <div class="settings-title-section">
                         <h1 class="settings-title tg-page-title">
                             <i class="fas fa-wave-square" aria-hidden="true"></i> Kosmic Tarang
-                            <span class="tg-inline-badge tg-badge-paper" id="modeBadge" aria-live="polite">PAPER</span>
-                            <span class="tg-inline-badge" id="autoBadge" aria-live="polite">AUTO OFF</span>
+                            <span class="tg-inline-badge tg-badge-paper" id="modeBadge" aria-live="polite">Forward test</span>
+                            <span class="tg-inline-badge" id="autoBadge" aria-live="polite">Auto orders: locked</span>
                         </h1>
-                        <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener, paper In-Trade &amp; report (admin)</p>
+                        <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener, forward test In-Trade &amp; report (admin)</p>
                     </div>
                     <div class="tg-header-aside">
-                        <button type="button" class="tg-btn" id="btnAutoToggle">AUTO PAPER: off</button>
+                        <button type="button" class="tg-btn" id="btnAutoToggle">Auto orders: locked</button>
                         <button type="button" class="tg-btn" id="btnRefresh">Refresh</button>
                         <button type="button" class="tg-btn tg-btn-primary" id="btnScreen">Run screener</button>
                     </div>
@@ -64,7 +64,7 @@
                     <div id="tab-screener" class="tg-tab-panel">
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">Opportunities</h2>
-                            <p class="tg-note">CL / NG / BTC / ETH — QUALIFIED, WATCHING, BLOCKED, or WARMING UP. Admin-only · PAPER. AUTO is PAPER-only; LIVE stays admin-gated.</p>
+                            <p class="tg-note">CL / NG / BTC / ETH — QUALIFIED, WATCHING, BLOCKED, or WARMING UP. Admin-only · Forward test auto-records QUALIFIED. Auto orders: locked.</p>
                             <div class="tg-table-wrap">
                                 <table class="tg-table" id="screenTable">
                                     <thead>
@@ -97,7 +97,7 @@
 
                     <div id="tab-ticket" class="tg-tab-panel" hidden>
                         <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Trade Ticket (PAPER)</h2>
+                            <h2 class="tg-section-title">Trade Ticket</h2>
                             <p class="tg-note" id="ticketHint">Select a QUALIFIED candidate from Screener, or enter candidate id.</p>
                             <div class="tg-ticket-bar">
                                 <label for="ticketId">Candidate id</label>
@@ -111,8 +111,8 @@
                                     <option value="INTRADAY" selected>INTRADAY</option>
                                     <option value="POSITIONAL">POSITIONAL overnight</option>
                                 </select>
-                                <button type="button" class="tg-btn tg-btn-primary" id="btnTake">Take trade (PAPER)</button>
-                                <button type="button" class="tg-btn" id="btnManual">Mark taken manually</button>
+                                <button type="button" class="tg-btn tg-btn-primary" id="btnTake">Record forward test</button>
+                                <button type="button" class="tg-btn" id="btnManual">I placed this at my broker</button>
                                 <button type="button" class="tg-btn" id="btnDismiss">Dismiss</button>
                             </div>
                         </section>
@@ -121,7 +121,7 @@
                     <div id="tab-intrade" class="tg-tab-panel" hidden>
                         <section class="tg-card tg-section">
                             <div class="tg-ticket-bar">
-                                <h2 class="tg-section-title" style="margin:0;">Open PAPER trades</h2>
+                                <h2 class="tg-section-title" style="margin:0;">Open trades</h2>
                                 <button type="button" class="tg-btn" id="btnRefreshIntrade">Refresh MTM</button>
                                 <button type="button" class="tg-btn" id="btnRunExitEngine">Run ExitEngine</button>
                                 <button type="button" class="tg-btn tg-btn-danger" id="btnExitAll">Exit all</button>
@@ -144,20 +144,21 @@
                         <section class="tg-card tg-section">
                             <div class="tg-ticket-bar">
                                 <h2 class="tg-section-title" style="margin:0;">Trade Report</h2>
-                                <label for="reportMode">Mode</label>
+                                <label for="reportMode">Book</label>
                                 <select id="reportMode" class="tg-input">
-                                    <option value="PAPER" selected>PAPER</option>
-                                    <option value="LIVE">LIVE</option>
+                                    <option value="FORWARD_TEST" selected>Forward test</option>
+                                    <option value="LIVE">Live</option>
+                                    <option value="ALL">All</option>
                                 </select>
                                 <button type="button" class="tg-btn" id="btnLoadReport">Load</button>
-                                <a class="tg-btn" id="btnCsv" href="/api/tarang/report.csv?mode=PAPER">CSV</a>
+                                <a class="tg-btn" id="btnCsv" href="/api/tarang/report.csv?book=FORWARD_TEST">CSV</a>
                             </div>
                             <div class="tg-metrics" id="reportMetrics"></div>
                             <div class="tg-table-wrap" style="margin-top:12px;">
                                 <table class="tg-table">
                                     <thead>
                                         <tr>
-                                            <th>Id</th><th>Origin</th><th>Profile</th><th>Hold</th><th>Structure</th><th>Exit</th>
+                                            <th>Id</th><th>Book</th><th>Origin</th><th>Profile</th><th>Hold</th><th>Structure</th><th>Exit</th>
                                             <th>Gross</th><th>Net</th><th>Fees</th><th>When</th>
                                         </tr>
                                     </thead>
@@ -328,6 +329,6 @@
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=8"></script>
+    <script src="tarang.js?v=9"></script>
 </body>
 </html>

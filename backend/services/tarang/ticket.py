@@ -1,9 +1,10 @@
-"""Trade Ticket actions — delegates to Phase 3 lifecycle (PAPER only)."""
+"""Trade Ticket — forward-test record and live user-entered fills. No live placement."""
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from backend.services.tarang.lifecycle import dismiss_candidate, mark_taken_manual, take_trade_paper
+from backend.services.tarang.labels import auto_lock_label, mode_badge
+from backend.services.tarang.lifecycle import dismiss_candidate, mark_taken_manual, record_live_user_trade, take_trade_paper
 from backend.services.tarang.screener import get_candidate
 
 
@@ -17,6 +18,8 @@ def build_ticket(candidate_id: int) -> Dict[str, Any]:
         "ok": True,
         "product": "Kosmic Tarang",
         "mode": "PAPER",
+        "display_mode": mode_badge("PAPER"),
+        "display_auto": auto_lock_label(),
         "auto": False,
         "candidate_id": candidate_id,
         "profile_id": cand["profile_id"],
@@ -43,8 +46,18 @@ def build_ticket(candidate_id: int) -> Dict[str, Any]:
         "net_credit_per_contract_inr": p.get("net_credit_per_contract_inr"),
         "max_contracts_per_order": p.get("max_contracts_per_order"),
         "max_contracts_per_trade": p.get("max_contracts_per_trade"),
-        "note": "Phase 3: Take trade simulates PAPER fills via PaperBroker — no live broker orders. Fees are round-trip estimates vs gross credit.",
+        "actions": {
+            "record_forward_test": "Record forward test",
+            "record_live": "I placed this at my broker",
+        },
+        "note": "QUALIFIED rows are recorded as Forward test automatically. Live records are user-entered broker fills only — the system never places orders.",
     }
 
 
-__all__ = ["build_ticket", "take_trade_paper", "dismiss_candidate", "mark_taken_manual"]
+__all__ = [
+    "build_ticket",
+    "take_trade_paper",
+    "dismiss_candidate",
+    "mark_taken_manual",
+    "record_live_user_trade",
+]

@@ -26,24 +26,29 @@
     return data;
   }
 
+  function displayMode(mode, recordType) {
+    const rt = String(recordType || '').toUpperCase();
+    if (rt === 'LIVE' || String(mode || '').toUpperCase() === 'LIVE') return 'Live';
+    return 'Forward test';
+  }
+
   function setModeBadges(mode, auto) {
-    const modeText = mode || 'PAPER';
-    const autoText = auto ? 'AUTO ON' : 'AUTO OFF';
+    const modeText = displayMode(mode);
+    const autoText = 'Auto orders: locked';
     ['modeBadge', 'modeBadgeMobile'].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
       el.textContent = modeText;
-      el.classList.toggle('tg-badge-paper', String(modeText).toUpperCase() === 'PAPER');
+      el.classList.toggle('tg-badge-paper', modeText === 'Forward test');
     });
     const autoEl = document.getElementById('autoBadge');
     if (autoEl) {
       autoEl.textContent = autoText;
-      autoEl.classList.toggle('tg-badge-warn', !!auto);
     }
     const autoBtn = document.getElementById('btnAutoToggle');
     if (autoBtn) {
-      autoBtn.textContent = auto ? 'AUTO PAPER: on' : 'AUTO PAPER: off';
-      autoBtn.dataset.on = auto ? '1' : '0';
+      autoBtn.textContent = autoText;
+      autoBtn.dataset.on = '0';
     }
   }
 
@@ -262,7 +267,7 @@
     const host = document.getElementById('intradeList');
     const trades = data.trades || [];
     if (!trades.length) {
-      host.innerHTML = '<p class="tg-muted">No open PAPER trades. Take a QUALIFIED candidate from Trade Ticket.</p>';
+      host.innerHTML = '<p class="tg-muted">No open trades. QUALIFIED rows record as Forward test automatically.</p>';
     } else {
       host.innerHTML = trades.map((v) => {
         const t = v.trade || {};
@@ -290,6 +295,7 @@
           <header class="tg-intrade-head">
             <div>
               <strong>#${t.id}</strong> ${statusChip(t.status)} <span class="tg-muted">${t.holding_mode || 'INTRADAY'}</span>
+              ${t.display_mode || displayMode(t.mode, t.record_type)} ${t.display_verified ? '<span class="tg-inline-badge">Verified</span>' : ''}
               ${t.origin || t.auto_managed ? `<span class="tg-inline-badge">${t.origin || (t.auto_managed ? 'AUTO' : 'USER')}</span>` : ''}
               ${t.profile_id || ''} · ${t.structure || ''}
               <span class="tg-muted">${t.venue || ''}</span>
@@ -317,7 +323,7 @@
       }).join('');
       host.querySelectorAll('.tg-exit-one').forEach((btn) => {
         btn.addEventListener('click', async () => {
-          if (!window.confirm(`Exit PAPER trade #${btn.dataset.id}?`)) return;
+          if (!window.confirm(`Exit forward-test / recorded trade #${btn.dataset.id}?`)) return;
           const status = document.getElementById('statusLine');
           try {
             const out = await api(`/api/tarang/trades/${btn.dataset.id}/exit`, {
@@ -358,24 +364,29 @@
   }
 
   function renderReport(rep) {
-    const m = rep.metrics || {};
     const box = document.getElementById('reportMetrics');
-    const wr = m.win_rate != null ? `${(m.win_rate * 100).toFixed(0)}%` : '—';
-    const pf = m.profit_factor_infinite ? '∞' : (m.profit_factor != null ? Number(m.profit_factor).toFixed(2) : '—');
-    box.innerHTML = `
-      <div class="tg-metric"><span>Trades</span><strong>${m.count || 0}</strong></div>
-      <div class="tg-metric"><span>Win rate</span><strong>${wr}</strong></div>
-      <div class="tg-metric"><span>Avg win</span><strong>${fmtInr(m.avg_win)}</strong></div>
-      <div class="tg-metric"><span>Avg loss</span><strong>${fmtInr(m.avg_loss)}</strong></div>
-      <div class="tg-metric"><span>Profit factor</span><strong>${pf}</strong></div>
-      <div class="tg-metric"><span>Expectancy</span><strong>${fmtInr(m.expectancy)}</strong></div>
-      <div class="tg-metric"><span>Net total</span><strong>${fmtInr(m.net_total)}</strong></div>
-      <div class="tg-metric"><span>Max DD</span><strong>${fmtInr(m.max_drawdown)}</strong></div>
-      <div class="tg-metric"><span>INTRADAY</span><strong>${(m.by_holding_mode && m.by_holding_mode.INTRADAY && m.by_holding_mode.INTRADAY.count) || 0}</strong></div>
-      <div class="tg-metric"><span>POSITIONAL</span><strong>${(m.by_holding_mode && m.by_holding_mode.POSITIONAL && m.by_holding_mode.POSITIONAL.count) || 0}</strong></div>
-      <div class="tg-metric"><span>AUTO</span><strong>${(m.by_origin && m.by_origin.AUTO && m.by_origin.AUTO.count) || 0}</strong></div>
-      <div class="tg-metric"><span>USER</span><strong>${(m.by_origin && m.by_origin.USER && m.by_origin.USER.count) || 0}</strong></div>
-    `;
+    if (rep.book === 'ALL' && rep.metrics && rep.metrics.paired) {
+      box.innerHTML = (rep.metrics.paired || []).map((p) => {
+        const ft = p.forward_test;
+        const lv = p.live;
+        const fmt = (v) => (v == null ? '—' : (typeof v === 'number' && Math.abs(v) < 10 && p.metric !== 'count' ? Number(v).toFixed(2) : v));
+        return `<div class="tg-metric"><span>${p.metric}</span><strong>FT ${fmt(ft)} · Live ${fmt(lv)}</strong></div>`;
+      }).join('');
+    } else {
+      const m = (rep.book === 'LIVE' ? (rep.metrics_live || rep.metrics) : (rep.metrics_forward_test || rep.metrics)) || {};
+      const wr = m.win_rate != null ? `${(m.win_rate * 100).toFixed(0)}%` : '—';
+      const pf = m.profit_factor_infinite ? '∞' : (m.profit_factor != null ? Number(m.profit_factor).toFixed(2) : '—');
+      box.innerHTML = `
+        <div class="tg-metric"><span>Trades</span><strong>${m.count || 0}</strong></div>
+        <div class="tg-metric"><span>Independent cycles</span><strong>${m.independent_cycles || 0}</strong></div>
+        <div class="tg-metric"><span>Win rate</span><strong>${wr}</strong></div>
+        <div class="tg-metric"><span>Profit factor</span><strong>${pf}</strong></div>
+        <div class="tg-metric"><span>Expectancy</span><strong>${fmtInr(m.expectancy)}</strong></div>
+        <div class="tg-metric"><span>Max DD</span><strong>${fmtInr(m.max_drawdown)}</strong></div>
+        <div class="tg-metric"><span>Worst</span><strong>${fmtInr(m.worst_trade)}</strong></div>
+        <div class="tg-metric"><span>Net</span><strong>${fmtInr(m.net_total)}</strong></div>
+      `;
+    }
     const body = document.getElementById('reportBody');
     const trades = rep.trades || [];
     if (!trades.length) {
@@ -384,6 +395,7 @@
     }
     body.innerHTML = trades.map((t) => `<tr>
       <td>${t.id}</td>
+      <td>${t.display_record_type || displayMode(t.mode, t.record_type)}</td>
       <td>${t.origin || (t.auto_managed ? 'AUTO' : 'USER')}</td>
       <td>${t.profile_id || ''}</td>
       <td>${t.holding_mode || 'INTRADAY'}</td>
@@ -421,11 +433,11 @@
   }
 
   async function loadReport() {
-    const mode = document.getElementById('reportMode').value || 'PAPER';
-    document.getElementById('btnCsv').href = `/api/tarang/report.csv?mode=${mode}`;
+    const mode = document.getElementById('reportMode').value || 'FORWARD_TEST';
+    document.getElementById('btnCsv').href = `/api/tarang/report.csv?book=${mode}`;
     const status = document.getElementById('statusLine');
     try {
-      const rep = await api(`/api/tarang/report?mode=${mode}&limit=100`);
+      const rep = await api(`/api/tarang/report?book=${mode}&limit=100`);
       renderReport(rep);
       status.textContent = `Report ${mode}: ${(rep.metrics && rep.metrics.count) || 0} trades`;
     } catch (err) {
@@ -603,8 +615,8 @@
           method: 'POST',
           body: JSON.stringify({ enabled: !on }),
         });
-        setModeBadges(out.mode || 'PAPER', out.auto);
-        status.textContent = out.auto ? 'AUTO PAPER on — LIVE stays admin-gated' : 'AUTO PAPER off';
+        setModeBadges(out.display_mode || out.mode, false);
+        status.textContent = 'Auto orders: locked';
       } catch (err) {
         status.textContent = String(err.message || err);
       }
@@ -619,7 +631,7 @@
       renderScreener(null, out.results || []);
       const rej = await api('/api/tarang/rejections?limit=40');
       renderRejections(rej.rejections || []);
-      status.textContent = `Screener done at ${out.run_at || ''}`;
+      status.textContent = `Screener done at ${out.run_at || ''} · forward tests ${(out.forward_tests && (out.forward_tests.recorded || []).length) || 0}`;
     } catch (err) {
       status.textContent = String(err.message || err);
     }
@@ -641,7 +653,7 @@
   });
   document.getElementById('btnTake').addEventListener('click', async () => {
     if (!currentTicketId) return;
-    if (!window.confirm(`Take PAPER trade for candidate ${currentTicketId}? Simulates fills — no live orders.`)) return;
+    if (!window.confirm(`Record forward test for candidate ${currentTicketId}? Simulates fills — no live orders.`)) return;
     const status = document.getElementById('statusLine');
     try {
       const out = await api(`/api/tarang/ticket/${currentTicketId}/take`, {
@@ -651,7 +663,7 @@
           holding_mode: (document.getElementById('holdingMode') || {}).value || 'INTRADAY',
         }),
       });
-      status.textContent = `PAPER trade #${out.trade_id} → ${out.status}`;
+      status.textContent = `Forward test #${out.trade_id} → ${out.status}`;
       switchTab('intrade');
     } catch (err) {
       status.textContent = String(err.message || err);
@@ -669,14 +681,14 @@
   });
   document.getElementById('btnManual').addEventListener('click', async () => {
     if (!currentTicketId) return;
-    const note = window.prompt('Optional note for manual PAPER mark:') || '';
+    const note = window.prompt('I placed this at my broker. Optional note:') || '';
     const status = document.getElementById('statusLine');
     try {
-      const out = await api(`/api/tarang/ticket/${currentTicketId}/mark-manual`, {
+      const out = await api(`/api/tarang/ticket/${currentTicketId}/record-live`, {
         method: 'POST',
-        body: JSON.stringify({ note, fills: {} }),
+        body: JSON.stringify({ note, fills: [], holding_mode: (document.getElementById('holdingMode') || {}).value || 'INTRADAY' }),
       });
-      status.textContent = `Manual PAPER trade #${out.trade_id}`;
+      status.textContent = `Live record #${out.trade_id}`;
       switchTab('intrade');
     } catch (err) {
       status.textContent = String(err.message || err);
@@ -696,7 +708,7 @@
     }
   });
   document.getElementById('btnExitAll').addEventListener('click', async () => {
-    if (!window.confirm('Exit ALL open PAPER Tarang trades?')) return;
+    if (!window.confirm('Exit ALL open Tarang trades (forward-test simulated exits)?')) return;
     const status = document.getElementById('statusLine');
     try {
       await api('/api/tarang/trades/exit-all', { method: 'POST', body: JSON.stringify({ reason: 'MANUAL' }) });
@@ -723,14 +735,14 @@
   }
   document.getElementById('reportMode').addEventListener('change', () => {
     document.getElementById('btnCsv').href =
-      `/api/tarang/report.csv?mode=${document.getElementById('reportMode').value}`;
+      `/api/tarang/report.csv?book=${document.getElementById('reportMode').value}`;
   });
 
   document.getElementById('btnCsv').addEventListener('click', async (e) => {
     e.preventDefault();
-    const mode = document.getElementById('reportMode').value || 'PAPER';
+    const mode = document.getElementById('reportMode').value || 'FORWARD_TEST';
     try {
-      const res = await fetch(`/api/tarang/report.csv?mode=${mode}`, {
+      const res = await fetch(`/api/tarang/report.csv?book=${mode}`, {
         headers: { Authorization: `Bearer ${token()}` },
       });
       if (!res.ok) throw new Error('CSV download failed');

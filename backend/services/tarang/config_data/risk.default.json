@@ -74,6 +74,30 @@
       "source": "MCX freeze / broker max lots — conservative default; do not exceed exchange freeze qty"
     }
   },
+  "forward_test": {
+    "cooldown_hours": 6,
+    "notes": "After a forward-test cycle closes, the same signal_key (underlying+expiry+structure+sorted strikes) cannot open again until 6 hours elapse. A QUALIFIED row that stays qualified is not a new trade while one is open."
+  },
+  "live_orders": {
+    "enabled_env": "TARANG_LIVE_ENABLED",
+    "default_enabled": false,
+    "allowlist_symbols": [],
+    "max_qty": 1,
+    "max_order_value_inr": 5000,
+    "price_band_frac": 0.05,
+    "freeze_qty": {
+      "upstox_mcx": 50,
+      "delta_india": 4000
+    },
+    "order_tag": "tarang-",
+    "notes": "Built locked. Production must not set TARANG_LIVE_ENABLED. Shadow logs payloads and sends nothing. Reconciliation only considers tarang- tagged orders."
+  },
+  "phase5_arming": {
+    "auto_entry": false,
+    "auto_exit": false,
+    "requires_admin_typed_confirmation": true,
+    "arming_expires_same_calendar_day_ist": true
+  },
   "phase4_hold": {
     "min_clean_snapshot_weeks": 4,
     "min_paper_trades_reviewed": 20,

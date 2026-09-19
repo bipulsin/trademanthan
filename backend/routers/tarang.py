@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
@@ -21,6 +21,8 @@ from backend.services.tarang.events import list_alerts
 from backend.services.tarang.expiry_eligibility import expiry_eligibility
 from backend.services.tarang.health import build_health_payload
 from backend.services.tarang.iv_snapshots import capture_iv_snapshots
+from backend.services.tarang.broker_verify import verify_trade_against_broker
+from backend.services.tarang.labels import auto_lock_label, mode_badge
 from backend.services.tarang.lifecycle import (
     add_trade_note,
     build_in_trade_view,
@@ -30,11 +32,14 @@ from backend.services.tarang.lifecycle import (
     get_trade,
     list_open_trades,
     mark_taken_manual,
+    record_live_user_trade,
     run_auto_paper_once,
     run_exit_engine_once,
     set_paper_auto,
     take_trade_paper,
 )
+from backend.services.tarang.live_broker import place_or_shadow
+from backend.services.tarang.live_control import LivePlacementDisabled, tarang_live_enabled
 from backend.services.tarang.report import build_report, report_csv
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.screener import (
@@ -79,8 +84,14 @@ class NoteBody(BaseModel):
     note: str
 
 
-class AutoBody(BaseModel):
-    enabled: bool = False
+class LiveFillBody(BaseModel):
+    note: str = ""
+    holding_mode: str = "INTRADAY"
+    fills: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class LivePlaceBody(BaseModel):
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/health")
@@ -243,7 +254,9 @@ def tarang_screener_latest(_user: User = Depends(_require_admin)) -> Dict[str, A
         "product": "Kosmic Tarang",
         "phase": 3,
         "mode": ma.get("mode") or "PAPER",
-        "auto": bool(ma.get("auto")),
+        "display_mode": mode_badge(ma.get("mode")),
+        "display_auto": auto_lock_label(),
+        "auto": False,
         "by_profile": by,
         "recent": cands[:20],
     }
@@ -314,13 +327,48 @@ def tarang_ticket_manual(
     return out
 
 
+@router.post("/ticket/{candidate_id}/record-live")
+def tarang_ticket_record_live(
+    candidate_id: int,
+    body: LiveFillBody = LiveFillBody(),
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = record_live_user_trade(
+        candidate_id,
+        fills=list(body.fills or []),
+        note=body.note or "",
+        holding_mode=body.holding_mode or "INTRADAY",
+    )
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out)
+    return out
+
+
+@router.post("/trades/{trade_id}/verify")
+def tarang_trade_verify(trade_id: int, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return verify_trade_against_broker(trade_id)
+
+
+@router.post("/live/place")
+def tarang_live_place(body: LivePlaceBody = LivePlaceBody(), _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    """Fail-closed. Shadow-logs payload; never transmits when TARANG_LIVE_ENABLED is false."""
+    out = place_or_shadow(dict(body.payload or {}))
+    return {
+        "ok": False,
+        "error": "live_placement_disabled",
+        "sent": False,
+        "shadow": out,
+        "live_enabled": tarang_live_enabled(),
+    }
+
+
 # --- Phase 3: In-Trade / Exit / Report ---
 
 
 @router.get("/trades/open")
 def tarang_trades_open(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     ensure_tarang_tables()
-    return {"mode": "PAPER", "trades": list_open_trades("PAPER")}
+    return {"display_mode": mode_badge("PAPER"), "mode": "PAPER", "trades": list_open_trades()}
 
 
 @router.get("/trades/{trade_id}")
@@ -334,7 +382,7 @@ def tarang_trade_get(trade_id: int, _user: User = Depends(_require_admin)) -> Di
 @router.get("/in-trade")
 def tarang_in_trade_list(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     ensure_tarang_tables()
-    opens = list_open_trades("PAPER")
+    opens = list_open_trades()
     views = []
     for t in opens:
         v = build_in_trade_view(int(t["id"]), refresh_quotes=True)
@@ -349,6 +397,8 @@ def tarang_in_trade_list(_user: User = Depends(_require_admin)) -> Dict[str, Any
         "product": "Kosmic Tarang",
         "phase": 3,
         "mode": "PAPER",
+        "display_mode": mode_badge("PAPER"),
+        "display_auto": auto_lock_label(),
         "trades": views,
         "alerts": alerts,
     }
@@ -411,27 +461,32 @@ def tarang_alerts(limit: int = 40, _user: User = Depends(_require_admin)) -> Dic
 
 @router.get("/report")
 def tarang_report(
-    mode: str = "PAPER",
+    mode: str = "FORWARD_TEST",
+    book: Optional[str] = None,
     profile_id: Optional[str] = None,
     limit: int = 100,
     _user: User = Depends(_require_admin),
 ) -> Dict[str, Any]:
     ensure_tarang_tables()
-    mode_u = (mode or "PAPER").upper()
-    if mode_u not in ("PAPER", "LIVE"):
-        raise HTTPException(status_code=400, detail="mode must be PAPER or LIVE")
-    return build_report(mode=mode_u, profile_id=profile_id, limit=min(limit, 500))
+    book_u = (book or mode or "FORWARD_TEST").upper()
+    if book_u in ("PAPER",):
+        book_u = "FORWARD_TEST"
+    if book_u not in ("FORWARD_TEST", "LIVE", "ALL", "PAPER"):
+        raise HTTPException(status_code=400, detail="book must be FORWARD_TEST, LIVE, or ALL")
+    return build_report(mode=book_u, profile_id=profile_id, limit=min(limit, 500), book=book_u)
 
 
 @router.get("/report.csv")
 def tarang_report_csv(
-    mode: str = "PAPER",
+    mode: str = "FORWARD_TEST",
+    book: Optional[str] = None,
     _user: User = Depends(_require_admin),
 ) -> Response:
     ensure_tarang_tables()
-    csv_text = report_csv(mode=(mode or "PAPER").upper())
+    book_u = (book or mode or "FORWARD_TEST").upper()
+    csv_text = report_csv(mode=book_u, book=book_u)
     return Response(
         content=csv_text,
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="tarang_report_{mode}.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="tarang_report_{book_u}.csv"'},
     )

@@ -136,15 +136,25 @@ def _tick_liquidity_probe() -> None:
         logger.exception("tarang liquidity probe failed: %s", e)
 
 
-def _tick_auto_paper() -> None:
+def _tick_forward_tests() -> None:
     try:
         from backend.services.tarang.lifecycle import run_auto_paper_once
 
         out = run_auto_paper_once()
-        if out.get("taken"):
-            logger.info("tarang AUTO PAPER: %s", out)
+        if (out.get("taken") or out.get("forward_tests")):
+            logger.info("tarang forward-test tick: %s", out)
     except Exception as e:
-        logger.exception("tarang AUTO PAPER tick failed: %s", e)
+        logger.exception("tarang forward-test tick failed: %s", e)
+
+
+def _tick_watchdog() -> None:
+    try:
+        from backend.services.tarang.heartbeat import check_watchdog, recon_job
+
+        check_watchdog()
+        recon_job()
+    except Exception as e:
+        logger.exception("tarang watchdog failed: %s", e)
 
 
 def start_tarang_scheduler() -> None:
@@ -224,9 +234,9 @@ def start_tarang_scheduler() -> None:
         coalesce=True,
     )
     sch.add_job(
-        _tick_auto_paper,
+        _tick_forward_tests,
         CronTrigger(minute="*/5", timezone="Asia/Kolkata"),
-        id="tarang_auto_paper",
+        id="tarang_forward_tests",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -276,7 +286,15 @@ def start_tarang_scheduler() -> None:
 
     sch.start()
     _scheduler = sch
-    logger.info("Kosmic Tarang scheduler started (delta-window snapshots + ExitEngine + AUTO PAPER + 08:45 token + Mon liquidity IST)")
+    sch.add_job(
+        _tick_watchdog,
+        CronTrigger(minute="*", timezone="Asia/Kolkata"),
+        id="tarang_watchdog",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    logger.info("Kosmic Tarang scheduler started (snapshots + ExitEngine + forward-test record + watchdog IST)")
     try:
         sch.add_job(
             _tick_snapshots_delta,
