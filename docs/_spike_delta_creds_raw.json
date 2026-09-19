@@ -1,0 +1,48 @@
+{
+  "ran_at_utc": "2026-09-19T07:44:34.606936+00:00",
+  "product": "Kosmic Tarang",
+  "base": "https://api.india.delta.exchange",
+  "credential_source": "backend/routers/algo.py constants",
+  "api_key_fingerprint": "Fp0b\u2026p8Ct (len=30)",
+  "calls": {
+    "wallet_balances": {
+      "http_status": 401,
+      "error": null,
+      "success": false,
+      "body_summary": {
+        "ok": false,
+        "result_type": "NoneType"
+      },
+      "error_message": "ip_not_whitelisted_for_api_key"
+    },
+    "positions": {
+      "http_status": 401,
+      "error": null,
+      "success": false,
+      "body_summary": {
+        "ok": true,
+        "n_positions": 0
+      },
+      "error_message": "ip_not_whitelisted_for_api_key"
+    },
+    "positions_margined": {
+      "http_status": 401,
+      "success": false,
+      "error_message": "ip_not_whitelisted_for_api_key"
+    }
+  },
+  "notes": [
+    "Read-only: wallet/balances + positions only.",
+    "Market data + paper: India prod public endpoints + PaperBroker (Phase 1+).",
+    "Testnet only Phase 4. Client order ids will prefix tarang-."
+  ],
+  "verdict": "FAIL_IP_NOT_WHITELISTED",
+  "permissions_inferred": {
+    "read_balances": false,
+    "read_positions": false,
+    "trade": "UNKNOWN",
+    "note": "Keys authenticate enough for Delta to return ip_not_whitelisted_for_api_key; whitelist paperclip 140.245.14.17 (and local if needed) or issue keys without IP lock."
+  },
+  "blocking": true,
+  "ask_user": "Existing Delta India keys reject both local and paperclip IPs (ip_not_whitelisted_for_api_key, client_ip includes 140.245.14.17). Please whitelist paperclip-vm IP and/or provide new India API keys with read balances/positions (trade later for Phase 4)."
+}

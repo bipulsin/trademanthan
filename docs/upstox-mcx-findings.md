@@ -1,115 +1,125 @@
-# Tarang Phase 0 — Upstox MCX + Delta India findings
+# Kosmic Tarang Phase 0 — Upstox MCX + Delta India findings
 
+**Product (user-facing):** Kosmic Tarang  
+**Internal prefix:** `tarang_` / `/tarang`  
 Spike scripts:
 
-- `scripts/tarang_phase0_upstox_mcx_greeks.py`
-- `scripts/tarang_phase0_delta_india_proof.py`
+- `scripts/tarang_phase0_upstox_mcx_greeks.py` (ATM + Black-76 + liquidity + sizing)
+- `scripts/tarang_phase0_delta_india_proof.py` (public market data)
+- `scripts/tarang_phase0_delta_creds_check.py` (read-only auth)
+- `scripts/tarang_phase0_delta_sizing.py` (BTC/ETH min max-loss)
 
-Raw outputs (no secrets): `docs/_spike_upstox_mcx_raw.json`, `docs/_spike_delta_india_raw.json`.
+Raw outputs (no secrets): `docs/_spike_upstox_mcx_raw.json`, `docs/_spike_delta_india_raw.json`, `docs/_spike_delta_creds_raw.json`, `docs/_spike_delta_sizing_raw.json`.  
+Sizing summary: [`docs/tarang-sizing-min-max-loss.md`](./tarang-sizing-min-max-loss.md).
 
 ---
 
-## Upstox MCX Option Greek spike
+## Upstox MCX Option Greek spike (follow-up, OAuth refreshed)
 
 ### Method
 
-1. Load public instrument master `https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz`.
-2. Pick MCX_FO CE/PE rows for Crude Oil / Natural Gas (name/symbol match; no hard-coded keys).
-3. Call `GET https://api.upstox.com/v3/market-quote/option-greek?instrument_key=…` (≤50 keys) with Bearer token from `UPSTOX_ACCESS_TOKEN` or deploy `upstox_token.json`.
+1. Load public instrument master; filter **`segment=MCX_FO`** and **`underlying_symbol` exact** `CRUDEOIL` / `NATURALGAS` (excludes `CRUDEOILM` / `NATGASMINI` / `NSE_COM`). Note: Upstox `name` is often `CRUDE OIL` (spaced); NATGASMINI rows also carry `name=NATURALGAS` — always key off `underlying_symbol`.
+2. Nearest **two option expiries** per family; futures LTP from closest matching `underlying_symbol` FUT.
+3. ATM: nearest CE+PE strike pairs around futures LTP.
+4. `GET /v3/market-quote/option-greek` (≤50 keys) + `GET /v2/market-quote/quotes` for bid/ask, via headers matching `UpstoxService.get_headers()` (+ UA; Cloudflare blocks bare urllib).
+5. Black-76 on futures price: implied IV from mid, model delta; flag |Δnative−Δmodel| > 0.12 or large IV relative gap.
+6. Liquidity: bid–ask as % of mid for strikes with |δ| in **10–16**.
 
-### Instrument master (PASS)
-
-Resolved live MCX option rows (sample from spike run on paperclip-vm, 2026-09-19 UTC):
-
-| Bucket | instrument_key | trading_symbol | type | strike | lot_size |
-|---|---|---|---|---|---|
-| CL | `MCX_FO\|584953` | CRUDEOILM 12700 CE 15 OCT 26 | CE | 12700 | 10 |
-| CL | `MCX_FO\|584954` | CRUDEOILM 12750 CE 15 OCT 26 | CE | 12750 | 10 |
-| CL | `MCX_FO\|584955` | CRUDEOILM 12800 CE 15 OCT 26 | CE | 12800 | 10 |
-| NG | `MCX_FO\|584827` | NATURALGAS 130 CE 20 NOV 26 | CE | 130 | 1250 |
-| NG | `MCX_FO\|584828` | NATURALGAS 130 PE 20 NOV 26 | PE | 130 | 1250 |
-| NG | `MCX_FO\|584872` | NATGASMINI 130 PE 20 NOV 26 | PE | 130 | 250 |
-
-Notes:
-
-- Confirms **chain must be built from master** (Upstox documents put/call option-chain as **not available for MCX**).
-- Spike matched **CRUDEOILM** / **NATURALGAS** / **NATGASMINI** — Phase 1 profiles must define whether CL/NG use mini vs full contracts (from master `lot_size`, never hard-coded).
-- Expiry arrives as epoch ms on master rows (`expiry` field).
-
-### Option Greek API result (BLOCKED — expired token)
+### Verdict
 
 | Field | Value |
 |---|---|
-| Verdict | `BLOCKED_EXPIRED_UPSTOX_TOKEN` |
-| HTTP | **401** |
-| Upstox error | `UDAPI100050` — Invalid token used to access API |
-| JWT | `token_expired: true` on paperclip `/home/ubuntu/twcto/data/upstox_token.json` |
-| `iv` / `delta` non-null | **0** (no usable body) |
+| Verdict | **`PARTIAL_RESPONSE_BUT_NULLS`** |
+| Reliable ATM IV+δ | **23 / 32** rows (IV>0 and \|δ\|∈(0.01,0.99)) |
+| Unreliable | **9** rows with IV=`0` and/or placeholder δ (`0` / `±1`) — mostly farther / thinner strikes |
+| Black-76 in Phase 1 | **Required as fill** when native is zero/placeholder; near-term ATM CL/NG natives track Black-76 well when F is the matching futures |
+| Auth | Token valid (paperclip OAuth refresh) — prior `BLOCKED_EXPIRED_UPSTOX_TOKEN` cleared |
 
-**Interpretation:** This is an **auth lifecycle** failure, not evidence that MCX Greeks are unsupported. Docs for `/v3/market-quote/option-greek` return `iv`, `delta`, `gamma`, `theta`, `vega`, `oi`, `volume`, `last_price` for instrument keys (incl. MCX_FO examples in Upstox samples). Re-run the spike after Broker OAuth refresh; expect `PASS_IV_AND_GREEKS_PRESENT` if MCX Greeks are populated, or `PARTIAL_RESPONSE_BUT_NULLS` if fields come back null (then Black-76 fallback becomes required for Phase 1).
+### ATM samples (reliable natives)
 
-**Secondary note:** Host `urllib` without a normal User-Agent hit Cloudflare 1010 on `api.upstox.com`; spike uses `requests` + Accept/User-Agent. Prefer `UpstoxService.get_headers()` in product code.
+**CRUDEOIL** — expiry 2026-10-15, lot **100**, strike step **50**, FUT `CRUDEOIL FUT 19 OCT 26` LTP **9230**
 
-### Implications for Tarang
+| Symbol | IV | δ | Black-76 δ | OI | Vol | Last | Bid/Ask | Spr% mid |
+|---|---:|---:|---:|---:|---:|---:|---|---:|
+| CRUDEOIL 9250 CE | 0.507 | +0.520 | +0.521 | 3648 | 10046 | 495.5 | 495 / 502 | 1.4% |
+| CRUDEOIL 9250 PE | 0.494 | −0.481 | −0.480 | 59 | 10913 | 507.1 | 506 / 516 | 2.0% |
+| CRUDEOIL 9300 CE | 0.513 | +0.505 | +0.506 | 3648 | 34624 | 478.2 | 473 / 480 | 1.5% |
+| CRUDEOIL 9300 PE | 0.501 | −0.497 | −0.496 | 1242 | 26592 | 541.4 | 540 / 543 | 0.5% |
 
-- Build MCX chain from daily master refresh (reuse `divtest.instruments.ensure_instrument_master`).
-- Batch Greeks ≤50 keys; Black-76 fallback when native IV/Greeks null.
-- **Blocker for Phase 1 live reads:** refresh Upstox OAuth on paperclip (token was expired at spike time).
+**NATURALGAS** — expiry 2026-09-23, lot **1250**, strike step **5**, FUT `NATURALGAS FUT 25 SEP 26` LTP **279.6**
 
----
+| Symbol | IV | δ | Black-76 δ | OI | Vol | Last | Bid/Ask | Spr% mid |
+|---|---:|---:|---:|---:|---:|---:|---|---:|
+| NATURALGAS 280 CE | 0.430 | +0.502 | +0.497 | 18100 | 305929 | 5.50 | 5.50 / 5.55 | 0.9% |
+| NATURALGAS 280 PE | 0.430 | −0.498 | −0.503 | 12697 | 260479 | 5.75 | 5.75 / 5.80 | 0.9% |
+| NATURALGAS 285 CE | 0.430 | +0.364 | +0.352 | 11207 | 193536 | 3.45 | 3.45 / 3.50 | 1.4% |
+| NATURALGAS 285 PE | 0.430 | −0.636 | −0.648 | 3144 | 95362 | 8.70 | 8.65 / 8.70 | 0.6% |
 
-## Delta Exchange India proof
+Puts are negative; ATM ≈ ±0.5 as expected.
 
-**Base:** `https://api.india.delta.exchange/v2` (public products/tickers; no API key for this spike).  
-**Testnet (not called):** `https://cdn-ind.testnet.deltaex.org`
+### Liquidity gate (10–16 δ band)
 
-### Symbol shape
+Strategy gate: bid–ask ≤ **15% of mid**.
 
-Pattern: `{C|P}-{BTC|ETH}-{strike}-{DDMMYY}`
-
-Examples:
-
-- `C-BTC-83000-190926`, `P-BTC-83000-190926`
-- `C-ETH-2760-210926`, `P-ETH-2720-190926`
-
-### contract_value
-
-| Underlying | Observed `contract_value` (live options page) |
+| Metric | Value (this run) |
 |---|---|
-| BTC | `"0.001"` |
-| ETH | `"0.01"` |
+| Sample size in band | 5 (NG-heavy; CL 10–16δ sparsely in near-ATM window) |
+| Median spread % of mid | **~4.4%** |
+| Passing ≤15% gate | **60%** (3/5) |
+| Failures | Wider books on farther NG expiry (e.g. ~68%, ~123% of mid) |
 
-`lot_size` on products was `null` in samples — size Tarang risk off `contract_value` × premium, not a hard-coded lot.
+**Implication:** Liquidity gate will reject a material share of 10–16δ candidates on thinner expiries; keep the 15% rule.
 
-### Expiry fields
+### Implications for Kosmic Tarang
 
-- **Products:** `settlement_time` ISO8601 UTC (e.g. `2026-09-19T12:00:00Z`, daily/weekly ladder present).
-- **Tickers:** no reliable `settlement_time` on ticker objects in this sample — join ticker → product (or parse DDMMYY from `symbol`) for DTE. Prefer **live products** as expiry source (never hard-code calendars).
-
-### Greeks / IV on tickers
-
-Public tickers include:
-
-- `mark_vol` (IV proxy)
-- `greeks`: `delta`, `gamma`, `theta`, `vega`, `rho`, `spot`
-- `mark_price`, `quotes` (bid/ask), `spot_price`, `strike_price`, `contract_value`
-
-So Delta native IV/Greeks are available without auth for screening; Black-Scholes remains fallback if fields missing.
-
-### preferNativeSpreads
-
-Spike did not exercise Delta multi-leg/native spread order APIs. Product default remains `preferNativeSpreads=false` (leg-by-leg) until Phase 4 design review.
+- Build MCX chain from master (`underlying_symbol` + `MCX_FO`); profile `contractFamily=full`.
+- Batch Greeks ≤50 keys; **Black-76 fill** when IV=0 / placeholder δ; use matching-expiry futures as F.
+- Share Upstox rate limiter / WS with CommDiv in Phase 1 (Tarang lower priority, capped) — plan only this turn; do not refactor CommDiv yet. Confirm WS subscription limits before dual subscribe.
+- Prior auth blocker is cleared.
 
 ---
+
+## Delta Exchange India
+
+### Public market data (unchanged proof)
+
+Base `https://api.india.delta.exchange/v2`. Symbols `C|P-{BTC|ETH}-{strike}-{DDMMYY}`; `contract_value` BTC `0.001`, ETH `0.01`; tickers expose `mark_vol` + greeks. Testnet only Phase 4. Client order ids: `tarang-` prefix. Paper: public India + PaperBroker.
+
+### Credential check (read-only)
+
+Script: `scripts/tarang_phase0_delta_creds_check.py`  
+Calls: `GET /v2/wallet/balances`, `GET /v2/positions` only (no orders).
+
+| Field | Value |
+|---|---|
+| Verdict | **`FAIL_IP_NOT_WHITELISTED`** |
+| Source | Existing keys in `backend/routers/algo.py` (no `DELTA_*` in paperclip `.env`) |
+| Error | `ip_not_whitelisted_for_api_key` |
+| Client IPs tried | Local workstation **and** paperclip `140.245.14.17` |
+| Read balances/positions | Not proven (blocked before payload) |
+| Trade perms | Not tested (by design) |
+
+**Blocking:** Whitelist paperclip IP (and/or issue new India keys with read access). Do not invent keys. Market-data screening can proceed on public endpoints; authenticated Delta adapter waits on this.
+
+### Crypto sizing (public)
+
+See [`tarang-sizing-min-max-loss.md`](./tarang-sizing-min-max-loss.md). Per-contract max loss at profile widths is **well under** ₹3k–10k budget (often &lt; $1 / contract) because `contract_value` is 0.001 / 0.01.
+
+---
+
+## Phase 1 planning notes (confirmed — do not implement yet)
+
+- Tables: all `tarang_*` via `ensure_*`; IV history table name **`tarang_iv_snapshots`**.
+- Nav: **Kosmic Tarang** next to Iron Condor / CommDiv; **admin-only** through Phase 2.
+- Profiles: full CL/NG only (`contractFamily` default `full`).
+- Upstox infra: share limiter/WS with CommDiv, Tarang lower priority — ask before any CommDiv refactor.
+- Delta: reuse `delta_api`; paper + public India until keys work; testnet Phase 4.
 
 ## Re-run commands
 
 ```bash
-# Delta (local, public)
+UPSTOX_TOKEN_FILE=/path/to/upstox_token.json python3 scripts/tarang_phase0_upstox_mcx_greeks.py
+python3 scripts/tarang_phase0_delta_creds_check.py --from-algo-defaults
+python3 scripts/tarang_phase0_delta_sizing.py
 python3 scripts/tarang_phase0_delta_india_proof.py
-
-# Upstox MCX Greeks (needs valid token)
-UPSTOX_ACCESS_TOKEN=… python3 scripts/tarang_phase0_upstox_mcx_greeks.py
-# or on paperclip after OAuth refresh:
-# TARANG_SPIKE_OUT=/tmp/_spike_upstox_mcx_raw.json python3 scripts/tarang_phase0_upstox_mcx_greeks.py
 ```
