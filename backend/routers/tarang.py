@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,11 @@ from backend.database import SessionLocal, get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.tarang.backtest import run_backtest
+from backend.services.tarang.backup import run_backup
 from backend.services.tarang.bhavcopy import checksum_from_html, import_bhavcopy_text, scan_datewise_dir
+from backend.services.tarang.delta_history import archive_expired_options, load_underlying_1h
+from backend.services.tarang.mcx_download import run_mcx_bhavcopy_download
+from backend.services.tarang.pipeline_health import pipeline_health
 from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.chain_snapshots import capture_chain_snapshots
 from backend.services.tarang.config import get_events, get_profiles, get_risk
@@ -27,6 +31,7 @@ from backend.services.tarang.lifecycle import (
     add_trade_note,
     build_in_trade_view,
     dismiss_candidate,
+    exclude_forward_test,
     exit_all_open,
     exit_trade,
     get_trade,
@@ -63,6 +68,24 @@ def _require_admin(user: User = Depends(_auth)) -> User:
     if (getattr(user, "is_admin", None) or "").strip() != "Yes":
         raise HTTPException(status_code=403, detail="Administrator only")
     return user
+
+
+class AutoBody(BaseModel):
+    enabled: bool = False
+
+
+class ExcludeBody(BaseModel):
+    reason: str
+
+
+class TelegramSettingsBody(BaseModel):
+    telegram_public_signals: Optional[bool] = None
+    telegram_private_chat_id: Optional[str] = None
+
+
+class BhavcopyBackfillBody(BaseModel):
+    start: str
+    include_full: bool = False
 
 
 class TakeBody(BaseModel):
@@ -201,6 +224,22 @@ async def tarang_bhavcopy_checksum(
 def tarang_bhavcopy_checksum_scan(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     ensure_tarang_tables()
     return scan_datewise_dir()
+
+
+@router.post("/bhavcopy/download")
+def tarang_bhavcopy_download(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return run_mcx_bhavcopy_download()
+
+
+@router.post("/bhavcopy/backfill")
+def tarang_bhavcopy_backfill(body: BhavcopyBackfillBody, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from datetime import date as date_cls
+
+    try:
+        start = date_cls.fromisoformat(body.start)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start must be YYYY-MM-DD")
+    return run_mcx_bhavcopy_download(backfill_start=start, include_full=body.include_full)
 
 
 @router.post("/bhavcopy/reconstruct")
@@ -493,3 +532,105 @@ def tarang_report_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="tarang_report_{book_u}.csv"'},
     )
+
+
+@router.get("/pipeline")
+def tarang_pipeline(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return pipeline_health()
+
+
+@router.post("/trades/{trade_id}/exclude")
+def tarang_trade_exclude(
+    trade_id: int,
+    body: ExcludeBody,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = exclude_forward_test(trade_id, body.reason or "", actor=getattr(_user, "username", None) or "admin")
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out)
+    return out
+
+
+@router.post("/delta/candles/run")
+def tarang_delta_candles(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return load_underlying_1h()
+
+
+@router.post("/delta/archive/run")
+def tarang_delta_archive(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return archive_expired_options()
+
+
+@router.post("/backup/run")
+def tarang_backup_run(dry_run: bool = True, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return run_backup(dry_run=dry_run)
+
+
+@router.get("/telegram/settings")
+def tarang_telegram_settings(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.alerts_telegram import private_chat_id, public_signals_enabled, start_link
+
+    db = SessionLocal()
+    try:
+        return {
+            "start_link": start_link(),
+            "private_chat_id": private_chat_id(db),
+            "telegram_public_signals": public_signals_enabled(db),
+            "how_to": "Open start_link, press Start on the bot, then Poll link. Bot cannot DM by username.",
+        }
+    finally:
+        db.close()
+
+
+@router.post("/telegram/settings")
+def tarang_telegram_settings_set(body: TelegramSettingsBody, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    import json as json_lib
+
+    from sqlalchemy import text as sql_text
+
+    from backend.services.tarang.alerts_telegram import save_private_chat_id
+
+    db = SessionLocal()
+    try:
+        if body.telegram_public_signals is not None:
+            db.execute(
+                sql_text(
+                    """
+                    INSERT INTO tarang_settings (key, value) VALUES ('telegram_public_signals', CAST(:v AS jsonb))
+                    ON CONFLICT (key) DO UPDATE SET value = CAST(:v AS jsonb)
+                    """
+                ),
+                {"v": json_lib.dumps(bool(body.telegram_public_signals))},
+            )
+        if body.telegram_private_chat_id:
+            save_private_chat_id(db, str(body.telegram_private_chat_id))
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+
+@router.post("/telegram/poll-link")
+def tarang_telegram_poll(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.alerts_telegram import poll_and_link
+
+    return poll_and_link()
+
+
+@router.post("/telegram/webhook")
+async def tarang_telegram_webhook(
+    request: Request,
+    secret: Optional[str] = Query(None),
+    x_telegram_bot_api_secret_token: Optional[str] = Header(None),
+) -> Dict[str, Any]:
+    import os
+
+    expected = (os.getenv("TARANG_TELEGRAM_WEBHOOK_SECRET") or os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    got = (secret or x_telegram_bot_api_secret_token or "").strip()
+    if expected and got != expected:
+        raise HTTPException(status_code=403, detail="bad webhook secret")
+    from backend.services.tarang.alerts_telegram import handle_telegram_update
+
+    body = await request.json()
+    return handle_telegram_update(body if isinstance(body, dict) else {})
+

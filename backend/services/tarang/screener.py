@@ -199,6 +199,24 @@ def screen_profile(profile_id: str, builder: Optional[ChainBuilder] = None) -> D
     except Exception:
         chosen_expiry = None
     chain = builder.build(profile_id, expiry=chosen_expiry)
+    if str(prof.get("venue") or "") == "upstox_mcx":
+        from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
+        from backend.services.tarang.data_gaps import record_data_gap
+
+        th = UpstoxMcxAdapter().health()
+        if th.get("token") in ("missing", "expired") or th.get("token_expired"):
+            record_data_gap(
+                venue="upstox_mcx",
+                profile_id=profile_id,
+                reason="upstox_token_invalid_screener_skipped",
+                detail={"token": th.get("token")},
+            )
+            return {
+                "profile_id": profile_id,
+                "status": "BLOCKED",
+                "gates": [],
+                "detail": "upstox_token_invalid",
+            }
 
     gates: List[GateResult] = []
     db = SessionLocal()

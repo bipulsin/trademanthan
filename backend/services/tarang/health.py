@@ -10,6 +10,7 @@ from sqlalchemy import text
 from backend.database import SessionLocal
 from backend.services.tarang.adapters.delta_india import DeltaIndiaAdapter
 from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
+from backend.services.tarang.alerts_telegram import start_link
 from backend.services.tarang.chain_snapshots import chain_coverage
 from backend.services.tarang.config import get_events, get_profiles, get_risk, validate_profiles
 from backend.services.tarang.data_gaps import recent_gaps
@@ -17,7 +18,8 @@ from backend.services.tarang.eod_reconstruct import liquidity_report
 from backend.services.tarang.expiry_eligibility import expiry_eligibility
 from backend.services.tarang.iv_snapshots import recent_iv_snapshot_counts
 from backend.services.tarang.schema import ensure_tarang_tables
-from backend.services.tarang.sizing import min_max_loss_table
+from backend.services.tarang.pipeline_health import pipeline_health, screener_stats_24h
+from backend.services.tarang.delta_history import delta_readiness
 
 logger = logging.getLogger(__name__)
 
@@ -128,4 +130,11 @@ def build_health_payload() -> Dict[str, Any]:
         "events": get_events(),
         "min_max_loss": min_max_loss_table(),
         "upstox_ws": (risk.get("upstox_ws") or {}),
+        "screener_24h": screener_stats_24h(),
+        "pipeline": pipeline_health(),
+        "delta_readiness": delta_readiness(),
+        "telegram": {
+            "start_link": start_link(),
+            "note": "Open the bot, press Start, then Poll / Link on Data health. Ops alerts go to that private chat only.",
+        },
     }

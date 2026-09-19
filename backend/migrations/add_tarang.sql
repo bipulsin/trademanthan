@@ -398,3 +398,89 @@ CREATE TABLE IF NOT EXISTS tarang_heartbeat (
     detail JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS exclude_reason TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS code_commit TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS rule_set_version INTEGER;
+
+CREATE TABLE IF NOT EXISTS tarang_job_runs (
+    job TEXT PRIMARY KEY,
+    last_started_at TIMESTAMPTZ,
+    last_finished_at TIMESTAMPTZ,
+    last_ok BOOLEAN,
+    last_error TEXT,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    next_run_hint TEXT,
+    detail JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS tarang_hist_underlying (
+    id BIGSERIAL PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    resolution TEXT NOT NULL,
+    bar_at TIMESTAMPTZ NOT NULL,
+    open DOUBLE PRECISION,
+    high DOUBLE PRECISION,
+    low DOUBLE PRECISION,
+    close DOUBLE PRECISION,
+    volume DOUBLE PRECISION
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tarang_hist_und
+    ON tarang_hist_underlying (symbol, resolution, bar_at);
+
+CREATE TABLE IF NOT EXISTS tarang_option_archive (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    symbol TEXT NOT NULL,
+    underlying TEXT,
+    expiry_date DATE NOT NULL,
+    resolution TEXT NOT NULL DEFAULT '30m',
+    settlement_price DOUBLE PRECISION,
+    settlement_time TEXT,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    raw_path TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tarang_option_archive
+    ON tarang_option_archive (symbol, expiry_date, resolution);
+
+CREATE OR REPLACE FUNCTION tarang_forbid_ft_delete()
+RETURNS trigger AS $$
+BEGIN
+    IF OLD.record_type = 'FORWARD_TEST' THEN
+        RAISE EXCEPTION 'forward-test trades cannot be deleted';
+    END IF;
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_tarang_forbid_ft_delete ON tarang_trades;
+CREATE TRIGGER trg_tarang_forbid_ft_delete
+    BEFORE DELETE ON tarang_trades
+    FOR EACH ROW
+    EXECUTE PROCEDURE tarang_forbid_ft_delete();
+
+CREATE OR REPLACE FUNCTION tarang_signal_snapshot_immutable()
+RETURNS trigger AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'tarang_signal_snapshots are append-only';
+    END IF;
+    IF TG_OP = 'UPDATE' THEN
+        RAISE EXCEPTION 'tarang_signal_snapshots cannot be updated';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_tarang_signal_snap_imm ON tarang_signal_snapshots;
+CREATE TRIGGER trg_tarang_signal_snap_imm
+    BEFORE UPDATE OR DELETE ON tarang_signal_snapshots
+    FOR EACH ROW
+    EXECUTE PROCEDURE tarang_signal_snapshot_immutable();
+
+INSERT INTO tarang_settings (key, value)
+VALUES
+    ('telegram_public_signals', 'false'::jsonb),
+    ('telegram_private_chat_id', '{}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+

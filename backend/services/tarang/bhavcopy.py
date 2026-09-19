@@ -42,14 +42,19 @@ def strip_cell(value: Any) -> str:
 def parse_trade_date(raw: str) -> Optional[date]:
     s = strip_cell(raw)
     m = TRADE_DATE_RE.match(s)
-    if not m:
-        return None
-    day = int(m.group(1))
-    mon = MONTHS.get(m.group(2).upper()[:3])
-    year = int(m.group(3))
-    if not mon:
-        return None
-    return date(year, mon, day)
+    if m:
+        day = int(m.group(1))
+        mon = MONTHS.get(m.group(2).upper()[:3])
+        year = int(m.group(3))
+        if not mon:
+            return None
+        return date(year, mon, day)
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def parse_expiry(raw: str) -> Optional[date]:

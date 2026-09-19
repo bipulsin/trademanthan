@@ -476,6 +476,28 @@
       eliq.textContent = JSON.stringify({ dates: liq.dates, sample, note: liq.note || liq.error }, null, 2);
     }
     renderEligibility(h.expiry_eligibility);
+    const s24 = document.getElementById('screener24Box');
+    if (s24) s24.textContent = JSON.stringify(h.screener_24h || {}, null, 2);
+    const pipe = (h.pipeline && h.pipeline.jobs) || [];
+    const pbody = document.getElementById('pipelineBody');
+    if (pbody) {
+      pbody.innerHTML = pipe.length ? pipe.map((j) => `<tr>
+        <td>${j.label || j.id}</td>
+        <td class="tg-muted">${(j.last_success || '').replace('T',' ').slice(0,19) || '—'}</td>
+        <td class="${j.last_ok ? 'tg-fit-yes' : 'tg-fit-no'}">${j.last_ok == null ? '—' : (j.last_ok ? 'yes' : 'no')}</td>
+        <td>${j.fail_count || 0}</td>
+        <td class="tg-muted">${j.next_run || ''}</td>
+        <td>${j.open_data_gaps || 0}</td>
+        <td class="tg-muted">${j.last_error || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="7" class="tg-muted">No job runs yet</td></tr>';
+    }
+    const dr = document.getElementById('deltaReadyBox');
+    if (dr) dr.textContent = JSON.stringify(h.delta_readiness || {}, null, 2);
+    const tg = h.telegram || {};
+    const a = document.getElementById('tgStartLink');
+    if (a && tg.start_link) a.href = tg.start_link;
+    const how = document.getElementById('tgHowTo');
+    if (how && tg.note) how.textContent = tg.note;
     return h;
   }
 
@@ -761,6 +783,51 @@
       } catch (err) {
         status.textContent = String(err.message || err);
       }
+    });
+  }
+  const btnUp = document.getElementById('btnBhavcopyUpload');
+  if (btnUp) {
+    btnUp.addEventListener('click', async () => {
+      const f = document.getElementById('bhavcopyFile');
+      if (!f || !f.files || !f.files[0]) return;
+      const fd = new FormData();
+      fd.append('file', f.files[0]);
+      const status = document.getElementById('statusLine');
+      try {
+        const res = await fetch('/api/tarang/bhavcopy/import', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token()}` },
+          body: fd,
+        });
+        const out = await res.json();
+        status.textContent = res.ok ? `Imported ${out.inserted || 0} rows` : JSON.stringify(out);
+      } catch (err) {
+        status.textContent = String(err.message || err);
+      }
+    });
+  }
+  const btnPoll = document.getElementById('btnTgPoll');
+  if (btnPoll) {
+    btnPoll.addEventListener('click', async () => {
+      const status = document.getElementById('statusLine');
+      try {
+        const out = await api('/api/tarang/telegram/poll-link', { method: 'POST', body: '{}' });
+        document.getElementById('tgBox').textContent = JSON.stringify(out, null, 2);
+        status.textContent = out.linked && out.linked.length ? `Linked ${out.linked.join(',')}` : 'No /start seen yet';
+      } catch (err) {
+        status.textContent = String(err.message || err);
+      }
+    });
+  }
+  const btnTgSave = document.getElementById('btnTgSave');
+  if (btnTgSave) {
+    btnTgSave.addEventListener('click', async () => {
+      const on = document.getElementById('tgPublicSignals').checked;
+      const out = await api('/api/tarang/telegram/settings', {
+        method: 'POST',
+        body: JSON.stringify({ telegram_public_signals: on }),
+      });
+      document.getElementById('statusLine').textContent = out.ok ? 'Telegram setting saved' : JSON.stringify(out);
     });
   }
   document.getElementById('reportMode').addEventListener('change', () => {

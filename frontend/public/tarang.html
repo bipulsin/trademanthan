@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=10" />
+    <link rel="stylesheet" href="tarang.css?v=11" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -59,6 +59,7 @@
                         <button type="button" class="tg-tab" data-tab="report">Trade Report</button>
                         <button type="button" class="tg-tab" data-tab="backtest">Backtest</button>
                         <button type="button" class="tg-tab" data-tab="health">Data health</button>
+                        <button type="button" class="tg-tab" data-tab="pipeline">Pipeline</button>
                     </nav>
 
                     <div id="tab-screener" class="tg-tab-panel">
@@ -227,6 +228,10 @@
                             <pre class="tg-pre" id="backtestCreditGrid">—</pre>
                             <h3 class="tg-section-title" style="margin-top:16px;">Date Wise checksum</h3>
                             <pre class="tg-pre" id="backtestDatewise">—</pre>
+                            <h3 class="tg-section-title" style="margin-top:16px;">Manual Bhavcopy upload</h3>
+                            <p class="tg-note">Drag CSV/XLS if the scheduled MCX downloader is blocked. Does not use Upstox.</p>
+                            <input type="file" id="bhavcopyFile" accept=".csv,.xls,.xlsx,.html,.htm" />
+                            <button type="button" class="tg-btn" id="btnBhavcopyUpload">Upload import</button>
                             <h3 class="tg-section-title" style="margin-top:16px;">First-gate rejections</h3>
                             <div class="tg-table-wrap">
                                 <table class="tg-table">
@@ -269,6 +274,19 @@
                     </div>
 
                     <div id="tab-health" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Screener (last 24h)</h2>
+                            <pre class="tg-pre" id="screener24Box">—</pre>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Telegram (private ops)</h2>
+                            <p class="tg-note" id="tgHowTo">Open the bot, press Start, then Poll link. The bot cannot DM by @username.</p>
+                            <p><a id="tgStartLink" href="#" target="_blank" rel="noopener">Link my chat</a></p>
+                            <label><input type="checkbox" id="tgPublicSignals" /> Also post forward-test signals to @Tradewithcto</label>
+                            <button type="button" class="tg-btn" id="btnTgPoll">I've pressed Start — poll</button>
+                            <button type="button" class="tg-btn" id="btnTgSave">Save setting</button>
+                            <pre class="tg-pre" id="tgBox">—</pre>
+                        </section>
                         <section class="tg-card tg-section">
                             <h2 class="tg-section-title">EOD liquidity (Bhavcopy)</h2>
                             <p class="tg-note">Traded 10–16 |delta| strikes and iron-condor wing availability per date.</p>
@@ -358,12 +376,39 @@
                             <pre class="tg-pre" id="wsBox">—</pre>
                         </section>
                     </div>
+
+                    <div id="tab-pipeline" class="tg-tab-panel" hidden>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Pipeline health</h2>
+                            <p class="tg-note">Last success, next run, failures, open data gaps. Phase 4/5 live orders stay locked.</p>
+                            <div class="tg-table-wrap">
+                                <table class="tg-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Job</th>
+                                            <th>Last success</th>
+                                            <th>Last ok?</th>
+                                            <th>Fails</th>
+                                            <th>Next</th>
+                                            <th>Open gaps</th>
+                                            <th>Error</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pipelineBody"><tr><td colspan="7" class="tg-muted">Load health</td></tr></tbody>
+                                </table>
+                            </div>
+                        </section>
+                        <section class="tg-card tg-section">
+                            <h2 class="tg-section-title">Delta segment readiness</h2>
+                            <pre class="tg-pre" id="deltaReadyBox">—</pre>
+                        </section>
+                    </div>
                 </div>
             </div>
         </main>
     </div>
 
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=10"></script>
+    <script src="tarang.js?v=11"></script>
 </body>
 </html>

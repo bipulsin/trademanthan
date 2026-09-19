@@ -9,6 +9,8 @@ from apscheduler.triggers.cron import CronTrigger
 from backend.services.tarang.calendar import mcx_session_open, should_run_delta_snapshot
 from backend.services.tarang.chain_snapshots import capture_chain_snapshots
 from backend.services.tarang.config import get_risk
+from backend.services.tarang.job_lock import try_job_lock
+from backend.services.tarang.job_runs import record_job_run
 from backend.services.tarang.schema import ensure_tarang_tables
 
 logger = logging.getLogger(__name__)
@@ -16,34 +18,54 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 
 
-def _tick_snapshots_delta(*, force: bool = False) -> None:
-    try:
-        if not force and not should_run_delta_snapshot():
+def _locked(job: str, fn, next_hint: str = "") -> None:
+    with try_job_lock(job) as got:
+        if not got:
             return
+        try:
+            out = fn()
+            record_job_run(job, ok=True, detail=out if isinstance(out, dict) else {}, next_run=next_hint)
+        except Exception as e:
+            logger.exception("tarang job %s failed", job)
+            record_job_run(job, ok=False, detail={"error": str(e)[:200]}, next_run=next_hint)
+            from backend.services.tarang.alerts_telegram import notify_ops
+            from backend.database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                notify_ops(db, kind="job_failed", message=f"Job {job} failed: {e}", dedupe_key=f"job_failed:{job}")
+                db.commit()
+            finally:
+                db.close()
+
+
+def _tick_snapshots_delta(*, force: bool = False) -> None:
+    def _run():
+        if not force and not should_run_delta_snapshot():
+            return {"skipped": "cadence"}
         ensure_tarang_tables()
         out = capture_chain_snapshots(venues=["delta_india"], respect_mcx_session=False)
         logger.info("tarang Delta chain snapshot: %s", out.get("results"))
         _record_expected_misses("delta_india", out)
-    except Exception as e:
-        logger.exception("tarang Delta chain snapshot failed: %s", e)
-        from backend.services.tarang.data_gaps import record_data_gap
+        from backend.services.tarang.heartbeat import beat
 
-        record_data_gap(venue="delta_india", reason="tick_exception", detail={"error": str(e)[:200]})
+        beat("scheduler", {"job": "delta_snapshots"})
+        return out
+
+    _locked("delta_snapshots", _run, "every 15m")
 
 
 def _tick_snapshots_mcx() -> None:
-    try:
+    def _run():
         if not mcx_session_open():
-            return
+            return {"skipped": "mcx_session_closed"}
         ensure_tarang_tables()
         out = capture_chain_snapshots(venues=["upstox_mcx"], respect_mcx_session=True)
         logger.info("tarang MCX chain snapshot: %s", out.get("results"))
         _record_expected_misses("upstox_mcx", out)
-    except Exception as e:
-        logger.exception("tarang MCX chain snapshot failed: %s", e)
-        from backend.services.tarang.data_gaps import record_data_gap
+        return out
 
-        record_data_gap(venue="upstox_mcx", reason="tick_exception", detail={"error": str(e)[:200]})
+    _locked("mcx_snapshots", _run, "in-session 30m")
 
 
 def _record_expected_misses(venue: str, out: dict) -> None:
@@ -64,13 +86,14 @@ def _record_expected_misses(venue: str, out: dict) -> None:
 
 
 def _tick_exit_engine_delta() -> None:
-    try:
+    def _run():
         from backend.services.tarang.lifecycle import run_exit_engine_once
 
         out = run_exit_engine_once(venues=["delta_india"])
         logger.info("tarang ExitEngine delta: %s", out.get("checked"))
-    except Exception as e:
-        logger.exception("tarang ExitEngine delta failed: %s", e)
+        return out
+
+    _locked("exit_engine", _run, "1m")
 
 
 def _tick_exit_engine_mcx() -> None:
@@ -114,14 +137,68 @@ def _tick_feed_health() -> None:
         logger.exception("tarang feed health tick failed: %s", e)
 
 
-def _tick_premarket_token() -> None:
-    try:
+def _tick_premarket_token(escalate: str = "0845") -> None:
+    def _run():
         from backend.services.tarang.token_check import check_upstox_token
 
-        out = check_upstox_token()
-        logger.info("tarang 08:45 Upstox token check expired=%s analytics=%s", out.get("expired"), (out.get("analytics") or {}).get("works_for_mcx"))
-    except Exception as e:
-        logger.exception("tarang premarket token check failed: %s", e)
+        out = check_upstox_token(escalate=escalate)
+        logger.info("tarang Upstox token check escalate=%s expired=%s", escalate, out.get("expired"))
+        return out
+
+    _locked("token_check", _run, "08:45/09:00/09:05 IST")
+
+
+def _tick_mcx_bhavcopy() -> None:
+    from backend.services.tarang.calendar import to_ist
+
+    ist = to_ist()
+    if ist.weekday() >= 5:
+        return
+    if ist.hour > 12 or (ist.hour == 12 and ist.minute > 5):
+        return
+
+    def _run():
+        from backend.services.tarang.mcx_download import run_mcx_bhavcopy_download
+
+        return run_mcx_bhavcopy_download()
+
+    _locked("mcx_bhavcopy", _run, "00:30 then hourly until 12:00 IST")
+
+
+def _tick_delta_candles() -> None:
+    def _run():
+        from backend.services.tarang.delta_history import load_underlying_1h
+
+        return load_underlying_1h()
+
+    _locked("delta_candles", _run, "daily 00:45 IST")
+
+
+def _tick_expired_archiver() -> None:
+    def _run():
+        from backend.services.tarang.delta_history import archive_expired_options
+
+        return archive_expired_options()
+
+    _locked("expired_archiver", _run, "daily 01:15 IST")
+
+
+def _tick_backup() -> None:
+    def _run():
+        from backend.services.tarang.backup import run_backup
+
+        return run_backup(dry_run=False)
+
+    _locked("backups", _run, "daily 02:00 IST")
+
+
+def _tick_weekly_digest() -> None:
+    def _run():
+        from backend.services.tarang.weekly_digest import send_weekly_digest
+
+        return send_weekly_digest()
+
+    _locked("weekly_digest", _run, "Sunday 18:00 IST")
 
 
 def _tick_liquidity_probe() -> None:
@@ -137,14 +214,15 @@ def _tick_liquidity_probe() -> None:
 
 
 def _tick_forward_tests() -> None:
-    try:
+    def _run():
         from backend.services.tarang.lifecycle import run_auto_paper_once
 
         out = run_auto_paper_once()
-        if (out.get("taken") or out.get("forward_tests")):
+        if out.get("taken") or out.get("forward_tests"):
             logger.info("tarang forward-test tick: %s", out)
-    except Exception as e:
-        logger.exception("tarang forward-test tick failed: %s", e)
+        return out
+
+    _locked("screener", _run, "5m")
 
 
 def _tick_watchdog() -> None:
@@ -224,6 +302,73 @@ def start_tarang_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=3600,
+        kwargs={"escalate": "0845"},
+    )
+    sch.add_job(
+        _tick_premarket_token,
+        CronTrigger(hour=9, minute=0, timezone="Asia/Kolkata"),
+        id="tarang_premarket_token_0900",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+        kwargs={"escalate": "0900"},
+    )
+    sch.add_job(
+        _tick_premarket_token,
+        CronTrigger(hour=9, minute=5, timezone="Asia/Kolkata"),
+        id="tarang_premarket_token_0905",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+        kwargs={"escalate": "0905"},
+    )
+    sch.add_job(
+        _tick_mcx_bhavcopy,
+        CronTrigger(minute=30, hour="0-12", day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="tarang_mcx_bhavcopy",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=2400,
+    )
+    sch.add_job(
+        _tick_delta_candles,
+        CronTrigger(hour=0, minute=45, timezone="Asia/Kolkata"),
+        id="tarang_delta_candles",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=7200,
+    )
+    sch.add_job(
+        _tick_expired_archiver,
+        CronTrigger(hour=1, minute=15, timezone="Asia/Kolkata"),
+        id="tarang_expired_archiver",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=7200,
+    )
+    sch.add_job(
+        _tick_backup,
+        CronTrigger(hour=2, minute=0, timezone="Asia/Kolkata"),
+        id="tarang_backup",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=7200,
+    )
+    sch.add_job(
+        _tick_weekly_digest,
+        CronTrigger(day_of_week="sun", hour=18, minute=0, timezone="Asia/Kolkata"),
+        id="tarang_weekly_digest",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=7200,
     )
     sch.add_job(
         _tick_liquidity_probe,

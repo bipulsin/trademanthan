@@ -1227,26 +1227,17 @@ def run_hard_exit_flatten() -> Dict[str, Any]:
 
 
 def check_feed_alerts() -> Dict[str, Any]:
-    """Stale feed / expired Upstox token / kill-switch consecutive losses."""
+    """Stale feed / kill-switch. Token expiry is 08:45/09:00/09:05 IST only (never 03:30 JWT expiry)."""
     ensure_tarang_tables()
-    from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
     from backend.services.tarang.alerts_telegram import notify_critical
     from backend.services.tarang.chain_snapshots import chain_coverage
+    from backend.services.tarang.token_check import should_alert_token
 
     fired = []
     db = SessionLocal()
     try:
-        ux = UpstoxMcxAdapter().health()
-        token_state = ux.get("token") or "unknown"
-        if token_state in ("missing", "expired") or not ux.get("ok"):
-            if token_state in ("missing", "expired"):
-                notify_critical(
-                    db,
-                    kind="upstox_token_expired",
-                    message=f"Upstox token {token_state} — MCX chain snapshots blocked",
-                    dedupe_key="upstox_token_expired",
-                )
-                fired.append("upstox_token_expired")
+        if should_alert_token():
+            pass  # token alerts belong to token_check jobs, not this 10-minute tick
         cov = chain_coverage()
         now = datetime.now(timezone.utc)
         for row in cov.get("underlyings") or []:
@@ -1332,3 +1323,34 @@ def run_auto_paper_once() -> Dict[str, Any]:
         "forward_tests": screen.get("forward_tests") or {},
         "taken": (screen.get("forward_tests") or {}).get("recorded") or [],
     }
+
+
+def exclude_forward_test(trade_id: int, reason: str, actor: str = "USER") -> Dict[str, Any]:
+    """Admin-only: keep the row visible, omit from metrics. Requires a reason."""
+    reason_n = (reason or "").strip()
+    if not reason_n:
+        return {"ok": False, "error": "exclude_reason_required"}
+    ensure_tarang_tables()
+    db = SessionLocal()
+    try:
+        row = db.execute(text("SELECT id, record_type FROM tarang_trades WHERE id = :id"), {"id": trade_id}).mappings().first()
+        if not row:
+            return {"ok": False, "error": "not_found"}
+        db.execute(
+            text(
+                """
+                UPDATE tarang_trades
+                SET excluded = true, exclude_reason = :r, updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {"id": trade_id, "r": reason_n[:500]},
+        )
+        db.commit()
+        return {"ok": True, "trade_id": trade_id, "excluded": True, "exclude_reason": reason_n, "actor": actor}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)[:200]}
+    finally:
+        db.close()
+

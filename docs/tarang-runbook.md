@@ -2,7 +2,7 @@
 
 **Product:** Kosmic Tarang  
 **Internal:** `tarang_*` / `/tarang` / `tarang.html`  
-**Defaults:** Forward-test book (internal `mode=PAPER`), auto live orders locked. **No live orders.** `TARANG_LIVE_ENABLED` defaults false.  
+**Defaults:** Forward-test book (internal `mode=PAPER`), auto live orders locked. **No live orders.** `TARANG_LIVE_ENABLED` defaults false. Phase 4/5 are **not enabled**.  
 **ENERGY contracts:** minis (`CRUDEOILM` / `NATGASMINI`). Full CL/NG stay behind `contractFamily: full`.  
 **Weekend window profiles (`BTC_WEEKEND` / `ETH_WEEKEND`):** **disabled by default.**
 
@@ -38,7 +38,7 @@ These are **Tarang-specific**. Existing algo Delta keys in `backend/routers/algo
 
 After editing paperclip `.env`, recreate the app container so compose re-injects env (deploy with `REBUILD=1` or `docker compose up -d --force-recreate app`).
 
-## Paper lifecycle (how to try on prod)
+## Forward-test lifecycle (how to try on prod)
 
 1. Admin → [Kosmic Tarang](https://www.tradewithcto.com/tarang.html) (Forward test badge).
 2. **Screener** → Run screener → QUALIFIED auto-records a forward-test trade.
@@ -86,9 +86,60 @@ Data-health **Full-chain coverage** shows days of history per underlying and the
 
 If a **mini** width cannot fit the ₹10,000 hard cap, report it — **do not raise the budget**. Full lots remain available only by switching `contractFamily` to `full`.
 
-## Telegram critical alerts
+## Telegram (private ops + optional public signals)
 
-Kinds: exit trigger hit, hard-exit warning, stale feed, Upstox token expired, kill switch (3 consecutive forward-test losses), heartbeat silence > 3 minutes. Dedupe + 15-minute throttle (5 minutes for exit triggers). Set `TARANG_TELEGRAM_CHAT_ID` (and optional `TARANG_TELEGRAM_THREAD_ID`).
+Bot cannot DM by username. **Link my chat:**
+
+1. Open Kosmic Tarang → Data health → **Link my chat** (`https://t.me/Tradewithcto?start=tarang`).
+2. Press **Start** on the bot.
+3. Click **I've pressed Start — poll** (or configure webhook `POST /api/tarang/telegram/webhook`).
+4. Numeric `chat_id` is stored as `tarang_settings.telegram_private_chat_id`.
+
+- **Ops/critical** (token expired, stale feed, kill switch, data gaps, heartbeat, recon, job failure) → **private chat only**.
+- Forward-test signals and weekly digest → private by default; `@Tradewithcto` only if `telegram_public_signals=true`.
+- If `TARANG_TELEGRAM_CHAT_ID` is unset, the stored private chat id is used (never silent-drop of in-app alerts).
+
+## Scheduler (IST) + locks
+
+Each job takes a Postgres advisory lock (`tarang:<job>`). `coalesce=True` + `misfire_grace_time` so a deploy mid-window still catch-up once.
+
+| Job | When | Alert |
+|---|---|---|
+| Delta snapshots | 15m (30m weekday :00/:30) | data_gap |
+| MCX snapshots | in-session :00/:30 | data_gap / token invalid |
+| Screener / FT record | every 5m | — |
+| Exit engine | 1m Delta 24x7; MCX in-session | stale_feed private |
+| Upstox token | **08:45**, escalate **09:00** and **09:05** IST. **Never 03:30 JWT expiry.** | private Telegram + re-auth link |
+| MCX Bhavcopy | 00:30 then hourly to 12:00 weekdays. **No Upstox.** | missing 24h → private |
+| Delta 1h candles | 00:45 IST | — |
+| Expired option archive | 01:15 IST | — |
+| tarang_* backup | 02:00 IST, 30-day retention under `TARANG_BACKUP_DIR` | — |
+| Weekly digest | Sunday 18:00 IST private | digest |
+
+**Manual recovery:** Pipeline tab → last error; `POST /api/tarang/bhavcopy/download`, `/delta/candles/run`, `/delta/archive/run`, `/backup/run?dry_run=true`. Drag-drop CSV on Backtest if MCX HTTP is blocked.
+
+**Restore:** `pg_restore -d $DATABASE_URL --data-only <dump>` — **never DELETE** `tarang_trades` forward-test rows. Chain snapshot storage: ~gzip BYTEA per 30m slot × underlyings; 400-day retention (`risk.chain_snapshots.retention_days`).
+
+## Real-order verification (DO NOT RUN until the operator says so)
+
+Phase 4/5 stay locked. Checklist **only** (not executed):
+
+1. Delta **testnet** first.
+2. Unfillable far-OTM **MCX** limit (must not fill).
+3. Minimum-size supervised spread.
+
+Do **not** enable `TARANG_LIVE_ENABLED`. Do **not** place those orders as part of this follow-up.
+
+## Upstox token refresh
+
+Operator renews the token **manually every day before 09:00 IST**. Tarang never alerts at overnight JWT expiry (~03:30). 08:45 IST check; escalate 09:00 and 09:05 if still invalid. MCX snapshots/screener skipped for invalid token write `tarang_data_gaps`. Bhavcopy downloader does not use Upstox.
+
+## MCX Bhavcopy endpoints
+
+- Daily: `POST https://www.mcxindia.com/backpage.aspx/GetDateWiseBhavCopy` (`Date=YYYYMMDD`, `InstrumentName=OPTFUT|FUTCOM`).
+- Date Wise checksums: `POST .../GetHistoricalDataDetails` (date range, max 365d, **aggregated volumes**, not per-expiry OHLC).
+- **No single expiry date-range bhavcopy.** Admin backfill loops calendar days (`POST /api/tarang/bhavcopy/backfill`).
+- If MCX blocks automation: stop; use drag-and-drop upload.
 
 ## Health checks
 

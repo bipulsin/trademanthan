@@ -154,12 +154,14 @@ def build_report(
     all_closed = list_closed_trades(mode=None, limit=max(limit, 500))
     if profile_id:
         all_closed = [t for t in all_closed if t.get("profile_id") == profile_id.upper()]
-    ft = [t for t in all_closed if _record_type(t) == "FORWARD_TEST"]
-    live = [t for t in all_closed if _record_type(t) == "LIVE"]
+    excluded = [t for t in all_closed if t.get("excluded")]
+    included = [t for t in all_closed if not t.get("excluded")]
+    ft = [t for t in included if _record_type(t) == "FORWARD_TEST"]
+    live = [t for t in included if _record_type(t) == "LIVE"]
     book_u = str(book or mode or "FORWARD_TEST").upper()
     if book_u in ("PAPER", "FORWARD_TEST", "FT"):
         book_u = "FORWARD_TEST"
-        trades = ft
+        trades = [t for t in all_closed if _record_type(t) == "FORWARD_TEST"]
         metrics = compute_metrics(ft)
         blended = False
     elif book_u == "LIVE":
@@ -202,6 +204,7 @@ def build_report(
         "book": book_u,
         "display_book": "Forward test" if book_u == "FORWARD_TEST" else ("Live" if book_u == "LIVE" else "All"),
         "trades": trades,
+        "excluded_visible": excluded,
         "metrics": metrics,
         "metrics_forward_test": ft_m,
         "metrics_live": live_m,

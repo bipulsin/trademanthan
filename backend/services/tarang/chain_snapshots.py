@@ -172,6 +172,20 @@ def capture_chain_snapshots(
                     }
                 )
                 continue
+            if venue == "upstox_mcx":
+                from backend.services.tarang.adapters.upstox_mcx import UpstoxMcxAdapter
+
+                th = UpstoxMcxAdapter().health()
+                if th.get("token") in ("missing", "expired") or th.get("token_expired"):
+                    insert_data_gap(
+                        db,
+                        venue=venue,
+                        profile_id=pid,
+                        reason="upstox_token_invalid_snapshot_skipped",
+                        detail={"token": th.get("token")},
+                    )
+                    results.append({"profile_id": pid, "ok": False, "skipped": "upstox_token_invalid"})
+                    continue
             try:
                 expiries = builder.snapshot_expiries(pid) or [None]
             except Exception as e:

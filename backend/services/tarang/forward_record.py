@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text
 
 from backend.database import SessionLocal
+from backend.services.tarang.code_rev import code_commit, rule_set_version
 from backend.services.tarang.config import get_events, get_risk
 from backend.services.tarang.gates import gate_event_blackout, gate_portfolio_limit
 from backend.services.tarang.labels import FILL_SIMULATED, RECORD_FORWARD_TEST
@@ -60,7 +61,8 @@ def build_immutable_snapshot(payload: Dict[str, Any], *, extra: Optional[Dict[st
         "lots_or_contracts": payload.get("lots_or_contracts"),
         "budget_inr": payload.get("budget_inr"),
         "candidate_risk_inr": payload.get("candidate_risk_inr"),
-        "rule_set_version": (get_risk().get("version") or 1),
+        "rule_set_version": rule_set_version(),
+        "code_commit": code_commit(),
         "underlying": payload.get("underlying"),
         "expiry": payload.get("expiry"),
         "structure": payload.get("structure"),
