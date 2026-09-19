@@ -426,7 +426,7 @@ class LeftMenu {
                     <span>Iron Condor</span></a>
                 </li>
                 <li class="nav-item nav-item-admin" data-page="tarang.html" style="display: none;" title="Administrator only through Phase 2">
-                    <a class="nav-item-link" href="tarang.html"><i class="fas fa-wave-square" style="color:#2dd4bf;"></i>
+                    <a class="nav-item-link" href="tarang.html"><i class="fas fa-wave-square" style="color:#3dba7a;"></i>
                     <span>Kosmic Tarang</span></a>
                 </li>
                 <li class="nav-item" data-page="pivot-breakout.html">

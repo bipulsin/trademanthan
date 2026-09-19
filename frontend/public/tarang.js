@@ -1,4 +1,4 @@
-/* Kosmic Tarang Phase 1 — data health UI */
+/* Kosmic Tarang Phase 1 — data health UI (charcoal/green shell) */
 (function () {
   const token = () => localStorage.getItem('trademanthan_token') || '';
 
@@ -28,18 +28,34 @@
     return `$${Number(row.max_loss_zero_credit_usd).toFixed(2)}`;
   }
 
+  function setModeBadges(mode, auto) {
+    const modeText = mode || 'PAPER';
+    const autoText = auto ? 'AUTO ON' : 'AUTO OFF';
+    ['modeBadge', 'modeBadgeMobile'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = modeText;
+      el.classList.toggle('tg-badge-paper', String(modeText).toUpperCase() === 'PAPER');
+    });
+    const autoEl = document.getElementById('autoBadge');
+    if (autoEl) {
+      autoEl.textContent = autoText;
+      autoEl.classList.toggle('tg-badge-warn', !!auto);
+    }
+  }
+
   function renderFeeds(feeds) {
     const host = document.getElementById('feedGrid');
     host.innerHTML = '';
     for (const [name, f] of Object.entries(feeds || {})) {
       const ok = !!f.ok || !!f.public_ok;
       const card = document.createElement('div');
-      card.className = 'tarang-card';
+      card.className = 'tg-feed-card';
       const auth = f.auth || {};
       card.innerHTML = `
         <h3>${name}</h3>
-        <div><span class="tarang-badge ${ok ? 'tarang-badge-ok' : 'tarang-badge-bad'}">${f.status || (ok ? 'ok' : 'fail')}</span></div>
-        <pre class="tarang-pre" style="margin-top:8px;">${JSON.stringify({ ...f, auth: auth }, null, 2)}</pre>
+        <div><span class="tg-inline-badge ${ok ? 'tg-badge-ok' : 'tg-badge-bad'}">${f.status || (ok ? 'ok' : 'fail')}</span></div>
+        <pre class="tg-pre" style="margin-top:8px;">${JSON.stringify({ ...f, auth: auth }, null, 2)}</pre>
       `;
       host.appendChild(card);
     }
@@ -49,17 +65,17 @@
     const body = document.getElementById('lossBody');
     const rows = (table && table.rows) || [];
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="5" class="tarang-muted">No rows</td></tr>';
+      body.innerHTML = '<tr><td colspan="5" class="tg-muted">No rows</td></tr>';
       return;
     }
     body.innerHTML = rows.map((r) => {
       const fit = r.currency === 'INR' ? r.fits_energy_budget : r.fits_crypto_budget;
       return `<tr>
-        <td>${r.underlying} <span class="tarang-muted">(${r.profile_id})</span></td>
+        <td>${r.underlying} <span class="tg-muted">(${r.profile_id})</span></td>
         <td>${r.width_label}</td>
         <td>${fmtLoss(r)}</td>
         <td>₹${Number(r.budget_ref_inr).toLocaleString('en-IN')}</td>
-        <td class="${fit ? 'tarang-fit-yes' : 'tarang-fit-no'}">${fit ? 'Yes' : 'No'}</td>
+        <td class="${fit ? 'tg-fit-yes' : 'tg-fit-no'}">${fit ? 'Yes' : 'No'}</td>
       </tr>`;
     }).join('');
   }
@@ -69,8 +85,7 @@
     status.textContent = 'Loading health…';
     try {
       const h = await api('/api/tarang/health');
-      document.getElementById('modeBadge').textContent = h.mode || 'PAPER';
-      document.getElementById('autoBadge').textContent = h.auto ? 'AUTO ON' : 'AUTO OFF';
+      setModeBadges(h.mode, h.auto);
       const banner = document.getElementById('tokenBanner');
       if (h.token_expired) {
         banner.hidden = false;

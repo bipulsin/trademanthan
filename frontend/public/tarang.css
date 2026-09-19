@@ -1,40 +1,381 @@
-/* Kosmic Tarang — Phase 1 data-health */
-.tarang-page .tarang-shell { padding: 16px 20px 40px; max-width: 1100px; }
-.tarang-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
-.tarang-toolbar h1 { margin:0; font-size:1.35rem; }
-.tarang-muted { color: var(--text-muted, #94a3b8); font-size:0.85rem; }
-.tarang-badges { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-.tarang-badge {
-  display:inline-block; padding:4px 10px; border-radius:4px; font-size:0.75rem; font-weight:700;
-  letter-spacing:0.04em; background:#1e293b; color:#e2e8f0; border:1px solid #334155;
+/**
+ * Kosmic Tarang — charcoal / green-black theme (parity with Stock Options)
+ */
+
+body.tarang-page,
+body.tarang-page[data-theme="dark"],
+body.tarang-page.theme-page {
+    --bg0: #0c1210;
+    --bg1: #121a17;
+    --bg2: #1a2621;
+    --line: rgba(180, 210, 190, 0.14);
+    --text: #e7f0ea;
+    --muted: #8fa398;
+    --accent: #3dba7a;
+    --accent-dim: #2a8f5c;
+    --danger: #e06b6b;
+    --warn: #d4a017;
+    --card: rgba(22, 34, 29, 0.92);
+    --card-inner: #121a17;
+    --font-display: "Syne", sans-serif;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --theme-bg: transparent;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: var(--text);
+    --theme-muted: var(--muted);
+    --theme-accent: var(--accent);
+    --theme-accent-hover: #4fd48c;
+    --theme-success: var(--accent);
+    --theme-danger: var(--danger);
+
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: var(--line);
+    --left-menu-accent: var(--accent);
+    --left-menu-text: var(--text);
+    --left-menu-muted: var(--muted);
+
+    margin: 0;
+    min-height: 100%;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    background-color: var(--bg0) !important;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent,
+            transparent 12px,
+            rgba(143, 163, 152, 0.045) 12px,
+            rgba(143, 163, 152, 0.045) 13px
+        ),
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+        linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
 }
-.tarang-badge-paper { background:#0f766e; border-color:#14b8a6; color:#ecfdf5; }
-.tarang-badge-warn { background:#7c2d12; border-color:#ea580c; color:#ffedd5; }
-.tarang-badge-ok { background:#14532d; border-color:#22c55e; color:#dcfce7; }
-.tarang-badge-bad { background:#7f1d1d; border-color:#ef4444; color:#fee2e2; }
-.tarang-btn {
-  border:1px solid #475569; background:#1e293b; color:#e2e8f0; padding:6px 12px;
-  border-radius:4px; cursor:pointer; font-size:0.82rem;
+
+body.tarang-page .main-content-area,
+body.tarang-page .right-panel {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    flex: 1;
+    min-width: 0;
 }
-.tarang-btn-primary { background:#0ea5e9; border-color:#0284c7; color:#0f172a; font-weight:600; }
-.tarang-section { margin: 18px 0 24px; }
-.tarang-section h2 { font-size:1rem; margin:0 0 10px; }
-.tarang-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:12px; }
-.tarang-card {
-  border:1px solid #334155; border-radius:6px; padding:12px 14px; background: rgba(15,23,42,0.45);
+
+body.tarang-page .tg-page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    width: 100%;
+    box-sizing: border-box;
 }
-.tarang-card h3 { margin:0 0 6px; font-size:0.9rem; }
-.tarang-pre {
-  margin:0; padding:12px; border-radius:6px; border:1px solid #334155;
-  background: rgba(15,23,42,0.55); font-size:0.78rem; overflow:auto; white-space:pre-wrap;
+
+body.tarang-page .settings-content {
+    max-width: none;
+    padding: 0;
 }
-.tarang-table-wrap { overflow:auto; border:1px solid #334155; border-radius:6px; }
-.tarang-t { width:100%; border-collapse:collapse; font-size:0.82rem; }
-.tarang-t th, .tarang-t td { padding:8px 10px; border-bottom:1px solid #334155; text-align:left; }
-.tarang-t th { background: rgba(30,41,59,0.8); font-weight:600; }
-.tarang-banner {
-  margin-bottom:12px; padding:10px 12px; border-radius:6px;
-  background:#7c2d12; border:1px solid #ea580c; color:#ffedd5; font-size:0.85rem;
+
+body.tarang-page .settings-header,
+body.tarang-page .tg-page-header {
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.25rem;
+    padding: 0 0 8px;
 }
-.tarang-fit-yes { color:#4ade80; font-weight:600; }
-.tarang-fit-no { color:#f87171; font-weight:600; }
+
+body.tarang-page .settings-title,
+body.tarang-page .tg-page-title {
+    font-family: var(--font-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px !important;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem 0.55rem;
+}
+
+body.tarang-page .settings-title i,
+body.tarang-page .tg-page-title i {
+    color: var(--accent) !important;
+}
+
+body.tarang-page .settings-subtitle,
+body.tarang-page .tg-subtitle {
+    color: var(--muted) !important;
+    font-family: var(--font-body) !important;
+    font-size: 0.95rem !important;
+    line-height: 1.4;
+    margin: 0 !important;
+    max-width: none;
+}
+
+/* Web hamburger topbar — match stockOptions */
+body.tarang-page .tm-web-topbar {
+    background: linear-gradient(180deg, rgba(18, 26, 23, 0.96), rgba(12, 18, 16, 0.92));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+    height: 72px;
+}
+
+body.tarang-page .tm-web-topbar-brand {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.65rem, 3.2vw, 2.35rem);
+    letter-spacing: -0.03em;
+    color: #e7f0ea;
+    line-height: 1.1;
+}
+
+body.tarang-page .tm-web-topbar-logo {
+    height: 44px;
+    max-width: 180px;
+}
+
+body.tarang-page .tm-web-hamburger {
+    width: 52px;
+    height: 52px;
+    background: var(--bg2);
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 1.45rem;
+}
+
+body.tarang-page .tm-web-hamburger:hover,
+body.tarang-page .tm-web-hamburger[aria-expanded="true"] {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.45);
+}
+
+body.tarang-page .mobile-title-bar {
+    background: linear-gradient(135deg, #0e1613, #1a2621) !important;
+    border-bottom: 1px solid var(--line);
+}
+
+body.tarang-page .mobile-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text) !important;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+body.tarang-page .mobile-logo {
+    height: 28px;
+    width: auto;
+}
+
+.tg-header-aside {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.tg-inline-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    vertical-align: middle;
+    line-height: 1.35;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--muted);
+}
+
+.tg-badge-paper {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.5);
+    color: var(--accent);
+}
+
+.tg-badge-warn {
+    background: rgba(212, 160, 23, 0.16);
+    border-color: rgba(212, 160, 23, 0.45);
+    color: var(--warn);
+}
+
+.tg-badge-ok {
+    background: rgba(61, 186, 122, 0.2);
+    border-color: rgba(61, 186, 122, 0.45);
+    color: #8ef0b8;
+}
+
+.tg-badge-bad {
+    background: rgba(224, 107, 107, 0.18);
+    border-color: rgba(224, 107, 107, 0.45);
+    color: #f5a8a8;
+}
+
+.tg-btn {
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    padding: 0.45rem 0.95rem;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 0.88rem;
+    font-family: var(--font-body);
+    font-weight: 600;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tg-btn:hover {
+    background: rgba(61, 186, 122, 0.12);
+    border-color: rgba(61, 186, 122, 0.35);
+}
+
+.tg-btn-primary {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #062015;
+}
+
+.tg-btn-primary:hover {
+    background: #4fd48c;
+    border-color: #4fd48c;
+    color: #062015;
+}
+
+.tg-note,
+.tg-muted {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.tg-banner {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(212, 160, 23, 0.14);
+    border: 1px solid rgba(212, 160, 23, 0.4);
+    color: #f0d78c;
+    font-size: 0.9rem;
+}
+
+.tg-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 14px 16px 18px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+
+.tg-section {
+    margin: 0 0 1rem;
+}
+
+.tg-section-title {
+    margin: 0 0 10px;
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.01em;
+}
+
+.tg-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+}
+
+.tg-feed-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: var(--card-inner);
+}
+
+.tg-feed-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.92rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text);
+}
+
+.tg-pre {
+    margin: 0;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card-inner);
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: var(--text);
+}
+
+.tg-table-wrap {
+    overflow-x: auto;
+}
+
+.tg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+.tg-table th,
+.tg-table td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+.tg-table th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: var(--bg2);
+}
+
+.tg-table tbody tr:hover {
+    background: rgba(61, 186, 122, 0.06);
+}
+
+.tg-fit-yes {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.tg-fit-no {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+@media (max-width: 768px) {
+    body.tarang-page .tg-page {
+        padding: 16px 12px 40px;
+    }
+
+    body.tarang-page .tg-page-header {
+        flex-direction: column;
+    }
+
+    body.tarang-page .settings-subtitle,
+    body.tarang-page .tg-subtitle {
+        white-space: normal;
+    }
+}
