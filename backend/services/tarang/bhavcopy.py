@@ -203,18 +203,18 @@ def _row_key(r: Dict[str, Any]) -> Tuple:
 
 
 def import_bhavcopy_text(
-    text: str,
+    csv_text: str,
     *,
     filename: str,
     copy_to_raw: bool = True,
 ) -> Dict[str, Any]:
     ensure_tarang_tables()
-    rows = parse_bhavcopy_csv(text, source_filename=filename)
+    rows = parse_bhavcopy_csv(csv_text, source_filename=filename)
     if copy_to_raw and filename:
         RAW_DIR.mkdir(parents=True, exist_ok=True)
         dest = RAW_DIR / Path(filename).name
         if not dest.exists():
-            dest.write_text(text, encoding="utf-8")
+            dest.write_text(csv_text, encoding="utf-8")
     started = datetime.now(timezone.utc)
     db = SessionLocal()
     inserted = 0
