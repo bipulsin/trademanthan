@@ -1,0 +1,92 @@
+{
+  "ran_at_utc": "2026-09-19T06:59:46.176107+00:00",
+  "token_meta": {
+    "token_len": 311,
+    "jwt_exp": 1789768800,
+    "now_unix": 1789801185,
+    "token_expired": true
+  },
+  "master_rows": 123220,
+  "picked_count": 6,
+  "picked": [
+    {
+      "bucket": "CL",
+      "instrument_key": "MCX_FO|584953",
+      "trading_symbol": "CRUDEOILM 12700 CE 15 OCT 26",
+      "instrument_type": "CE",
+      "expiry": 1792088999000,
+      "strike_price": 12700.0,
+      "lot_size": 10,
+      "segment": "MCX_FO"
+    },
+    {
+      "bucket": "CL",
+      "instrument_key": "MCX_FO|584954",
+      "trading_symbol": "CRUDEOILM 12750 CE 15 OCT 26",
+      "instrument_type": "CE",
+      "expiry": 1792088999000,
+      "strike_price": 12750.0,
+      "lot_size": 10,
+      "segment": "MCX_FO"
+    },
+    {
+      "bucket": "CL",
+      "instrument_key": "MCX_FO|584955",
+      "trading_symbol": "CRUDEOILM 12800 CE 15 OCT 26",
+      "instrument_type": "CE",
+      "expiry": 1792088999000,
+      "strike_price": 12800.0,
+      "lot_size": 10,
+      "segment": "MCX_FO"
+    },
+    {
+      "bucket": "NG",
+      "instrument_key": "MCX_FO|584827",
+      "trading_symbol": "NATURALGAS 130 CE 20 NOV 26",
+      "instrument_type": "CE",
+      "expiry": 1795199399000,
+      "strike_price": 130.0,
+      "lot_size": 1250,
+      "segment": "MCX_FO"
+    },
+    {
+      "bucket": "NG",
+      "instrument_key": "MCX_FO|584828",
+      "trading_symbol": "NATURALGAS 130 PE 20 NOV 26",
+      "instrument_type": "PE",
+      "expiry": 1795199399000,
+      "strike_price": 130.0,
+      "lot_size": 1250,
+      "segment": "MCX_FO"
+    },
+    {
+      "bucket": "NG",
+      "instrument_key": "MCX_FO|584872",
+      "trading_symbol": "NATGASMINI 130 PE 20 NOV 26",
+      "instrument_type": "PE",
+      "expiry": 1795199399000,
+      "strike_price": 130.0,
+      "lot_size": 250,
+      "segment": "MCX_FO"
+    }
+  ],
+  "greek_http_status": 401,
+  "greek_status": "error",
+  "greek_error": "HTTP 401",
+  "greek_errors": [
+    {
+      "errorCode": "UDAPI100050",
+      "message": "Invalid token used to access API",
+      "propertyPath": null,
+      "invalidValue": null,
+      "error_code": "UDAPI100050",
+      "property_path": null,
+      "invalid_value": null
+    }
+  ],
+  "per_key": [],
+  "non_null_iv_count": 0,
+  "non_null_delta_count": 0,
+  "iv_greeks_non_null": false,
+  "verdict": "BLOCKED_EXPIRED_UPSTOX_TOKEN"
+}
