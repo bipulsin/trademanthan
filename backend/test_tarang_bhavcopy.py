@@ -3,7 +3,21 @@ from __future__ import annotations
 
 from datetime import date
 
-from backend.services.tarang.backtest import INTRADAY_EOD_MSG, mcx_entry_dte_ok, run_eod_backtest
+from backend.services.tarang.backtest import (
+    INTRADAY_EOD_MSG,
+    cycle_is_expired,
+    eod_iv_gate,
+    first_entry_reject,
+    iv_history_warmup,
+    mcx_entry_dte_ok,
+    run_eod_backtest,
+)
+from backend.services.tarang.eod_reconstruct import (
+    match_futures_underlying,
+    put_call_parity_F,
+    reconstruct_slice,
+    years_to_expiry,
+)
 from backend.services.tarang.bhavcopy import (
     checksum_bhavcopy_vs_datewise,
     import_report_from_rows,
@@ -14,7 +28,6 @@ from backend.services.tarang.bhavcopy import (
     strip_cell,
 )
 from backend.services.tarang.config import get_profiles
-from backend.services.tarang.eod_reconstruct import reconstruct_slice, years_to_expiry
 
 TINY_CSV = """Date,Instrument Name,Symbol,Expiry Date,Option Type,Strike Price,Open,High,Low,Close,Previous Close,Volume(Lots),Volume(In 000's),Value(Lacs),Open Interest(Lots)
 "18 Sep 2026","OPTFUT","CRUDEOILM    ","17SEP2026","CE","5400","","","","0.05","0.05","0","0.000 BBL  ","0.00","0"
@@ -182,10 +195,109 @@ def test_dte_window_7_35():
 
 def test_intraday_not_on_eod_message():
     assert "INTRADAY cannot be tested on EOD" in INTRADAY_EOD_MSG
-    # run_eod_backtest needs DB tables; if empty still returns the note
     try:
-        out = run_eod_backtest()
+        out = run_eod_backtest(today=date(2026, 9, 19))
         assert INTRADAY_EOD_MSG in out["intraday_note"]
         assert out["label"] == "MCX EOD-reconstructed, modelled fills"
     except Exception:
         pass
+
+
+def test_expired_only_cycle_count_excludes_open_oct_nov():
+    today = date(2026, 9, 19)
+    assert cycle_is_expired(date(2026, 9, 17), today) is True
+    assert cycle_is_expired(date(2026, 8, 17), today) is True
+    assert cycle_is_expired(date(2026, 10, 15), today) is False
+    assert cycle_is_expired(date(2026, 11, 17), today) is False
+    open_exps = [date(2026, 10, 15), date(2026, 11, 17)]
+    independent = [e for e in [date(2026, 8, 17), date(2026, 9, 17), *open_exps] if cycle_is_expired(e, today)]
+    assert date(2026, 10, 15) not in independent
+    assert date(2026, 11, 17) not in independent
+    assert len(independent) == 2
+
+
+def test_first_reject_gate_order():
+    assert first_entry_reject(has_underlying=False, n_quotes=10, dte=20) == "data"
+    assert first_entry_reject(has_underlying=True, n_quotes=0, dte=20) == "data"
+    assert first_entry_reject(has_underlying=True, n_quotes=4, dte=6) == "dte_window"
+    assert first_entry_reject(has_underlying=True, n_quotes=4, dte=36) == "dte_window"
+    assert first_entry_reject(has_underlying=True, n_quotes=4, dte=20, iv_passed=False) == "iv_gate"
+    assert first_entry_reject(has_underlying=True, n_quotes=4, dte=20, iv_passed=True, structure_error="no_PE_short") == "liquidity"
+    assert first_entry_reject(has_underlying=True, n_quotes=4, dte=20, iv_passed=True, structure_error="no_CE_long") == "traded_wings"
+    assert first_entry_reject(
+        has_underlying=True, n_quotes=4, dte=20, iv_passed=True, credit=0.0, width=10.0
+    ) == "min_credit"
+    assert first_entry_reject(
+        has_underlying=True, n_quotes=4, dte=20, iv_passed=True, credit=3.0, width=10.0, units=0
+    ) == "budget"
+    assert first_entry_reject(
+        has_underlying=True, n_quotes=4, dte=20, iv_passed=True, credit=3.0, width=10.0, units=1, fee_ok=False
+    ) == "fees"
+    assert first_entry_reject(
+        has_underlying=True, n_quotes=4, dte=20, iv_passed=True, credit=3.0, width=10.0, units=1, fee_ok=True
+    ) is None
+
+
+def test_futures_match_closest_parity_forward():
+    parity = put_call_parity_F(
+        [{"strike": 5400, "close": 80, "traded": True}],
+        [{"strike": 5400, "close": 20, "traded": True}],
+    )
+    # F ≈ 5400 + 80 - 20 = 5460
+    assert abs(parity - 5460) < 1e-9
+    futs = [
+        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 8, 17), "close": 5300, "option_type": "FUT"},
+        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 9, 17), "close": 5455, "option_type": "FUT"},
+        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 11, 17), "close": 5600, "option_type": "FUT"},
+    ]
+    m = match_futures_underlying(parity, futs, option_expiry=date(2026, 10, 15))
+    assert m["estimated"] is False
+    assert m["fut_expiry"] == date(2026, 9, 17)
+    assert m["source"] == "futcom_closest_parity"
+    none = match_futures_underlying(parity, [], option_expiry=date(2026, 10, 15))
+    assert none["estimated"] is True
+    assert none["F"] == parity
+    rec = reconstruct_slice(
+        [
+            {
+                "option_type": "CE",
+                "strike": 5400,
+                "close": 80,
+                "traded": True,
+                "volume_lots": 20,
+                "oi_lots": 10,
+                "trade_date": date(2026, 8, 1),
+                "expiry_date": date(2026, 10, 15),
+            },
+            {
+                "option_type": "PE",
+                "strike": 5400,
+                "close": 20,
+                "traded": True,
+                "volume_lots": 20,
+                "oi_lots": 10,
+                "trade_date": date(2026, 8, 1),
+                "expiry_date": date(2026, 10, 15),
+            },
+        ],
+        futures_for_date=futs,
+    )
+    assert rec[0]["underlying_fut_expiry"] == date(2026, 9, 17)
+    assert rec[0]["underlying_estimated"] is False
+
+
+def test_warmup_iv_vs_rv_skips_percentile():
+    assert iv_history_warmup(59) is True
+    assert iv_history_warmup(60) is False
+    warm = eod_iv_gate(0.40, 0.30, [0.2] * 10, relative_min=0.10)
+    assert warm["warmup"] is True
+    assert warm["passed"] is True
+    warm_fail = eod_iv_gate(0.31, 0.30, [0.2] * 10, relative_min=0.10)
+    assert warm_fail["passed"] is False
+    assert warm_fail["gate"] == "iv_gate"
+    full_hist = [0.20 + i * 0.001 for i in range(60)]
+    full = eod_iv_gate(0.40, 0.30, full_hist, min_percentile=50.0, relative_min=0.10)
+    assert full["warmup"] is False
+    low_pct = eod_iv_gate(0.10, 0.05, full_hist, min_percentile=50.0, relative_min=0.10)
+    assert low_pct["passed"] is False
+    assert low_pct["mode"] == "percentile"

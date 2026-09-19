@@ -288,6 +288,9 @@ CREATE TABLE IF NOT EXISTS tarang_hist_eod (
     greeks_source TEXT,
     underlying_price DOUBLE PRECISION,
     underlying_source TEXT,
+    underlying_fut_symbol TEXT,
+    underlying_fut_expiry DATE,
+    underlying_estimated BOOLEAN,
     reconstruction_run_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -304,4 +307,7 @@ ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS greeks_source TEXT;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_price DOUBLE PRECISION;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_source TEXT;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS reconstruction_run_id TEXT;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_fut_symbol TEXT;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_fut_expiry DATE;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_estimated BOOLEAN;
 

@@ -494,23 +494,52 @@
     if (!msg) return;
     const label = bt.label || (bt.source === 'mcx_eod' ? 'MCX EOD-reconstructed, modelled fills' : '');
     const nTrades = (bt.metrics && bt.metrics.count) || (bt.trades || []).length || 0;
-    const cycles = (bt.metrics && bt.metrics.expiry_cycles) || bt.expiry_cycles || 0;
+    const nPess = (bt.metrics && bt.metrics.count_pessimistic);
+    const cycles = (bt.metrics && bt.metrics.independent_cycles) || (bt.independent_cycles || []).length || bt.expiry_cycles || 0;
+    const openN = (bt.metrics && bt.metrics.open_cycles_excluded) || (bt.open_cycles_excluded || []).length || 0;
     if (bt.insufficient_data) {
       msg.textContent = bt.message || 'Insufficient data.';
       msg.classList.add('tg-fit-no');
     } else {
-      msg.textContent = `${label ? label + '. ' : ''}Expiry cycles: ${cycles}. Trades: ${nTrades}. ${bt.intraday_note || ''} ${bt.note || ''}`;
+      msg.textContent = `${label ? label + '. ' : ''}Independent (expired) cycles: ${cycles}. Open excluded: ${openN}. Trades (base): ${nTrades}${nPess != null ? `; pessimistic: ${nPess}` : ''}. ${bt.intraday_note || ''} ${bt.note || ''}`;
       msg.classList.remove('tg-fit-no');
     }
-    const m = bt.metrics || {};
     const gateHidden = bt.show_go_live_gate === false || nTrades < (bt.go_live_gate_hidden_until_trades || 40);
     metrics.innerHTML = `
       <div class="tg-metric"><span>Label</span><strong>${label || 'Snapshot replay'}</strong></div>
-      <div class="tg-metric"><span>Expiry cycles</span><strong>${cycles}</strong></div>
-      <div class="tg-metric"><span>Trades</span><strong>${nTrades}</strong></div>
-      <div class="tg-metric"><span>Fill mode</span><strong>${bt.fill_mode || '—'}</strong></div>
+      <div class="tg-metric"><span>Independent cycles</span><strong>${cycles}</strong></div>
+      <div class="tg-metric"><span>Open excluded</span><strong>${openN}</strong></div>
+      <div class="tg-metric"><span>Trades (base)</span><strong>${nTrades}</strong></div>
+      <div class="tg-metric"><span>Trades (pessimistic)</span><strong>${nPess != null ? nPess : '—'}</strong></div>
       ${gateHidden ? '' : `<div class="tg-metric"><span>Go-live gate</span><strong>${bt.go_live_gate || 'n/a'}</strong></div>`}
     `;
+    const cycBody = document.getElementById('backtestCycles');
+    if (cycBody) {
+      const cyc = [...(bt.independent_cycles || []).map((c) => ({...c, inResults: 'Yes'})), ...(bt.open_cycles_excluded || []).map((c) => ({...c, inResults: 'No'}))];
+      cycBody.innerHTML = cyc.length ? cyc.map((c) => `<tr>
+        <td>${c.symbol || ''}</td>
+        <td>${c.expiry || ''}</td>
+        <td>${c.status || ''}</td>
+        <td class="${c.inResults === 'Yes' ? 'tg-fit-yes' : 'tg-fit-no'}">${c.inResults}</td>
+      </tr>`).join('') : '<tr><td colspan="4" class="tg-muted">No cycles</td></tr>';
+    }
+    const sumBody = document.getElementById('backtestRejSummary');
+    if (sumBody) {
+      const sum = bt.rejection_summary || {};
+      const keys = Object.keys(sum);
+      sumBody.innerHTML = keys.length ? keys.map((k) => `<tr><td>${k}</td><td>${sum[k]}</td></tr>`).join('') : '<tr><td colspan="2" class="tg-muted">No rejections</td></tr>';
+    }
+    const logBody = document.getElementById('backtestRejLog');
+    if (logBody) {
+      const log = (bt.rejection_log || []).slice(0, 250);
+      logBody.innerHTML = log.length ? log.map((r) => `<tr>
+        <td>${r.trade_date || ''}</td>
+        <td>${r.expiry || ''}</td>
+        <td>${r.gate || ''}</td>
+        <td>${r.dte != null ? r.dte : ''}</td>
+        <td class="tg-muted">${r.detail || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="5" class="tg-muted">—</td></tr>';
+    }
     const liq = document.getElementById('eodLiqBox');
     if (liq && bt.intraday_note) {
       liq.textContent = bt.intraday_note;
