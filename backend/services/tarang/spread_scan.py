@@ -34,7 +34,7 @@ def _chain_from_payload(profile_id: str, venue: str, underlying: str, expiry: st
     for q in payload.get("quotes") or []:
         if not isinstance(q, dict):
             continue
-            quotes.append(
+        quotes.append(
             OptionQuote(
                 instrument_key=str(q.get("instrument_key") or ""),
                 symbol=str(q.get("symbol") or ""),

@@ -8,7 +8,7 @@ from backend.services.tarang.alerts_telegram import OPS_KINDS, _destinations
 from backend.services.tarang.mcx_download import AUTOMATION_ALLOWED
 from backend.services.tarang.mcx_expiry_reminder import download_span, reminder_lines
 from backend.services.tarang.rv import realized_vol_20d, realized_vol_hourly_20d, SYMBOL_FOR_PROFILE
-from backend.services.tarang.spread_scan import conservative_credit
+from backend.services.tarang.spread_scan import _chain_from_payload, conservative_credit
 
 
 def test_gate_rv_is_daily_not_hourly():
@@ -50,6 +50,36 @@ def test_archive_and_expiry_kinds_are_ops_private():
     ), patch("backend.services.tarang.alerts_telegram.public_chat_id", return_value="@Tradewithcto"):
         dests = _destinations(db, "mcx_expiry_download_reminder")
     assert dests == ["111"]
+
+
+def test_chain_from_payload_appends_dict_quotes():
+    chain = _chain_from_payload(
+        "BTC",
+        "delta_india",
+        "BTCUSD",
+        "2026-09-25",
+        {
+            "quotes": [
+                {
+                    "instrument_key": "C-BTC-100000-250925",
+                    "symbol": "C-BTC-100000-250925",
+                    "strike": 100000,
+                    "right": "C",
+                    "bid": 10,
+                    "ask": 12,
+                    "mid": 11,
+                    "delta": -0.12,
+                    "contract_value": 0.001,
+                }
+            ]
+        },
+        115000,
+        1,
+        50,
+    )
+    assert len(chain.quotes) == 1
+    assert chain.quotes[0].strike == 100000
+    assert chain.quotes[0].delta == -0.12
 
 
 def test_reminder_lines_empty_when_no_expiry_match():
