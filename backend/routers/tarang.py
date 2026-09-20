@@ -561,6 +561,34 @@ def tarang_delta_archive(_user: User = Depends(_require_admin)) -> Dict[str, Any
     return archive_expired_options()
 
 
+@router.get("/rv-compare")
+def tarang_rv_compare(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.rv import rv_compare, rv_for_profile
+
+    return {
+        "gate_uses": "daily_close_to_close",
+        "gate_rv": {p: rv_for_profile(p) for p in ("BTC", "ETH", "CL", "NG")},
+        "btc": rv_compare("BTCUSD"),
+        "eth": rv_compare("ETHUSD"),
+        "crudeoilm": rv_compare("CRUDEOILM"),
+        "natgasmini": rv_compare("NATGASMINI"),
+    }
+
+
+@router.get("/spreads/delta-scan")
+def tarang_delta_spread_scan(live: bool = False, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.spread_scan import scan_latest_delta_window
+
+    return scan_latest_delta_window(live=live)
+
+
+@router.post("/mcx/futures-candles/run")
+def tarang_mcx_futures_candles(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.mcx_futures_candles import load_mcx_futures_daily
+
+    return load_mcx_futures_daily()
+
+
 @router.post("/backup/run")
 def tarang_backup_run(dry_run: bool = True, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
     return run_backup(dry_run=dry_run)

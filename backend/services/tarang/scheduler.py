@@ -174,7 +174,25 @@ def _tick_expired_archiver() -> None:
 
         return archive_expired_options()
 
-    _locked("expired_archiver", _run, "daily 01:15 IST")
+    _locked("expired_archiver", _run, "17:45 IST after expiry + 01:15 IST")
+
+
+def _tick_mcx_futures_candles() -> None:
+    def _run():
+        from backend.services.tarang.mcx_futures_candles import load_mcx_futures_daily
+
+        return load_mcx_futures_daily()
+
+    _locked("mcx_futures_candles", _run, "09:10 IST weekdays (Upstox hist, after token check)")
+
+
+def _tick_mcx_expiry_reminder() -> None:
+    def _run():
+        from backend.services.tarang.mcx_expiry_reminder import run_mcx_expiry_reminder
+
+        return run_mcx_expiry_reminder()
+
+    _locked("mcx_expiry_reminder", _run, "23:40 IST weekdays after MCX close")
 
 
 def _tick_backup() -> None:
@@ -345,6 +363,33 @@ def start_tarang_scheduler() -> None:
         max_instances=1,
         coalesce=True,
         misfire_grace_time=7200,
+    )
+    sch.add_job(
+        _tick_expired_archiver,
+        CronTrigger(hour=17, minute=45, timezone="Asia/Kolkata"),
+        id="tarang_expired_archiver_1745",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    sch.add_job(
+        _tick_mcx_futures_candles,
+        CronTrigger(hour=9, minute=10, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="tarang_mcx_futures_candles",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    sch.add_job(
+        _tick_mcx_expiry_reminder,
+        CronTrigger(hour=23, minute=40, day_of_week="mon-fri", timezone="Asia/Kolkata"),
+        id="tarang_mcx_expiry_reminder",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
     )
     sch.add_job(
         _tick_backup,

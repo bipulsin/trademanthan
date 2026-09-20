@@ -18,7 +18,9 @@ JOBS = [
     {"id": "exit_engine", "label": "Exit engine", "next": "every 1m (Delta 24x7; MCX in-session)"},
     {"id": "mcx_bhavcopy", "label": "MCX Bhavcopy download", "next": "00:30 IST then hourly to 12:00"},
     {"id": "delta_candles", "label": "Delta 1h underlying candles", "next": "daily 00:45 IST"},
-    {"id": "expired_archiver", "label": "Expired option archiver", "next": "daily 01:15 IST"},
+    {"id": "mcx_futures_candles", "label": "MCX futures daily candles (Upstox)", "next": "09:10 IST weekdays"},
+    {"id": "expired_archiver", "label": "Expired option archiver", "next": "17:45 IST after expiry + 01:15 IST"},
+    {"id": "mcx_expiry_reminder", "label": "MCX expiry drag-drop reminder", "next": "23:40 IST weekdays (scrape off)"},
     {"id": "backups", "label": "tarang_* backups", "next": "daily 02:00 IST"},
 ]
 
@@ -158,6 +160,64 @@ def open_gaps_by_job() -> Dict[str, List[Dict[str, Any]]]:
     return by
 
 
+def last_mcx_uploads() -> List[Dict[str, Any]]:
+    ensure_tarang_tables()
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT symbol,
+                       expiry_date,
+                       COALESCE(NULLIF(instrument_name,''), 'OPTFUT') AS instrument,
+                       MAX(trade_date) AS last_trade_date,
+                       MIN(trade_date) AS first_trade_date,
+                       COUNT(*)::int AS n_rows,
+                       MAX(source_filename) AS last_file
+                FROM tarang_hist_eod
+                GROUP BY symbol, expiry_date, COALESCE(NULLIF(instrument_name,''), 'OPTFUT')
+                ORDER BY symbol, expiry_date DESC
+                """
+            )
+        ).mappings().all()
+        return [
+            {
+                "symbol": r["symbol"],
+                "expiry": str(r["expiry_date"]) if r.get("expiry_date") else None,
+                "instrument": r["instrument"],
+                "first_trade_date": str(r["first_trade_date"]) if r.get("first_trade_date") else None,
+                "last_trade_date": str(r["last_trade_date"]) if r.get("last_trade_date") else None,
+                "n_rows": r["n_rows"],
+                "last_file": r["last_file"],
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def fee_formula_panel() -> Dict[str, Any]:
+    from backend.services.tarang.fees import fee_schedules
+
+    sch = fee_schedules()
+    d = sch.get("delta_india_options") or {}
+    return {
+        "delta_india_options": {
+            "formula": "fee_usd = min(notional_usd × taker_or_maker_frac, premium_usd × premium_cap_frac); total = fee_usd × (1+GST); INR = total × usd_inr",
+            "notional_usd": "underlying_price × contract_value × qty (falls back to premium × contract_value × qty)",
+            "premium_vs_notional": "Rate is on notional; cap is on premium.",
+            "taker_notional_frac": d.get("taker_notional_frac"),
+            "maker_notional_frac": d.get("maker_notional_frac"),
+            "premium_cap_frac": d.get("premium_cap_frac"),
+            "gst_frac": d.get("gst_frac"),
+            "assume_taker_in_paper": d.get("assume_taker_in_paper"),
+            "usd_inr": sch.get("usd_inr"),
+            "source": d.get("source"),
+            "source_checked": "https://www.delta.exchange/fees (fetched 2026-09-20): options taker 0.03% / maker 0.010% of notional; cap 3.5% of premium (page also shows struck-through 10%); +18% GST. Live code still uses 3.5% cap — defaults not changed.",
+        }
+    }
+
+
 def pipeline_health() -> Dict[str, Any]:
     runs = {r["job"]: r for r in list_job_runs()}
     gaps = open_gaps_by_job()
@@ -177,4 +237,10 @@ def pipeline_health() -> Dict[str, Any]:
                 "gap_sample": (gaps.get(spec["id"]) or [])[:3],
             }
         )
-    return {"jobs": jobs, "screener_24h": screener_stats_24h()}
+    return {
+        "jobs": jobs,
+        "screener_24h": screener_stats_24h(),
+        "last_mcx_uploads": last_mcx_uploads(),
+        "fee_formula": fee_formula_panel(),
+        "mcx_scrape": "off",
+    }

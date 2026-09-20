@@ -508,6 +508,21 @@
         <td class="tg-muted">${j.last_error || ''}</td>
       </tr>`).join('') : '<tr><td colspan="7" class="tg-muted">No job runs yet</td></tr>';
     }
+    const upBody = document.getElementById('mcxUploadBody');
+    if (upBody) {
+      const ups = (h.pipeline && h.pipeline.last_mcx_uploads) || [];
+      upBody.innerHTML = ups.length ? ups.map((r) => `<tr>
+        <td>${r.symbol || ''}</td>
+        <td>${r.expiry || '—'}</td>
+        <td>${r.instrument || ''}</td>
+        <td class="tg-muted">${r.first_trade_date || '—'}</td>
+        <td>${r.last_trade_date || '—'}</td>
+        <td>${r.n_rows != null ? r.n_rows : '—'}</td>
+        <td class="tg-muted">${r.last_file || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="7" class="tg-muted">No hist_eod uploads</td></tr>';
+    }
+    const feeBox = document.getElementById('feeFormulaBox');
+    if (feeBox) feeBox.textContent = JSON.stringify((h.pipeline && h.pipeline.fee_formula) || {}, null, 2);
     const dr = document.getElementById('deltaReadyBox');
     if (dr) dr.textContent = JSON.stringify(h.delta_readiness || {}, null, 2);
     const tg = h.telegram || {};

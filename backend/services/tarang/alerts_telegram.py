@@ -29,6 +29,8 @@ OPS_KINDS = {
     "heartbeat",
     "recon_failure",
     "job_failed",
+    "archive_fetch_failed",
+    "mcx_expiry_download_reminder",
 }
 CRITICAL_KINDS = set(OPS_KINDS)
 

@@ -49,10 +49,15 @@ def persist_underlying_candles(symbol: str, resolution: str, bars: List[Any]) ->
                 ts, o, h, l, c = bar[0], bar[1], bar[2], bar[3], bar[4]
                 vol = bar[5] if len(bar) > 5 else None
             try:
-                ts_i = int(ts)
-                if ts_i > 10_000_000_000:
-                    ts_i //= 1000
-                dt = datetime.fromtimestamp(ts_i, tz=timezone.utc)
+                if isinstance(ts, str) and not str(ts).isdigit():
+                    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    ts_i = int(float(ts))
+                    if ts_i > 10_000_000_000:
+                        ts_i //= 1000
+                    dt = datetime.fromtimestamp(ts_i, tz=timezone.utc)
             except (TypeError, ValueError):
                 continue
             db.execute(
@@ -222,13 +227,18 @@ def archive_expired_options(*, days: int = 4) -> Dict[str, Any]:
     now = int(datetime.now(timezone.utc).timestamp())
     start = now - 86400 * 10
     stored = []
+    fetch_failed = []
     db = SessionLocal()
     try:
         for p in products:
             resp = fetch_candles(p["symbol"], "30m", start, now)
             body = resp.get("body") or {}
+            http = resp.get("http_status")
+            bars = body.get("result") if isinstance(body.get("result"), list) else []
             raw_path = RAW_DIR / f"{p['symbol']}_{datetime.now(timezone.utc).date().isoformat()}.json"
             raw_path.write_text(json.dumps({"product": p, "candles": body}, default=str)[:4_000_000], encoding="utf-8")
+            if http != 200:
+                fetch_failed.append({"symbol": p["symbol"], "http": http, "error": str(body.get("error") or "")[:160]})
             db.execute(
                 text(
                     """
@@ -255,13 +265,25 @@ def archive_expired_options(*, days: int = 4) -> Dict[str, Any]:
             )
             stored.append(p["symbol"])
         db.commit()
+        if fetch_failed:
+            from backend.services.tarang.alerts_telegram import notify_ops
+
+            sample = ", ".join(f"{x['symbol']} HTTP {x['http']}" for x in fetch_failed[:12])
+            notify_ops(
+                db,
+                kind="archive_fetch_failed",
+                message=f"Expired-option archiver could not fetch candles for {len(fetch_failed)} contract(s): {sample}",
+                dedupe_key=f"archive_fetch_failed:{datetime.now(timezone.utc).date().isoformat()}",
+                throttle_sec=0,
+            )
+            db.commit()
     except Exception:
         db.rollback()
         logger.exception("expired option archive failed")
         return {"ok": False, "error": "persist_failed", "n_products": len(products)}
     finally:
         db.close()
-    return {"ok": True, "n": len(stored), "symbols": stored[:40]}
+    return {"ok": True, "n": len(stored), "symbols": stored[:40], "fetch_failed": fetch_failed[:40], "n_fetch_failed": len(fetch_failed)}
 
 
 def delta_readiness() -> Dict[str, Any]:
