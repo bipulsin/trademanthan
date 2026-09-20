@@ -384,7 +384,6 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
             feasible_days = 0
             gated_days = 0
             credits_pct: List[float] = []
-            rejected_cap = False
             narrowest = None
             for exp in expiries:
                 if exp in ALWAYS_EXCLUDE_EXPIRIES or not cycle_is_expired(exp, today):
@@ -414,8 +413,6 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                     zc = _spec_max_loss_lot(width, und)
                     if zc is not None:
                         narrowest = zc if narrowest is None else min(narrowest, zc)
-                        if zc > hard:
-                            rejected_cap = True
                     F = chain.futures_or_spot
                     atm = _atm_traded_iv(sl, F)
                     mex = next(
@@ -606,7 +603,7 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                 "credit_pct_width_mean": _avg(credits_pct),
                 "reward_risk": rr,
                 "narrowest_zero_credit_max_loss_per_lot": narrowest,
-                "rejected_exceeds_caps": rejected_cap or (narrowest is not None and narrowest > hard),
+                "rejected_exceeds_caps": narrowest is not None and narrowest > hard,
                 "vs_caps": {
                     "cap_5000": None if narrowest is None else narrowest <= 5000,
                     "cap_10000": None if narrowest is None else narrowest <= 10000,

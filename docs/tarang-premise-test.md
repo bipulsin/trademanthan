@@ -70,3 +70,4 @@ Same structures from `tarang_chain_snapshots` + hourly candles when present. Sta
 |---|---|---|
 | 2026-09-20 | 36d7585 | Registration only. No P&amp;L yet. |
 | 2026-09-20 | f1abdbe | Pre-register commit of this file. Structures unchanged. |
+| 2026-09-20 | 2c69185 | First P&amp;L run on production FUTCOM. IV exceeded RV on 62% of 1330 entry days (mean IV−RV +2.3 vol pts). Mean net per cycle at 10% per-leg cost was **negative** for every locked structure. Narrowest max-loss per lot is within ₹5k/₹10k (A–E). Live rules unchanged. |

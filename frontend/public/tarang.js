@@ -573,6 +573,7 @@
     }
     const gateHidden = bt.show_go_live_gate === false || nTrades < (bt.go_live_gate_hidden_until_trades || 40);
     const st = bt.stats || {};
+    const omitPfDd = nTrades < 10;
     metrics.innerHTML = `
       <div class="tg-metric"><span>Label</span><strong>${label || 'Snapshot replay'}</strong></div>
       <div class="tg-metric"><span>Independent cycles</span><strong>${cycles}</strong></div>
@@ -580,9 +581,9 @@
       <div class="tg-metric"><span>Trades (base)</span><strong>${nTrades}</strong></div>
       <div class="tg-metric"><span>Trades (pessimistic)</span><strong>${nPess != null ? nPess : '—'}</strong></div>
       <div class="tg-metric"><span>Win rate</span><strong>${st.win_rate != null ? (100 * st.win_rate).toFixed(1) + '%' : '—'}</strong></div>
-      <div class="tg-metric"><span>Profit factor</span><strong>${st.profit_factor != null ? Number(st.profit_factor).toFixed(2) : '—'}</strong></div>
+      ${omitPfDd ? '<div class="tg-metric"><span>Profit factor</span><strong>omitted under 10 trades</strong></div>' : `<div class="tg-metric"><span>Profit factor</span><strong>${st.profit_factor != null ? Number(st.profit_factor).toFixed(2) : '—'}</strong></div>`}
       <div class="tg-metric"><span>Expectancy</span><strong>${st.expectancy != null ? fmtInr(st.expectancy) : '—'}</strong></div>
-      <div class="tg-metric"><span>Max DD</span><strong>${st.max_drawdown != null ? fmtInr(st.max_drawdown) : '—'}</strong></div>
+      ${omitPfDd ? '<div class="tg-metric"><span>Max DD</span><strong>omitted under 10 trades</strong></div>' : `<div class="tg-metric"><span>Max DD</span><strong>${st.max_drawdown != null ? fmtInr(st.max_drawdown) : '—'}</strong></div>`}
       <div class="tg-metric"><span>NOT_EVALUABLE days</span><strong>${ev.not_evaluable || 0}</strong></div>
       <div class="tg-metric"><span>FAILED days</span><strong>${ev.failed || 0}</strong></div>
       ${gateHidden ? '' : `<div class="tg-metric"><span>Go-live gate</span><strong>${bt.go_live_gate || 'n/a'}</strong></div>`}
