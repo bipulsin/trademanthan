@@ -18,10 +18,21 @@ from backend.services.tarang.schema import ensure_tarang_tables
 
 PLACEHOLDER_CLOSE = 0.05
 FROM_TO_RE = re.compile(r"(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})")
+FILENAME_EXPIRY_RE = re.compile(
+    r"(\d{1,2})(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\d{4})",
+    re.IGNORECASE,
+)
 MONTHS = {
     "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
     "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
 }
+TYPICAL_CRUDEOILM_EXPIRIES = (
+    date(2025, 9, 17), date(2025, 10, 16), date(2025, 11, 17), date(2025, 12, 16),
+    date(2026, 1, 14), date(2026, 2, 17), date(2026, 3, 17), date(2026, 4, 16),
+    date(2026, 5, 14), date(2026, 6, 16), date(2026, 7, 16), date(2026, 8, 17),
+    date(2026, 9, 17),
+)
+SPAN_VS_90_DAYS = 85
 TRADE_DATE_RE = re.compile(
     r"^\s*(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s*$"
 )
@@ -122,6 +133,34 @@ def filename_from_to(filename: str) -> Tuple[Optional[date], Optional[date]]:
         return None, None
 
 
+def filename_expiry(filename: str) -> Optional[date]:
+    """Expiry token in names like CRUDEOILM_OPTFUT_16Oct2025.csv — not ISO From/To dates."""
+    m = FILENAME_EXPIRY_RE.search(filename or "")
+    if not m:
+        return None
+    mon = MONTHS.get(m.group(2).upper()[:3])
+    if not mon:
+        return None
+    return date(int(m.group(3)), mon, int(m.group(1)))
+
+
+def missing_typical_crudeoilm_expiries(found: Sequence[date]) -> List[str]:
+    have = {_as_plain_date(d) for d in found if d}
+    lo, hi = date(2025, 9, 17), date(2026, 9, 17)
+    return [e.isoformat() for e in TYPICAL_CRUDEOILM_EXPIRIES if lo <= e <= hi and e not in have]
+
+
+def _as_plain_date(v: Any) -> Optional[date]:
+    if isinstance(v, date) and not isinstance(v, datetime):
+        return v
+    if isinstance(v, datetime):
+        return v.date()
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
 def parse_bhavcopy_csv(text: str, *, source_filename: str = "") -> List[Dict[str, Any]]:
     """Parse MCX Bhavcopy CSV. Dates come from rows, never the filename."""
     f = io.StringIO(text)
@@ -174,28 +213,44 @@ def import_report_from_rows(
     first_d = dates[0] if dates else None
     last_d = dates[-1] if dates else None
     from_d, to_d = filename_from_to(filename)
+    fn_exp = filename_expiry(filename)
+    row_exps = sorted({r["expiry_date"] for r in rows if r.get("expiry_date")})
     per_date: Dict[str, int] = defaultdict(int)
     for r in rows:
         if r.get("traded") and r.get("trade_date"):
             per_date[r["trade_date"].isoformat()] += 1
     early = bool(from_d and first_d and first_d == from_d)
+    mismatch = bool(fn_exp and row_exps and any(e != fn_exp for e in row_exps))
+    span = (last_d - first_d).days if first_d and last_d else None
+    truncated = span is not None and span < SPAN_VS_90_DAYS
+    from_note = (
+        "filename has no From Date token (YYYY-MM-DD_YYYY-MM-DD); cannot compare first date to From Date"
+        if from_d is None
+        else (
+            "first trade_date equals filename From Date — contract's early life may be missing"
+            if early
+            else "first trade_date is after filename From Date (or equal check passed false)"
+        )
+    )
     return {
         "filename": filename,
         "first_trade_date": first_d.isoformat() if first_d else None,
         "last_trade_date": last_d.isoformat() if last_d else None,
         "filename_from_date": from_d.isoformat() if from_d else None,
         "filename_to_date": to_d.isoformat() if to_d else None,
+        "filename_from_date_present": from_d is not None,
+        "filename_expiry": fn_exp.isoformat() if fn_exp else None,
+        "row_expiries": [e.isoformat() for e in row_exps],
+        "filename_vs_row_expiry_mismatch": mismatch,
+        "calendar_span_days": span,
+        "series_may_be_truncated_vs_90d": truncated,
         "rows_total": len(rows),
         "inserted": inserted,
         "duplicates_skipped": duplicates_skipped,
         "traded_rows": sum(1 for r in rows if r.get("traded")),
         "traded_row_counts_per_date": dict(sorted(per_date.items())),
         "early_life_may_be_missing": early,
-        "early_life_flag_note": (
-            "first trade_date equals filename From Date — contract's early life may be missing"
-            if early
-            else None
-        ),
+        "early_life_flag_note": from_note,
     }
 
 

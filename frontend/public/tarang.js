@@ -543,27 +543,59 @@
     const metrics = document.getElementById('backtestMetrics');
     const body = document.getElementById('backtestTimeline');
     if (!msg) return;
-    const label = bt.label || (bt.source === 'mcx_eod' ? 'MCX EOD-reconstructed, modelled fills' : '');
+    const label = bt.label || (bt.source === 'mcx_eod' ? 'MCX EOD-reconstructed, modelled fills, estimated underlying' : '');
     const nTrades = (bt.metrics && bt.metrics.count) || (bt.trades || []).length || 0;
     const nPess = (bt.metrics && bt.metrics.count_pessimistic);
     const cycles = (bt.metrics && bt.metrics.independent_cycles) || (bt.independent_cycles || []).length || bt.expiry_cycles || 0;
     const openN = (bt.metrics && bt.metrics.open_cycles_excluded) || (bt.open_cycles_excluded || []).length || 0;
+    const ev = bt.rejection_evaluability || {};
     if (bt.insufficient_data) {
       msg.textContent = bt.message || 'Insufficient data.';
       msg.classList.add('tg-fit-no');
     } else {
-      msg.textContent = `${label ? label + '. ' : ''}Independent (expired) cycles: ${cycles}. Open excluded: ${openN}. Trades (base): ${nTrades}${nPess != null ? `; pessimistic: ${nPess}` : ''}. ${bt.intraday_note || ''} ${bt.note || ''}`;
+      msg.textContent = `${label ? label + '. ' : ''}Independent (expired) cycles: ${cycles}. Open excluded: ${openN}. Trades (base): ${nTrades}${nPess != null ? `; pessimistic: ${nPess}` : ''}. NOT_EVALUABLE days: ${ev.not_evaluable || 0}; FAILED days: ${ev.failed || 0}. ${bt.intraday_note || ''} ${bt.note || ''}`;
       msg.classList.remove('tg-fit-no');
     }
     const gateHidden = bt.show_go_live_gate === false || nTrades < (bt.go_live_gate_hidden_until_trades || 40);
+    const st = bt.stats || {};
     metrics.innerHTML = `
       <div class="tg-metric"><span>Label</span><strong>${label || 'Snapshot replay'}</strong></div>
       <div class="tg-metric"><span>Independent cycles</span><strong>${cycles}</strong></div>
       <div class="tg-metric"><span>Open excluded</span><strong>${openN}</strong></div>
       <div class="tg-metric"><span>Trades (base)</span><strong>${nTrades}</strong></div>
       <div class="tg-metric"><span>Trades (pessimistic)</span><strong>${nPess != null ? nPess : '—'}</strong></div>
+      <div class="tg-metric"><span>Win rate</span><strong>${st.win_rate != null ? (100 * st.win_rate).toFixed(1) + '%' : '—'}</strong></div>
+      <div class="tg-metric"><span>Profit factor</span><strong>${st.profit_factor != null ? Number(st.profit_factor).toFixed(2) : '—'}</strong></div>
+      <div class="tg-metric"><span>Expectancy</span><strong>${st.expectancy != null ? fmtInr(st.expectancy) : '—'}</strong></div>
+      <div class="tg-metric"><span>Max DD</span><strong>${st.max_drawdown != null ? fmtInr(st.max_drawdown) : '—'}</strong></div>
+      <div class="tg-metric"><span>NOT_EVALUABLE days</span><strong>${ev.not_evaluable || 0}</strong></div>
+      <div class="tg-metric"><span>FAILED days</span><strong>${ev.failed || 0}</strong></div>
       ${gateHidden ? '' : `<div class="tg-metric"><span>Go-live gate</span><strong>${bt.go_live_gate || 'n/a'}</strong></div>`}
     `;
+    const statsEl = document.getElementById('backtestStats');
+    if (statsEl) statsEl.textContent = JSON.stringify({
+      avg_win: st.avg_win, avg_loss: st.avg_loss, worst_trade: st.worst_trade,
+      vs_budget_caps_inr: st.vs_budget_caps_inr, credit_grid_plateaus: (bt.credit_grid || {}).plateaus,
+      delta_band_grid: bt.delta_band_grid,
+    }, null, 2);
+    const tBody = document.getElementById('backtestTrades');
+    if (tBody) {
+      const ts = bt.trades || [];
+      tBody.innerHTML = ts.length ? ts.map((t) => `<tr>
+        <td>${t.entry_date || ''}</td>
+        <td>${t.expiry || ''}</td>
+        <td>${(t.exit_reason || '') + (t.exit_date ? ' ' + t.exit_date : '')}</td>
+        <td>${t.net_pnl != null ? fmtInr(t.net_pnl) : '—'}</td>
+        <td class="tg-muted">${t.estimated_underlying ? 'estimated underlying' : (t.underlying_source || '')}</td>
+      </tr>`).join('') : '<tr><td colspan="5" class="tg-muted">No trades at default 20% min credit</td></tr>';
+    }
+    const byEl = document.getElementById('backtestByCycle');
+    if (byEl) byEl.textContent = JSON.stringify({ by_cycle: st.by_cycle, by_month: st.by_month }, null, 2);
+    const liqC = document.getElementById('backtestLiqCycle');
+    if (liqC) {
+      const rows = (bt.independent_cycles || []).map((c) => ({ expiry: c.expiry, ...(c.traded_strike_liquidity || {}) }));
+      liqC.textContent = JSON.stringify(rows, null, 2);
+    }
     const cycBody = document.getElementById('backtestCycles');
     if (cycBody) {
       const cyc = [...(bt.independent_cycles || []).map((c) => ({...c, inResults: 'Yes'})), ...(bt.open_cycles_excluded || []).map((c) => ({...c, inResults: 'No'}))];
@@ -578,7 +610,10 @@
     if (sumBody) {
       const sum = bt.rejection_summary || {};
       const keys = Object.keys(sum);
-      sumBody.innerHTML = keys.length ? keys.map((k) => `<tr><td>${k}</td><td>${sum[k]}</td></tr>`).join('') : '<tr><td colspan="2" class="tg-muted">No rejections</td></tr>';
+      sumBody.innerHTML = keys.length ? keys.map((k) => `<tr><td>${k}</td><td>${sum[k]}</td></tr>`).join('') +
+        `<tr><td>NOT_EVALUABLE (total days)</td><td>${(bt.rejection_evaluability || {}).not_evaluable || 0}</td></tr>` +
+        `<tr><td>FAILED (total days)</td><td>${(bt.rejection_evaluability || {}).failed || 0}</td></tr>`
+        : '<tr><td colspan="2" class="tg-muted">No rejections</td></tr>';
     }
     const subBody = document.getElementById('backtestDataSub');
     if (subBody) {
@@ -607,7 +642,10 @@
       </tr>`).join('') : '<tr><td colspan="4" class="tg-muted">None</td></tr>';
     }
     const gridEl = document.getElementById('backtestCreditGrid');
-    if (gridEl) gridEl.textContent = JSON.stringify(bt.credit_grid || {}, null, 2);
+    if (gridEl) {
+      const g = bt.credit_grid || {};
+      gridEl.textContent = JSON.stringify({ ...g, plateaus: g.plateaus || [], delta_band: bt.delta_band_grid }, null, 2);
+    }
     const dwEl = document.getElementById('backtestDatewise');
     if (dwEl) dwEl.textContent = JSON.stringify(bt.datewise_checksum || { note: 'not run' }, null, 2);
     const logBody = document.getElementById('backtestRejLog');
@@ -616,7 +654,7 @@
       logBody.innerHTML = log.length ? log.map((r) => `<tr>
         <td>${r.trade_date || ''}</td>
         <td>${r.expiry || ''}</td>
-        <td>${r.gate || ''}</td>
+        <td>${r.gate || ''}${r.evaluability ? ' (' + r.evaluability + ')' : ''}</td>
         <td>${r.dte != null ? r.dte : ''}</td>
         <td class="tg-muted">${r.detail || ''}</td>
       </tr>`).join('') : '<tr><td colspan="5" class="tg-muted">—</td></tr>';

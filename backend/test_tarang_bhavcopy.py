@@ -5,6 +5,7 @@ from datetime import date
 
 from backend.services.tarang.backtest import (
     CREDIT_GRID_FRACS,
+    EOD_LABEL,
     INTRADAY_EOD_MSG,
     classify_data_gate,
     cycle_is_expired,
@@ -203,7 +204,7 @@ def test_intraday_not_on_eod_message():
     try:
         out = run_eod_backtest(today=date(2026, 9, 19))
         assert INTRADAY_EOD_MSG in out["intraday_note"]
-        assert out["label"] == "MCX EOD-reconstructed, modelled fills"
+        assert out["label"] == EOD_LABEL
     except Exception:
         pass
 
@@ -386,3 +387,33 @@ def test_datewise_scan_empty_folder(tmp_path):
     assert out["empty"] is True
     assert out["ok"] is True
     assert out["files"] == []
+
+
+def test_filename_expiry_vs_rows_and_no_from_date():
+    from backend.services.tarang.bhavcopy import filename_expiry, missing_typical_crudeoilm_expiries
+
+    assert filename_expiry("CRUDEOILM_OPTFUT_16Oct2025.csv") == date(2025, 10, 16)
+    body = (
+        "Date,Instrument Name,Symbol,Expiry Date,Option Type,Strike Price,Open,High,Low,Close,Previous Close,"
+        "Volume(Lots),Volume(In 000's),Value(Lacs),Open Interest(Lots)\n"
+        '"22 Jul 2025","OPTFUT","CRUDEOILM","16OCT2025","CE","5500","","","","1","1","10","1","1","10"\n'
+    )
+    rows = parse_bhavcopy_csv(body)
+    rep = import_report_from_rows(rows, filename="CRUDEOILM_OPTFUT_16Oct2025.csv", inserted=1, duplicates_skipped=0)
+    assert rep["filename_from_date_present"] is False
+    assert "no From Date" in (rep["early_life_flag_note"] or "")
+    assert rep["filename_vs_row_expiry_mismatch"] is False
+    mismatch_rows = parse_bhavcopy_csv(
+        body.replace("16OCT2025", "17NOV2025")
+    )
+    bad = import_report_from_rows(mismatch_rows, filename="CRUDEOILM_OPTFUT_16Oct2025.csv", inserted=1, duplicates_skipped=0)
+    assert bad["filename_vs_row_expiry_mismatch"] is True
+    assert missing_typical_crudeoilm_expiries([date(2025, 9, 17)])  # others missing
+    assert missing_typical_crudeoilm_expiries(
+        [
+            date(2025, 9, 17), date(2025, 10, 16), date(2025, 11, 17), date(2025, 12, 16),
+            date(2026, 1, 14), date(2026, 2, 17), date(2026, 3, 17), date(2026, 4, 16),
+            date(2026, 5, 14), date(2026, 6, 16), date(2026, 7, 16), date(2026, 8, 17),
+            date(2026, 9, 17),
+        ]
+    ) == []

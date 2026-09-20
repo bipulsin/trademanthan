@@ -14,7 +14,8 @@ from backend.services.tarang.data_gaps import gaps_overlapping, recent_gaps, sna
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
 from backend.services.tarang.eod_reconstruct import put_call_parity_F, reconstruct_slice
 from backend.services.tarang.exit_engine import evaluate_exits
-from backend.services.tarang.fee_gate import gate_fee_and_limits
+from backend.services.tarang.fee_gate import gate_fee_and_limits, round_trip_fees_inr
+from backend.services.tarang.gates import EVAL_FAILED, EVAL_NOT_EVALUABLE
 from backend.services.tarang.paper_broker import simulated_fill_price
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.structures import build_structure, max_loss_per_unit_inr, floor_units
@@ -108,9 +109,23 @@ MODELLED_SPREAD_FRAC_OF_MID = 0.02
 GO_LIVE_GATE_MIN_TRADES = 40
 IV_WARMUP_DAYS = 60
 CREDIT_GRID_FRACS = (0.10, 0.15, 0.20)
+DELTA_BAND_GRID = ((0.08, 0.14), (0.10, 0.16), (0.12, 0.18))
 DELTA_REL_CREDIT_FORMULA = "min_frac = clip(0.10, 0.25, mean(|δ_short|))"
 UNDERLYING_GATES = frozenset({"no_futures", "parity_failed", "missing_underlying"})
+NOT_EVALUABLE_GATES = frozenset(
+    {
+        "no_futures",
+        "parity_failed",
+        "missing_underlying",
+        "insufficient_traded_strikes",
+        "strike_step_missing",
+        "no_mids",
+    }
+)
+ALWAYS_EXCLUDE_EXPIRIES = frozenset({date(2026, 10, 15), date(2026, 11, 17)})
+EOD_LABEL = "MCX EOD-reconstructed, modelled fills, estimated underlying"
 INTRADAY_EOD_MSG = "INTRADAY cannot be tested on EOD — this path is positional daily decisions only."
+BUDGET_CAPS_INR = (5000.0, 10000.0)
 
 
 def _as_date(v: Any) -> Optional[date]:
@@ -502,6 +517,61 @@ def _atm_iv(rows: List[Dict[str, Any]]) -> Optional[float]:
     return ivs[len(ivs) // 2]
 
 
+def rejection_evaluability(gate: Optional[str], *, iv_not_evaluable: bool = False) -> str:
+    if not gate:
+        return EVAL_FAILED
+    if gate in NOT_EVALUABLE_GATES:
+        return EVAL_NOT_EVALUABLE
+    if gate == "iv_gate" and iv_not_evaluable:
+        return EVAL_NOT_EVALUABLE
+    return EVAL_FAILED
+
+
+def _pnl_inr(credit: Optional[float], debit: Optional[float], units: int, lot_size: Optional[float]) -> Optional[float]:
+    if credit is None or debit is None:
+        return None
+    return (float(credit) - float(debit)) * float(lot_size or 10) * int(units or 0)
+
+
+def _summarize_pnls(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    from backend.services.tarang.report import compute_metrics
+
+    closed = [t for t in trades if t.get("exit_reason") != "OPEN"]
+    m = compute_metrics(closed)
+    worst = m.get("worst_trade")
+    vs_caps = {}
+    for cap in BUDGET_CAPS_INR:
+        vs_caps[f"cap_{int(cap)}"] = {
+            "cap_inr": cap,
+            "worst_trade": worst,
+            "worst_within_cap": None if worst is None else float(worst) >= -float(cap),
+        }
+    by_cycle: Dict[str, Dict[str, Any]] = {}
+    by_month: Dict[str, Dict[str, Any]] = {}
+    for t in closed:
+        ck = f"{t.get('symbol')}|{t.get('expiry')}"
+        by_cycle.setdefault(ck, []).append(t)
+        ed = str(t.get("entry_date") or "")[:7]
+        by_month.setdefault(ed, []).append(t)
+    m["by_cycle"] = {k: compute_metrics(v) for k, v in by_cycle.items()}
+    m["by_month"] = {k: compute_metrics(v) for k, v in sorted(by_month.items())}
+    m["vs_budget_caps_inr"] = vs_caps
+    m["open_unclosed"] = sum(1 for t in trades if t.get("exit_reason") == "OPEN")
+    return m
+
+
+def _plateaus_from_grid(by_frac: Dict[str, Any]) -> List[str]:
+    notes = []
+    items = [(float(k), int(v.get("days_with_structure_passing_this_frac") or 0)) for k, v in sorted(by_frac.items())]
+    for i in range(1, len(items)):
+        a, b = items[i - 1], items[i]
+        if a[1] == b[1]:
+            notes.append(f"plateau: min-credit {a[0]:.0%} and {b[0]:.0%} both pass {a[1]} structure days")
+        elif a[1] and abs(a[1] - b[1]) / max(a[1], 1) <= 0.05:
+            notes.append(f"near-plateau: min-credit {a[0]:.0%}={a[1]} vs {b[0]:.0%}={b[1]} days")
+    return notes
+
+
 def _run_eod_once(
     *,
     fill_mode: str,
@@ -522,6 +592,7 @@ def _run_eod_once(
     by_day_exp: Dict[Tuple[str, date, date], List[Dict[str, Any]]] = {}
     dates_by_sym: Dict[str, List[date]] = {}
     F_by_sym_date: Dict[Tuple[str, date], float] = {}
+    parity_by_sym_date: Dict[Tuple[str, date], float] = {}
     iv_by_sym_date: Dict[Tuple[str, date], float] = {}
     for r in all_rows:
         td = _as_date(r["trade_date"])
@@ -539,6 +610,12 @@ def _run_eod_once(
             F_by_sym_date.setdefault((und, td), float(r["close"]))
         if r.get("iv") is not None:
             iv_by_sym_date.setdefault((und, td), float(r["iv"]))
+    for (und, _exp, td), sl in by_day_exp.items():
+        calls = [x for x in sl if x.get("option_type") == "CE"]
+        puts = [x for x in sl if x.get("option_type") == "PE"]
+        pf = put_call_parity_F(calls, puts) if calls and puts else None
+        if pf is not None:
+            parity_by_sym_date.setdefault((und, td), float(pf))
 
     # median IV per und+date from collected first-write; recompute properly
     iv_lists: Dict[Tuple[str, date], List[float]] = {}
@@ -557,6 +634,7 @@ def _run_eod_once(
     rejections: List[Dict[str, Any]] = []
     min_credit_days: List[Dict[str, Any]] = []
     credit_grid_days: List[Dict[str, Any]] = []
+    delta_band_days: List[Dict[str, Any]] = []
     pid_by_und = {}
     for pid, prof in profiles.items():
         if not prof.get("enabled") or prof.get("venue") != "upstox_mcx":
@@ -570,18 +648,22 @@ def _run_eod_once(
         min_dte = int(prof.get("expiry_min_dte") or prof.get("expiry_dte_min") or 7)
         max_dte = int(prof.get("expiry_dte_max") or 35)
         dates = sorted(set(dates_by_sym.get(und, [])))
-        F_series_dates = sorted({td for (s, td) in F_by_sym_date if s == und})
+        parity_dates = sorted({td for (s, td) in parity_by_sym_date if s == und})
         expiries = sorted({k[1] for k in by_day_exp if k[0] == und})
         for exp in expiries:
             label = {"symbol": und, "expiry": exp.isoformat()}
-            if not cycle_is_expired(exp, today):
+            if exp in ALWAYS_EXCLUDE_EXPIRIES or not cycle_is_expired(exp, today):
                 open_cycles.append({**label, "status": "open", "excluded": True})
                 continue
             cycle_gate_days: Dict[str, List[str]] = {}
             cycle_cf: List[Dict[str, Any]] = []
+            cycle_liq: List[int] = []
+            cycle_dates = sorted({k[2] for k in by_day_exp if k[0] == und and k[1] == exp})
+            extra = [d for d in dates if cycle_dates and d > cycle_dates[-1] and d <= exp]
+            loop_dates = cycle_dates + extra
             independent.append({**label, "status": "expired"})
             open_trade = None
-            for i, td in enumerate(dates):
+            for i, td in enumerate(loop_dates):
                 slice_rows = by_day_exp.get((und, exp, td)) or []
                 dte = _dte(exp, td)
                 chain = _chain_for_day(slice_rows, profile_id=pid)
@@ -614,9 +696,23 @@ def _run_eod_once(
                         now=now,
                     )
                     if ev.should_exit:
+                        lot = float(open_trade.get("lot_size") or LOT_SIZE.get(und, 10))
+                        gross = _pnl_inr(open_trade.get("entry_credit"), debit, int(open_trade.get("units") or 0), lot)
+                        fees = round_trip_fees_inr(
+                            venue="upstox_mcx",
+                            legs=open_trade.get("legs") or [],
+                            units=int(open_trade.get("units") or 0),
+                            lot_size=lot,
+                            contract_value=None,
+                            underlying_price=chain.futures_or_spot,
+                        )
                         open_trade["exit_date"] = td.isoformat()
                         open_trade["exit_reason"] = ev.reason
                         open_trade["origin"] = "BACKTEST_EOD"
+                        open_trade["exit_debit"] = debit
+                        open_trade["gross_pnl"] = gross
+                        open_trade["net_pnl"] = (gross or 0) - float(fees.get("round_trip_inr") or 0)
+                        open_trade["estimated_underlying"] = True
                         paper_trades.append(open_trade)
                         open_trade = None
                     continue
@@ -631,6 +727,7 @@ def _run_eod_once(
                 elif slice_rows:
                     F = next((float(r["underlying_price"]) for r in slice_rows if r.get("underlying_price")), None)
                 n_quotes = len([r for r in opts if r.get("traded")])
+                cycle_liq.append(len({float(r["strike"]) for r in opts if r.get("traded")}))
                 has_und = F is not None
                 calls = [r for r in opts if r.get("option_type") == "CE"]
                 puts = [r for r in opts if r.get("option_type") == "PE"]
@@ -639,10 +736,11 @@ def _run_eod_once(
                 parity_ok = parity_F is not None
                 short_untraded = _band_short_untraded(slice_rows, d_min, d_max)
 
-                prior_F = [F_by_sym_date[(und, d)] for d in F_series_dates if d <= td]
+                prior_F = [parity_by_sym_date[(und, d)] for d in parity_dates if d <= td]
                 rv = realized_vol_from_closes(prior_F)
                 prior_iv = [iv_by_sym_date[(und, d)] for d in dates if d < td and (und, d) in iv_by_sym_date]
                 atm = _atm_iv(opts)
+                iv_ne = atm is None or rv is None
                 iv_res = eod_iv_gate(
                     atm,
                     rv,
@@ -666,8 +764,8 @@ def _run_eod_once(
                         structure_error = str(built.get("error") or "structure")
                     else:
                         fill_chain = chain
-                        if fill_mode == "pessimistic" and i + 1 < len(dates):
-                            nxt_rows = by_day_exp.get((und, exp, dates[i + 1])) or []
+                        if fill_mode == "pessimistic" and i + 1 < len(loop_dates):
+                            nxt_rows = by_day_exp.get((und, exp, loop_dates[i + 1])) or []
                             nxt_chain = _chain_for_day(nxt_rows, profile_id=pid, require_traded=False)
                             if nxt_chain:
                                 fill_chain = nxt_chain
@@ -740,6 +838,17 @@ def _run_eod_once(
                             "delta_rel_frac": min_credit_frac_from_short_delta(short_d),
                         }
                     )
+                if record_rejections and has_und and chain and mcx_entry_dte_ok(dte, min_dte, max_dte):
+                    for lo, hi in DELTA_BAND_GRID:
+                        b2 = build_structure(chain, "iron_condor", lo, hi, width_steps)
+                        delta_band_days.append(
+                            {
+                                "trade_date": td.isoformat(),
+                                "expiry": exp.isoformat(),
+                                "band": f"{lo:.2f}-{hi:.2f}",
+                                "ok": bool(b2.get("ok")),
+                            }
+                        )
 
                 if gate == "min_credit" and record_rejections:
                     min_credit_days.append(
@@ -823,6 +932,7 @@ def _run_eod_once(
                                 "symbol": und,
                                 "expiry": exp.isoformat(),
                                 "gate": gate,
+                                "evaluability": rejection_evaluability(gate, iv_not_evaluable=iv_ne),
                                 "dte": dte,
                                 "detail": iv_res.get("detail") if gate == "iv_gate" else (structure_error or gate),
                                 "warmup_iv": iv_res.get("warmup"),
@@ -830,13 +940,17 @@ def _run_eod_once(
                                 "short_deltas": short_d,
                                 "n_traded": n_quotes,
                                 "n_fut": n_fut,
+                                "rv_source": "put_call_parity_series",
                             }
                         )
                     continue
 
-                estimated = bool((chain.meta or {}).get("estimated_underlying")) if chain else True
+                estimated = True
+                if chain and chain.meta:
+                    estimated = bool(chain.meta.get("estimated_underlying", True))
                 open_trade = {
                     "profile_id": pid,
+                    "symbol": und,
                     "expiry": str(exp),
                     "entry_date": td.isoformat(),
                     "entry_credit": credit,
@@ -844,21 +958,30 @@ def _run_eod_once(
                     "units": units,
                     "max_loss": ml,
                     "budget_inr": budget,
+                    "lot_size": built.get("lot_size") or (chain.lot_size if chain else LOT_SIZE.get(und, 10)),
                     "venue": "upstox_mcx",
                     "holding_mode": "POSITIONAL",
                     "fill_mode": fill_mode,
-                    "fills_label": "MCX EOD-reconstructed, modelled fills",
+                    "fills_label": EOD_LABEL,
                     "estimated_underlying": estimated,
+                    "underlying_label": "estimated underlying",
                     "warmup_mode": bool(iv_res.get("warmup")),
                     "atm_iv": atm,
+                    "rv_source": "put_call_parity_series",
                     "underlying_fut_expiry": (chain.meta or {}).get("underlying_fut_expiry") if chain else None,
-                    "underlying_source": (chain.meta or {}).get("underlying_source") if chain else None,
+                    "underlying_source": (chain.meta or {}).get("underlying_source") if chain else "put_call_parity",
                 }
             if open_trade:
                 open_trade["exit_reason"] = "OPEN"
                 open_trade["origin"] = "BACKTEST_EOD"
+                open_trade["estimated_underlying"] = True
                 paper_trades.append(open_trade)
             independent[-1]["gate_days"] = {g: len(v) for g, v in cycle_gate_days.items()}
+            independent[-1]["traded_strike_liquidity"] = {
+                "days": len(cycle_liq),
+                "median_traded_strikes": (sorted(cycle_liq)[len(cycle_liq) // 2] if cycle_liq else 0),
+                "max_traded_strikes": max(cycle_liq) if cycle_liq else 0,
+            }
             independent[-1]["gate_dates"] = cycle_gate_days
             independent[-1]["data_subreasons"] = {
                 k: v for k, v in independent[-1]["gate_days"].items()
@@ -917,15 +1040,41 @@ def _run_eod_once(
         "min_credit_rejects_that_would_pass": delta_rel_pass,
         "min_credit_rejects_at_default": len(failed_credit_only),
     }
+    grid["plateaus"] = _plateaus_from_grid(grid["by_frac"])
+    from collections import Counter as _C
+
+    band_ok = _C()
+    band_n = _C()
+    for d in delta_band_days:
+        band_n[d["band"]] += 1
+        if d.get("ok"):
+            band_ok[d["band"]] += 1
+    delta_band_grid = {
+        "note": "Sensitivity only; default short delta band remains 0.10–0.16.",
+        "by_band": {
+            b: {"structure_ok_days": band_ok[b], "days_evaluated": band_n[b]}
+            for b in sorted(band_n)
+        },
+        "plateaus": [],
+    }
+    band_counts = [delta_band_grid["by_band"][b]["structure_ok_days"] for b in sorted(delta_band_grid["by_band"])]
+    if len(set(band_counts)) == 1 and band_counts:
+        delta_band_grid["plateaus"].append(f"plateau: all delta bands structure-ok on {band_counts[0]} days")
     return {
         "trades": paper_trades,
         "independent_cycles": independent,
         "open_cycles_excluded": open_cycles,
         "rejections": rejections,
         "rejection_summary": dict(counts),
+        "rejection_evaluability": {
+            "failed": sum(1 for r in rejections if r.get("evaluability") == EVAL_FAILED),
+            "not_evaluable": sum(1 for r in rejections if r.get("evaluability") == EVAL_NOT_EVALUABLE),
+        },
         "data_subreasons": data_counts,
         "min_credit_days": min_credit_days,
         "credit_grid": grid,
+        "delta_band_grid": delta_band_grid,
+        "rv_source": "put_call_parity_series",
         "metrics": {
             "count": len(paper_trades),
             "independent_cycles": len(independent),
@@ -960,24 +1109,41 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
     from backend.services.tarang.bhavcopy import scan_datewise_dir
 
     datewise = scan_datewise_dir()
+    from backend.services.tarang.bhavcopy import missing_typical_crudeoilm_expiries
+    from backend.services.tarang.eod_reconstruct import liquidity_report
+
+    found_exps = sorted({_as_date(c.get("expiry")) for c in base["independent_cycles"] if c.get("expiry")})
+    found_exps += sorted({_as_date(c.get("expiry")) for c in base["open_cycles_excluded"] if c.get("expiry")})
+    found_exps = [e for e in found_exps if e]
+    stats = _summarize_pnls(base["trades"])
+    stats_pess = _summarize_pnls(pess["trades"]) if pess else {}
+    ev = (shared_rej or base).get("rejection_evaluability") or {}
     return {
         "product": "Kosmic Tarang",
         "source": "mcx_eod",
-        "label": "MCX EOD-reconstructed, modelled fills",
+        "label": EOD_LABEL,
         "fill_mode": fill_mode,
         "asof_ist": today.isoformat(),
         "intraday_note": INTRADAY_EOD_MSG,
         "parity_formula": "F ≈ K + (C − P)  (Black-76 with DF=1, undiscounted)",
+        "rv_source": "put_call_parity_series",
+        "underlying_note": "No FUTCOM loaded; every reconstructed F and trade is estimated underlying.",
         "independent_cycles": base["independent_cycles"],
         "open_cycles_excluded": base["open_cycles_excluded"],
         "expiry_cycles": len(base["independent_cycles"]),
+        "missing_typical_crudeoilm_expiries": missing_typical_crudeoilm_expiries(found_exps),
         "trades": base["trades"],
         "trades_pessimistic": (pess or {}).get("trades") if pess else [],
+        "stats": stats,
+        "stats_pessimistic": stats_pess,
         "rejection_log": (shared_rej or base)["rejections"],
         "rejection_summary": (shared_rej or base)["rejection_summary"],
+        "rejection_evaluability": ev,
         "data_subreasons": (shared_rej or base).get("data_subreasons") or {},
         "min_credit_days": (shared_rej or base).get("min_credit_days") or [],
         "credit_grid": (shared_rej or base).get("credit_grid") or {},
+        "delta_band_grid": (shared_rej or base).get("delta_band_grid") or {},
+        "liquidity": liquidity_report(),
         "datewise_checksum": datewise,
         "datewise_drop_path": datewise.get("path"),
         "metrics": {
@@ -988,14 +1154,17 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
             "open_cycles_excluded": len(base["open_cycles_excluded"]),
             "estimated_underlying_trades": sum(1 for t in base["trades"] if t.get("estimated_underlying")),
             "warmup_mode_trades": sum(1 for t in base["trades"] if t.get("warmup_mode")),
+            "not_evaluable_days": ev.get("not_evaluable"),
+            "failed_days": ev.get("failed"),
         },
         "show_go_live_gate": n >= GO_LIVE_GATE_MIN_TRADES,
         "go_live_gate_hidden_until_trades": GO_LIVE_GATE_MIN_TRADES,
         "note": (
             "Independent cycles = expired option contracts only (expiry_date < today IST). "
-            "Open contracts (e.g. 15 Oct 2026, 17 Nov 2026 as of 19 Sep 2026) are excluded. "
+            "Open contracts (e.g. 15 Oct 2026, 17 Nov 2026) are excluded even if present. "
             "EOD positional replay uses Screener structure rules, SizingService floor_units, fee gate 15% of credit, "
             "and ExitEngine. IV percentile waits for 60 days of IV history; until then IV-vs-RV only (warm-up-mode). "
+            "RV uses the put-call parity forward series, not Delta candles. "
             "Base fills: signal and fill at day-t close with modelled bid-ask haircut. "
             "Pessimistic: fill at t+1 close; stops use short-leg High / long-leg Low. "
             + INTRADAY_EOD_MSG
