@@ -15,8 +15,24 @@ from backend.services.tarang.premise_test import run_premise_test  # noqa: E402
 
 def main() -> int:
     out = run_premise_test()
-    print(json.dumps(out, indent=2, default=str))
-    return 0
+    slim = {
+        "registered_sha": out.get("registered_sha"),
+        "status": out.get("status"),
+        "error": out.get("error"),
+        "plain_language": out.get("plain_language"),
+        "metric": out.get("metric"),
+        "iv_vs_rv": out.get("iv_vs_rv"),
+        "supported_ids": out.get("supported_ids"),
+        "decision_inputs": out.get("decision_inputs"),
+        "delta_premise": out.get("delta_premise"),
+        "live_defaults_unchanged": out.get("live_defaults_unchanged"),
+        "max_loss_specs": out.get("max_loss_specs"),
+        "structures": out.get("structures") or [],
+        "asof_ist": out.get("asof_ist"),
+        "generated_at": out.get("generated_at"),
+    }
+    print(json.dumps(slim, indent=2, default=str))
+    return 1 if out.get("error") else 0
 
 
 if __name__ == "__main__":

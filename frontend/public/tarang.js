@@ -680,6 +680,7 @@
       prem.textContent = JSON.stringify({
         registered_sha: p.registered_sha,
         status: p.status || 'cached',
+        plain_language: p.plain_language,
         metric: p.metric,
         iv_vs_rv: p.iv_vs_rv,
         supported_ids: p.supported_ids,

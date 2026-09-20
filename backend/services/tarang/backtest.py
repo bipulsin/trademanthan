@@ -731,7 +731,6 @@ def _run_eod_once(
                         open_trade["exit_debit"] = debit
                         open_trade["gross_pnl"] = gross
                         open_trade["net_pnl"] = (gross or 0) - float(fees.get("round_trip_inr") or 0)
-                        open_trade["estimated_underlying"] = True
                         paper_trades.append(open_trade)
                         open_trade = None
                     continue

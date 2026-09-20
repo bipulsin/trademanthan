@@ -24,6 +24,8 @@ from backend.services.tarang.backtest import (
     _dte,
     _load_eod_rows,
     cycle_is_expired,
+    eod_iv_gate,
+    first_entry_reject,
     ist_today,
     mcx_entry_dte_ok,
     realized_vol_from_closes,
@@ -34,7 +36,7 @@ from backend.services.tarang.eod_reconstruct import (
     SRC_FUTCOM,
     years_to_expiry,
 )
-from backend.services.tarang.fee_gate import round_trip_fees_inr
+from backend.services.tarang.fee_gate import gate_fee_and_limits, round_trip_fees_inr
 from backend.services.tarang.schema import ensure_tarang_tables
 from backend.services.tarang.structures import (
     build_structure,
@@ -282,15 +284,28 @@ def _spec_max_loss_lot(width: float, und: str) -> Optional[float]:
     return max_loss_per_unit_inr(width, 0.0, lot_size=LOT_SIZE.get(und, 10), venue="upstox_mcx")
 
 
+def _avg(xs: List[float]) -> Optional[float]:
+    return (sum(xs) / len(xs)) if xs else None
+
+
 def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: Optional[date] = None) -> Dict[str, Any]:
     today = today or ist_today()
     if all_rows is None:
-        ensure_tarang_tables()
-        db = SessionLocal()
         try:
-            all_rows = _load_eod_rows(db)
-        finally:
-            db.close()
+            ensure_tarang_tables()
+            db = SessionLocal()
+            try:
+                all_rows = _load_eod_rows(db)
+            finally:
+                db.close()
+        except Exception as exc:
+            return {
+                "registered_sha": REGISTERED_SHA,
+                "doc": DOC_PATH,
+                "status": "db_unavailable",
+                "error": str(exc),
+                "live_defaults_unchanged": True,
+            }
     for r in all_rows:
         r["trade_date"] = _as_date(r.get("trade_date"))
         r["expiry_date"] = _as_date(r.get("expiry_date"))
@@ -301,6 +316,7 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
     risk = get_risk()
     budget = float(((risk.get("buckets") or {}).get("ENERGY") or {}).get("per_trade_budget_inr") or 5000)
     hard = float(((risk.get("buckets") or {}).get("ENERGY") or {}).get("hard_cap_inr") or 10000)
+    live_frac = float(risk.get("min_credit_fraction_of_width") or 0.20)
     cl = profiles.get("CL") or {}
     width_steps = int(cl.get("width_steps_min") or 5)
     min_dte = int(cl.get("expiry_min_dte") or 7)
@@ -308,24 +324,63 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
     pid = "CL"
 
     by_day_exp: Dict[Tuple[str, date, date], List[Dict[str, Any]]] = defaultdict(list)
+    fut_index: Dict[Tuple[str, date], List[Tuple[date, float, int]]] = defaultdict(list)
     for r in all_rows:
         td, exp = r.get("trade_date"), r.get("expiry_date")
         if not td or not exp:
             continue
-        by_day_exp[(str(r.get("symbol") or "").upper(), exp, td)].append(r)
+        und = str(r.get("symbol") or "").upper()
+        by_day_exp[(und, exp, td)].append(r)
+        if r.get("option_type") == "FUT" and r.get("close") is not None:
+            fut_index[(und, exp)].append((td, float(r["close"]), int(r.get("volume_lots") or 0)))
+    for k in fut_index:
+        fut_index[k].sort()
 
-    unds = sorted({k[0] for k in by_day_exp})
+    unds = sorted({k[0] for k in by_day_exp if any(r.get("option_type") in ("CE", "PE") for r in by_day_exp[k])})
+    chains_traded: Dict[Tuple[str, date, date], Any] = {}
+    chains_marks: Dict[Tuple[str, date, date], Any] = {}
+    iv_median: Dict[Tuple[str, date], float] = {}
+    iv_lists: Dict[Tuple[str, date], List[float]] = defaultdict(list)
+    for (und, exp, td), sl in by_day_exp.items():
+        if und not in LOT_SIZE:
+            continue
+        if not any(r.get("option_type") in ("CE", "PE") for r in sl):
+            continue
+        if exp in ALWAYS_EXCLUDE_EXPIRIES or not cycle_is_expired(exp, today):
+            continue
+        chains_traded[(und, exp, td)] = _chain_for_day(sl, profile_id=pid, require_traded=True)
+        chains_marks[(und, exp, td)] = _chain_for_day(sl, profile_id=pid, require_traded=False)
+        ch = chains_traded[(und, exp, td)]
+        F = ch.futures_or_spot if ch else None
+        atm = _atm_traded_iv(sl, F)
+        if atm is not None:
+            iv_lists[(und, td)].append(atm)
+    iv_median = {k: sorted(v)[len(v) // 2] for k, v in iv_lists.items()}
+
     results: List[Dict[str, Any]] = []
     iv_rv_days: List[Dict[str, Any]] = []
+    iv_pts: List[float] = []
+    iv_var: List[float] = []
+
+    def _empty_books() -> Dict[float, Dict[str, List[float]]]:
+        return {c: {"hold": [], "rule": [], "gross": []} for c in COST_GRID}
 
     for spec in STRUCTURES:
         for und in unds:
             if und not in LOT_SIZE:
                 continue
             lot = LOT_SIZE[und]
-            expiries = sorted({k[1] for k in by_day_exp if k[0] == und})
-            cycle_nets_h: Dict[float, Dict[str, List[float]]] = {c: {"hold": [], "rule": []} for c in COST_GRID}
+            expiries = sorted(
+                {
+                    k[1]
+                    for k in by_day_exp
+                    if k[0] == und and any(r.get("option_type") in ("CE", "PE") for r in by_day_exp[k])
+                }
+            )
+            books = _empty_books()
+            books_g = _empty_books()
             trades_h: Dict[float, int] = {c: 0 for c in COST_GRID}
+            trades_g: Dict[float, int] = {c: 0 for c in COST_GRID}
             feasible_days = 0
             gated_days = 0
             credits_pct: List[float] = []
@@ -337,13 +392,18 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                 days = sorted({k[2] for k in by_day_exp if k[0] == und and k[1] == exp})
                 cycle_hold = {c: 0.0 for c in COST_GRID}
                 cycle_rule = {c: 0.0 for c in COST_GRID}
+                cycle_gross = {c: 0.0 for c in COST_GRID}
+                cycle_hold_g = {c: 0.0 for c in COST_GRID}
+                cycle_rule_g = {c: 0.0 for c in COST_GRID}
+                cycle_gross_g = {c: 0.0 for c in COST_GRID}
                 n_tr = 0
+                n_tr_g = 0
                 for td in days:
                     dte = _dte(exp, td)
                     if not mcx_entry_dte_ok(dte, min_dte, max_dte):
                         continue
                     sl = by_day_exp.get((und, exp, td)) or []
-                    chain = _chain_for_day(sl, profile_id=pid)
+                    chain = chains_traded.get((und, exp, td))
                     if not chain or not chain.futures_or_spot:
                         continue
                     built = _build_research(chain, spec, width_steps)
@@ -358,32 +418,49 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                             rejected_cap = True
                     F = chain.futures_or_spot
                     atm = _atm_traded_iv(sl, F)
-                    mex = next((_as_date(r.get("mapped_fut_expiry") or r.get("underlying_fut_expiry")) for r in sl if r.get("mapped_fut_expiry") or r.get("underlying_fut_expiry")), None)
-                    series = _fut_series(all_rows, und, mex)
+                    mex = next(
+                        (
+                            _as_date(r.get("mapped_fut_expiry") or r.get("underlying_fut_expiry"))
+                            for r in sl
+                            if r.get("mapped_fut_expiry") or r.get("underlying_fut_expiry")
+                        ),
+                        None,
+                    )
+                    series = fut_index.get((und, mex), []) if mex else []
                     rv = _rv_entry_to_expiry(series, td, exp)
                     if atm is not None and rv is not None:
-                        iv_rv_days.append(
-                            {
-                                "structure": spec["id"],
-                                "symbol": und,
-                                "expiry": exp.isoformat(),
-                                "trade_date": td.isoformat(),
-                                "atm_iv": atm,
-                                "rv_entry_to_expiry": rv,
-                                "iv_minus_rv_vol": atm - rv,
-                                "iv2_minus_rv2": atm * atm - rv * rv,
-                            }
-                        )
+                        dlt = atm - rv
+                        var_d = atm * atm - rv * rv
+                        iv_pts.append(dlt)
+                        iv_var.append(var_d)
+                        if len(iv_rv_days) < 400:
+                            iv_rv_days.append(
+                                {
+                                    "structure": spec["id"],
+                                    "symbol": und,
+                                    "expiry": exp.isoformat(),
+                                    "trade_date": td.isoformat(),
+                                    "atm_iv": atm,
+                                    "rv_entry_to_expiry": rv,
+                                    "iv_minus_rv_vol": dlt,
+                                    "iv2_minus_rv2": var_d,
+                                    "underlying_source": next((r.get("underlying_source") for r in sl if r.get("underlying_source")), SRC_FUTCOM),
+                                }
+                            )
                     mid_credit = built.get("net_credit")
                     if width > 0 and mid_credit is not None:
                         credits_pct.append(100.0 * float(mid_credit) / width)
-                    last_chain = None
-                    for later in days:
-                        if later <= td:
-                            continue
-                        ch2 = _chain_for_day(by_day_exp.get((und, exp, later)) or [], profile_id=pid, require_traded=False)
-                        if ch2:
-                            last_chain = (later, ch2)
+                    later_chains = [(d, chains_marks[(und, exp, d)]) for d in days if d > td and chains_marks.get((und, exp, d))]
+                    last_chain = later_chains[-1] if later_chains else None
+                    entry_ds = [abs(float(dlt)) for dlt in (built.get("short_deltas") or []) if dlt is not None]
+                    stop_d = min(2.0 * (sum(entry_ds) / len(entry_ds)), 0.45) if entry_ds else 0.45
+                    t1 = spec["targets"][0]
+                    day_hold = {c: None for c in COST_GRID}
+                    day_rule = {c: None for c in COST_GRID}
+                    day_gross = {c: None for c in COST_GRID}
+                    units_10 = 0
+                    credit_10 = None
+                    fee_10 = 0.0
                     for cost in COST_GRID:
                         credit = _credit(built["legs"], cost)
                         if credit is None or credit <= 0 or width <= 0:
@@ -401,25 +478,23 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                             underlying_price=F,
                         )
                         fee = float(fees.get("round_trip_inr") or 0)
+                        if abs(cost - HEADLINE_COST) < 1e-12:
+                            units_10 = units
+                            credit_10 = credit
+                            fee_10 = fee
                         if last_chain:
                             debit = _debit_to_close(last_chain[1], built["legs"], cost)
                             if debit is not None:
                                 gross = (credit - debit) * lot * units
+                                day_gross[cost] = gross
+                                day_hold[cost] = gross - fee
                                 cycle_hold[cost] += gross - fee
+                                cycle_gross[cost] += gross
                                 trades_h[cost] += 1
                                 n_tr += 1
-                        # rule-exit: first day hitting profit target (first level) or delta stop
-                        t1 = spec["targets"][0]
                         max_profit = credit * lot * units
                         exit_pnl = None
-                        entry_ds = [abs(float(d)) for d in (built.get("short_deltas") or []) if d is not None]
-                        stop_d = min(2.0 * (sum(entry_ds) / len(entry_ds)), 0.45) if entry_ds else 0.45
-                        for later in days:
-                            if later <= td:
-                                continue
-                            ch2 = _chain_for_day(by_day_exp.get((und, exp, later)) or [], profile_id=pid, require_traded=False)
-                            if not ch2:
-                                continue
+                        for _later, ch2 in later_chains:
                             debit = _debit_to_close(ch2, built["legs"], cost)
                             if debit is None:
                                 continue
@@ -445,31 +520,90 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                             if debit is not None:
                                 exit_pnl = (credit - debit) * lot * units - fee
                         if exit_pnl is not None:
+                            day_rule[cost] = exit_pnl
                             cycle_rule[cost] += exit_pnl
-                    gated_days += 1  # counted as feasible; live gates not applied in ungated book
+
+                    iv_hist = [iv_median[(und, d)] for d in sorted({k[1] for k in iv_median if k[0] == und}) if d < td]
+                    iv_res = eod_iv_gate(atm, rv, iv_hist)
+                    fee_ok = None
+                    if units_10 >= 1 and credit_10 and credit_10 > 0:
+                        fg = gate_fee_and_limits(
+                            venue="upstox_mcx",
+                            legs=built["legs"],
+                            net_credit_pts=credit_10,
+                            units=units_10,
+                            lot_size=lot,
+                            contract_value=None,
+                            underlying_price=F,
+                        )
+                        fee_ok = bool(fg["gate"].passed)
+                    gate = first_entry_reject(
+                        has_underlying=True,
+                        n_quotes=sum(1 for r in sl if r.get("traded") and r.get("option_type") in ("CE", "PE")),
+                        dte=dte,
+                        min_dte=min_dte,
+                        max_dte=max_dte,
+                        iv_passed=iv_res.get("passed") if atm is not None else None,
+                        credit=credit_10,
+                        width=width,
+                        min_credit_frac=live_frac,
+                        units=units_10,
+                        fee_ok=fee_ok,
+                        n_fut=sum(1 for r in sl if r.get("option_type") == "FUT" and r.get("close")),
+                        n_option_rows=sum(1 for r in sl if r.get("option_type") in ("CE", "PE")),
+                    )
+                    if gate is None:
+                        gated_days += 1
+                        for cost in COST_GRID:
+                            if day_hold[cost] is not None:
+                                cycle_hold_g[cost] += day_hold[cost]
+                                cycle_gross_g[cost] += day_gross[cost] or 0.0
+                                trades_g[cost] += 1
+                                n_tr_g += 1
+                            if day_rule[cost] is not None:
+                                cycle_rule_g[cost] += day_rule[cost]
                 if n_tr:
                     for cost in COST_GRID:
-                        cycle_nets_h[cost]["hold"].append(cycle_hold[cost])
-                        cycle_nets_h[cost]["rule"].append(cycle_rule[cost])
+                        books[cost]["hold"].append(cycle_hold[cost])
+                        books[cost]["rule"].append(cycle_rule[cost])
+                        books[cost]["gross"].append(cycle_gross[cost])
+                if n_tr_g:
+                    for cost in COST_GRID:
+                        books_g[cost]["hold"].append(cycle_hold_g[cost])
+                        books_g[cost]["rule"].append(cycle_rule_g[cost])
+                        books_g[cost]["gross"].append(cycle_gross_g[cost])
 
-            headline = cycle_nets_h[HEADLINE_COST]
-            mean_hold = (sum(headline["hold"]) / len(headline["hold"])) if headline["hold"] else None
-            mean_rule = (sum(headline["rule"]) / len(headline["rule"])) if headline["rule"] else None
+            headline = books[HEADLINE_COST]
+            headline_g = books_g[HEADLINE_COST]
             n_tr_h = trades_h[HEADLINE_COST]
             rr = None
             if credits_pct:
                 avg_c = sum(credits_pct) / len(credits_pct) / 100.0
                 rr = (avg_c / (1.0 - avg_c)) if avg_c < 1 else None
+            worst = min(headline["hold"]) if headline["hold"] else None
+            wins = sum(1 for x in headline["hold"] if x > 0)
             row = {
                 "id": spec["id"],
                 "label": spec["label"],
                 "underlying": und,
                 "feasible_days_ungated": feasible_days,
+                "gated_days_live_rules": gated_days,
                 "trades_at_10pct": n_tr_h,
+                "trades_at_10pct_gated": trades_g[HEADLINE_COST],
                 "independent_cycles": len(headline["hold"]),
-                "mean_net_per_cycle_hold_10pct": mean_hold,
-                "mean_net_per_cycle_rule_10pct": mean_rule,
-                "credit_pct_width_mean": (sum(credits_pct) / len(credits_pct)) if credits_pct else None,
+                "independent_cycles_gated": len(headline_g["hold"]),
+                "mean_net_per_cycle_hold_10pct": _avg(headline["hold"]),
+                "mean_net_per_cycle_rule_10pct": _avg(headline["rule"]),
+                "mean_gross_per_cycle_hold_10pct": _avg(headline["gross"]),
+                "mean_net_per_cycle_hold_10pct_gated": _avg(headline_g["hold"]),
+                "mean_net_per_cycle_rule_10pct_gated": _avg(headline_g["rule"]),
+                "win_rate_cycles_hold_10pct": (wins / len(headline["hold"])) if headline["hold"] else None,
+                "worst_cycle_net_hold_10pct": worst,
+                "worst_vs_caps": {
+                    "cap_5000": None if worst is None else worst >= -5000,
+                    "cap_10000": None if worst is None else worst >= -10000,
+                },
+                "credit_pct_width_mean": _avg(credits_pct),
                 "reward_risk": rr,
                 "narrowest_zero_credit_max_loss_per_lot": narrowest,
                 "rejected_exceeds_caps": rejected_cap or (narrowest is not None and narrowest > hard),
@@ -478,11 +612,13 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
                     "cap_10000": None if narrowest is None else narrowest <= 10000,
                 },
                 "cost_grid": {
-                    f"{int(c*100)}pct": {
+                    f"{int(c * 100)}pct": {
                         "trades": trades_h[c],
-                        "mean_net_hold": (sum(cycle_nets_h[c]["hold"]) / len(cycle_nets_h[c]["hold"])) if cycle_nets_h[c]["hold"] else None,
-                        "mean_net_rule": (sum(cycle_nets_h[c]["rule"]) / len(cycle_nets_h[c]["rule"])) if cycle_nets_h[c]["rule"] else None,
-                        "gross_hold_sum": sum(cycle_nets_h[c]["hold"]) if cycle_nets_h[c]["hold"] else 0,
+                        "mean_net_hold": _avg(books[c]["hold"]),
+                        "mean_net_rule": _avg(books[c]["rule"]),
+                        "gross_hold_sum": sum(books[c]["gross"]) if books[c]["gross"] else 0,
+                        "net_hold_sum": sum(books[c]["hold"]) if books[c]["hold"] else 0,
+                        "gated_mean_net_hold": _avg(books_g[c]["hold"]),
                     }
                     for c in COST_GRID
                 },
@@ -491,17 +627,15 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
             }
             results.append(row)
 
-    # IV vs RV summary (traded ATM vs mapped-contract RV)
-    if iv_rv_days:
-        n = len(iv_rv_days)
-        exceed = sum(1 for x in iv_rv_days if (x.get("iv_minus_rv_vol") or 0) > 0)
-        mean_pts = sum(x["iv_minus_rv_vol"] for x in iv_rv_days) / n
-        mean_var = sum(x["iv2_minus_rv2"] for x in iv_rv_days) / n
+    if iv_pts:
+        n = len(iv_pts)
+        exceed = sum(1 for x in iv_pts if x > 0)
         iv_summary = {
             "days": n,
             "frac_iv_exceeds_rv": exceed / n,
-            "mean_iv_minus_rv_vol": mean_pts,
-            "mean_iv2_minus_rv2": mean_var,
+            "mean_iv_minus_rv_vol": sum(iv_pts) / n,
+            "mean_iv2_minus_rv2": sum(iv_var) / n,
+            "sample_days_in_payload": len(iv_rv_days),
         }
     else:
         iv_summary = {"days": 0, "frac_iv_exceeds_rv": None, "mean_iv_minus_rv_vol": None, "mean_iv2_minus_rv2": None}
@@ -513,20 +647,47 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
         if (r.get("mean_net_per_cycle_hold_10pct") or 0) > 0 and (iv_summary.get("frac_iv_exceeds_rv") or 0) > 0.5:
             supported.append(r["id"])
 
-    ng_width = 3 * 1.0 * 250  # spec: NATGASMINI lot 250, assume ₹1 step × 3 profile steps
+    positive = [r["id"] for r in results if (r.get("mean_net_per_cycle_hold_10pct") or 0) > 0]
+    iv_ok = (iv_summary.get("frac_iv_exceeds_rv") or 0) > 0.5
+    if supported:
+        plain = (
+            f"IV exceeded mapped-contract RV on {100 * (iv_summary.get('frac_iv_exceeds_rv') or 0):.0f}% of entry days "
+            f"(mean IV−RV {iv_summary.get('mean_iv_minus_rv_vol')}). "
+            f"Mean net P&L per cycle at 10% per-leg cost is positive for {', '.join(supported)}. "
+            "Live min-credit 0.20, ENERGY caps, DTE, time stop, and Phase 4 stay unchanged."
+        )
+    else:
+        why = []
+        if not iv_ok:
+            why.append("ATM IV did not exceed RV on a majority of days")
+        if not positive:
+            why.append("no locked structure has positive mean net P&L per cycle at 10% per-leg cost")
+        rejected = [r["id"] for r in results if r.get("rejected_exceeds_caps")]
+        if rejected:
+            why.append(f"structures {', '.join(rejected)} exceed ₹5k/₹10k zero-credit max loss")
+        if not why:
+            why.append("the locked decision rule is not met")
+        plain = (
+            "Premise is not supported for a live-rule change: "
+            + "; ".join(why)
+            + ". Options without changing live rules: change which research structure is studied next, defer MCX, or focus Delta."
+        )
+
+    ng_width = 3 * 1.0 * 250
     payload = {
         "product": "Kosmic Tarang",
         "registered_sha": REGISTERED_SHA,
         "doc": DOC_PATH,
         "metric": "mean net P&L per independent expired cycle at 10% per-leg cost",
+        "plain_language": plain,
         "live_defaults_unchanged": {
-            "min_credit_fraction_of_width": float(risk.get("min_credit_fraction_of_width") or 0.20),
+            "min_credit_fraction_of_width": live_frac,
             "energy_budget": budget,
             "energy_hard_cap": hard,
             "phase4_approved": bool((risk.get("phase4_hold") or {}).get("approved")),
         },
         "iv_vs_rv": iv_summary,
-        "iv_vs_rv_days": iv_rv_days[:400],
+        "iv_vs_rv_days": iv_rv_days,
         "structures": results,
         "supported_ids": supported,
         "max_loss_specs": {
@@ -535,8 +696,8 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
         },
         "delta_premise": _delta_snapshot_cycles(today),
         "decision_inputs": {
-            "iv_exceeds_rv_majority": (iv_summary.get("frac_iv_exceeds_rv") or 0) > 0.5,
-            "positive_mean_net_at_10pct": [r["id"] for r in results if (r.get("mean_net_per_cycle_hold_10pct") or 0) > 0],
+            "iv_exceeds_rv_majority": iv_ok,
+            "positive_mean_net_at_10pct": positive,
         },
         "asof_ist": today.isoformat(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
