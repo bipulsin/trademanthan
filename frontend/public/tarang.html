@@ -4,8 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
     <title>Kosmic Tarang - TradeWithCTO</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
     <script src="auth-check.js?v=1"></script>
@@ -16,7 +14,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.49" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="tarang.css?v=12" />
+    <link rel="stylesheet" href="tarang.css?v=14" />
 </head>
 <body class="tarang-page theme-page left-menu-web-hamburger tarang-body" data-theme="dark">
     <div class="mobile-title-bar">
@@ -25,7 +23,7 @@
             <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
             <h1 class="mobile-title">
                 Kosmic Tarang
-                <span class="tg-inline-badge tg-badge-paper" id="modeBadgeMobile" aria-live="polite">Forward test</span>
+                <span class="tg-inline-badge tg-badge-paper" id="modeBadgeMobile">Forward test</span>
             </h1>
         </div>
     </div>
@@ -37,121 +35,50 @@
                     <div class="settings-title-section">
                         <h1 class="settings-title tg-page-title">
                             <i class="fas fa-wave-square" aria-hidden="true"></i> Kosmic Tarang
-                            <span class="tg-inline-badge tg-badge-paper" id="modeBadge" aria-live="polite">Forward test</span>
-                            <span class="tg-inline-badge" id="autoBadge" aria-live="polite">Auto orders: locked</span>
+                            <span class="tg-inline-badge tg-badge-paper" id="modeBadge">Forward test</span>
+                            <span class="tg-inline-badge" id="autoBadge">Auto orders: locked</span>
                         </h1>
-                        <p class="settings-subtitle tg-subtitle">IV-gated credit spreads — screener, forward test In-Trade &amp; report (admin)</p>
+                        <p class="settings-subtitle tg-subtitle">Screener, Trade, Report</p>
                     </div>
                     <div class="tg-header-aside">
-                        <button type="button" class="tg-btn" id="btnAutoToggle">Auto orders: locked</button>
+                        <a class="tg-lab-link" href="tarang-lab.html">Research &amp; Ops</a>
                         <button type="button" class="tg-btn" id="btnRefresh">Refresh</button>
-                        <button type="button" class="tg-btn tg-btn-primary" id="btnScreen">Run screener</button>
                     </div>
                 </div>
                 <div class="settings-content">
                     <p id="tokenBanner" class="tg-banner" hidden></p>
                     <p id="statusLine" class="tg-note">Loading…</p>
-
                     <nav class="tg-tabs" aria-label="Kosmic Tarang views">
                         <button type="button" class="tg-tab active" data-tab="screener">Screener</button>
-                        <button type="button" class="tg-tab" data-tab="ticket">Trade Ticket</button>
-                        <button type="button" class="tg-tab" data-tab="intrade">In-Trade</button>
-                        <button type="button" class="tg-tab" data-tab="report">Trade Report</button>
-                        <button type="button" class="tg-tab" data-tab="backtest">Backtest</button>
-                        <button type="button" class="tg-tab" data-tab="health">Data health</button>
-                        <button type="button" class="tg-tab" data-tab="pipeline">Pipeline</button>
+                        <button type="button" class="tg-tab" data-tab="trade">Trade</button>
+                        <button type="button" class="tg-tab" data-tab="report">Report</button>
                     </nav>
 
                     <div id="tab-screener" class="tg-tab-panel">
                         <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Opportunities</h2>
-                            <p class="tg-note">CL / NG / BTC / ETH — QUALIFIED, WATCHING, BLOCKED, or WARMING UP. Admin-only · Forward test auto-records QUALIFIED. Auto orders: locked.</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table" id="screenTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Profile</th>
-                                            <th>Status</th>
-                                            <th>Structure</th>
-                                            <th>Credit / width</th>
-                                            <th>Lots</th>
-                                            <th>Failed gates</th>
-                                            <th></th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="screenBody"><tr><td colspan="7" class="tg-muted">Run screener to load</td></tr></tbody>
-                                </table>
-                            </div>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Recent rejections</h2>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr><th>When</th><th>Profile</th><th>Gate</th><th>Detail</th></tr>
-                                    </thead>
-                                    <tbody id="rejBody"><tr><td colspan="4" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
+                            <div id="screenerEmpty" class="tg-note" hidden></div>
+                            <div id="screenerList" class="tg-screen-list"></div>
                         </section>
                     </div>
 
-                    <div id="tab-ticket" class="tg-tab-panel" hidden>
+                    <div id="tab-trade" class="tg-tab-panel" hidden>
                         <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Trade Ticket</h2>
-                            <p class="tg-note" id="ticketHint">Select a QUALIFIED candidate from Screener, or enter candidate id.</p>
-                            <div class="tg-ticket-bar">
-                                <label for="ticketId">Candidate id</label>
-                                <input id="ticketId" type="number" min="1" class="tg-input" />
-                                <button type="button" class="tg-btn" id="btnLoadTicket">Load</button>
-                            </div>
-                            <div id="ticketPanel" class="tg-ticket"></div>
-                            <div class="tg-ticket-actions" id="ticketActions" hidden>
-                                <label for="holdingMode">Holding</label>
-                                <select id="holdingMode" class="tg-input">
-                                    <option value="INTRADAY" selected>INTRADAY</option>
-                                    <option value="POSITIONAL">POSITIONAL overnight</option>
-                                </select>
-                                <button type="button" class="tg-btn tg-btn-primary" id="btnTake">Record forward test</button>
-                                <button type="button" class="tg-btn" id="btnManual">I placed this at my broker</button>
-                                <button type="button" class="tg-btn" id="btnDismiss">Dismiss</button>
-                            </div>
-                        </section>
-                    </div>
-
-                    <div id="tab-intrade" class="tg-tab-panel" hidden>
-                        <section class="tg-card tg-section">
-                            <div class="tg-ticket-bar">
-                                <h2 class="tg-section-title" style="margin:0;">Open trades</h2>
-                                <button type="button" class="tg-btn" id="btnRefreshIntrade">Refresh MTM</button>
-                                <button type="button" class="tg-btn" id="btnRunExitEngine">Run ExitEngine</button>
-                                <button type="button" class="tg-btn tg-btn-danger" id="btnExitAll">Exit all</button>
-                            </div>
-                            <p class="tg-note">Live mark-to-market · exit triggers · hard-exit countdown. Delta 17:00 IST hard-exits INTRADAY and expiry-day positions only — POSITIONAL holds other days. MCX 23:15 IST is INTRADAY only.</p>
-                            <div id="intradeList"></div>
+                            <h2 class="tg-section-title">My trades</h2>
+                            <div id="activeList"></div>
                         </section>
                         <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Alerts</h2>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead><tr><th>When</th><th>Level</th><th>Message</th><th>Trade</th></tr></thead>
-                                    <tbody id="alertBody"><tr><td colspan="4" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
+                            <h2 class="tg-section-title">Setup</h2>
+                            <div id="symbolChips" class="tg-chips"></div>
+                            <div id="candidatePanel"></div>
                         </section>
                     </div>
 
                     <div id="tab-report" class="tg-tab-panel" hidden>
                         <section class="tg-card tg-section">
                             <div class="tg-ticket-bar">
-                                <h2 class="tg-section-title" style="margin:0;">Trade Report</h2>
-                                <label for="reportMode">Book</label>
-                                <select id="reportMode" class="tg-input">
-                                    <option value="FORWARD_TEST" selected>Forward test</option>
-                                    <option value="LIVE">Live</option>
-                                    <option value="ALL">All</option>
-                                </select>
-                                <button type="button" class="tg-btn" id="btnLoadReport">Load</button>
+                                <h2 class="tg-section-title" style="margin:0;">Report</h2>
+                                <label class="tg-toggle"><input type="radio" name="book" value="LIVE" /> Live</label>
+                                <label class="tg-toggle"><input type="radio" name="book" value="FORWARD_TEST" checked /> Forward test</label>
                                 <a class="tg-btn" id="btnCsv" href="/api/tarang/report.csv?book=FORWARD_TEST">CSV</a>
                             </div>
                             <div class="tg-metrics" id="reportMetrics"></div>
@@ -159,320 +86,20 @@
                                 <table class="tg-table">
                                     <thead>
                                         <tr>
-                                            <th>Id</th><th>Book</th><th>Origin</th><th>Profile</th><th>Hold</th><th>Structure</th><th>Exit</th>
-                                            <th>Gross</th><th>Net</th><th>Fees</th><th>When</th>
+                                            <th>When</th><th>Symbol</th><th>Structure</th><th>Entry</th><th>Exit</th><th>Net</th><th>Reason</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="reportBody"><tr><td colspan="8" class="tg-muted">Load report</td></tr></tbody>
+                                    <tbody id="reportBody"><tr><td colspan="7" class="tg-muted">—</td></tr></tbody>
                                 </table>
                             </div>
-                        </section>
-                    </div>
-
-                    <div id="tab-backtest" class="tg-tab-panel" hidden>
-                        <section class="tg-card tg-section">
-                            <div class="tg-ticket-bar">
-                                <h2 class="tg-section-title" style="margin:0;">Replay harness</h2>
-                                <button type="button" class="tg-btn" id="btnRunBacktest">Run replay</button>
-                            </div>
-                            <p class="tg-note">Same Screener structure rules, SizingService and ExitEngine. Snapshot replay skips narrow_window (ATM±10) for wing validation. MCX EOD path is labelled <strong>MCX EOD-reconstructed, modelled fills</strong> when FUTCOM is mapped; PARITY_ESTIMATE only if that month has no futures. Independent expired cycles and trades are listed separately. Gate days split NOT_EVALUABLE vs FAILED. INTRADAY cannot be tested on EOD. Phase 4 is held. Go-live gate stays hidden until 40 trades. Live min credit stays 0.20.</p>
-                            <div id="premiseCard" class="tg-card" style="margin:12px 0; padding:12px;">
-                                <h3 class="tg-section-title" style="margin:0 0 8px;">Premise test</h3>
-                                <p class="tg-note">Locked in docs/tarang-premise-test.md against SHA 36d7585 before P&amp;L. Does not change live rules.</p>
-                                <pre class="tg-pre" id="premiseBox">—</pre>
-                            </div>
-                            <p id="backtestMsg" class="tg-note"></p>
-                            <div class="tg-metrics" id="backtestMetrics"></div>
-                            <div id="eodLiqBox" class="tg-note"></div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Independent vs open cycles</h3>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Symbol</th>
-                                            <th>Expiry</th>
-                                            <th>Status</th>
-                                            <th>In results?</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="backtestCycles"><tr><td colspan="4" class="tg-muted">Load replay</td></tr></tbody>
-                                </table>
-                            </div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Data sub-reasons (expired cycles)</h3>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Expiry</th>
-                                            <th>No futures</th>
-                                            <th>Parity failed</th>
-                                            <th>Short not traded</th>
-                                            <th>Insufficient traded strikes</th>
-                                            <th>Would qualify if F</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="backtestDataSub"><tr><td colspan="6" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Min-credit rejects (default 20%)</h3>
-                            <p class="tg-note">Default screening is still risk.default.json min_credit_fraction_of_width (0.20). Grid below does not change that.</p>
-                            <div class="tg-table-wrap" style="max-height:220px; overflow:auto;">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Expiry</th>
-                                            <th>Credit % of width</th>
-                                            <th>Short deltas</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="backtestMinCredit"><tr><td colspan="4" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Credit grid (sensitivity only)</h3>
-                            <pre class="tg-pre" id="backtestCreditGrid">—</pre>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Date Wise checksum</h3>
-                            <pre class="tg-pre" id="backtestDatewise">—</pre>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Manual Bhavcopy upload</h3>
-                            <p class="tg-note">Drag CSV/XLS if the scheduled MCX downloader is blocked. Does not use Upstox.</p>
-                            <input type="file" id="bhavcopyFile" accept=".csv,.xls,.xlsx,.html,.htm" />
-                            <button type="button" class="tg-btn" id="btnBhavcopyUpload">Upload import</button>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Stats vs ₹5,000 / ₹10,000 caps</h3>
-                            <pre class="tg-pre" id="backtestStats">—</pre>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Trades (expired cycles)</h3>
-                            <div class="tg-table-wrap" style="max-height:240px; overflow:auto;">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Entry</th>
-                                            <th>Expiry</th>
-                                            <th>Exit</th>
-                                            <th>Net ₹</th>
-                                            <th>Underlying</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="backtestTrades"><tr><td colspan="5" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">By cycle / by month</h3>
-                            <pre class="tg-pre" id="backtestByCycle">—</pre>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Traded-strike liquidity per cycle</h3>
-                            <pre class="tg-pre" id="backtestLiqCycle">—</pre>
-                            <h3 class="tg-section-title" style="margin-top:16px;">First-gate rejections</h3>
-                            <p class="tg-note">NOT_EVALUABLE (missing F / IV / quotes) is counted separately from FAILED (evaluated and rejected).</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr><th>Gate</th><th>Count</th></tr>
-                                    </thead>
-                                    <tbody id="backtestRejSummary"><tr><td colspan="2" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                            <div class="tg-table-wrap" style="margin-top:12px; max-height:240px; overflow:auto;">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Expiry</th>
-                                            <th>Gate</th>
-                                            <th>DTE</th>
-                                            <th>Detail</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="backtestRejLog"><tr><td colspan="5" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                            <div class="tg-table-wrap" style="margin-top:12px;">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Underlying</th>
-                                            <th>Days (all)</th>
-                                            <th>Days wide</th>
-                                            <th>Narrow rows</th>
-                                            <th>Earliest</th>
-                                            <th>6m ready on</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="backtestTimeline"><tr><td colspan="6" class="tg-muted">Load replay</td></tr></tbody>
-                                </table>
-                            </div>
-                        </section>
-                    </div>
-
-                    <div id="tab-health" class="tg-tab-panel" hidden>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Screener (last 24h)</h2>
-                            <pre class="tg-pre" id="screener24Box">—</pre>
-                            <h3 class="tg-section-title" style="margin-top:12px;">ATM IV vs realized vol</h3>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Underlying</th>
-                                            <th>ATM IV</th>
-                                            <th>RV 20d</th>
-                                            <th>(IV−RV)/RV</th>
-                                            <th>Threshold</th>
-                                            <th>Gate</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="ivRvBody"><tr><td colspan="6" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Telegram (private ops)</h2>
-                            <p class="tg-note" id="tgHowTo">Open the bot, press Start, then Poll link. The bot cannot DM by @username.</p>
-                            <p><a id="tgStartLink" href="#" target="_blank" rel="noopener">Link my chat</a>
-                            <button type="button" class="tg-btn" id="btnTgTest">Send test alert</button></p>
-                            <label><input type="checkbox" id="tgPublicSignals" /> Also post forward-test signals to @Tradewithcto</label>
-                            <button type="button" class="tg-btn" id="btnTgPoll">I've pressed Start — poll</button>
-                            <button type="button" class="tg-btn" id="btnTgSave">Save setting</button>
-                            <pre class="tg-pre" id="tgBox">—</pre>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">EOD liquidity (Bhavcopy)</h2>
-                            <p class="tg-note">Traded 10–16 |delta| strikes and iron-condor wing availability per date.</p>
-                            <pre class="tg-pre" id="eodLiqHealth">—</pre>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Phase 4 hold</h2>
-                            <pre class="tg-pre" id="phase4Box">—</pre>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Expiry eligibility (7-day rule)</h2>
-                            <p class="tg-note">Never trade an expiry below min DTE. Never trade without two-sided quotes. Black-76 fills Greeks only — not prices.</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Underlying</th>
-                                            <th>Expiry</th>
-                                            <th>DTE</th>
-                                            <th>Min</th>
-                                            <th>Max</th>
-                                            <th>Time stop</th>
-                                            <th>Tradable?</th>
-                                            <th>Note</th>
-                                        </tr>
-                                    </thead>
-                                            <tbody id="eligBody"><tr><td colspan="8" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Feed health</h2>
-                            <div class="tg-grid" id="feedGrid"></div>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">ENERGY / CRYPTO budgets</h2>
-                            <pre class="tg-pre" id="budgetBox">—</pre>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Minimum max-loss per lot / contract</h2>
-                            <p class="tg-note">Zero-credit ceiling = width × multiplier.</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Underlying</th>
-                                            <th>Family</th>
-                                            <th>Width</th>
-                                            <th>Max loss</th>
-                                            <th>Budget</th>
-                                            <th>Fits default?</th>
-                                            <th>Fits hard cap?</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="lossBody"><tr><td colspan="5" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Full-chain coverage</h2>
-                            <p class="tg-note">Days of compressed chain history per underlying. 6-month backtest needs 60-day IV warmup first. Earliest start = first snapshot + 60d.</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Underlying</th>
-                                            <th>Days</th>
-                                            <th>Wide days</th>
-                                            <th>Narrow</th>
-                                            <th>Earliest</th>
-                                            <th>Backtest start</th>
-                                            <th>6m ready on</th>
-                                            <th>Ready?</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="coverageBody"><tr><td colspan="6" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">IV / chain snapshot counts</h2>
-                            <pre class="tg-pre" id="ivCounts">—</pre>
-                            <button type="button" class="tg-btn" id="btnIvSnap" style="margin-top:10px;">Run full-chain snapshot</button>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Upstox WS share (planning)</h2>
-                            <pre class="tg-pre" id="wsBox">—</pre>
-                        </section>
-                    </div>
-
-                    <div id="tab-pipeline" class="tg-tab-panel" hidden>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Pipeline health</h2>
-                            <p class="tg-note">Last success, next run, failures, open data gaps. Phase 4/5 live orders stay locked.</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Job</th>
-                                            <th>Last success</th>
-                                            <th>Last ok?</th>
-                                            <th>Fails</th>
-                                            <th>Next</th>
-                                            <th>Open gaps</th>
-                                            <th>Error</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="pipelineBody"><tr><td colspan="7" class="tg-muted">Load health</td></tr></tbody>
-                                </table>
-                            </div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Last MCX upload per commodity / expiry</h3>
-                            <p class="tg-note">HTTP scrape stays off. After each expiry, drag-drop OPTFUT and FUTCOM for the reminded date range.</p>
-                            <div class="tg-table-wrap">
-                                <table class="tg-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Symbol</th>
-                                            <th>Expiry</th>
-                                            <th>Instrument</th>
-                                            <th>First date</th>
-                                            <th>Last upload date</th>
-                                            <th>Rows</th>
-                                            <th>File</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="mcxUploadBody"><tr><td colspan="7" class="tg-muted">—</td></tr></tbody>
-                                </table>
-                            </div>
-                            <h3 class="tg-section-title" style="margin-top:16px;">Delta fee formula (paper, defaults unchanged)</h3>
-                            <pre class="tg-pre" id="feeFormulaBox">—</pre>
-                        </section>
-                        <section class="tg-card tg-section">
-                            <h2 class="tg-section-title">Delta segment readiness</h2>
-                            <pre class="tg-pre" id="deltaReadyBox">—</pre>
                         </section>
                     </div>
                 </div>
             </div>
         </main>
     </div>
-
+    <div id="modalRoot"></div>
     <script src="left-menu.js?v=3.49"></script>
-    <script src="tarang.js?v=16"></script>
+    <script src="tarang.js?v=20"></script>
 </body>
 </html>

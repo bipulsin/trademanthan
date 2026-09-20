@@ -142,15 +142,32 @@ def record_forward_tests_from_screen(results: List[Dict[str, Any]]) -> Dict[str,
                 text(
                     """
                     SELECT id FROM tarang_trades
-                    WHERE signal_key = :k AND record_type = 'FORWARD_TEST'
+                    WHERE record_type = 'FORWARD_TEST'
                       AND status IN ('ENTRY_PENDING', 'IN_TRADE', 'EXIT_PENDING', 'open')
+                      AND (
+                        signal_key = :k
+                        OR profile_id = :pid
+                        OR COALESCE(meta->>'underlying', '') = :und
+                      )
                     LIMIT 1
                     """
                 ),
-                {"k": sk},
+                {
+                    "k": sk,
+                    "pid": row.get("profile_id"),
+                    "und": str(payload.get("underlying") or row.get("profile_id") or ""),
+                },
             ).mappings().first()
             if open_row:
-                skipped.append({"reason": "already_open", "signal_key": sk, "trade_id": open_row["id"]})
+                persist_skipped(
+                    db,
+                    signal_key=sk,
+                    profile_id=row.get("profile_id"),
+                    reason="open_forward_test_symbol",
+                    payload={"signal_key": sk, "trade_id": open_row["id"]},
+                )
+                db.commit()
+                skipped.append({"reason": "open_forward_test_symbol", "signal_key": sk, "trade_id": open_row["id"]})
                 db.close()
                 continue
             closed = db.execute(

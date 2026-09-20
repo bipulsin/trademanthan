@@ -496,3 +496,11 @@ VALUES
     ('telegram_private_chat_id', '{}'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS fills_confirmed BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS linked_ft_trade_id BIGINT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS voided BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS void_reason TEXT;
+ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS fill_overrides JSONB;
+
+ALTER TABLE tarang_alert_dedupe ADD COLUMN IF NOT EXISTS last_message TEXT;
+

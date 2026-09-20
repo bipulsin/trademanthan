@@ -233,11 +233,9 @@ def test_exit_hard_exit_delta_positional_on_expiry_day():
     ]
     m = compute_metrics(trades)
     assert m["count"] == 3
-    assert abs(m["win_rate"] - 2 / 3) < 1e-9
-    assert m["avg_win"] == 400.0
-    assert m["avg_loss"] == -800.0
-    assert m["profit_factor"] is not None
-    assert m["expectancy"] == pytest.approx((500 - 800 + 300) / 3)
+    assert m["stats_ready"] is False
+    assert m["win_rate"] is None
+    assert m["net_total"] == 0.0
 
 
 def test_paper_lifecycle_with_db_fixtures():

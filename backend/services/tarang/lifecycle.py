@@ -809,6 +809,27 @@ def build_in_trade_view(trade_id: int, *, refresh_quotes: bool = True) -> Dict[s
         pnl = float(mtm.get("unrealized_pnl_inr") or 0)
         pct_max_profit = (pnl / max_profit * 100.0) if max_profit else None
         pct_max_loss = (abs(min(pnl, 0)) / max_loss * 100.0) if max_loss else None
+        # Prefer last/LTP when inside bid-ask; else mid + marker
+        for pl in mtm.get("per_leg") or []:
+            last = pl.get("last") or pl.get("ltp")
+            bid, ask = pl.get("bid"), pl.get("ask")
+            mid = pl.get("mid")
+            mark_src = "mid"
+            mark = mid
+            if last is not None:
+                try:
+                    lf = float(last)
+                    if bid is not None and ask is not None and float(bid) <= lf <= float(ask):
+                        mark, mark_src = lf, "ltp"
+                    elif bid is None or ask is None:
+                        mark, mark_src = lf, "ltp"
+                    else:
+                        mark, mark_src = mid if mid is not None else lf, "mid_fallback"
+                except (TypeError, ValueError):
+                    pass
+            pl["mark"] = mark
+            pl["mark_source"] = mark_src
+            pl["ltp"] = last
         alerts = list_alerts(db, trade_id=trade_id, limit=20)
         gap = None
         new_meta = dict(meta)
@@ -853,6 +874,9 @@ def build_in_trade_view(trade_id: int, *, refresh_quotes: bool = True) -> Dict[s
             "gap_at_open": gap,
             "alerts": alerts,
             "events": list_events(db, trade_id, limit=50),
+            "fills_confirmed": bool(trade.get("fills_confirmed")),
+            "unconfirmed": str(trade.get("record_type") or "").upper() == RECORD_LIVE and not bool(trade.get("fills_confirmed")),
+            "void_until_sec": None,
         }
     finally:
         db.close()
@@ -865,6 +889,7 @@ def exit_trade(
     actor: str = "USER",
     note: str = "",
     refresh_quotes: bool = True,
+    fills: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """IN_TRADE → EXIT_PENDING → paper exit fills → CLOSED → REPORTED."""
     ensure_tarang_tables()
@@ -892,23 +917,47 @@ def exit_trade(
         entry_fills = _load_entry_fills(db, trade_id, meta)
         bundle = _refresh_quote_bundle(trade) if refresh_quotes else {"quotes": [], "ok": False}
         live = bundle.get("quotes") or []
-        if venue == "upstox_mcx" and mcx_feed_closed():
+        if venue == "upstox_mcx" and mcx_feed_closed() and not fills:
             return {"ok": False, "error": "mcx_closed", "quotes_status": "mcx_closed"}
-        if not live or not bundle.get("ok"):
+        if (not live or not bundle.get("ok")) and not fills:
             return {
                 "ok": False,
                 "error": "exit_deferred_stale_or_missing_quote",
                 "quotes_status": "stale",
             }
-        exit_res = simulate_exit_fills(
-            legs,
-            entry_fills,
-            units=units,
-            venue=venue,
-            lot_size=meta.get("lot_size"),
-            contract_value=meta.get("contract_value"),
-            live_quotes=live,
-        )
+        if fills:
+            exit_res = {
+                "ok": True,
+                "fills": fills,
+                "fees_inr": float(sum(float(f.get("fees") or 0) for f in fills)),
+                "gross_pnl_inr": None,
+            }
+            # Gross from entry vs exit prices when both present
+            entry_by = {int(f.get("leg_index") or i): f for i, f in enumerate(entry_fills)}
+            gross = 0.0
+            for i, f in enumerate(fills):
+                ef = entry_by.get(int(f.get("leg_index") if f.get("leg_index") is not None else i), {})
+                ep = float(ef.get("price") or 0)
+                xp = float(f.get("price") or 0)
+                side = str(ef.get("side") or f.get("side") or "").upper()
+                qty = float(f.get("qty") or ef.get("qty") or 1)
+                # credit spread: sold high, buy back lower is profit
+                if side == "SELL":
+                    gross += (ep - xp) * qty
+                else:
+                    gross += (xp - ep) * qty
+            # Convert pts-ish via existing mtm multiplier if available
+            exit_res["gross_pnl_inr"] = gross
+        else:
+            exit_res = simulate_exit_fills(
+                legs,
+                entry_fills,
+                units=units,
+                venue=venue,
+                lot_size=meta.get("lot_size"),
+                contract_value=meta.get("contract_value"),
+                live_quotes=live,
+            )
         if not exit_res.get("ok"):
             return {
                 "ok": False,
@@ -1323,6 +1372,241 @@ def run_auto_paper_once() -> Dict[str, Any]:
         "forward_tests": screen.get("forward_tests") or {},
         "taken": (screen.get("forward_tests") or {}).get("recorded") or [],
     }
+
+
+def list_open_user_trades() -> List[Dict[str, Any]]:
+    """Trades the operator started (Trade button / Live / unconfirmed). Not auto forward-tests."""
+    rows = []
+    for t in list_open_trades():
+        if t.get("voided"):
+            continue
+        rt = str(t.get("record_type") or "").upper()
+        orig = str(t.get("origin") or "").upper()
+        if rt == RECORD_FORWARD_TEST and orig in ("AUTO", "SYSTEM"):
+            continue
+        if orig == "USER" or rt == RECORD_LIVE:
+            rows.append(t)
+    return rows
+
+
+def _open_user_profiles() -> set:
+    return {str(t.get("profile_id") or "").upper() for t in list_open_user_trades()}
+
+
+def start_user_trade(
+    candidate_id: int,
+    *,
+    note: str = "",
+    holding_mode: str = "INTRADAY",
+) -> Dict[str, Any]:
+    """Start at suggested prices. Unconfirmed fills until Edit save or tick. No broker send."""
+    cand = get_candidate(candidate_id)
+    if not cand:
+        return {"ok": False, "error": "candidate_not_found"}
+    p = cand.get("payload") or {}
+    status = str(p.get("status") or "").upper().replace(" ", "_")
+    if status != QUALIFIED and str(cand.get("status") or "").lower() not in ("qualified",):
+        return {"ok": False, "error": "candidate_not_qualified", "reason": "Not qualified"}
+    pid = str(cand.get("profile_id") or "").upper()
+    if pid in _open_user_profiles():
+        return {"ok": False, "error": "active_user_trade", "reason": "You already have an active trade in this symbol"}
+    out = take_trade_paper(
+        candidate_id,
+        note=note or "user_trade_suggested",
+        actor="USER",
+        holding_mode=holding_mode,
+        record_type=RECORD_LIVE,
+        fill_source=FILL_USER,
+    )
+    if not out.get("ok"):
+        return out
+    tid = int(out["trade_id"])
+    linked = None
+    db = SessionLocal()
+    try:
+        ft = db.execute(
+            text(
+                """
+                SELECT id FROM tarang_trades
+                WHERE record_type = 'FORWARD_TEST'
+                  AND status = ANY(:st)
+                  AND profile_id = :p
+                  AND COALESCE(voided, false) = false
+                ORDER BY id DESC LIMIT 1
+                """
+            ),
+            {"st": list(OPEN_STATUSES), "p": pid},
+        ).mappings().first()
+        if ft:
+            linked = int(ft["id"])
+        db.execute(
+            text(
+                """
+                UPDATE tarang_trades
+                SET fills_confirmed = false, linked_ft_trade_id = :ft, origin = 'USER',
+                    record_type = 'LIVE', fill_source = 'USER_ENTERED', mode = 'LIVE',
+                    updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {"id": tid, "ft": linked},
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.exception("start_user_trade flag update failed")
+        return {"ok": False, "error": str(e)[:200]}
+    finally:
+        db.close()
+    out["fills_confirmed"] = False
+    out["record_type"] = RECORD_LIVE
+    out["display_mode"] = "Live"
+    out["linked_ft_trade_id"] = linked
+    out["confirm_fills_banner"] = "Confirm your actual fills."
+    out["message"] = "Started at suggested prices. Confirm your actual fills."
+    return out
+
+
+def confirm_or_edit_fills(
+    trade_id: int,
+    *,
+    fills: Optional[List[Dict[str, Any]]] = None,
+    lots: Optional[int] = None,
+    fees: Optional[float] = None,
+    notes: Optional[str] = None,
+    legs: Optional[List[Dict[str, Any]]] = None,
+    confirm: bool = True,
+) -> Dict[str, Any]:
+    """Timestamped overrides. Original snapshot stays immutable."""
+    trade = get_trade(trade_id)
+    if not trade:
+        return {"ok": False, "error": "trade_not_found"}
+    if trade.get("voided"):
+        return {"ok": False, "error": "voided"}
+    db = SessionLocal()
+    try:
+        meta = dict(trade.get("meta") or {})
+        prev = {
+            "entry_fills": meta.get("entry_fills"),
+            "lots": trade.get("lots_or_contracts"),
+            "fees_total": trade.get("fees_total"),
+            "legs": trade.get("legs"),
+            "notes": trade.get("notes"),
+        }
+        hist = list(meta.get("fill_override_history") or [])
+        hist.append({"at": datetime.now(timezone.utc).isoformat(), "previous": prev})
+        meta["fill_override_history"] = hist[-20:]
+        if fills:
+            meta["entry_fills"] = fills
+            credit = 0.0
+            for f in fills:
+                side = str(f.get("side") or "").upper()
+                px = float(f.get("price") or 0)
+                credit += -px if side == "BUY" else px
+            db.execute(text("UPDATE tarang_trades SET entry_credit = :c WHERE id = :id"), {"c": credit, "id": trade_id})
+            db.execute(text("DELETE FROM tarang_fills WHERE trade_id = :id AND phase = 'entry'"), {"id": trade_id})
+            _persist_fills(db, trade_id, fills, "entry", record_type=RECORD_LIVE, fill_source=FILL_USER)
+        if lots is not None:
+            db.execute(
+                text("UPDATE tarang_trades SET lots_or_contracts = :n WHERE id = :id"),
+                {"n": int(lots), "id": trade_id},
+            )
+        if fees is not None:
+            db.execute(text("UPDATE tarang_trades SET fees_total = :f WHERE id = :id"), {"f": float(fees), "id": trade_id})
+            meta["fees_entry_inr"] = float(fees)
+        if notes is not None:
+            db.execute(text("UPDATE tarang_trades SET notes = :n WHERE id = :id"), {"n": notes, "id": trade_id})
+        if legs is not None:
+            db.execute(
+                text("UPDATE tarang_trades SET legs = CAST(:l AS jsonb) WHERE id = :id"),
+                {"l": json.dumps(legs), "id": trade_id},
+            )
+        warn = []
+        max_loss = trade.get("max_loss")
+        from backend.services.tarang.config import energy_budget, crypto_budget
+
+        cap = float((crypto_budget() if trade.get("risk_bucket") == "CRYPTO" else energy_budget()).get("per_trade_budget_inr") or 0)
+        units = int(lots if lots is not None else trade.get("lots_or_contracts") or 1)
+        if max_loss is not None and cap and float(max_loss) * units > cap:
+            warn.append("Risk may exceed the per-trade cap after this edit.")
+        if legs is not None and len(legs) < 2:
+            warn.append("Legs may no longer be defined-risk.")
+        meta["fills_confirmed"] = bool(confirm)
+        db.execute(
+            text(
+                """
+                UPDATE tarang_trades
+                SET fills_confirmed = :c, meta = CAST(:m AS jsonb), fill_overrides = CAST(:m AS jsonb), updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {"c": bool(confirm), "m": json.dumps(meta), "id": trade_id},
+        )
+        append_event(
+            db,
+            trade_id=trade_id,
+            from_status=IN_TRADE,
+            to_status=IN_TRADE,
+            actor="USER",
+            event_type="fills_edited",
+            payload={"warn": warn, "confirm": confirm},
+            enforce_transition=False,
+        )
+        db.commit()
+        return {"ok": True, "trade_id": trade_id, "fills_confirmed": bool(confirm), "warnings": warn}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)[:300]}
+    finally:
+        db.close()
+
+
+def void_user_trade(trade_id: int, reason: str) -> Dict[str, Any]:
+    reason_n = (reason or "").strip()
+    if not reason_n:
+        return {"ok": False, "error": "reason_required"}
+    trade = get_trade(trade_id)
+    if not trade:
+        return {"ok": False, "error": "trade_not_found"}
+    entry = trade.get("entry_at")
+    try:
+        ts = datetime.fromisoformat(str(entry).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+    except Exception:
+        ts = datetime.now(timezone.utc)
+    age = (datetime.now(timezone.utc) - ts).total_seconds()
+    if age > 300:
+        return {"ok": False, "error": "void_window_elapsed", "age_sec": age}
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                UPDATE tarang_trades
+                SET voided = true, void_reason = :r, status = 'VOIDED', updated_at = NOW()
+                WHERE id = :id
+                """
+            ),
+            {"id": trade_id, "r": reason_n[:500]},
+        )
+        append_event(
+            db,
+            trade_id=trade_id,
+            from_status=IN_TRADE,
+            to_status="VOIDED",
+            actor="USER",
+            event_type="void_within_5min",
+            payload={"reason": reason_n, "age_sec": age},
+            enforce_transition=False,
+        )
+        db.commit()
+        return {"ok": True, "trade_id": trade_id, "voided": True, "reason": reason_n}
+    except Exception as e:
+        db.rollback()
+        return {"ok": False, "error": str(e)[:200]}
+    finally:
+        db.close()
 
 
 def exclude_forward_test(trade_id: int, reason: str, actor: str = "USER") -> Dict[str, Any]:

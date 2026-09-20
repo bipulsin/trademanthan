@@ -54,12 +54,23 @@ def _atm_iv(chain) -> Optional[float]:
 
 
 def _load_iv_history(db, profile_id: str, limit: int = 120) -> List[float]:
+    """One ATM IV per IST calendar day (latest snapshot that day). Count = unique days."""
     rows = db.execute(
         text(
             """
-            SELECT atm_iv FROM tarang_iv_snapshots
-            WHERE profile_id = :p AND atm_iv IS NOT NULL
-            ORDER BY captured_at DESC
+            SELECT day_ist, atm_iv FROM (
+                SELECT
+                    (captured_at AT TIME ZONE 'Asia/Kolkata')::date AS day_ist,
+                    atm_iv,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY (captured_at AT TIME ZONE 'Asia/Kolkata')::date
+                        ORDER BY captured_at DESC
+                    ) AS rn
+                FROM tarang_iv_snapshots
+                WHERE profile_id = :p AND atm_iv IS NOT NULL
+            ) d
+            WHERE rn = 1
+            ORDER BY day_ist DESC
             LIMIT :lim
             """
         ),
@@ -591,3 +602,110 @@ def get_candidate(candidate_id: int) -> Optional[Dict[str, Any]]:
         }
     finally:
         db.close()
+
+
+MAIN_PROFILES = ("CL", "NG", "BTC", "ETH")
+
+
+def build_screener_simple() -> Dict[str, Any]:
+    """One row per symbol for the main Screener tab (no gate lists)."""
+    from backend.services.tarang.calendar import format_ist, parse_to_ist_str
+    from backend.services.tarang.labels import (
+        auto_lock_label,
+        format_inr,
+        friendly_symbol,
+        gate_plain,
+        mode_badge,
+        structure_plain,
+        GATE_PLAIN,
+    )
+    from backend.services.tarang.lifecycle import get_mode_auto, list_open_user_trades
+
+    ensure_tarang_tables()
+    busy = {str(t.get("profile_id") or "").upper() for t in list_open_user_trades()}
+    latest = {}
+    for c in list_recent_candidates(80):
+        pid = str(c.get("profile_id") or "").upper()
+        if pid not in latest:
+            latest[pid] = c
+    rows = []
+    last_checked = None
+    for pid in MAIN_PROFILES:
+        if pid in busy:
+            continue
+        c = latest.get(pid)
+        fr = friendly_symbol(pid)
+        if not c:
+            rows.append(
+                {
+                    "profile_id": pid,
+                    "display_name": fr["display_name"],
+                    "status": "WATCHING",
+                    "headline": "Market closed" if pid in ("CL", "NG") else "No screen yet",
+                    "why": ["No recent screen"],
+                    "candidate_id": None,
+                    "qualified": False,
+                }
+            )
+            continue
+        p = c.get("payload") or {}
+        st = str(p.get("status") or c.get("screen_status") or "").upper().replace(" ", "_")
+        if st in ("WARMING_UP", "BLOCKED", "NOT_EVALUABLE"):
+            chip = "WATCHING"
+        elif st == "QUALIFIED":
+            chip = "QUALIFIED"
+        else:
+            chip = "WATCHING"
+        created = c.get("created_at")
+        if created and (last_checked is None or str(created) > str(last_checked)):
+            last_checked = created
+        failed = []
+        for g in p.get("gates") or []:
+            if not g.get("passed") or g.get("evaluability") in ("failed", "not_evaluable"):
+                failed.append(gate_plain(g.get("name"), g.get("detail")))
+        for name in (p.get("failed_gates") or [])[:3]:
+            line = gate_plain(name)
+            if line not in failed:
+                failed.append(line)
+        why = failed[:3]
+        if chip == "QUALIFIED":
+            headline = (
+                f"{structure_plain(c.get('structure') or p.get('structure'))} · "
+                f"expiry {p.get('expiry') or '—'} · "
+                f"credit {format_inr(p.get('gross_credit_inr') or p.get('max_profit_approx_inr'))} · "
+                f"max loss {format_inr(p.get('candidate_risk_inr') or p.get('max_loss_per_unit_inr'))}"
+            )
+        else:
+            headline = why[0] if why else (p.get("detail") or "Watching")
+            if "closed" in str(p.get("detail") or "").lower() or st == "BLOCKED":
+                if "token" in str(p.get("detail") or "").lower():
+                    headline = "Market data unavailable"
+        rows.append(
+            {
+                "profile_id": pid,
+                "display_name": fr["display_name"],
+                "status": chip,
+                "headline": headline,
+                "why": why,
+                "candidate_id": c.get("id"),
+                "qualified": chip == "QUALIFIED",
+                "structure": structure_plain(c.get("structure") or p.get("structure")),
+                "expiry": p.get("expiry"),
+                "net_credit": p.get("net_credit"),
+                "max_loss_inr": p.get("candidate_risk_inr") or p.get("max_loss_per_unit_inr"),
+            }
+        )
+    any_q = any(r.get("qualified") for r in rows)
+    ma = get_mode_auto()
+    return {
+        "rows": rows,
+        "any_qualified": any_q,
+        "empty_message": None
+        if rows
+        else f"Nothing qualifies right now. Last checked {parse_to_ist_str(last_checked) or format_ist()}.",
+        "last_checked_ist": parse_to_ist_str(last_checked) or format_ist(),
+        "gate_labels": GATE_PLAIN,
+        "display_mode": ma.get("display_mode") or mode_badge("PAPER"),
+        "display_auto": auto_lock_label(),
+        "hidden_profiles": sorted(busy),
+    }

@@ -186,7 +186,7 @@ def test_unique_open_and_cooldown_and_skip_and_snapshot(monkeypatch):
         first = record_forward_tests_from_screen([row])
         assert first["recorded"]
         second = record_forward_tests_from_screen([row])
-        assert any(s.get("reason") == "already_open" for s in second["skipped"])
+        assert any(s.get("reason") in ("already_open", "open_forward_test_symbol") for s in second["skipped"])
 
     db2 = MagicMock()
 

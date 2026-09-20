@@ -18,6 +18,25 @@ WEEKEND_SUN_END_MIN = 17 * 60
 _DOW_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
+def format_ist(now: Optional[datetime] = None) -> str:
+    """User-facing IST timestamp, e.g. 20 Sep 2026, 12:22 IST."""
+    ist = to_ist(now)
+    return ist.strftime("%d %b %Y, %H:%M IST")
+
+
+def parse_to_ist_str(value: Any) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return format_ist(value)
+    try:
+        raw = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(raw)
+        return format_ist(dt)
+    except Exception:
+        return str(value)
+
+
 def to_ist(now: Optional[datetime] = None) -> datetime:
     if now is None:
         return datetime.now(IST)

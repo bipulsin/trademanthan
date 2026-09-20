@@ -32,6 +32,9 @@ def _record_type(t: Dict[str, Any]) -> str:
     return "LIVE" if str(t.get("mode") or "").upper() == "LIVE" else "FORWARD_TEST"
 
 
+MIN_TRADES_FOR_STATS = 10
+
+
 def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     pnls = [_safe(t.get("net_pnl")) for t in trades]
     empty = {
@@ -51,6 +54,8 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "by_underlying": {},
         "by_holding_mode": {"INTRADAY": {"count": 0}, "POSITIONAL": {"count": 0}},
         "by_origin": {"AUTO": {"count": 0}, "USER": {"count": 0}},
+        "stats_ready": False,
+        "stats_note": "Too few trades to be meaningful",
     }
     if not pnls:
         return empty
@@ -118,20 +123,25 @@ def compute_metrics(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         by_origin.setdefault(orig, []).append(t)
     origin_metrics = {k: _slice_metrics(v) for k, v in by_origin.items()}
 
+    stats_ok = len(pnls) >= MIN_TRADES_FOR_STATS
+    too_few = "Too few trades to be meaningful"
+
     return {
         "count": len(pnls),
         "independent_cycles": len(keys),
-        "win_rate": win_rate,
-        "avg_win": avg_win,
-        "avg_loss": avg_loss,
-        "profit_factor": pf if pf != float("inf") else None,
-        "profit_factor_infinite": pf == float("inf"),
-        "expectancy": expectancy,
+        "win_rate": win_rate if stats_ok else None,
+        "avg_win": avg_win if stats_ok else None,
+        "avg_loss": avg_loss if stats_ok else None,
+        "profit_factor": (pf if pf != float("inf") else None) if stats_ok else None,
+        "profit_factor_infinite": bool(stats_ok and pf == float("inf")),
+        "expectancy": expectancy if stats_ok else None,
+        "stats_ready": stats_ok,
+        "stats_note": None if stats_ok else too_few,
         "gross_total": sum(_safe(t.get("gross_pnl")) for t in trades),
         "net_total": sum(pnls),
         "fees_total": sum(_safe(t.get("fees_total")) for t in trades),
-        "max_drawdown": max_dd,
-        "worst_trade": worst,
+        "max_drawdown": max_dd if stats_ok else None,
+        "worst_trade": worst if stats_ok else None,
         "by_exit_reason": by_reason,
         "by_profile": by_profile,
         "by_underlying": by_und,
@@ -154,10 +164,14 @@ def build_report(
     all_closed = list_closed_trades(mode=None, limit=max(limit, 500))
     if profile_id:
         all_closed = [t for t in all_closed if t.get("profile_id") == profile_id.upper()]
-    excluded = [t for t in all_closed if t.get("excluded")]
-    included = [t for t in all_closed if not t.get("excluded")]
+    excluded = [t for t in all_closed if t.get("excluded") or t.get("voided")]
+    included = [t for t in all_closed if not t.get("excluded") and not t.get("voided")]
     ft = [t for t in included if _record_type(t) == "FORWARD_TEST"]
-    live = [t for t in included if _record_type(t) == "LIVE"]
+    live = [
+        t
+        for t in included
+        if _record_type(t) == "LIVE" and bool(t.get("fills_confirmed", True))
+    ]
     book_u = str(book or mode or "FORWARD_TEST").upper()
     if book_u in ("PAPER", "FORWARD_TEST", "FT"):
         book_u = "FORWARD_TEST"

@@ -31,18 +31,22 @@ from backend.services.tarang.labels import auto_lock_label, mode_badge
 from backend.services.tarang.lifecycle import (
     add_trade_note,
     build_in_trade_view,
+    confirm_or_edit_fills,
     dismiss_candidate,
     exclude_forward_test,
     exit_all_open,
     exit_trade,
     get_trade,
     list_open_trades,
+    list_open_user_trades,
     mark_taken_manual,
     record_live_user_trade,
     run_auto_paper_once,
     run_exit_engine_once,
     set_paper_auto,
+    start_user_trade,
     take_trade_paper,
+    void_user_trade,
 )
 from backend.services.tarang.live_broker import place_or_shadow
 from backend.services.tarang.live_control import LivePlacementDisabled, tarang_live_enabled
@@ -53,6 +57,7 @@ from backend.services.tarang.screener import (
     list_recent_candidates,
     list_rejections,
     run_screener,
+    build_screener_simple,
 )
 from backend.services.tarang.sizing import min_max_loss_table
 from backend.services.tarang.ticket import build_ticket
@@ -102,6 +107,20 @@ class ManualBody(BaseModel):
 class ExitBody(BaseModel):
     reason: str = "MANUAL"
     note: str = ""
+    fills: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class EditFillsBody(BaseModel):
+    fills: List[Dict[str, Any]] = Field(default_factory=list)
+    lots: Optional[int] = None
+    fees: Optional[float] = None
+    notes: Optional[str] = None
+    legs: Optional[List[Dict[str, Any]]] = None
+    confirm: bool = True
+
+
+class VoidBody(BaseModel):
+    reason: str
 
 
 class NoteBody(BaseModel):
@@ -291,6 +310,19 @@ def tarang_screener_run(
     return run_screener(ids)
 
 
+@router.get("/screener/simple")
+def tarang_screener_simple(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    return build_screener_simple()
+
+
+@router.get("/labels")
+def tarang_labels(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from backend.services.tarang.labels import GATE_PLAIN, FRIENDLY_SYMBOLS, auto_lock_label
+
+    return {"gates": GATE_PLAIN, "symbols": FRIENDLY_SYMBOLS, "display_auto": auto_lock_label()}
+
+
 @router.get("/screener")
 def tarang_screener_latest(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     ensure_tarang_tables()
@@ -346,6 +378,18 @@ def tarang_ticket(candidate_id: int, _user: User = Depends(_require_admin)) -> D
     if not t.get("ok"):
         raise HTTPException(status_code=404, detail=t.get("error") or "not found")
     return t
+
+
+@router.post("/ticket/{candidate_id}/start")
+def tarang_ticket_start(
+    candidate_id: int,
+    body: TakeBody = TakeBody(),
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = start_user_trade(candidate_id, note=body.note or "", holding_mode=body.holding_mode or "INTRADAY")
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out.get("reason") or out)
+    return out
 
 
 @router.post("/ticket/{candidate_id}/take")
@@ -424,6 +468,25 @@ def tarang_trades_open(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     return {"display_mode": mode_badge("PAPER"), "mode": "PAPER", "trades": list_open_trades()}
 
 
+@router.get("/trades/active")
+def tarang_trades_active(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    ensure_tarang_tables()
+    views = []
+    for t in list_open_user_trades():
+        v = build_in_trade_view(int(t["id"]), refresh_quotes=True)
+        if v.get("ok"):
+            views.append(v)
+    return {"trades": views, "display_auto": auto_lock_label()}
+
+
+@router.get("/quotes")
+def tarang_quotes(trade_id: int, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    v = build_in_trade_view(trade_id, refresh_quotes=True)
+    if not v.get("ok"):
+        raise HTTPException(status_code=404, detail=v.get("error") or "not found")
+    return v
+
+
 @router.get("/trades/{trade_id}")
 def tarang_trade_get(trade_id: int, _user: User = Depends(_require_admin)) -> Dict[str, Any]:
     t = get_trade(trade_id)
@@ -471,7 +534,13 @@ def tarang_trade_exit(
     body: ExitBody = ExitBody(),
     _user: User = Depends(_require_admin),
 ) -> Dict[str, Any]:
-    out = exit_trade(trade_id, reason=body.reason or "MANUAL", actor="USER", note=body.note or "")
+    out = exit_trade(
+        trade_id,
+        reason=body.reason or "MANUAL",
+        actor="USER",
+        note=body.note or "",
+        fills=list(body.fills or []) or None,
+    )
     if not out.get("ok"):
         raise HTTPException(status_code=400, detail=out.get("error") or out)
     return out
@@ -494,6 +563,38 @@ def tarang_trade_note(
     out = add_trade_note(trade_id, body.note)
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail=out.get("error"))
+    return out
+
+
+@router.patch("/trades/{trade_id}/fills")
+def tarang_trade_edit_fills(
+    trade_id: int,
+    body: EditFillsBody,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = confirm_or_edit_fills(
+        trade_id,
+        fills=list(body.fills or []) or None,
+        lots=body.lots,
+        fees=body.fees,
+        notes=body.notes,
+        legs=body.legs,
+        confirm=bool(body.confirm),
+    )
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out)
+    return out
+
+
+@router.post("/trades/{trade_id}/void")
+def tarang_trade_void(
+    trade_id: int,
+    body: VoidBody,
+    _user: User = Depends(_require_admin),
+) -> Dict[str, Any]:
+    out = void_user_trade(trade_id, body.reason)
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or out)
     return out
 
 
@@ -615,6 +716,7 @@ def tarang_telegram_settings(_user: User = Depends(_require_admin)) -> Dict[str,
             "start_link": start_link(),
             "private_chat_id": private_chat_id(db),
             "telegram_public_signals": public_signals_enabled(db),
+            "telegram_public_signals_default": False,
             "how_to": "Open start_link, press Start on the bot, then Poll link. Bot cannot DM by username.",
         }
     finally:
@@ -649,7 +751,41 @@ def tarang_telegram_settings_set(body: TelegramSettingsBody, _user: User = Depen
         db.close()
 
 
-@router.post("/telegram/poll-link")
+@router.get("/telegram/audit")
+def tarang_telegram_audit(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    from sqlalchemy import text as sql_text
+
+    db = SessionLocal()
+    try:
+        ensure_tarang_tables()
+        alerts = db.execute(
+            sql_text(
+                """
+                SELECT COUNT(*)::int AS n
+                FROM tarang_alerts
+                WHERE COALESCE(meta->>'kind','') = 'forward_test_signal'
+                   OR message ILIKE '%@Tradewithcto%'
+                """
+            )
+        ).mappings().first()
+        settings = db.execute(
+            sql_text("SELECT value FROM tarang_settings WHERE key = 'telegram_public_signals'")
+        ).mappings().first()
+        pub = False
+        if settings:
+            v = settings["value"]
+            if isinstance(v, bool):
+                pub = v
+            elif isinstance(v, str):
+                pub = v.lower() in ("true", "1", "yes")
+        return {
+            "public_signals_setting": pub,
+            "forward_test_signal_alerts": (alerts or {}).get("n") or 0,
+            "public_chat": "@Tradewithcto",
+            "note": "Ops kinds never go public. Signals only if telegram_public_signals is true.",
+        }
+    finally:
+        db.close()
 def tarang_telegram_poll(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     from backend.services.tarang.alerts_telegram import poll_and_link
 

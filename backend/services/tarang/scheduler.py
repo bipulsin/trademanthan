@@ -237,6 +237,16 @@ def _tick_forward_tests() -> None:
     _locked("screener", _run, "5m")
 
 
+def _tick_heartbeat() -> None:
+    """Keep scheduler last-beat within the 180s watchdog window."""
+    try:
+        from backend.services.tarang.heartbeat import beat
+
+        beat("scheduler", {"job": "heartbeat"})
+    except Exception as e:
+        logger.exception("tarang heartbeat beat failed: %s", e)
+
+
 def _tick_watchdog() -> None:
     try:
         from backend.services.tarang.heartbeat import check_watchdog, recon_job
@@ -470,6 +480,14 @@ def start_tarang_scheduler() -> None:
 
     sch.start()
     _scheduler = sch
+    sch.add_job(
+        _tick_heartbeat,
+        CronTrigger(minute="*", timezone="Asia/Kolkata"),
+        id="tarang_heartbeat",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     sch.add_job(
         _tick_watchdog,
         CronTrigger(minute="*", timezone="Asia/Kolkata"),

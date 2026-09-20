@@ -567,6 +567,47 @@ body.tarang-page .mobile-logo {
     font-size: 1rem;
 }
 
+.tg-lab-link {
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-decoration: none;
+}
+.tg-lab-link:hover { color: var(--accent); }
+.tg-screen-list { display: flex; flex-direction: column; gap: 10px; }
+.tg-row-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--card-inner);
+}
+.tg-row-main { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tg-one-line { margin: 8px 0 0; color: var(--text); font-size: 0.92rem; }
+.tg-why { font-size: 0.82rem; color: var(--muted); }
+.tg-why ul { margin: 6px 0 0; padding-left: 1.1rem; }
+.tg-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tg-chip {
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.tg-chip.active { border-color: var(--accent); color: var(--accent); }
+.tg-modal {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 80;
+    padding: 16px;
+}
+.tg-modal-card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; max-width: 520px; width: 100%;
+}
+.tg-input { background: var(--bg2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.tg-status-QUALIFIED { background: rgba(61,186,122,0.2); color: #8ef0b8; }
+.tg-status-WATCHING { background: rgba(212,160,23,0.16); color: var(--warn); }
+
 @media (max-width: 768px) {
     body.tarang-page .tg-page {
         padding: 16px 12px 40px;
