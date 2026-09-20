@@ -571,7 +571,7 @@ def delta_fee_pct_from_latest_snapshots() -> Dict[str, Any]:
                 text(
                     """
                     SELECT DISTINCT ON (underlying_symbol, expiry_date)
-                           underlying_symbol, expiry_date, payload, captured_at
+                           underlying_symbol, expiry_date, payload_gzip, captured_at
                     FROM tarang_chain_snapshots
                     WHERE venue = 'delta_india'
                     ORDER BY underlying_symbol, expiry_date, captured_at DESC
@@ -588,7 +588,8 @@ def delta_fee_pct_from_latest_snapshots() -> Dict[str, Any]:
     out: List[Dict[str, Any]] = []
     for r in rows[:24]:
         try:
-            payload = unpack_chain_payload(r["payload"]) if isinstance(r["payload"], (bytes, memoryview)) else r["payload"]
+            blob = r.get("payload_gzip") or r.get("payload")
+            payload = unpack_chain_payload(blob) if isinstance(blob, (bytes, memoryview)) else blob
         except Exception:
             continue
         quotes_raw = (payload or {}).get("quotes") or []
@@ -743,7 +744,7 @@ def parity_diagnostics() -> Dict[str, Any]:
             text(
                 """
                 SELECT h.trade_date, h.expiry_date, h.mapped_fut_expiry,
-                       MAX(h.underlying_price) AS F_fut, MAX(h.parity_forward) AS F_parity,
+                       MAX(h.underlying_price) AS ffut, MAX(h.parity_forward) AS fpar,
                        MAX(h.parity_abs_pct_diff) AS pct,
                        MAX(h.underlying_price) - MAX(h.parity_forward) AS signed
                 FROM tarang_hist_eod h
@@ -799,9 +800,11 @@ def parity_diagnostics() -> Dict[str, Any]:
         me = _as_date(r["mapped_fut_expiry"])
         td = _as_date(r["trade_date"])
         mv = move_idx.get((me, td))
-        if mv is None or r["F_fut"] in (None, 0):
+        ffut = r.get("ffut")
+        fpar = r.get("fpar")
+        if mv is None or ffut in (None, 0):
             continue
-        err = abs(float(r["F_fut"]) - float(r["F_parity"] or 0))
+        err = abs(float(ffut) - float(fpar or 0))
         pairs.append((err, mv, float(r["pct"])))
     corr = None
     slope = None

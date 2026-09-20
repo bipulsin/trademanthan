@@ -71,6 +71,8 @@ Same structures from `tarang_chain_snapshots` + hourly candles when present. Sta
 | 2026-09-20 | 36d7585 | Registration only. No P&amp;L yet. |
 | 2026-09-20 | f1abdbe | Pre-register commit of this file. Structures unchanged. |
 | 2026-09-20 | 2c69185 | First P&amp;L run on production FUTCOM. IV exceeded RV on 62% of 1330 entry days (mean IV−RV +2.3 vol pts). Mean net per cycle at 10% per-leg cost was **negative** for every locked structure. Narrowest max-loss per lot is within ₹5k/₹10k (A–E). Live rules unchanged. |
+| 2026-09-20 ~22:00 | 634d617 | Follow-up **pre-register** (calibrated δ schedule, one-entry ~26 DTE, mean-within-cycle, IV−RV quartiles, Δ-F/G/H, kill-criteria draft). No P&amp;L in that commit. |
+| 2026-09-20 ~22:15 | a862ee0 / follow-up run | After registration: NATGASMINI and 2025 FUTCOM files **not found** (crude-only, 13 expired cycles). One-entry + 1-lot cap-compliant: uniform 10% still **negative** for A–D; calibrated (Delta-measured half-spreads 0.8–7.7% of mid) still **negative** for A–D. E-C-PE one-entry calibrated mean **+₹907** (n=12; exploratory, not a live change). Prior −₹51k “cycle” was the **sum** of many days + up to 2 lots. Date Wise 20 Sep file compared (257 rows; definition mismatch vs summed expiry volumes). |
 
 ---
 
