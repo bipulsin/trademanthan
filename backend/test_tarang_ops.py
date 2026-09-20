@@ -91,6 +91,20 @@ def test_live_still_locked():
     assert live_send_allowed() is False
 
 
+def test_private_chat_id_empty_dict_not_linked(monkeypatch):
+    from backend.services.tarang.alerts_telegram import private_chat_id
+
+    monkeypatch.delenv("TARANG_TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("TELEGRAM_TARANG_CHAT_ID", raising=False)
+    db = MagicMock()
+    with patch("backend.services.tarang.alerts_telegram._setting", return_value={}):
+        assert private_chat_id(db) is None
+    with patch("backend.services.tarang.alerts_telegram._setting", return_value=None):
+        assert private_chat_id(db) is None
+    with patch("backend.services.tarang.alerts_telegram._setting", return_value={"id": "555"}):
+        assert private_chat_id(db) == "555"
+
+
 def test_iv_vs_rv_missing_is_not_evaluable():
     from backend.services.tarang.gates import EVAL_NOT_EVALUABLE, aggregate_status, gate_iv_percentile, gate_iv_vs_rv
 

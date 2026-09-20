@@ -71,8 +71,12 @@ def private_chat_id(db=None) -> Optional[str]:
         return None
     if isinstance(v, dict):
         v = v.get("id") or v.get("chat_id")
+    if v is None:
+        return None
     s = str(v).strip().strip('"')
-    return s or None
+    if not s or s.lower() in ("none", "null"):
+        return None
+    return s
 
 
 def public_signals_enabled(db=None) -> bool:
