@@ -309,7 +309,19 @@ ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_source TEXT;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS reconstruction_run_id TEXT;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_fut_symbol TEXT;
 ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_fut_expiry DATE;
-ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS underlying_estimated BOOLEAN;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS mapped_fut_expiry DATE;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS parity_forward DOUBLE PRECISION;
+ALTER TABLE tarang_hist_eod ADD COLUMN IF NOT EXISTS parity_abs_pct_diff DOUBLE PRECISION;
+
+CREATE TABLE IF NOT EXISTS tarang_expiry_map (
+    symbol TEXT NOT NULL,
+    option_expiry DATE NOT NULL,
+    mapped_fut_expiry DATE,
+    source TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (symbol, option_expiry)
+);
+
 
 -- Forward-test / live bookkeeping (internal mode enum stays PAPER|LIVE)
 ALTER TABLE tarang_trades ADD COLUMN IF NOT EXISTS record_type TEXT DEFAULT 'FORWARD_TEST';

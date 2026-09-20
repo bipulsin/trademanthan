@@ -1,6 +1,7 @@
 """Replay Screener / Sizing / ExitEngine over stored full-chain snapshots or MCX EOD."""
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -12,7 +13,14 @@ from backend.services.tarang.chain_snapshots import chain_coverage, unpack_chain
 from backend.services.tarang.config import get_profiles, get_risk
 from backend.services.tarang.data_gaps import gaps_overlapping, recent_gaps, snapshot_in_gap
 from backend.services.tarang.domain.types import OptionChain, OptionQuote
-from backend.services.tarang.eod_reconstruct import put_call_parity_F, reconstruct_slice
+from backend.services.tarang.eod_reconstruct import (
+    FUT_RV_MIN_VOLUME_LOTS,
+    SRC_FUTCOM,
+    SRC_PARITY,
+    map_option_expiry_to_futcom,
+    put_call_parity_F,
+    reconstruct_slice,
+)
 from backend.services.tarang.exit_engine import evaluate_exits
 from backend.services.tarang.fee_gate import gate_fee_and_limits, round_trip_fees_inr
 from backend.services.tarang.gates import EVAL_FAILED, EVAL_NOT_EVALUABLE
@@ -123,9 +131,11 @@ NOT_EVALUABLE_GATES = frozenset(
     }
 )
 ALWAYS_EXCLUDE_EXPIRIES = frozenset({date(2026, 10, 15), date(2026, 11, 17)})
-EOD_LABEL = "MCX EOD-reconstructed, modelled fills, estimated underlying"
+EOD_LABEL = "MCX EOD-reconstructed, modelled fills"
+EOD_LABEL_ESTIMATED = "MCX EOD-reconstructed, modelled fills, estimated underlying"
 INTRADAY_EOD_MSG = "INTRADAY cannot be tested on EOD — this path is positional daily decisions only."
 BUDGET_CAPS_INR = (5000.0, 10000.0)
+FUT_RV_MIN_VOLUME_LOTS = 500
 
 
 def _as_date(v: Any) -> Optional[date]:
@@ -388,7 +398,8 @@ def _load_eod_rows(db) -> List[Dict[str, Any]]:
         SELECT symbol, expiry_date, option_type, strike, trade_date,
                open, high, low, close, volume_lots, oi_lots, traded,
                iv, delta, greeks_source, underlying_price, underlying_source,
-               underlying_fut_symbol, underlying_fut_expiry, underlying_estimated
+               underlying_fut_symbol, underlying_fut_expiry, underlying_estimated,
+               mapped_fut_expiry
         FROM tarang_hist_eod
         WHERE option_type IN ('CE','PE','FUT')
         ORDER BY trade_date, symbol, expiry_date, option_type, strike
@@ -422,7 +433,10 @@ def _chain_for_day(
             F = float(fut["close"])
     step = _strike_step([q.strike for q in quotes])
     und = str(opts[0]["symbol"])
-    estimated = any(bool(r.get("underlying_estimated")) for r in opts)
+    src = str(opts[0].get("underlying_source") or "")
+    estimated = src == SRC_PARITY or (
+        src not in (SRC_FUTCOM,) and any(bool(r.get("underlying_estimated")) for r in opts)
+    )
     return OptionChain(
         profile_id=profile_id,
         venue="upstox_mcx",
@@ -591,9 +605,8 @@ def _run_eod_once(
 
     by_day_exp: Dict[Tuple[str, date, date], List[Dict[str, Any]]] = {}
     dates_by_sym: Dict[str, List[date]] = {}
-    F_by_sym_date: Dict[Tuple[str, date], float] = {}
-    parity_by_sym_date: Dict[Tuple[str, date], float] = {}
     iv_by_sym_date: Dict[Tuple[str, date], float] = {}
+    fut_px: Dict[Tuple[str, date, date], Tuple[float, int]] = {}
     for r in all_rows:
         td = _as_date(r["trade_date"])
         exp = _as_date(r["expiry_date"])
@@ -604,18 +617,18 @@ def _run_eod_once(
         und = str(r["symbol"]).upper()
         by_day_exp.setdefault((und, exp, td), []).append(r)
         dates_by_sym.setdefault(und, []).append(td)
-        if r.get("underlying_price"):
-            F_by_sym_date.setdefault((und, td), float(r["underlying_price"]))
-        elif r.get("option_type") == "FUT" and r.get("close"):
-            F_by_sym_date.setdefault((und, td), float(r["close"]))
+        if r.get("option_type") == "FUT" and r.get("close"):
+            fut_px[(und, exp, td)] = (float(r["close"]), int(r.get("volume_lots") or 0))
         if r.get("iv") is not None:
             iv_by_sym_date.setdefault((und, td), float(r["iv"]))
-    for (und, _exp, td), sl in by_day_exp.items():
-        calls = [x for x in sl if x.get("option_type") == "CE"]
-        puts = [x for x in sl if x.get("option_type") == "PE"]
-        pf = put_call_parity_F(calls, puts) if calls and puts else None
-        if pf is not None:
-            parity_by_sym_date.setdefault((und, td), float(pf))
+    mapped_cycle: Dict[Tuple[str, date], Optional[date]] = {}
+    fut_exps_by_und: Dict[str, List[date]] = defaultdict(list)
+    for und, fe, _td in fut_px:
+        fut_exps_by_und[und].append(fe)
+    for (und, exp, td), sl in by_day_exp.items():
+        m = next((_as_date(x.get("mapped_fut_expiry") or x.get("underlying_fut_expiry")) for x in sl if x.get("mapped_fut_expiry") or x.get("underlying_fut_expiry")), None)
+        if (und, exp) not in mapped_cycle:
+            mapped_cycle[(und, exp)] = m or map_option_expiry_to_futcom(exp, fut_exps_by_und.get(und) or [])
 
     # median IV per und+date from collected first-write; recompute properly
     iv_lists: Dict[Tuple[str, date], List[float]] = {}
@@ -648,8 +661,14 @@ def _run_eod_once(
         min_dte = int(prof.get("expiry_min_dte") or prof.get("expiry_dte_min") or 7)
         max_dte = int(prof.get("expiry_dte_max") or 35)
         dates = sorted(set(dates_by_sym.get(und, [])))
-        parity_dates = sorted({td for (s, td) in parity_by_sym_date if s == und})
-        expiries = sorted({k[1] for k in by_day_exp if k[0] == und})
+        expiries = sorted(
+            {
+                k[1]
+                for k in by_day_exp
+                if k[0] == und
+                and any(r.get("option_type") in ("CE", "PE") for r in by_day_exp[k])
+            }
+        )
         for exp in expiries:
             label = {"symbol": und, "expiry": exp.isoformat()}
             if exp in ALWAYS_EXCLUDE_EXPIRIES or not cycle_is_expired(exp, today):
@@ -736,8 +755,15 @@ def _run_eod_once(
                 parity_ok = parity_F is not None
                 short_untraded = _band_short_untraded(slice_rows, d_min, d_max)
 
-                prior_F = [parity_by_sym_date[(und, d)] for d in parity_dates if d <= td]
+                mex = mapped_cycle.get((und, exp))
+                prior_F = []
+                if mex is not None:
+                    for d in sorted({k[2] for k in fut_px if k[0] == und and k[1] == mex and k[2] <= td}):
+                        px, vol = fut_px[(und, mex, d)]
+                        if vol >= FUT_RV_MIN_VOLUME_LOTS:
+                            prior_F.append(px)
                 rv = realized_vol_from_closes(prior_F)
+                rv_src = "mapped_futcom_contract" if mex is not None else "none"
                 prior_iv = [iv_by_sym_date[(und, d)] for d in dates if d < td and (und, d) in iv_by_sym_date]
                 atm = _atm_iv(opts)
                 iv_ne = atm is None or rv is None
@@ -940,14 +966,13 @@ def _run_eod_once(
                                 "short_deltas": short_d,
                                 "n_traded": n_quotes,
                                 "n_fut": n_fut,
-                                "rv_source": "put_call_parity_series",
+                                "rv_source": rv_src,
                             }
                         )
                     continue
 
-                estimated = True
-                if chain and chain.meta:
-                    estimated = bool(chain.meta.get("estimated_underlying", True))
+                src = str((chain.meta or {}).get("underlying_source") or "") if chain else ""
+                estimated = src != SRC_FUTCOM
                 open_trade = {
                     "profile_id": pid,
                     "symbol": und,
@@ -964,17 +989,16 @@ def _run_eod_once(
                     "fill_mode": fill_mode,
                     "fills_label": EOD_LABEL,
                     "estimated_underlying": estimated,
-                    "underlying_label": "estimated underlying",
+                    "underlying_label": SRC_PARITY if estimated else SRC_FUTCOM,
                     "warmup_mode": bool(iv_res.get("warmup")),
                     "atm_iv": atm,
-                    "rv_source": "put_call_parity_series",
+                    "rv_source": rv_src,
                     "underlying_fut_expiry": (chain.meta or {}).get("underlying_fut_expiry") if chain else None,
-                    "underlying_source": (chain.meta or {}).get("underlying_source") if chain else "put_call_parity",
+                    "underlying_source": src or SRC_PARITY,
                 }
             if open_trade:
                 open_trade["exit_reason"] = "OPEN"
                 open_trade["origin"] = "BACKTEST_EOD"
-                open_trade["estimated_underlying"] = True
                 paper_trades.append(open_trade)
             independent[-1]["gate_days"] = {g: len(v) for g, v in cycle_gate_days.items()}
             independent[-1]["traded_strike_liquidity"] = {
@@ -1111,6 +1135,7 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
     datewise = scan_datewise_dir()
     from backend.services.tarang.bhavcopy import missing_typical_crudeoilm_expiries
     from backend.services.tarang.eod_reconstruct import liquidity_report
+    from backend.services.tarang.premise_test import load_cached_premise
 
     found_exps = sorted({_as_date(c.get("expiry")) for c in base["independent_cycles"] if c.get("expiry")})
     found_exps += sorted({_as_date(c.get("expiry")) for c in base["open_cycles_excluded"] if c.get("expiry")})
@@ -1126,8 +1151,12 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
         "asof_ist": today.isoformat(),
         "intraday_note": INTRADAY_EOD_MSG,
         "parity_formula": "F ≈ K + (C − P)  (Black-76 with DF=1, undiscounted)",
-        "rv_source": "put_call_parity_series",
-        "underlying_note": "No FUTCOM loaded; every reconstructed F and trade is estimated underlying.",
+        "rv_source": "mapped_futcom_contract",
+        "underlying_note": (
+            "FUTCOM_CLOSE when the option month maps to a loaded futures contract "
+            "(same calendar month, nearest futures expiry on or after the option expiry). "
+            "PARITY_ESTIMATE only for option months with no matching FUTCOM."
+        ),
         "independent_cycles": base["independent_cycles"],
         "open_cycles_excluded": base["open_cycles_excluded"],
         "expiry_cycles": len(base["independent_cycles"]),
@@ -1146,6 +1175,7 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
         "liquidity": liquidity_report(),
         "datewise_checksum": datewise,
         "datewise_drop_path": datewise.get("path"),
+        "premise_test": load_cached_premise(),
         "metrics": {
             "count": n,
             "count_base": n,
@@ -1164,7 +1194,8 @@ def run_eod_backtest(*, fill_mode: str = "both", today: Optional[date] = None) -
             "Open contracts (e.g. 15 Oct 2026, 17 Nov 2026) are excluded even if present. "
             "EOD positional replay uses Screener structure rules, SizingService floor_units, fee gate 15% of credit, "
             "and ExitEngine. IV percentile waits for 60 days of IV history; until then IV-vs-RV only (warm-up-mode). "
-            "RV uses the put-call parity forward series, not Delta candles. "
+            "RV uses the mapped FUTCOM contract daily closes only (never stitched across months); "
+            "days with futures volume below 500 lots are skipped for RV. "
             "Base fills: signal and fill at day-t close with modelled bid-ask haircut. "
             "Pessimistic: fill at t+1 close; stops use short-leg High / long-leg Low. "
             + INTRADAY_EOD_MSG

@@ -558,7 +558,7 @@
     const metrics = document.getElementById('backtestMetrics');
     const body = document.getElementById('backtestTimeline');
     if (!msg) return;
-    const label = bt.label || (bt.source === 'mcx_eod' ? 'MCX EOD-reconstructed, modelled fills, estimated underlying' : '');
+    const label = bt.label || (bt.source === 'mcx_eod' ? 'MCX EOD-reconstructed, modelled fills' : '');
     const nTrades = (bt.metrics && bt.metrics.count) || (bt.trades || []).length || 0;
     const nPess = (bt.metrics && bt.metrics.count_pessimistic);
     const cycles = (bt.metrics && bt.metrics.independent_cycles) || (bt.independent_cycles || []).length || bt.expiry_cycles || 0;
@@ -601,7 +601,7 @@
         <td>${t.expiry || ''}</td>
         <td>${(t.exit_reason || '') + (t.exit_date ? ' ' + t.exit_date : '')}</td>
         <td>${t.net_pnl != null ? fmtInr(t.net_pnl) : '—'}</td>
-        <td class="tg-muted">${t.estimated_underlying ? 'estimated underlying' : (t.underlying_source || '')}</td>
+        <td class="tg-muted">${t.estimated_underlying ? 'PARITY_ESTIMATE' : (t.underlying_label || t.underlying_source || 'FUTCOM_CLOSE')}</td>
       </tr>`).join('') : '<tr><td colspan="5" class="tg-muted">No trades at default 20% min credit</td></tr>';
     }
     const byEl = document.getElementById('backtestByCycle');
@@ -673,6 +673,26 @@
         <td>${r.dte != null ? r.dte : ''}</td>
         <td class="tg-muted">${r.detail || ''}</td>
       </tr>`).join('') : '<tr><td colspan="5" class="tg-muted">—</td></tr>';
+    }
+    const prem = document.getElementById('premiseBox');
+    if (prem) {
+      const p = bt.premise_test || {};
+      prem.textContent = JSON.stringify({
+        registered_sha: p.registered_sha,
+        status: p.status || 'cached',
+        metric: p.metric,
+        iv_vs_rv: p.iv_vs_rv,
+        supported_ids: p.supported_ids,
+        structures: (p.structures || []).map((s) => ({
+          id: s.id,
+          trades_at_10pct: s.trades_at_10pct,
+          cycles: s.independent_cycles,
+          mean_net_hold_10pct: s.mean_net_per_cycle_hold_10pct,
+          rejected_caps: s.rejected_exceeds_caps,
+        })),
+        delta: p.delta_premise,
+        live_defaults_unchanged: p.live_defaults_unchanged,
+      }, null, 2);
     }
     const liq = document.getElementById('eodLiqBox');
     if (liq && bt.intraday_note) {

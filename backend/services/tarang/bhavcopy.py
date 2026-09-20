@@ -104,7 +104,7 @@ def parse_int_lots(raw: str) -> Optional[int]:
 def normalize_option_type(instrument: str, option_type: str) -> str:
     inst = strip_cell(instrument).upper()
     ot = strip_cell(option_type).upper()
-    if inst == "FUTCOM" or ot in ("", "XX", "FUT", "F"):
+    if inst == "FUTCOM" or ot in ("", "-", "XX", "FUT", "F", "NA"):
         return "FUT"
     if ot in ("CE", "C", "CALL"):
         return "CE"
@@ -513,6 +513,7 @@ def scan_datewise_dir(path: Optional[Path] = None) -> Dict[str, Any]:
         "container_hint": "/app/data/mcx_bhavcopy/datewise/",
         "paperclip_copy_hint": "scp files then: docker compose cp /tmp/mcx_datewise/. app:/app/data/mcx_bhavcopy/datewise/",
         "empty": not files,
+        "checksum_status": "pending" if not files else "run",
         "files": [],
         "ok": True,
         "threshold_pct": 1.0,
@@ -520,8 +521,8 @@ def scan_datewise_dir(path: Optional[Path] = None) -> Dict[str, Any]:
     }
     if not files:
         payload["note"] = (
-            "No Date Wise files in the drop folder. Place HTML-as-.xls reports in "
-            f"{payload['host_hint']} (production container: {payload['container_hint']})."
+            "Date Wise checksum pending — drop folder is empty. Place HTML-as-.xls reports in "
+            f"{payload['host_hint']} (production container: {payload['container_hint']}). Not a failure."
         )
         return payload
     reports = []

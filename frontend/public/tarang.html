@@ -175,7 +175,12 @@
                                 <h2 class="tg-section-title" style="margin:0;">Replay harness</h2>
                                 <button type="button" class="tg-btn" id="btnRunBacktest">Run replay</button>
                             </div>
-                            <p class="tg-note">Same Screener structure rules, SizingService and ExitEngine. Snapshot replay skips narrow_window (ATM±10) for wing validation. MCX EOD path is labelled <strong>MCX EOD-reconstructed, modelled fills, estimated underlying</strong>. Independent expired cycles and trades are listed separately. Gate days split NOT_EVALUABLE vs FAILED. INTRADAY cannot be tested on EOD. Phase 4 is held. Go-live gate stays hidden until 40 trades.</p>
+                            <p class="tg-note">Same Screener structure rules, SizingService and ExitEngine. Snapshot replay skips narrow_window (ATM±10) for wing validation. MCX EOD path is labelled <strong>MCX EOD-reconstructed, modelled fills</strong> when FUTCOM is mapped; PARITY_ESTIMATE only if that month has no futures. Independent expired cycles and trades are listed separately. Gate days split NOT_EVALUABLE vs FAILED. INTRADAY cannot be tested on EOD. Phase 4 is held. Go-live gate stays hidden until 40 trades. Live min credit stays 0.20.</p>
+                            <div id="premiseCard" class="tg-card" style="margin:12px 0; padding:12px;">
+                                <h3 class="tg-section-title" style="margin:0 0 8px;">Premise test</h3>
+                                <p class="tg-note">Locked in docs/tarang-premise-test.md against SHA 36d7585 before P&amp;L. Does not change live rules.</p>
+                                <pre class="tg-pre" id="premiseBox">—</pre>
+                            </div>
                             <p id="backtestMsg" class="tg-note"></p>
                             <div class="tg-metrics" id="backtestMetrics"></div>
                             <div id="eodLiqBox" class="tg-note"></div>

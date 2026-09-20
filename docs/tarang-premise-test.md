@@ -69,3 +69,4 @@ Same structures from `tarang_chain_snapshots` + hourly candles when present. Sta
 | When | SHA | Note |
 |---|---|---|
 | 2026-09-20 | 36d7585 | Registration only. No P&amp;L yet. |
+| 2026-09-20 | f1abdbe | Pre-register commit of this file. Structures unchanged. |

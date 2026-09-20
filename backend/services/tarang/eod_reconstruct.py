@@ -1,13 +1,13 @@
-"""EOD reconstruction: futures underlying, Black-76 IV/delta, liquidity bands.
+"""EOD reconstruction: mapped FUTCOM (same calendar month), Black-76 IV/delta.
 
 Put-call parity (Black-76, DF=1, undiscounted — same as greeks.py default df=1.0):
 
     F ≈ K + (C − P)
 
-at a common strike K. Median across strikes that have both a call and put close.
-American/MCX early-exercise bias is ignored; this is the estimator used to
-(1) fill F when no FUTCOM exists, and (2) pick the FUTCOM contract whose close
-is closest to that parity-implied forward (not necessarily the option's own expiry).
+is the **estimator and validator**, not the primary underlying when FUTCOM exists.
+Each option expiry maps to the futures contract of the **same calendar month**
+whose expiry is the nearest on or after the option expiry (e.g. 17AUG2026 options
+→ 19AUG2026 futures). Missing FUTCOM → PARITY_ESTIMATE.
 """
 from __future__ import annotations
 
@@ -26,6 +26,10 @@ from backend.services.tarang.schema import ensure_tarang_tables
 
 IST = ZoneInfo("Asia/Kolkata")
 MIN_VOLUME_DEFAULT = 5
+FUT_RV_MIN_VOLUME_LOTS = 500
+PARITY_FLAG_PCT = 1.0
+SRC_FUTCOM = "FUTCOM_CLOSE"
+SRC_PARITY = "PARITY_ESTIMATE"
 EXPIRY_DAY_POLICY = "skip_expiry_day_options"
 YEARS = 365.25
 PARITY_FORMULA = "F ≈ K + (C − P)  (Black-76 with DF=1, undiscounted)"
@@ -70,53 +74,80 @@ def put_call_parity_F(calls: Sequence[Dict[str, Any]], puts: Sequence[Dict[str, 
     return None
 
 
+def map_option_expiry_to_futcom(
+    option_expiry: Optional[date],
+    fut_expiries: Sequence[Any],
+) -> Optional[date]:
+    """Same calendar month; nearest futures expiry on or after the option expiry."""
+    oe = _as_date(option_expiry)
+    if oe is None:
+        return None
+    cands = []
+    for raw in fut_expiries:
+        d = _as_date(raw)
+        if d is None:
+            continue
+        if d.year == oe.year and d.month == oe.month and d >= oe:
+            cands.append(d)
+    return min(cands) if cands else None
+
+
+def match_mapped_futcom(
+    futures: Sequence[Dict[str, Any]],
+    *,
+    option_expiry: Optional[date],
+    parity_F: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Primary F = mapped same-month FUTCOM close. Parity only if no mapped contract."""
+    cands = [f for f in futures if f.get("close") is not None and float(f["close"]) > 0]
+    mapped = map_option_expiry_to_futcom(option_expiry, [_as_date(f.get("expiry_date")) for f in cands])
+    pick = None
+    if mapped is not None:
+        same = [f for f in cands if _as_date(f.get("expiry_date")) == mapped]
+        pick = same[0] if same else None
+    if pick is not None:
+        F = float(pick["close"])
+        pct = None
+        if parity_F is not None and F:
+            pct = abs(F - float(parity_F)) / abs(F) * 100.0
+        return {
+            "F": F,
+            "estimated": False,
+            "source": SRC_FUTCOM,
+            "fut_symbol": str(pick.get("symbol") or ""),
+            "fut_expiry": mapped,
+            "mapped_fut_expiry": mapped,
+            "parity_F": parity_F,
+            "abs_diff": abs(F - float(parity_F)) if parity_F is not None else None,
+            "parity_abs_pct_diff": pct,
+            "parity_flag": bool(pct is not None and pct > PARITY_FLAG_PCT),
+            "fut_volume_lots": int(pick.get("volume_lots") or 0),
+            "low_fut_volume": int(pick.get("volume_lots") or 0) < FUT_RV_MIN_VOLUME_LOTS,
+        }
+    return {
+        "F": parity_F,
+        "estimated": True,
+        "source": SRC_PARITY if parity_F is not None else None,
+        "fut_symbol": None,
+        "fut_expiry": None,
+        "mapped_fut_expiry": None,
+        "parity_F": parity_F,
+        "abs_diff": None,
+        "parity_abs_pct_diff": None,
+        "parity_flag": False,
+        "fut_volume_lots": 0,
+        "low_fut_volume": True,
+    }
+
+
 def match_futures_underlying(
     parity_F: Optional[float],
     futures: Sequence[Dict[str, Any]],
     *,
     option_expiry: Optional[date] = None,
 ) -> Dict[str, Any]:
-    """Pick FUTCOM whose close is closest to the parity-implied forward.
-
-    Does not require the futures expiry to equal the option expiry. If no futures
-    closes exist, fall back to parity and flag estimated=True.
-    """
-    cands = [f for f in futures if f.get("close") is not None and float(f["close"]) > 0]
-    if not cands:
-        return {
-            "F": parity_F,
-            "estimated": True,
-            "source": "put_call_parity" if parity_F is not None else None,
-            "fut_symbol": None,
-            "fut_expiry": None,
-            "parity_F": parity_F,
-            "abs_diff": None,
-        }
-    if parity_F is None:
-        if option_expiry is not None:
-            same = [f for f in cands if _as_date(f.get("expiry_date")) == _as_date(option_expiry)]
-            pick = same[0] if same else min(cands, key=lambda f: _as_date(f.get("expiry_date")) or date.max)
-        else:
-            pick = cands[0]
-        return {
-            "F": float(pick["close"]),
-            "estimated": False,
-            "source": "futcom_close",
-            "fut_symbol": str(pick.get("symbol") or ""),
-            "fut_expiry": _as_date(pick.get("expiry_date")),
-            "parity_F": None,
-            "abs_diff": None,
-        }
-    pick = min(cands, key=lambda f: abs(float(f["close"]) - float(parity_F)))
-    return {
-        "F": float(pick["close"]),
-        "estimated": False,
-        "source": "futcom_closest_parity",
-        "fut_symbol": str(pick.get("symbol") or ""),
-        "fut_expiry": _as_date(pick.get("expiry_date")),
-        "parity_F": float(parity_F),
-        "abs_diff": abs(float(pick["close"]) - float(parity_F)),
-    }
+    """Mapped same-month FUTCOM; parity only as fallback. Closest-to-parity is not used to pick F."""
+    return match_mapped_futcom(futures, option_expiry=option_expiry, parity_F=parity_F)
 
 
 def _as_date(v: Any) -> Optional[date]:
@@ -160,8 +191,13 @@ def reconstruct_slice(
     extra = {
         "underlying_fut_symbol": matched.get("fut_symbol"),
         "underlying_fut_expiry": matched.get("fut_expiry"),
+        "mapped_fut_expiry": matched.get("mapped_fut_expiry"),
         "underlying_estimated": bool(matched.get("estimated")),
         "parity_forward": matched.get("parity_F"),
+        "parity_abs_pct_diff": matched.get("parity_abs_pct_diff"),
+        "parity_flag": matched.get("parity_flag"),
+        "fut_volume_lots": matched.get("fut_volume_lots"),
+        "low_fut_volume": matched.get("low_fut_volume"),
         "parity_formula": PARITY_FORMULA,
     }
     if F is None:
@@ -229,6 +265,10 @@ def persist_reconstruction(*, min_volume: int = MIN_VOLUME_DEFAULT) -> Dict[str,
         ).mappings().all()
         futs_by: Dict[Tuple[str, date], List[Dict[str, Any]]] = defaultdict(list)
         opt_groups: Dict[Tuple, List[Dict[str, Any]]] = defaultdict(list)
+        fut_exps_by_sym: Dict[str, set] = defaultdict(set)
+        parity_flags: List[Dict[str, Any]] = []
+        low_vol: List[Dict[str, Any]] = []
+        maps: Dict[Tuple[str, date], Optional[date]] = {}
         for r in rows:
             d = dict(r)
             td = _as_date(d["trade_date"])
@@ -236,6 +276,8 @@ def persist_reconstruction(*, min_volume: int = MIN_VOLUME_DEFAULT) -> Dict[str,
             d["expiry_date"] = _as_date(d["expiry_date"])
             if d.get("option_type") == "FUT":
                 futs_by[(str(d["symbol"]).upper(), td)].append(d)
+                if d["expiry_date"]:
+                    fut_exps_by_sym[str(d["symbol"]).upper()].add(d["expiry_date"])
             elif d.get("option_type") in ("CE", "PE"):
                 opt_groups[(d["symbol"], d["expiry_date"], td)].append(d)
         for (sym, _exp, td), slice_rows in opt_groups.items():
@@ -244,6 +286,31 @@ def persist_reconstruction(*, min_volume: int = MIN_VOLUME_DEFAULT) -> Dict[str,
                 futures_for_date=futs_by.get((str(sym).upper(), td), []),
                 min_volume=min_volume,
             )
+            if recs:
+                maps[(str(sym).upper(), _exp)] = recs[0].get("mapped_fut_expiry")
+                pct = recs[0].get("parity_abs_pct_diff")
+                if recs[0].get("parity_flag"):
+                    parity_flags.append(
+                        {
+                            "symbol": str(sym).upper(),
+                            "option_expiry": _exp.isoformat() if _exp else None,
+                            "trade_date": td.isoformat() if td else None,
+                            "mapped_fut_expiry": str(recs[0].get("mapped_fut_expiry") or "")[:10] or None,
+                            "F_fut": recs[0].get("underlying_price"),
+                            "F_parity": recs[0].get("parity_forward"),
+                            "abs_pct_diff": pct,
+                        }
+                    )
+                if recs[0].get("low_fut_volume") and recs[0].get("underlying_source") == SRC_FUTCOM:
+                    low_vol.append(
+                        {
+                            "symbol": str(sym).upper(),
+                            "trade_date": td.isoformat() if td else None,
+                            "mapped_fut_expiry": str(recs[0].get("mapped_fut_expiry") or "")[:10] or None,
+                            "volume_lots": recs[0].get("fut_volume_lots"),
+                            "min_lots": FUT_RV_MIN_VOLUME_LOTS,
+                        }
+                    )
             for rec in recs:
                 if rec.get("id") is None:
                     continue
@@ -256,7 +323,10 @@ def persist_reconstruction(*, min_volume: int = MIN_VOLUME_DEFAULT) -> Dict[str,
                             underlying_source = :underlying_source,
                             underlying_fut_symbol = :underlying_fut_symbol,
                             underlying_fut_expiry = :underlying_fut_expiry,
+                            mapped_fut_expiry = :mapped_fut_expiry,
                             underlying_estimated = :underlying_estimated,
+                            parity_forward = :parity_forward,
+                            parity_abs_pct_diff = :parity_abs_pct_diff,
                             reconstruction_run_id = :rid
                         WHERE id = :id
                         """
@@ -269,21 +339,59 @@ def persist_reconstruction(*, min_volume: int = MIN_VOLUME_DEFAULT) -> Dict[str,
                         "underlying_source": rec.get("underlying_source"),
                         "underlying_fut_symbol": rec.get("underlying_fut_symbol"),
                         "underlying_fut_expiry": rec.get("underlying_fut_expiry"),
+                        "mapped_fut_expiry": rec.get("mapped_fut_expiry"),
                         "underlying_estimated": bool(rec.get("underlying_estimated")),
+                        "parity_forward": rec.get("parity_forward"),
+                        "parity_abs_pct_diff": rec.get("parity_abs_pct_diff"),
                         "rid": run_id,
                         "id": rec["id"],
                     },
                 )
                 updated += 1
+        for (sym, oe), me in maps.items():
+            db.execute(
+                text(
+                    """
+                    INSERT INTO tarang_expiry_map (symbol, option_expiry, mapped_fut_expiry, source, updated_at)
+                    VALUES (:s, :oe, :me, :src, NOW())
+                    ON CONFLICT (symbol, option_expiry) DO UPDATE SET
+                        mapped_fut_expiry = EXCLUDED.mapped_fut_expiry,
+                        source = EXCLUDED.source,
+                        updated_at = NOW()
+                    """
+                ),
+                {"s": sym, "oe": oe, "me": me, "src": SRC_FUTCOM if me else SRC_PARITY},
+            )
         db.commit()
+        from backend.services.tarang.bhavcopy import TYPICAL_CRUDEOILM_EXPIRIES
+
+        missing_fut = []
+        for oe in TYPICAL_CRUDEOILM_EXPIRIES:
+            mapped = map_option_expiry_to_futcom(oe, list(fut_exps_by_sym.get("CRUDEOILM") or []))
+            if mapped is None:
+                missing_fut.append(oe.isoformat())
         return {
             "reconstruction_run_id": run_id,
             "rows_updated": updated,
             "min_volume": min_volume,
             "expiry_day_policy": EXPIRY_DAY_POLICY,
             "parity_formula": PARITY_FORMULA,
+            "parity_flag_pct": PARITY_FLAG_PCT,
+            "parity_flags": sorted(parity_flags, key=lambda x: (x.get("trade_date") or "", x.get("option_expiry") or "")),
+            "parity_flag_count": len(parity_flags),
+            "fut_rv_min_volume_lots": FUT_RV_MIN_VOLUME_LOTS,
+            "low_fut_volume_days": low_vol,
+            "option_expiries_missing_matching_futures": missing_fut,
+            "expiry_maps": [
+                {"symbol": s, "option_expiry": oe.isoformat() if oe else None, "mapped_fut_expiry": me.isoformat() if me else None}
+                for (s, oe), me in sorted(maps.items(), key=lambda kv: (kv[0][0], str(kv[0][1])))
+            ],
             "tte_note": "T = 23:30 IST on trade_date to 23:30 IST on expiry_date / 365.25. Expiry-day options skipped (T would be a residual session stub).",
-            "underlying_match_note": "FUTCOM chosen by closest close to parity-implied F; not required to share the option expiry. No futures → parity F with estimated=true.",
+            "underlying_match_note": (
+                "FUTCOM mapped by same calendar month, nearest futures expiry on or after the option expiry. "
+                "Source FUTCOM_CLOSE when mapped; PARITY_ESTIMATE only if that month's futures are missing. "
+                "Parity is a validator (|F_fut−F_parity|/F > 1% flagged), not the picker."
+            ),
         }
     except Exception:
         db.rollback()

@@ -21,6 +21,7 @@ from backend.services.tarang.chain_builder import ChainBuilder
 from backend.services.tarang.chain_snapshots import capture_chain_snapshots
 from backend.services.tarang.config import get_events, get_profiles, get_risk
 from backend.services.tarang.eod_reconstruct import liquidity_report, persist_reconstruction
+from backend.services.tarang.premise_test import load_cached_premise, run_premise_test
 from backend.services.tarang.events import list_alerts
 from backend.services.tarang.expiry_eligibility import expiry_eligibility
 from backend.services.tarang.health import build_health_payload
@@ -245,6 +246,16 @@ def tarang_bhavcopy_backfill(body: BhavcopyBackfillBody, _user: User = Depends(_
 @router.post("/bhavcopy/reconstruct")
 def tarang_bhavcopy_reconstruct(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
     return persist_reconstruction()
+
+
+@router.get("/premise-test")
+def tarang_premise_get(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return load_cached_premise()
+
+
+@router.post("/premise-test/run")
+def tarang_premise_run(_user: User = Depends(_require_admin)) -> Dict[str, Any]:
+    return run_premise_test()
 
 
 @router.get("/bhavcopy/liquidity")

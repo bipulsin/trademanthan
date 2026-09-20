@@ -244,25 +244,39 @@ def test_first_reject_gate_order():
     ) is None
 
 
-def test_futures_match_closest_parity_forward():
+def test_dash_option_type_is_fut():
+    body = (
+        "Date,Instrument Name,Symbol,Expiry Date,Option Type,Strike Price,Open,High,Low,Close,Previous Close,"
+        "Volume(Lots),Volume(In 000's),Value(Lacs),Open Interest(Lots)\n"
+        '"18 Sep 2026","FUTCOM","CRUDEOILM    ","21SEP2026","-","0","1","2","1","9664","9752","85164","851.640 BBL  ","1","1"\n'
+    )
+    rows = parse_bhavcopy_csv(body)
+    assert rows[0]["option_type"] == "FUT"
+    assert rows[0]["strike"] == 0.0
+    assert rows[0]["symbol"] == "CRUDEOILM"
+    assert rows[0]["volume_lots"] == 85164
+
+
+def test_map_same_month_futcom_not_closest_parity():
+    from backend.services.tarang.eod_reconstruct import SRC_FUTCOM, SRC_PARITY, map_option_expiry_to_futcom
+
+    assert map_option_expiry_to_futcom(date(2026, 8, 17), [date(2026, 8, 19), date(2026, 9, 21)]) == date(2026, 8, 19)
     parity = put_call_parity_F(
         [{"strike": 5400, "close": 80, "traded": True}],
         [{"strike": 5400, "close": 20, "traded": True}],
     )
-    # F ≈ 5400 + 80 - 20 = 5460
-    assert abs(parity - 5460) < 1e-9
     futs = [
-        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 8, 17), "close": 5300, "option_type": "FUT"},
-        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 9, 17), "close": 5455, "option_type": "FUT"},
-        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 11, 17), "close": 5600, "option_type": "FUT"},
+        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 8, 19), "close": 5300, "volume_lots": 8000, "option_type": "FUT"},
+        {"symbol": "CRUDEOILM", "expiry_date": date(2026, 9, 21), "close": 5455, "volume_lots": 9000, "option_type": "FUT"},
     ]
-    m = match_futures_underlying(parity, futs, option_expiry=date(2026, 10, 15))
+    m = match_futures_underlying(parity, futs, option_expiry=date(2026, 8, 17))
     assert m["estimated"] is False
-    assert m["fut_expiry"] == date(2026, 9, 17)
-    assert m["source"] == "futcom_closest_parity"
-    none = match_futures_underlying(parity, [], option_expiry=date(2026, 10, 15))
-    assert none["estimated"] is True
-    assert none["F"] == parity
+    assert m["source"] == SRC_FUTCOM
+    assert m["fut_expiry"] == date(2026, 8, 19)
+    # Oct option has no Oct FUTCOM → parity estimate
+    miss = match_futures_underlying(parity, futs, option_expiry=date(2026, 10, 15))
+    assert miss["estimated"] is True
+    assert miss["source"] == SRC_PARITY
     rec = reconstruct_slice(
         [
             {
@@ -273,7 +287,7 @@ def test_futures_match_closest_parity_forward():
                 "volume_lots": 20,
                 "oi_lots": 10,
                 "trade_date": date(2026, 8, 1),
-                "expiry_date": date(2026, 10, 15),
+                "expiry_date": date(2026, 8, 17),
             },
             {
                 "option_type": "PE",
@@ -283,13 +297,14 @@ def test_futures_match_closest_parity_forward():
                 "volume_lots": 20,
                 "oi_lots": 10,
                 "trade_date": date(2026, 8, 1),
-                "expiry_date": date(2026, 10, 15),
+                "expiry_date": date(2026, 8, 17),
             },
         ],
         futures_for_date=futs,
     )
-    assert rec[0]["underlying_fut_expiry"] == date(2026, 9, 17)
+    assert rec[0]["underlying_fut_expiry"] == date(2026, 8, 19)
     assert rec[0]["underlying_estimated"] is False
+    assert rec[0]["underlying_source"] == SRC_FUTCOM
 
 
 def test_warmup_iv_vs_rv_skips_percentile():
@@ -386,6 +401,7 @@ def test_datewise_scan_empty_folder(tmp_path):
     out = scan_datewise_dir(tmp_path)
     assert out["empty"] is True
     assert out["ok"] is True
+    assert out["checksum_status"] == "pending"
     assert out["files"] == []
 
 
