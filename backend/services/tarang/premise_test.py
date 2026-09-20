@@ -709,10 +709,18 @@ def run_premise_test(*, all_rows: Optional[List[Dict[str, Any]]] = None, today: 
 
 def load_cached_premise() -> Dict[str, Any]:
     if CACHE_PATH.is_file():
-        return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    return {
-        "registered_sha": REGISTERED_SHA,
-        "doc": DOC_PATH,
-        "status": "not_run",
-        "note": "Run scripts/tarang_premise_test.py or POST /api/tarang/premise-test/run.",
-    }
+        out = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+    else:
+        out = {
+            "registered_sha": REGISTERED_SHA,
+            "doc": DOC_PATH,
+            "status": "not_run",
+            "note": "Run scripts/tarang_premise_test.py or POST /api/tarang/premise-test/run.",
+        }
+    follow = Path(__file__).resolve().parents[3] / "data" / "tarang" / "premise_followup_last.json"
+    if follow.is_file() and "followup" not in out:
+        try:
+            out["followup"] = json.loads(follow.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return out

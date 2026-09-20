@@ -706,6 +706,7 @@
         })),
         delta: p.delta_premise,
         live_defaults_unchanged: p.live_defaults_unchanged,
+        followup: p.followup,
       }, null, 2);
     }
     const liq = document.getElementById('eodLiqBox');
