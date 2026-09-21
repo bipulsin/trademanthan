@@ -498,10 +498,9 @@ def run_contract_rollover(*, dry_run: bool = False) -> Dict[str, Any]:
                 summary["skipped_ineligible"] += 1
                 continue
             sym = _norm_symbol(row.get("symbol"))
+            # Strict: only roll to arbitrage_master currmth. Do not invent a month via
+            # instruments day-20 heuristics when the symbol is missing from master.
             master = contract_from_arbitrage_master(db, sym)
-            if not master:
-                # Live fallback: same path used when arming Radar→Active.
-                master = resolve_contract_mmm_yyyy(sym, now_naive, db=db)
             if not master:
                 summary["skipped_no_master"] += 1
                 continue
