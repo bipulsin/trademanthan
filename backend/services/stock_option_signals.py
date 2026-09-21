@@ -158,6 +158,22 @@ def format_contract_mmm_yyyy(expiry: date) -> str:
     return f"{_MONTH_ABBR[int(expiry.month)]}-{int(expiry.year):04d}"
 
 
+def parse_contract_mmm_yyyy(label: Any) -> Optional[Tuple[int, int]]:
+    """Parse 'SEP-2026' → (month, year)."""
+    raw = str(label or "").strip().upper().replace("_", "-").replace(" ", "-")
+    parts = [p for p in raw.split("-") if p]
+    if len(parts) < 2:
+        return None
+    mon = _MONTH_NUM.get(parts[0][:3])
+    yy = parts[1]
+    if mon is None or not yy.isdigit():
+        return None
+    year = int(yy)
+    if year < 100:
+        year += 2000
+    return (mon, year)
+
+
 def parse_fut_trading_symbol_expiry(trading_symbol: Any) -> Optional[date]:
     """Parse 'BAJAJFINSV FUT 29 SEP 26' → date(2026, 9, 29)."""
     parts = str(trading_symbol or "").strip().upper().split()
@@ -906,13 +922,143 @@ def instrument_key_at_strike(chain: Any, side: Optional[str], strike: Any) -> Op
     return None
 
 
+def parse_nse_fo_option_key(instrument_key: str) -> Optional[Dict[str, Any]]:
+    """Decode NSE_FO|SYMBOL{YY}{MMM}{STRIKE}{CE|PE} (colon or pipe)."""
+    raw = str(instrument_key or "").strip()
+    tail = raw.replace(":", "|").split("|")[-1].upper()
+    if not (tail.endswith("CE") or tail.endswith("PE")):
+        return None
+    right = tail[-2:]
+    body = tail[:-2]
+    idx = -1
+    mon_name = None
+    for name in _MONTH_NUM:
+        i = body.rfind(name)
+        if i >= 2 and i > idx:
+            idx = i
+            mon_name = name
+    if mon_name is None:
+        return None
+    yy_s = body[idx - 2 : idx]
+    strike_s = body[idx + 3 :]
+    if not yy_s.isdigit() or not strike_s:
+        return None
+    try:
+        strike = float(strike_s)
+    except ValueError:
+        return None
+    return {
+        "year": 2000 + int(yy_s),
+        "month": _MONTH_NUM[mon_name],
+        "strike": strike,
+        "right": right,
+    }
+
+
+def option_key_matches_trade(
+    instrument_key: Optional[str],
+    contract_mmm_yyyy: Optional[str],
+    strike: Any,
+    right: Optional[str],
+) -> bool:
+    parsed = parse_nse_fo_option_key(str(instrument_key or ""))
+    if not parsed:
+        return False
+    cm = parse_contract_mmm_yyyy(contract_mmm_yyyy)
+    if cm and (parsed["month"], parsed["year"]) != cm:
+        return False
+    if right and parsed["right"] != str(right).strip().upper():
+        return False
+    target = _as_float(strike)
+    if target is not None and abs(parsed["strike"] - target) > 1e-6:
+        return False
+    return True
+
+
+def lookup_option_instrument_key(
+    symbol: str,
+    strike: Any,
+    right: Optional[str],
+    contract_mmm_yyyy: Optional[str],
+    *,
+    instruments: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[str]:
+    """NSE master CE/PE key for underlying + strike + right + stored MMM-YYYY.
+
+    Never uses arbitrage_master / live Upstox chain (those roll to next expiry).
+    When several expiries share the month (index weeklies), pick the last in-month date
+    (monthly).
+    """
+    cm = parse_contract_mmm_yyyy(contract_mmm_yyyy)
+    strike_f = _as_float(strike)
+    right_u = str(right or "").strip().upper()
+    sym = _norm_symbol(symbol)
+    if not cm or strike_f is None or right_u not in ("CE", "PE") or not sym:
+        return None
+    month, year = cm
+    if instruments is not None:
+        rows = [
+            i
+            for i in instruments
+            if isinstance(i, dict)
+            and _norm_symbol(i.get("underlying_symbol") or "") == sym
+        ]
+    else:
+        rows = list(_nse_fo_option_index().get(sym) or [])
+    hits: List[Tuple[date, str]] = []
+    for inst in rows:
+        kind = str(inst.get("instrument_type") or "").strip().upper()
+        if kind != right_u:
+            continue
+        st = _as_float(inst.get("strike_price") if inst.get("strike_price") is not None else inst.get("strike"))
+        if st is None or abs(st - strike_f) > 1e-6:
+            continue
+        exp = expiry_date_from_instrument(inst)
+        if exp is None or exp.month != month or exp.year != year:
+            continue
+        ik = str(inst.get("instrument_key") or "").strip()
+        if ik:
+            hits.append((exp, ik))
+    if not hits:
+        return None
+    hits.sort(key=lambda x: x[0])
+    return hits[-1][1]
+
+
+def resolve_executed_leg_instrument_key(
+    stored_key: Optional[str],
+    *,
+    symbol: str,
+    strike: Any,
+    side: Any,
+    contract_mmm_yyyy: Optional[str],
+    instruments: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[str]:
+    """Instrument for an executed (or in-trade) option leg: stored expiry, never rolled master."""
+    right = option_code(side)
+    stored = str(stored_key or "").strip() or None
+    contract = str(contract_mmm_yyyy or "").strip() or None
+    if stored and option_key_matches_trade(stored, contract, strike, right):
+        return stored
+    looked = lookup_option_instrument_key(
+        symbol, strike, right, contract, instruments=instruments
+    )
+    if looked:
+        return looked
+    if stored and not contract:
+        return stored
+    if stored and not parse_nse_fo_option_key(stored):
+        return stored
+    return None
+
+
 def ensure_executed_option_instrument_keys(
     signal_id: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Resolve sell/buy instrument keys for filled Executed rows from user strikes.
+    """Bind sell/buy keys to the trade's stored expiry + executed strikes.
 
-    Re-fetches the option chain when keys are missing or when user strikes differ
-    from the algo-suggested strikes (whose keys were stored at arm time).
+    Missing or rolled (next-month) keys are resolved from the NSE instruments
+    file using ``contract_mmm_yyyy``. Never from live Upstox chain / arbitrage_master.
     """
     ensure_stock_option_tables()
     db = SessionLocal()
@@ -932,7 +1078,7 @@ def ensure_executed_option_instrument_keys(
                        sell_strike, buy_strike,
                        user_sell_strike, user_buy_strike,
                        sell_instrument_key, buy_instrument_key,
-                       remarks
+                       contract_mmm_yyyy, armed_at, remarks
                 FROM stock_option_signals
                 WHERE status = :executed
                   AND date_traded IS NOT NULL
@@ -962,42 +1108,30 @@ def ensure_executed_option_instrument_keys(
         if sell_s is None or buy_s is None:
             continue
 
-        algo_sell = _as_float(row.get("sell_strike"))
-        algo_buy = _as_float(row.get("buy_strike"))
         sell_key = str(row.get("sell_instrument_key") or "").strip() or None
         buy_key = str(row.get("buy_instrument_key") or "").strip() or None
-        sell_mismatch = (
-            algo_sell is not None and abs(algo_sell - sell_s) > 1e-6
-        ) or not sell_key
-        buy_mismatch = (
-            algo_buy is not None and abs(algo_buy - buy_s) > 1e-6
-        ) or not buy_key
-        # Keep keys when user strikes match algo and keys already present.
-        need_chain = sell_mismatch or buy_mismatch
+        contract = str(row.get("contract_mmm_yyyy") or "").strip() or None
+        if not contract:
+            contract = resolve_contract_mmm_yyyy(
+                str(row.get("symbol") or ""), row.get("armed_at"), db=None
+            )
         note = str(row.get("remarks") or "")
         clear_expiry = EXPIRY_REMARKS in note
 
-        new_sell, new_buy = sell_key, buy_key
-        if need_chain:
-            try:
-                chain = _option_chain_for_symbol(str(row.get("symbol") or ""))
-            except Exception as e:
-                logger.info(
-                    "stock_option key resolve chain failed id=%s %s: %s",
-                    row.get("id"),
-                    row.get("symbol"),
-                    e,
-                )
-                chain = None
-            if chain is not None:
-                if sell_mismatch:
-                    resolved = instrument_key_at_strike(chain, row.get("side"), sell_s)
-                    if resolved:
-                        new_sell = resolved
-                if buy_mismatch:
-                    resolved = instrument_key_at_strike(chain, row.get("side"), buy_s)
-                    if resolved:
-                        new_buy = resolved
+        new_sell = resolve_executed_leg_instrument_key(
+            sell_key,
+            symbol=str(row.get("symbol") or ""),
+            strike=sell_s,
+            side=row.get("side"),
+            contract_mmm_yyyy=contract,
+        )
+        new_buy = resolve_executed_leg_instrument_key(
+            buy_key,
+            symbol=str(row.get("symbol") or ""),
+            strike=buy_s,
+            side=row.get("side"),
+            contract_mmm_yyyy=contract,
+        )
 
         if (
             new_sell == sell_key
@@ -1012,8 +1146,9 @@ def ensure_executed_option_instrument_keys(
                 text(
                     """
                     UPDATE stock_option_signals
-                    SET sell_instrument_key = COALESCE(:sell_ik, sell_instrument_key),
-                        buy_instrument_key = COALESCE(:buy_ik, buy_instrument_key),
+                    SET sell_instrument_key = :sell_ik,
+                        buy_instrument_key = :buy_ik,
+                        contract_mmm_yyyy = COALESCE(contract_mmm_yyyy, :contract),
                         remarks = CASE
                             WHEN remarks LIKE :expiry_like THEN NULL
                             ELSE remarks
@@ -1025,6 +1160,7 @@ def ensure_executed_option_instrument_keys(
                 {
                     "sell_ik": new_sell,
                     "buy_ik": new_buy,
+                    "contract": contract,
                     "expiry_like": f"%{EXPIRY_REMARKS}%",
                     "ts": now_ist_second(),
                     "id": int(row["id"]),
@@ -1204,6 +1340,9 @@ _LOT_CACHE_TTL = 600.0
 _FUT_BY_UND: Dict[str, List[Dict[str, Any]]] = {}
 _FUT_BY_UND_AT = 0.0
 _FUT_BY_UND_TTL = 600.0
+_OPT_BY_UND: Dict[str, List[Dict[str, Any]]] = {}
+_OPT_BY_UND_AT = 0.0
+_OPT_BY_UND_TTL = 600.0
 
 
 def _fut_contracts_index() -> Dict[str, List[Dict[str, Any]]]:
@@ -1257,6 +1396,44 @@ def _fut_contracts_for_symbol(symbol: str) -> List[Dict[str, Any]]:
     if not sym:
         return []
     return list(_fut_contracts_index().get(sym) or [])
+
+
+def _nse_fo_option_index() -> Dict[str, List[Dict[str, Any]]]:
+    """underlying → NSE_FO CE/PE rows. Cached 10 minutes."""
+    global _OPT_BY_UND, _OPT_BY_UND_AT
+    now = time.monotonic()
+    if _OPT_BY_UND and (now - _OPT_BY_UND_AT) < _OPT_BY_UND_TTL:
+        return _OPT_BY_UND
+    from backend.config import get_instruments_file_path
+
+    path = get_instruments_file_path()
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    if not path.is_file():
+        _OPT_BY_UND = {}
+        _OPT_BY_UND_AT = now
+        return _OPT_BY_UND
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("stock_option option master: instruments unreadable")
+        return _OPT_BY_UND or {}
+    if not isinstance(data, list):
+        return {}
+    for inst in data:
+        if not isinstance(inst, dict):
+            continue
+        if str(inst.get("segment") or "").upper() != "NSE_FO":
+            continue
+        kind = str(inst.get("instrument_type") or "").upper()
+        if kind not in ("CE", "PE"):
+            continue
+        und = _norm_symbol(inst.get("underlying_symbol") or "")
+        if not und:
+            continue
+        out.setdefault(und, []).append(inst)
+    _OPT_BY_UND = out
+    _OPT_BY_UND_AT = now
+    return _OPT_BY_UND
 
 
 def _instrument_lot_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
@@ -3830,6 +4007,10 @@ def _parse_iso_datetime(value: Any, field: str) -> datetime:
 def quote_exit_ltps(signal_id: int) -> Dict[str, Any]:
     """Live LTP for an Executed row at exit-popup open. Does not complete the trade."""
     ensure_stock_option_tables()
+    try:
+        ensure_executed_option_instrument_keys(signal_id)
+    except Exception:
+        logger.debug("stock_option key ensure before exit quote failed", exc_info=True)
     now = now_ist_second()
     db = SessionLocal()
     try:

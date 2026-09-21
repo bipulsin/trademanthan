@@ -31,6 +31,11 @@ from backend.services.stock_option_signals import (
     hard_stop_price,
     is_index_symbol,
     realized_credit_pnl,
+    lookup_option_instrument_key,
+    option_key_matches_trade,
+    parse_contract_mmm_yyyy,
+    parse_nse_fo_option_key,
+    resolve_executed_leg_instrument_key,
     _optional_exit_bundle,
     _row_public,
     next_ema_action,
@@ -617,6 +622,62 @@ def test_contract_mmm_yyyy_from_fut_symbol():
     assert resolve_contract_mmm_yyyy("NIFTY", datetime(2026, 8, 19, 11, 15)) == "AUG-2026"
     # Roll window after day 20 → next month
     assert resolve_contract_mmm_yyyy("NIFTY", datetime(2026, 8, 26, 13, 15)) == "SEP-2026"
+
+
+def _opt_inst(und: str, right: str, strike: float, exp: date, key: str) -> dict:
+    ms = int(IST.localize(datetime(exp.year, exp.month, exp.day, 15, 30)).timestamp() * 1000)
+    return {
+        "segment": "NSE_FO",
+        "instrument_type": right,
+        "underlying_symbol": und,
+        "strike_price": strike,
+        "expiry": ms,
+        "instrument_key": key,
+    }
+
+
+def test_executed_ltp_key_uses_trade_expiry_not_rolled_master():
+    """When master/live chain is Oct, executed Sep trade still quotes Sep keys."""
+    sep_sell = "NSE_FO|RELIANCE26SEP1400CE"
+    oct_sell = "NSE_FO|RELIANCE26OCT1400CE"
+    sep_buy = "NSE_FO|RELIANCE26SEP1420CE"
+    oct_buy = "NSE_FO|RELIANCE26OCT1420CE"
+    master = [
+        _opt_inst("RELIANCE", "CE", 1400, date(2026, 10, 27), oct_sell),
+        _opt_inst("RELIANCE", "CE", 1420, date(2026, 10, 27), oct_buy),
+        _opt_inst("RELIANCE", "CE", 1400, date(2026, 9, 29), sep_sell),
+        _opt_inst("RELIANCE", "CE", 1420, date(2026, 9, 29), sep_buy),
+    ]
+    assert parse_contract_mmm_yyyy("SEP-2026") == (9, 2026)
+    assert option_key_matches_trade(oct_sell, "SEP-2026", 1400, "CE") is False
+    assert option_key_matches_trade(sep_sell, "SEP-2026", 1400, "CE") is True
+    assert parse_nse_fo_option_key(oct_sell)["month"] == 10
+
+    assert lookup_option_instrument_key(
+        "RELIANCE", 1400, "CE", "SEP-2026", instruments=master
+    ) == sep_sell
+    assert lookup_option_instrument_key(
+        "RELIANCE", 1400, "CE", "OCT-2026", instruments=master
+    ) == oct_sell
+
+    # Stored keys already rolled to Oct; trade contract is Sep.
+    assert resolve_executed_leg_instrument_key(
+        oct_sell,
+        symbol="RELIANCE",
+        strike=1400,
+        side=SIDE_BEAR,
+        contract_mmm_yyyy="SEP-2026",
+        instruments=master,
+    ) == sep_sell
+    # Missing keys: derive from stored expiry, not Oct master front.
+    assert resolve_executed_leg_instrument_key(
+        None,
+        symbol="RELIANCE",
+        strike=1420,
+        side=SIDE_BEAR,
+        contract_mmm_yyyy="SEP-2026",
+        instruments=master,
+    ) == sep_buy
 
 
 def test_row_public_includes_contract():
