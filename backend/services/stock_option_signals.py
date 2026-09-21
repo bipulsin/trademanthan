@@ -383,6 +383,320 @@ def backfill_contract_mmm_yyyy(*, overwrite: bool = False) -> int:
     return updated
 
 
+# Statuses that may still show a pre-trade contract and should follow master currmth.
+# Executed / Completed (Trade report) / Rejected keep the stored expiry forever.
+CONTRACT_ROLLOVER_ACTIVE_STATUSES = frozenset({STATUS_ACTIVE})
+CONTRACT_ROLLOVER_SKIP_STATUSES = frozenset(
+    {STATUS_EXECUTED, STATUS_COMPLETED, STATUS_REJECTED}
+)
+CONTRACT_ROLLOVER_REMARKS = "Contract rolled to arbitrage_master currmth"
+
+
+def contract_rollover_eligible(
+    status: Any,
+    contract_mmm_yyyy: Any = None,
+    *,
+    date_traded: Any = None,
+) -> bool:
+    """True when morning/EOD rollover may update this row's contract.
+
+    Active always (pre-trade). Radar only when a contract month is already shown.
+    Executed / Completed / Rejected and any row with date_traded are never rolled
+    (preserves executed LTP binding to stored expiry).
+    """
+    if trade_is_submitted(date_traded):
+        return False
+    s = str(status or "").strip()
+    if s in CONTRACT_ROLLOVER_SKIP_STATUSES:
+        return False
+    if s == STATUS_ACTIVE:
+        return True
+    if s == STATUS_RADAR and str(contract_mmm_yyyy or "").strip():
+        return True
+    return False
+
+
+def resolve_spread_keys_for_contract(
+    symbol: str,
+    side: Any,
+    sell_strike: Any,
+    buy_strike: Any,
+    contract_mmm_yyyy: Optional[str],
+    *,
+    instruments: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Optional[str]]]:
+    """Re-map existing strikes onto ``contract_mmm_yyyy`` via NSE instruments file.
+
+    Returns ``{sell_instrument_key, buy_instrument_key}`` when both legs resolve;
+    otherwise None (caller should clear strikes and recompute like Radar→Active).
+    """
+    right = option_code(side)
+    if not right or not str(contract_mmm_yyyy or "").strip():
+        return None
+    sell_ik = lookup_option_instrument_key(
+        symbol, sell_strike, right, contract_mmm_yyyy, instruments=instruments
+    )
+    buy_ik = lookup_option_instrument_key(
+        symbol, buy_strike, right, contract_mmm_yyyy, instruments=instruments
+    )
+    if not sell_ik or not buy_ik:
+        return None
+    return {"sell_instrument_key": sell_ik, "buy_instrument_key": buy_ik}
+
+
+def run_contract_rollover(*, dry_run: bool = False) -> Dict[str, Any]:
+    """Align pre-trade contract months to ``arbitrage_master`` currmth FUT.
+
+    Updates ``contract_mmm_yyyy`` (and sell/buy instrument keys when strikes still
+    exist for the new month). If strikes cannot be remapped, clears spread fields
+    so the next EMA tick / ``_fill_spreads_if_blank`` can re-arm like Radar→Active.
+
+    Never touches Executed, Completed (Trade report), Rejected, or submitted trades.
+    """
+    ensure_stock_option_tables()
+    now_naive = now_ist_second()
+    summary: Dict[str, Any] = {
+        "ok": True,
+        "dry_run": dry_run,
+        "checked": 0,
+        "rolled": 0,
+        "keys_remapped": 0,
+        "spreads_cleared": 0,
+        "skipped_same": 0,
+        "skipped_no_master": 0,
+        "skipped_ineligible": 0,
+        "errors": 0,
+        "sample": [],
+    }
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT id, symbol, status, side, contract_mmm_yyyy,
+                       sell_strike, buy_strike, sell_delta, buy_delta,
+                       sell_instrument_key, buy_instrument_key, date_traded
+                FROM stock_option_signals
+                WHERE status IN (:radar, :active)
+                   OR (
+                        contract_mmm_yyyy IS NOT NULL
+                        AND TRIM(contract_mmm_yyyy) <> ''
+                        AND LOWER(TRIM(status)) NOT IN ('executed', 'completed', 'rejected')
+                   )
+                ORDER BY id
+                """
+            ),
+            {"radar": STATUS_RADAR, "active": STATUS_ACTIVE},
+        ).mappings().all()
+        for row in rows:
+            summary["checked"] += 1
+            if not contract_rollover_eligible(
+                row.get("status"),
+                row.get("contract_mmm_yyyy"),
+                date_traded=row.get("date_traded"),
+            ):
+                summary["skipped_ineligible"] += 1
+                continue
+            sym = _norm_symbol(row.get("symbol"))
+            master = contract_from_arbitrage_master(db, sym)
+            if not master:
+                # Live fallback: same path used when arming Radar→Active.
+                master = resolve_contract_mmm_yyyy(sym, now_naive, db=db)
+            if not master:
+                summary["skipped_no_master"] += 1
+                continue
+            old = str(row.get("contract_mmm_yyyy") or "").strip() or None
+            if old and old.upper() == master.upper():
+                # Still ensure instrument keys match stored month (stale next-month keys).
+                sell_s = row.get("sell_strike")
+                buy_s = row.get("buy_strike")
+                if (
+                    sell_s is not None
+                    and buy_s is not None
+                    and str(row.get("status") or "").strip() == STATUS_ACTIVE
+                ):
+                    remapped = resolve_spread_keys_for_contract(
+                        sym, row.get("side"), sell_s, buy_s, master
+                    )
+                    sell_ik = str(row.get("sell_instrument_key") or "").strip() or None
+                    buy_ik = str(row.get("buy_instrument_key") or "").strip() or None
+                    if remapped and (
+                        sell_ik != remapped["sell_instrument_key"]
+                        or buy_ik != remapped["buy_instrument_key"]
+                    ):
+                        if not dry_run:
+                            db.execute(
+                                text(
+                                    """
+                                    UPDATE stock_option_signals
+                                    SET sell_instrument_key = :sell_instrument_key,
+                                        buy_instrument_key = :buy_instrument_key,
+                                        updated_at = :ts
+                                    WHERE id = :id
+                                      AND status = :active
+                                      AND date_traded IS NULL
+                                    """
+                                ),
+                                {
+                                    **remapped,
+                                    "ts": now_naive,
+                                    "id": row["id"],
+                                    "active": STATUS_ACTIVE,
+                                },
+                            )
+                        summary["keys_remapped"] += 1
+                    elif remapped is None and (sell_ik or buy_ik):
+                        # Keys exist but strikes invalid for this month — leave alone when
+                        # contract already matches; EMA path will refill if blank.
+                        pass
+                summary["skipped_same"] += 1
+                continue
+
+            sell_s = row.get("sell_strike")
+            buy_s = row.get("buy_strike")
+            remapped: Optional[Dict[str, Optional[str]]] = None
+            clear_spreads = False
+            if sell_s is not None and buy_s is not None:
+                remapped = resolve_spread_keys_for_contract(
+                    sym, row.get("side"), sell_s, buy_s, master
+                )
+                if remapped is None:
+                    clear_spreads = True
+
+            sample_entry = {
+                "id": int(row["id"]),
+                "symbol": sym,
+                "status": row.get("status"),
+                "from": old,
+                "to": master,
+                "keys_remapped": bool(remapped),
+                "spreads_cleared": clear_spreads,
+            }
+            if len(summary["sample"]) < 20:
+                summary["sample"].append(sample_entry)
+
+            if dry_run:
+                summary["rolled"] += 1
+                if remapped:
+                    summary["keys_remapped"] += 1
+                if clear_spreads:
+                    summary["spreads_cleared"] += 1
+                continue
+
+            try:
+                if clear_spreads:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE stock_option_signals
+                            SET contract_mmm_yyyy = :contract,
+                                sell_strike = NULL,
+                                sell_delta = NULL,
+                                sell_instrument_key = NULL,
+                                buy_strike = NULL,
+                                buy_delta = NULL,
+                                buy_instrument_key = NULL,
+                                remarks = COALESCE(remarks, :remarks),
+                                updated_at = :ts
+                            WHERE id = :id
+                              AND date_traded IS NULL
+                              AND LOWER(TRIM(status)) NOT IN ('executed', 'completed', 'rejected')
+                            """
+                        ),
+                        {
+                            "contract": master,
+                            "remarks": CONTRACT_ROLLOVER_REMARKS,
+                            "ts": now_naive,
+                            "id": row["id"],
+                        },
+                    )
+                    summary["spreads_cleared"] += 1
+                elif remapped:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE stock_option_signals
+                            SET contract_mmm_yyyy = :contract,
+                                sell_instrument_key = :sell_instrument_key,
+                                buy_instrument_key = :buy_instrument_key,
+                                remarks = COALESCE(remarks, :remarks),
+                                updated_at = :ts
+                            WHERE id = :id
+                              AND date_traded IS NULL
+                              AND LOWER(TRIM(status)) NOT IN ('executed', 'completed', 'rejected')
+                            """
+                        ),
+                        {
+                            "contract": master,
+                            "sell_instrument_key": remapped["sell_instrument_key"],
+                            "buy_instrument_key": remapped["buy_instrument_key"],
+                            "remarks": CONTRACT_ROLLOVER_REMARKS,
+                            "ts": now_naive,
+                            "id": row["id"],
+                        },
+                    )
+                    summary["keys_remapped"] += 1
+                else:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE stock_option_signals
+                            SET contract_mmm_yyyy = :contract,
+                                remarks = COALESCE(remarks, :remarks),
+                                updated_at = :ts
+                            WHERE id = :id
+                              AND date_traded IS NULL
+                              AND LOWER(TRIM(status)) NOT IN ('executed', 'completed', 'rejected')
+                            """
+                        ),
+                        {
+                            "contract": master,
+                            "remarks": CONTRACT_ROLLOVER_REMARKS,
+                            "ts": now_naive,
+                            "id": row["id"],
+                        },
+                    )
+                summary["rolled"] += 1
+            except Exception:
+                summary["errors"] += 1
+                logger.exception(
+                    "stock_option contract rollover failed id=%s symbol=%s",
+                    row.get("id"),
+                    sym,
+                )
+
+        if not dry_run and summary["rolled"]:
+            db.commit()
+        elif dry_run:
+            db.rollback()
+        else:
+            db.commit()
+    except Exception:
+        db.rollback()
+        summary["ok"] = False
+        logger.exception("stock_option contract rollover failed")
+    finally:
+        db.close()
+
+    # After clearing spreads, try live chain refill for Active (same as arm path).
+    if not dry_run and summary.get("spreads_cleared"):
+        try:
+            refill_rows = _open_rows()
+            for r in refill_rows:
+                if str(r.get("status") or "").strip() != STATUS_ACTIVE:
+                    continue
+                if r.get("sell_strike") is not None and r.get("buy_strike") is not None:
+                    continue
+                _fill_spreads_if_blank(r, now_naive)
+                time.sleep(FETCH_SLEEP_SEC)
+        except Exception:
+            logger.exception("stock_option contract rollover spread refill failed")
+
+    if summary["rolled"] or summary["keys_remapped"]:
+        logger.info("stock_option contract rollover: %s", summary)
+    return summary
+
+
 def decode_raw_payload(body: bytes) -> Tuple[Any, Dict[str, Any]]:
     text_body = body.decode("utf-8", errors="replace") if body else ""
     if not text_body.strip():

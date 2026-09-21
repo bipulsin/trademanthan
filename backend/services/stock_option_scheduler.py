@@ -4,6 +4,11 @@ Main ticks (11:15 / 13:15 / 15:15): WR(280) Radar scan over arbitrage_master, th
 EMA arm/demote for Radar/Active. Post-market 15:45: EMA tick + Radar EOD cleanup
 (no full-universe WR scan). Catch-up 11:45 / 13:45: EMA fetch-failed only.
 
+Contract rollover (Active / Radar-with-contract → arbitrage_master currmth):
+- Morning **09:12 IST** Mon–Fri — just after arbitrage daily setup 09:10 metadata roll.
+- EOD **15:50 IST** Mon–Fri — after post-market EMA + Radar cleanup at 15:45.
+Executed / Completed (Trade report) are never updated.
+
 Also keeps Executed option instrument keys on the shared Upstox WS (1m sync from
 09:30 IST after Breakfast) so sell/buy LTPs update live; 2h
 ``refresh_executed_ltps`` remains the REST fallback.
@@ -33,6 +38,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.stock_option_signals import (
     ensure_index_radar_rows,
+    run_contract_rollover,
     run_ema_tick,
     run_radar_eod_cleanup,
     run_wr_radar_scan,
@@ -199,6 +205,18 @@ def _ws_ltp_sync() -> None:
         logger.exception("stock_option_ws_ltp sync failed")
 
 
+def _contract_rollover_tick() -> None:
+    """Morning 09:12 / EOD 15:50: roll Active (and Radar-with-contract) to master currmth."""
+    if should_skip_scheduled_market_jobs_ist():
+        logger.info("stock_option contract rollover: skipped (weekend/holiday)")
+        return
+    try:
+        out = run_contract_rollover()
+        logger.info("stock_option contract rollover: %s", out)
+    except Exception:
+        logger.exception("stock_option contract rollover failed")
+
+
 def start_stock_option_scheduler() -> None:
     global _scheduler
     if _scheduler is not None:
@@ -278,6 +296,38 @@ def start_stock_option_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # After arbitrage_master 09:10 roll: align Active (and Radar-with-contract) months.
+    sch.add_job(
+        _contract_rollover_tick,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute=12,
+            timezone="Asia/Kolkata",
+        ),
+        id="stock_option_contract_rollover_0912",
+        name="Stock Options contract rollover 09:12 (master currmth)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    # Post day-end: second pass after 15:45 EMA / Radar cleanup.
+    sch.add_job(
+        _contract_rollover_tick,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=15,
+            minute=50,
+            timezone="Asia/Kolkata",
+        ),
+        id="stock_option_contract_rollover_1550",
+        name="Stock Options contract rollover 15:50 (master currmth)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
     sch.start()
     _scheduler = sch
     try:
@@ -287,6 +337,7 @@ def start_stock_option_scheduler() -> None:
     logger.info(
         "Stock Options scheduler started "
         "(WR+EMA 11:15/13:15/15:15; EMA+EOD cleanup 15:45; catch-up 11:45/13:45; "
+        "contract rollover 09:12/15:50; "
         "fetch-fail +10m chained retry + Executed WS LTP from 09:30 IST)"
     )
 

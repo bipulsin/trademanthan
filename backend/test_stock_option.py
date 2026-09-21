@@ -17,6 +17,7 @@ from backend.services.stock_option_signals import (
     WR_PERIOD,
     allowed_status_revert,
     build_selling_report,
+    contract_rollover_eligible,
     delta_targets_for_symbol,
     detect_ema_cross_side,
     expiry_remarks,
@@ -37,6 +38,7 @@ from backend.services.stock_option_signals import (
     parse_contract_mmm_yyyy,
     parse_nse_fo_option_key,
     resolve_executed_leg_instrument_key,
+    resolve_spread_keys_for_contract,
     _optional_exit_bundle,
     _row_public,
     next_ema_action,
@@ -724,6 +726,107 @@ def test_row_public_includes_contract():
     assert row["contract_mmm_yyyy"] == "SEP-2026"
     assert row["ema_stale"] is False
     assert row["ema_fetch_ok"] is None
+
+
+def test_contract_rollover_eligible_statuses():
+    """Active rolls; Executed/Completed never; Radar only with a contract month."""
+    assert contract_rollover_eligible(STATUS_ACTIVE) is True
+    assert contract_rollover_eligible(STATUS_ACTIVE, "SEP-2026") is True
+    assert contract_rollover_eligible(STATUS_ACTIVE, None, date_traded="2026-09-01") is False
+    assert contract_rollover_eligible(STATUS_EXECUTED, "SEP-2026") is False
+    assert contract_rollover_eligible(STATUS_COMPLETED, "SEP-2026") is False
+    assert contract_rollover_eligible(STATUS_REJECTED, "SEP-2026") is False
+    assert contract_rollover_eligible(STATUS_RADAR) is False
+    assert contract_rollover_eligible(STATUS_RADAR, None) is False
+    assert contract_rollover_eligible(STATUS_RADAR, "") is False
+    assert contract_rollover_eligible(STATUS_RADAR, "SEP-2026") is True
+
+
+def test_resolve_spread_keys_for_contract_remaps_month():
+    """Same strikes on a new MMM-YYYY resolve to that month's instrument keys."""
+    instruments = [
+        {
+            "underlying_symbol": "RELIANCE",
+            "instrument_type": "CE",
+            "strike_price": 1400,
+            "expiry": int(IST.localize(datetime(2026, 9, 29, 15, 30)).timestamp() * 1000),
+            "instrument_key": "NSE_FO|REL_SEP_1400CE",
+        },
+        {
+            "underlying_symbol": "RELIANCE",
+            "instrument_type": "CE",
+            "strike_price": 1450,
+            "expiry": int(IST.localize(datetime(2026, 9, 29, 15, 30)).timestamp() * 1000),
+            "instrument_key": "NSE_FO|REL_SEP_1450CE",
+        },
+        {
+            "underlying_symbol": "RELIANCE",
+            "instrument_type": "CE",
+            "strike_price": 1400,
+            "expiry": int(IST.localize(datetime(2026, 10, 27, 15, 30)).timestamp() * 1000),
+            "instrument_key": "NSE_FO|REL_OCT_1400CE",
+        },
+        {
+            "underlying_symbol": "RELIANCE",
+            "instrument_type": "CE",
+            "strike_price": 1450,
+            "expiry": int(IST.localize(datetime(2026, 10, 27, 15, 30)).timestamp() * 1000),
+            "instrument_key": "NSE_FO|REL_OCT_1450CE",
+        },
+    ]
+    sep = resolve_spread_keys_for_contract(
+        "RELIANCE", SIDE_BEAR, 1400, 1450, "SEP-2026", instruments=instruments
+    )
+    assert sep == {
+        "sell_instrument_key": "NSE_FO|REL_SEP_1400CE",
+        "buy_instrument_key": "NSE_FO|REL_SEP_1450CE",
+    }
+    oct_ = resolve_spread_keys_for_contract(
+        "RELIANCE", SIDE_BEAR, 1400, 1450, "OCT-2026", instruments=instruments
+    )
+    assert oct_ == {
+        "sell_instrument_key": "NSE_FO|REL_OCT_1400CE",
+        "buy_instrument_key": "NSE_FO|REL_OCT_1450CE",
+    }
+    # Strike missing in new month → None (caller clears / recomputes)
+    assert (
+        resolve_spread_keys_for_contract(
+            "RELIANCE", SIDE_BEAR, 1400, 1500, "OCT-2026", instruments=instruments
+        )
+        is None
+    )
+
+
+def test_executed_ltp_binding_ignores_master_roll():
+    """Executed legs stay on stored SEP even when OCT keys exist (rollover must not touch)."""
+    assert contract_rollover_eligible(STATUS_EXECUTED, "SEP-2026") is False
+    instruments = [
+        {
+            "underlying_symbol": "RELIANCE",
+            "instrument_type": "CE",
+            "strike_price": 1400,
+            "expiry": int(IST.localize(datetime(2026, 9, 29, 15, 30)).timestamp() * 1000),
+            "instrument_key": "NSE_FO|REL_SEP_1400CE",
+        },
+        {
+            "underlying_symbol": "RELIANCE",
+            "instrument_type": "CE",
+            "strike_price": 1400,
+            "expiry": int(IST.localize(datetime(2026, 10, 27, 15, 30)).timestamp() * 1000),
+            "instrument_key": "NSE_FO|REL_OCT_1400CE",
+        },
+    ]
+    assert (
+        resolve_executed_leg_instrument_key(
+            "NSE_FO|REL_OCT_1400CE",
+            symbol="RELIANCE",
+            strike=1400,
+            side=SIDE_BEAR,
+            contract_mmm_yyyy="SEP-2026",
+            instruments=instruments,
+        )
+        == "NSE_FO|REL_SEP_1400CE"
+    )
 
 
 def test_row_public_hides_stale_emas():
