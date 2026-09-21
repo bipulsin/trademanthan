@@ -15,7 +15,7 @@ from backend.services.tarang.domain.types import OptionChain, OptionQuote
 from backend.services.tarang.greeks_service import enrich_quote
 from backend.services.tarang.iv_normalize import normalize_iv
 from backend.services.tarang.strike_window import select_strikes, years_to_expiry
-from backend.services.upstox_service import UpstoxService
+from backend.services.upstox_service import UpstoxService, match_upstox_batch_quote
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,6 @@ QUOTES_URL = "https://api.upstox.com/v2/market-quote/quotes"
 _FAMILY_MINI = {"CL": "CRUDEOILM", "NG": "NATGASMINI"}
 _FAMILY_FULL = {"CL": "CRUDEOIL", "NG": "NATURALGAS"}
 _ALL_ENERGY = ("CRUDEOIL", "CRUDEOILM", "NATURALGAS", "NATGASMINI")
-
-
-def _norm_key(k: str) -> str:
-    return str(k or "").replace("%7C", "|").replace("%7c", "|").strip().upper()
 
 
 def _is_mcx_fo(row: Dict[str, Any]) -> bool:
@@ -213,9 +209,10 @@ class UpstoxMcxAdapter:
             data = body.get("data") if isinstance(body, dict) else None
             if not isinstance(data, dict):
                 continue
-            by = {_norm_key(k): v for k, v in data.items() if isinstance(v, dict)}
+            # Upstox often keys MCX payloads as MCX_FO:SYMBOL while callers request MCX_FO|token.
+            # Join on instrument_token (and exact / colon-pipe aliases) via match_upstox_batch_quote.
             for ik in chunk:
-                gd = by.get(_norm_key(ik))
+                gd = match_upstox_batch_quote(data, ik)
                 if isinstance(gd, dict):
                     out[ik] = gd
         return out
@@ -230,9 +227,9 @@ class UpstoxMcxAdapter:
             data = body.get("data") if isinstance(body, dict) else None
             if not isinstance(data, dict):
                 continue
-            by = {_norm_key(k): v for k, v in data.items() if isinstance(v, dict)}
             for ik in chunk:
-                qd = by.get(_norm_key(ik))
+                # Match by instrument_token when top-level keys are MCX_FO:SYMBOL.
+                qd = match_upstox_batch_quote(data, ik)
                 if not isinstance(qd, dict):
                     continue
                 depth = qd.get("depth") or {}
