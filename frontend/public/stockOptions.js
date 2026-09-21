@@ -480,6 +480,8 @@
             { enabled: true, period: 30 },
             { enabled: true, period: 100 },
           ],
+          vwapEnabled: false,
+          volumeEnabled: false,
         });
       })
       .catch(function (err) {
@@ -872,6 +874,32 @@
     return wrapDesktopMobile(table, cards);
   }
 
+  function statusBackBtn(r, fromStatus) {
+    const st = String(fromStatus || r.status || "").trim();
+    let target = "";
+    let title = "";
+    if (st === "Executed") {
+      target = "Active";
+      title = "Move back to Active";
+    } else if (st === "Active") {
+      target = "Radar";
+      title = "Move back to Radar";
+    } else {
+      return "";
+    }
+    return (
+      '<button type="button" class="so-edit-btn so-status-back-btn" data-status-back="' +
+      r.id +
+      '" data-status-to="' +
+      target +
+      '" title="' +
+      title +
+      '" aria-label="' +
+      title +
+      '"><i class="fas fa-arrow-left" aria-hidden="true"></i></button>'
+    );
+  }
+
   function renderActive() {
     const rows = sortRows("active", workspace.active || []);
     if (!rows.length) return '<p class="so-empty">No Active symbols.</p>';
@@ -888,7 +916,10 @@
         <td>${sideChip(r.side)}</td>
         <td>${esc(r.contract_mmm_yyyy || "—")}</td>
         <td class="so-spread">${spread}</td>
-        <td><button type="button" class="button-41" role="button" data-trade="${r.id}"><span class="text">Trade</span></button></td>
+        <td class="so-exit-cell"><span class="so-row-actions">
+          ${statusBackBtn(r, "Active")}
+          <button type="button" class="button-41" role="button" data-trade="${r.id}"><span class="text">Trade</span></button>
+        </span></td>
       </tr>`;
     }).join("");
     const table = `<div class="so-table-wrap"><table class="so-table">
@@ -912,7 +943,9 @@
           detailRow("Status", esc(r.status || "—")) +
           detailRow("Contract", esc(r.contract_mmm_yyyy || "—")) +
           detailRow("Spread", '<span class="so-spread">' + spread + "</span>") +
-          '<div class="so-mcard-actions"><button type="button" class="button-41" role="button" data-trade="' +
+          '<div class="so-mcard-actions so-row-actions">' +
+          statusBackBtn(r, "Active") +
+          '<button type="button" class="button-41" role="button" data-trade="' +
           r.id + '"><span class="text">Trade</span></button></div>';
         return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
       }).join("");
@@ -967,6 +1000,7 @@
         <td class="so-tight so-executed-pnl ${pnl.cls}" title="${esc(pnl.title)}">${pnl.html}</td>
         <td class="so-hs"><span class="so-hs-cell">${num(r.hard_stop)}${hsBox}</span></td>
         <td class="so-exit-cell"><span class="so-row-actions">
+          ${statusBackBtn(r, "Executed")}
           <button type="button" class="so-edit-btn" data-edit="${r.id}" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button>
           <button type="button" class="so-exit-btn" data-exit="${r.id}">Exit</button>
         </span></td>
@@ -994,6 +1028,7 @@
       detailRow("Hard stop", '<span class="so-hs-cell">' + num(r.hard_stop) + hsBox + "</span>") +
       (r.notes && String(r.notes).trim() ? detailRow("Notes", esc(String(r.notes).trim())) : "") +
       '<div class="so-mcard-actions so-row-actions">' +
+      statusBackBtn(r, "Executed") +
       '<button type="button" class="so-edit-btn" data-edit="' + r.id + '" title="Edit trade" aria-label="Edit trade"><i class="fas fa-pencil-alt" aria-hidden="true"></i></button>' +
       '<button type="button" class="so-exit-btn" data-exit="' + r.id + '">Exit</button></div>';
     return mobileCard(summary, details, isIndexRow(r) ? "so-mcard-index" : "");
@@ -1515,6 +1550,29 @@
     }
   }
 
+  async function revertStatus(id, targetStatus) {
+    const to = String(targetStatus || "").trim();
+    if (!id || !to) return;
+    const label = to === "Active" ? "Active" : to === "Radar" ? "Radar" : to;
+    if (!window.confirm("Move this row back to " + label + "?")) return;
+    const banner = document.getElementById("soBanner");
+    try {
+      const res = await fetch(API + "/api/stock-options/signals/" + id + "/status", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ status: to }),
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        throw new Error((data && data.detail) || ("HTTP " + res.status));
+      }
+      if (banner) banner.textContent = "";
+      await load();
+    } catch (e) {
+      if (banner) banner.textContent = e.message || "Status change failed";
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll(".bf-tab").forEach((btn) => {
       btn.addEventListener("click", () => setTab(btn.dataset.tab));
@@ -1547,6 +1605,11 @@
       }
       const btn = ev.target.closest("[data-trade]");
       if (btn) openTrade(btn.dataset.trade);
+      const backBtn = ev.target.closest("[data-status-back]");
+      if (backBtn) {
+        revertStatus(backBtn.dataset.statusBack, backBtn.dataset.statusTo);
+        return;
+      }
       const editBtn = ev.target.closest("[data-edit]");
       if (editBtn) openEdit(editBtn.dataset.edit);
       const exitBtn = ev.target.closest("[data-exit]");

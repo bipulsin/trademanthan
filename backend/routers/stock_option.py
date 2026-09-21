@@ -20,6 +20,7 @@ from backend.services.stock_option_signals import (
     list_workspace,
     now_ist_second,
     quote_exit_ltps,
+    revert_signal_status,
     set_hard_stop_placed,
     submit_exit,
     submit_trade,
@@ -84,6 +85,11 @@ class UpdateBody(BaseModel):
     buy_exit: Optional[float] = Field(None, ge=0)
     trade_mode: Optional[str] = Field(None, max_length=16)
     notes: Optional[str] = Field(None, max_length=4000)
+
+
+class StatusBody(BaseModel):
+    """Manual back-arrow: Executed→Active or Active→Radar only."""
+    status: str = Field(..., min_length=3, max_length=16)
 
 
 async def _ingest(request: Request) -> JSONResponse:
@@ -283,6 +289,22 @@ async def stock_option_update(
             notes=body.notes,
             notes_provided="notes" in payload,
         )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return JSONResponse(status_code=200, content=out)
+
+
+@router.post("/stock-options/signals/{signal_id}/status")
+async def stock_option_status(
+    signal_id: int,
+    body: StatusBody,
+    _user: User = Depends(_auth_user),
+) -> JSONResponse:
+    """Back-arrow status: Executed→Active or Active→Radar. All other transitions rejected."""
+    try:
+        out = revert_signal_status(signal_id, body.status)
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:

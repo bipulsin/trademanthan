@@ -15,7 +15,7 @@ from backend.services.stock_option_signals import (
     STATUS_RADAR,
     STATUS_REJECTED,
     WR_PERIOD,
-    active_past_max_age,
+    allowed_status_revert,
     build_selling_report,
     delta_targets_for_symbol,
     detect_ema_cross_side,
@@ -28,6 +28,7 @@ from backend.services.stock_option_signals import (
     pnl_rupees,
     completed_2h_ohlc,
     ema_condition_holds,
+    expire_stale_active,
     hard_stop_price,
     is_index_symbol,
     realized_credit_pnl,
@@ -171,11 +172,23 @@ def test_invalidate_keeps_executed_only_with_arm_and_strikes():
     assert invalidate_outcome(armed, 1400, None) == STATUS_REJECTED
 
 
-def test_active_expires_after_72h():
-    armed = datetime(2026, 9, 6, 11, 15)
-    assert active_past_max_age(armed, datetime(2026, 9, 9, 11, 14)) is False
-    assert active_past_max_age(armed, datetime(2026, 9, 9, 11, 15)) is True
-    assert active_past_max_age(None, datetime(2026, 9, 9, 11, 15)) is False
+def test_status_revert_allowlist():
+    assert allowed_status_revert(STATUS_EXECUTED, STATUS_ACTIVE) is True
+    assert allowed_status_revert(STATUS_ACTIVE, STATUS_RADAR) is True
+    assert allowed_status_revert(STATUS_ACTIVE, STATUS_EXECUTED) is False
+    assert allowed_status_revert(STATUS_RADAR, STATUS_ACTIVE) is False
+    assert allowed_status_revert(STATUS_EXECUTED, STATUS_RADAR) is False
+    assert allowed_status_revert(STATUS_COMPLETED, STATUS_ACTIVE) is False
+    assert allowed_status_revert(STATUS_RADAR, STATUS_EXECUTED) is False
+    assert allowed_status_revert("executed", "active") is False  # exact case
+    assert allowed_status_revert(None, STATUS_ACTIVE) is False
+
+
+def test_72h_active_expiry_removed():
+    """72h Active→Executed auto-promotion is disabled (no-op job)."""
+    assert expire_stale_active() == 0
+    assert expire_stale_active(datetime(2026, 9, 9, 11, 15)) == 0
+    # Legacy remark helper still available for clearing old auto-expiry notes.
     assert expiry_remarks(None) == EXPIRY_REMARKS
     assert expiry_remarks("keep strikes") == f"keep strikes | {EXPIRY_REMARKS}"
     assert expiry_remarks(EXPIRY_REMARKS) == EXPIRY_REMARKS

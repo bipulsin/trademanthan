@@ -36,7 +36,6 @@ from backend.services.ist_datetime import naive_ist
 from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 from backend.services.stock_option_signals import (
     EMA_SLOW,
-    EXPIRY_REMARKS,
     FETCH_SLEEP_SEC,
     INVALIDATE_REMARKS,
     STATUS_ACTIVE,
@@ -45,11 +44,9 @@ from backend.services.stock_option_signals import (
     STATUS_REJECTED,
     WR_PERIOD,
     _fill_spreads_if_blank,
-    active_past_max_age,
     aggregate_intraday_to_2h,
     completed_2h_ohlc,
     ema_snapshot,
-    expiry_remarks,
     invalidate_outcome,
     next_ema_action,
     resolve_equity_instrument_key,
@@ -223,17 +220,8 @@ def reject(row: Dict[str, Any], remarks: str, side: Optional[str] = None) -> Non
 
 
 def apply_expiry(row: Dict[str, Any], tick: datetime) -> bool:
-    if row.get("status") != STATUS_ACTIVE:
-        return False
-    if user_submitted(row):
-        return False
-    if not active_past_max_age(row.get("armed_at"), tick):
-        return False
-    armed = row.get("armed_at")
-    row["status"] = STATUS_EXECUTED
-    row["date_traded"] = armed.date() if isinstance(armed, datetime) else None
-    row["remarks"] = expiry_remarks(None)
-    return True
+    """No-op: 72h Active→Executed auto-promotion removed."""
+    return False
 
 
 def replay_symbol(

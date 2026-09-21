@@ -9,9 +9,9 @@ on completed 2h bars ending at/before each trigger:
 
     WR > -2 → BEAR CALL; WR < -98 → BULL PUT; else discard
 
-Arming uses 2h EMA9/30/100 after the trigger. Active rows lose EMA → Executed
-(invalidate remark), or auto-expire after 72h from armed_at. Remaining Active
-rows get ~28Δ / ~18Δ stock spreads via the existing Upstox option-chain path.
+Arming uses 2h EMA9/30/100 after the trigger. Active rows lose EMA → demote to
+Radar (or Rejected when arm/strikes incomplete). Remaining Active rows get
+~28Δ / ~18Δ stock spreads via the existing Upstox option-chain path.
 
 Does not truncate. Aborts if ``stock_option_signals`` is not empty unless
 ``--allow-nonempty`` is passed (inserts only new rows; never rewrites user
@@ -47,12 +47,10 @@ from backend.services.stock_option_signals import (
     STATUS_RADAR,
     _fill_spreads_if_blank,
     _norm_symbol,
-    active_past_max_age,
     aggregate_intraday_to_2h,
     completed_2h_ohlc,
     ema_snapshot,
     ensure_stock_option_tables,
-    expiry_remarks,
     is_index_symbol,
     next_ema_action,
     resolve_equity_instrument_key,
@@ -529,13 +527,6 @@ def simulate(
         tick: datetime = dt
         for sym, sig in list(open_by_sym.items()):
             if sig["trigger_at"] >= tick:
-                continue
-            if sig["status"] == STATUS_ACTIVE and active_past_max_age(sig.get("armed_at"), tick):
-                sig["status"] = STATUS_EXECUTED
-                sig["remarks"] = expiry_remarks(sig.get("remarks"))
-                sig["updated_at"] = tick
-                open_by_sym.pop(sym, None)
-                stats["expired_72h"] += 1
                 continue
             snaps = bars_by_sym.get(sym) or []
             if not snaps:

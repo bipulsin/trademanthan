@@ -46,8 +46,16 @@ SIDE_BULL = "BULL PUT"
 TRADE_MODE_PAPER = "PAPER"
 TRADE_MODE_LIVE = "LIVE"
 INVALIDATE_REMARKS = "Trade not executed for this symbol"
-ACTIVE_MAX_HOURS = 72
+# Legacy 72h Active→Executed auto-promotion (removed). Kept for clearing old remarks.
 EXPIRY_REMARKS = "Auto-expired after 72 hours from armed time"
+REVERT_TO_RADAR_REMARKS = "Moved to Radar by user"
+# Manual back-arrow allowlist: (from_status, to_status)
+STATUS_REVERT_ALLOWLIST = frozenset(
+    {
+        (STATUS_EXECUTED, STATUS_ACTIVE),
+        (STATUS_ACTIVE, STATUS_RADAR),
+    }
+)
 
 _MONTH_NUM = {
     "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
@@ -780,22 +788,15 @@ def _naive_ist(value: Any) -> Optional[datetime]:
     return None
 
 
-def active_past_max_age(
-    armed_at: Any,
-    now: datetime,
-    hours: int = ACTIVE_MAX_HOURS,
-) -> bool:
-    """True once Active has been armed for 72 hours or longer."""
-    armed = _naive_ist(armed_at)
-    if armed is None:
-        return False
-    current = _naive_ist(now)
-    if current is None:
-        return False
-    return (current - armed) >= timedelta(hours=hours)
+def allowed_status_revert(from_status: Any, to_status: Any) -> bool:
+    """True only for Executed→Active and Active→Radar (manual back-arrow)."""
+    src = (from_status or "").strip()
+    dst = (to_status or "").strip()
+    return (src, dst) in STATUS_REVERT_ALLOWLIST
 
 
 def expiry_remarks(existing: Any) -> str:
+    """Append legacy 72h expiry note (kept for historical remark cleanup)."""
     note = (existing or "").strip()
     if not note:
         return EXPIRY_REMARKS
@@ -2720,75 +2721,125 @@ def _open_rows(*, only_fetch_failed: bool = False) -> List[Dict[str, Any]]:
 
 
 def expire_stale_active(now: Optional[datetime] = None) -> int:
-    """Move Active rows armed 72h+ ago to Executed. Keep strikes/side/EMAs.
+    """No-op: 72h Active→Executed auto-promotion removed.
 
-    Trade date is the armed calendar date. Does not invent or clear strikes.
-    Skips rows that already have a submitted trade date or costs.
-    Re-seeds permanent index Radar after expiry.
+    Active stays Active until Trade submit or manual back-arrow to Radar.
+    ``now`` retained for call-site compatibility.
+    """
+    return 0
+
+
+def revert_signal_status(signal_id: int, target_status: str) -> Dict[str, Any]:
+    """Manual status back-step: Executed→Active or Active→Radar only.
+
+    Executed→Active clears trade submission fields so Trade can be re-submitted.
+    Active→Radar clears arm/spread fields (same shape as EMA demote).
     """
     ensure_stock_option_tables()
-    now_naive = now_ist_second() if now is None else naive_ist(now)
-    cutoff = now_naive - timedelta(hours=ACTIVE_MAX_HOURS)
+    target = (target_status or "").strip()
+    now = now_ist_second()
     db = SessionLocal()
-    reseeds: List[str] = []
     try:
-        rows = db.execute(
+        row = db.execute(
             text(
                 """
-                SELECT id, symbol, armed_at, remarks
+                SELECT id, symbol, status, remarks, armed_at,
+                       sell_cost, buy_cost, date_traded
                 FROM stock_option_signals
-                WHERE status = :active
-                  AND armed_at IS NOT NULL
-                  AND armed_at <= :cutoff
-                  AND date_traded IS NULL
-                  AND sell_cost IS NULL
-                  AND buy_cost IS NULL
+                WHERE id = :id
                 """
             ),
-            {"active": STATUS_ACTIVE, "cutoff": cutoff},
-        ).mappings().all()
-        n = 0
-        for row in rows:
-            armed = _naive_ist(row.get("armed_at"))
-            if armed is None or not active_past_max_age(armed, now_naive):
-                continue
+            {"id": signal_id},
+        ).mappings().first()
+        if not row:
+            raise LookupError("signal not found")
+        current = (row.get("status") or "").strip()
+        if not allowed_status_revert(current, target):
+            raise ValueError(
+                f"status transition not allowed: {current or '?'} → {target or '?'}"
+            )
+
+        if current == STATUS_EXECUTED and target == STATUS_ACTIVE:
+            note = (row.get("remarks") or "").strip()
+            new_remarks = None if (not note or EXPIRY_REMARKS in note) else note
             db.execute(
                 text(
                     """
                     UPDATE stock_option_signals
-                    SET status = :executed,
-                        date_traded = CAST(:armed_date AS DATE),
+                    SET status = :active,
+                        date_traded = NULL,
+                        sell_cost = NULL,
+                        buy_cost = NULL,
+                        user_sell_strike = NULL,
+                        user_buy_strike = NULL,
+                        sell_ltp = NULL,
+                        buy_ltp = NULL,
+                        hard_stop_placed = FALSE,
+                        exit_date = NULL,
+                        sell_exit_price = NULL,
+                        buy_exit_price = NULL,
+                        realized_pnl = NULL,
+                        arm_caution = FALSE,
                         remarks = :remarks,
                         updated_at = :ts
-                    WHERE id = :id
-                      AND status = :active
-                      AND date_traded IS NULL
+                    WHERE id = :id AND status = :executed
                     """
                 ),
                 {
+                    "active": STATUS_ACTIVE,
+                    "remarks": new_remarks,
+                    "ts": now,
+                    "id": signal_id,
                     "executed": STATUS_EXECUTED,
-                    "armed_date": armed.date().isoformat(),
-                    "remarks": expiry_remarks(row.get("remarks")),
-                    "ts": now_naive,
-                    "id": row["id"],
+                },
+            )
+        else:
+            # Active → Radar
+            db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET status = :radar,
+                        armed_at = NULL,
+                        contract_mmm_yyyy = NULL,
+                        sell_strike = NULL,
+                        sell_delta = NULL,
+                        sell_instrument_key = NULL,
+                        buy_strike = NULL,
+                        buy_delta = NULL,
+                        buy_instrument_key = NULL,
+                        arm_caution = TRUE,
+                        remarks = :remarks,
+                        updated_at = :ts
+                    WHERE id = :id AND status = :active
+                      AND date_traded IS NULL
+                      AND sell_cost IS NULL AND buy_cost IS NULL
+                    """
+                ),
+                {
+                    "radar": STATUS_RADAR,
+                    "remarks": REVERT_TO_RADAR_REMARKS,
+                    "ts": now,
+                    "id": signal_id,
                     "active": STATUS_ACTIVE,
                 },
             )
-            n += 1
-            sym = _norm_symbol(row.get("symbol"))
-            if is_index_symbol(sym):
-                reseeds.append(sym)
-        for sym in reseeds:
-            ensure_index_radar_row(db, sym, now=now_naive)
-        if n or reseeds:
-            db.commit()
-        return n
+        if db.execute(
+            text("SELECT status FROM stock_option_signals WHERE id = :id"),
+            {"id": signal_id},
+        ).scalar() != target:
+            raise ValueError("status transition failed (row changed or not eligible)")
+        # Permanent indices: keep a Radar row after leaving Active via back-arrow.
+        if target == STATUS_RADAR:
+            ensure_index_radar_row(db, row.get("symbol") or "", now=now)
+        db.commit()
     except Exception:
         db.rollback()
-        logger.exception("stock_option 72h active expiry failed")
-        return 0
+        raise
     finally:
         db.close()
+    _sync_executed_ws_ltp_subscriptions()
+    return {"ok": True, "id": signal_id, "status": target}
 
 
 def _flag_executed_arm_caution(now: Optional[datetime] = None) -> int:
@@ -3135,7 +3186,7 @@ def run_ema_tick(
     *,
     only_fetch_failed: bool = False,
 ) -> Dict[str, Any]:
-    """2h job: seed index Radar, expire stale Active, update EMAs, arm, demote, fill spreads.
+    """2h job: seed index Radar, update EMAs, arm, demote, fill spreads.
 
     NIFTY/BANKNIFTY: no WR gate; Radar→Active only on EMA9 cross vs EMA30+EMA100;
     Active (not submitted) demotes to Radar when hold fails.
@@ -3148,7 +3199,8 @@ def run_ema_tick(
     then Radar — so open rows are not starved by late Upstox empties.
 
     When ``only_fetch_failed`` is True (off-schedule retry), only Radar/Active
-    rows with ``ema_fetch_ok=FALSE`` are refreshed; seed/expire/LTP refresh are skipped.
+    rows with ``ema_fetch_ok=FALSE`` are refreshed; seed/LTP refresh are skipped.
+    Active no longer auto-promotes to Executed after 72h.
     """
     ensure_stock_option_tables()
     from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
@@ -3162,6 +3214,7 @@ def run_ema_tick(
     expired = 0
     if not only_fetch_failed:
         seeded = ensure_index_radar_rows(now_naive)
+        # 72h Active→Executed auto-promotion removed (expire_stale_active is a no-op).
         expired = expire_stale_active(now_naive)
     # Indices first so permanent NIFTY/BANKNIFTY EMA/arm is not starved by late-loop
     # Upstox empty responses after many stock candle fetches.
@@ -3714,7 +3767,6 @@ def _pin_index_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def list_workspace() -> Dict[str, Any]:
     ensure_stock_option_tables()
     ensure_index_radar_rows()
-    expire_stale_active()
     db = SessionLocal()
     try:
         rows = db.execute(
