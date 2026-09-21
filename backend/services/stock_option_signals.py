@@ -975,6 +975,59 @@ def option_key_matches_trade(
     return True
 
 
+def _norm_option_ik(key: Any) -> str:
+    return str(key or "").strip().replace(":", "|")
+
+
+def find_option_instrument_by_key(
+    instrument_key: Optional[str],
+    instruments: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    want = _norm_option_ik(instrument_key)
+    if not want:
+        return None
+    if instruments is not None:
+        rows: Sequence[Dict[str, Any]] = instruments
+    else:
+        rows = [i for lst in _nse_fo_option_index().values() for i in lst]
+    for inst in rows:
+        if not isinstance(inst, dict):
+            continue
+        if _norm_option_ik(inst.get("instrument_key")) == want:
+            return inst
+    return None
+
+
+def stored_option_key_matches_trade(
+    instrument_key: Optional[str],
+    contract_mmm_yyyy: Optional[str],
+    strike: Any,
+    right: Optional[str],
+    symbol: Optional[str] = None,
+    instruments: Optional[Sequence[Dict[str, Any]]] = None,
+) -> bool:
+    """True if stored key is this trade's contract (encoded key or NSE token)."""
+    if option_key_matches_trade(instrument_key, contract_mmm_yyyy, strike, right):
+        return True
+    inst = find_option_instrument_by_key(instrument_key, instruments)
+    if not inst:
+        return False
+    cm = parse_contract_mmm_yyyy(contract_mmm_yyyy)
+    exp = expiry_date_from_instrument(inst)
+    if cm and (exp is None or (exp.month, exp.year) != cm):
+        return False
+    if right and str(inst.get("instrument_type") or "").strip().upper() != str(right).strip().upper():
+        return False
+    target = _as_float(strike)
+    st = _as_float(inst.get("strike_price") if inst.get("strike_price") is not None else inst.get("strike"))
+    if target is not None and st is not None and abs(st - target) > 1e-6:
+        return False
+    und = _norm_symbol(inst.get("underlying_symbol") or "")
+    if symbol and und and und != _norm_symbol(symbol):
+        return False
+    return True
+
+
 def lookup_option_instrument_key(
     symbol: str,
     strike: Any,
@@ -1038,7 +1091,9 @@ def resolve_executed_leg_instrument_key(
     right = option_code(side)
     stored = str(stored_key or "").strip() or None
     contract = str(contract_mmm_yyyy or "").strip() or None
-    if stored and option_key_matches_trade(stored, contract, strike, right):
+    if stored and stored_option_key_matches_trade(
+        stored, contract, strike, right, symbol, instruments
+    ):
         return stored
     looked = lookup_option_instrument_key(
         symbol, strike, right, contract, instruments=instruments
@@ -1046,8 +1101,6 @@ def resolve_executed_leg_instrument_key(
     if looked:
         return looked
     if stored and not contract:
-        return stored
-    if stored and not parse_nse_fo_option_key(stored):
         return stored
     return None
 

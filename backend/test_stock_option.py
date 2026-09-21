@@ -678,6 +678,21 @@ def test_executed_ltp_key_uses_trade_expiry_not_rolled_master():
         contract_mmm_yyyy="SEP-2026",
         instruments=master,
     ) == sep_buy
+    # Upstox token keys: Oct token must not be kept when trade is Sep.
+    oct_token = "NSE_FO|999001"
+    sep_token = "NSE_FO|888001"
+    token_master = [
+        _opt_inst("RELIANCE", "CE", 1400, date(2026, 10, 27), oct_token),
+        _opt_inst("RELIANCE", "CE", 1400, date(2026, 9, 29), sep_token),
+    ]
+    assert resolve_executed_leg_instrument_key(
+        oct_token,
+        symbol="RELIANCE",
+        strike=1400,
+        side=SIDE_BEAR,
+        contract_mmm_yyyy="SEP-2026",
+        instruments=token_master,
+    ) == sep_token
 
 
 def test_row_public_includes_contract():
