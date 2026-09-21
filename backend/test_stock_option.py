@@ -976,6 +976,9 @@ def test_tick_schedules_retry_when_fetch_failed(monkeypatch):
 
     scheduled = {"n": 0}
     monkeypatch.setattr(sch, "should_skip_scheduled_market_jobs_ist", lambda: False)
+    monkeypatch.setattr(
+        sch, "run_left_arbitrage_master_cleanup", lambda: {"ok": True, "dropped": 0}
+    )
     monkeypatch.setattr(sch, "run_wr_radar_scan", lambda: {"ok": True, "inserted": 0})
     monkeypatch.setattr(sch, "run_ema_tick", lambda: {"ok": True, "ema_fetch_failed": 3})
     monkeypatch.setattr(sch, "_schedule_ema_fetch_retry", lambda: scheduled.__setitem__("n", scheduled["n"] + 1))
@@ -1002,8 +1005,183 @@ def test_post_market_runs_ema_then_eod_cleanup(monkeypatch):
         "run_radar_eod_cleanup",
         lambda: order.append("eod") or {"ok": True, "removed": 0},
     )
+    monkeypatch.setattr(
+        sch,
+        "run_left_arbitrage_master_cleanup",
+        lambda: order.append("left") or {"ok": True, "dropped": 0},
+    )
     sch._post_market_tick()
-    assert order == ["ema", "eod"]
+    assert order == ["ema", "eod", "left"]
+
+
+def test_tick_runs_left_master_before_wr_scan(monkeypatch):
+    from backend.services import stock_option_scheduler as sch
+
+    order = []
+    monkeypatch.setattr(sch, "should_skip_scheduled_market_jobs_ist", lambda: False)
+    monkeypatch.setattr(
+        sch,
+        "run_left_arbitrage_master_cleanup",
+        lambda: order.append("left") or {"ok": True, "dropped": 0},
+    )
+    monkeypatch.setattr(
+        sch,
+        "run_wr_radar_scan",
+        lambda: order.append("wr") or {"ok": True, "inserted": 0},
+    )
+    monkeypatch.setattr(
+        sch,
+        "run_ema_tick",
+        lambda: order.append("ema") or {"ok": True, "ema_fetch_failed": 0},
+    )
+    sch._tick()
+    assert order == ["left", "wr", "ema"]
+
+
+def test_left_arbitrage_master_cleanup_drops_radar_active_keeps_executed(monkeypatch):
+    """Radar/Active not in master → Rejected; Executed untouched."""
+    from backend.services import stock_option_signals as sos
+
+    updates: list[dict] = []
+    master_rows = [("RELIANCE",), ("NIFTY",)]
+    open_rows = [
+        {
+            "id": 1,
+            "symbol": "COLPAL",
+            "status": STATUS_ACTIVE,
+            "date_traded": None,
+            "sell_cost": None,
+            "buy_cost": None,
+        },
+        {
+            "id": 2,
+            "symbol": "INOXWIND",
+            "status": STATUS_RADAR,
+            "date_traded": None,
+            "sell_cost": None,
+            "buy_cost": None,
+        },
+        {
+            "id": 3,
+            "symbol": "RELIANCE",
+            "status": STATUS_RADAR,
+            "date_traded": None,
+            "sell_cost": None,
+            "buy_cost": None,
+        },
+        {
+            "id": 4,
+            "symbol": "COLPAL",
+            "status": STATUS_EXECUTED,
+            "date_traded": datetime(2026, 9, 10, 11, 20),
+            "sell_cost": 100.0,
+            "buy_cost": 40.0,
+        },
+        {
+            "id": 5,
+            "symbol": "GONE",
+            "status": STATUS_ACTIVE,
+            "date_traded": datetime(2026, 9, 12, 10, 0),
+            "sell_cost": None,
+            "buy_cost": None,
+        },
+    ]
+
+    class _MapResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+        def fetchall(self):
+            return self._rows
+
+    class _UpdateResult:
+        rowcount = 1
+
+    class _FakeDb:
+        def execute(self, stmt, params=None):
+            sql = str(stmt).lower()
+            if "from arbitrage_master" in sql:
+                return _MapResult(master_rows)
+            if "from stock_option_signals" in sql and "status in" in sql:
+                # Only Radar/Active are selected by the cleanup query.
+                radar_active = [
+                    r
+                    for r in open_rows
+                    if r["status"] in (STATUS_RADAR, STATUS_ACTIVE)
+                ]
+                return _MapResult(radar_active)
+            if "update stock_option_signals" in sql:
+                updates.append(dict(params or {}))
+                return _UpdateResult()
+            return _MapResult([])
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sos, "ensure_stock_option_tables", lambda: None)
+    monkeypatch.setattr(sos, "SessionLocal", lambda: _FakeDb())
+    out = sos.run_left_arbitrage_master_cleanup(
+        datetime(2026, 9, 21, 12, 0),
+        skip_breakfast_defer=True,
+    )
+    assert out["ok"] is True
+    assert out["dropped"] == 2
+    dropped_ids = {r["id"] for r in out["dropped_rows"]}
+    assert dropped_ids == {1, 2}
+    dropped_syms = {r["symbol"] for r in out["dropped_rows"]}
+    assert dropped_syms == {"COLPAL", "INOXWIND"}
+    assert all(u["remarks"] == sos.LEFT_ARBITRAGE_MASTER_REMARKS for u in updates)
+    assert all(u["rejected"] == STATUS_REJECTED for u in updates)
+    # Executed COLPAL never selected; submitted Active GONE skipped.
+    assert {u["id"] for u in updates} == {1, 2}
+    assert out["skipped_submitted"] == 1
+    assert out["skipped_in_master"] == 1
+
+
+def test_ensure_index_radar_skips_when_absent_from_master(monkeypatch):
+    from backend.services import stock_option_signals as sos
+
+    class _NoInsertDb:
+        def execute(self, *a, **k):
+            raise AssertionError("should not insert when index missing from master")
+
+    assert (
+        sos.ensure_index_radar_row(_NoInsertDb(), "NIFTY", master_symbols=set()) is False
+    )
+
+    inserts = []
+
+    class _InsertDb:
+        def execute(self, stmt, params=None):
+            inserts.append(params)
+            return None
+
+    monkeypatch.setattr(sos, "_statuses_for_symbol", lambda db, sym: [])
+    monkeypatch.setattr(
+        sos, "resolve_equity_instrument_key", lambda s, db: "NSE_INDEX|Nifty 50"
+    )
+    assert (
+        sos.ensure_index_radar_row(
+            _InsertDb(),
+            "NIFTY",
+            master_symbols={"NIFTY"},
+            now=datetime(2026, 9, 21, 9, 15),
+        )
+        is True
+    )
+    assert inserts and inserts[0]["symbol"] == "NIFTY"
 
 
 def test_webhook_insert_disabled_returns_zero(monkeypatch):

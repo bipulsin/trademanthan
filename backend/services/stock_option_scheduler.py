@@ -1,11 +1,13 @@
 """IST 11:15 / 13:15 / 15:15 + post-market 15:45 — Stock Options WR scan + 2h EMAs.
 
-Main ticks (11:15 / 13:15 / 15:15): WR(280) Radar scan over arbitrage_master, then
-EMA arm/demote for Radar/Active. Post-market 15:45: EMA tick + Radar EOD cleanup
-(no full-universe WR scan). Catch-up 11:45 / 13:45: EMA fetch-failed only.
+Main ticks (11:15 / 13:15 / 15:15): left-master cleanup, WR(280) Radar scan over
+arbitrage_master, then EMA arm/demote for Radar/Active. Post-market 15:45: EMA
+tick + Radar EOD WR cleanup + left-master cleanup (no full-universe WR scan).
+Catch-up 11:45 / 13:45: EMA fetch-failed only.
 
 Contract rollover (Active / Radar-with-contract → arbitrage_master currmth):
-- Morning **09:12 IST** Mon–Fri — just after arbitrage daily setup 09:10 metadata roll.
+- Morning **09:12 IST** Mon–Fri — just after arbitrage daily setup 09:10 metadata roll;
+  then drop Radar/Active symbols no longer in master.
 - EOD **15:50 IST** Mon–Fri — after post-market EMA + Radar cleanup at 15:45.
 Executed / Completed (Trade report) are never updated.
 
@@ -40,6 +42,7 @@ from backend.services.stock_option_signals import (
     ensure_index_radar_rows,
     run_contract_rollover,
     run_ema_tick,
+    run_left_arbitrage_master_cleanup,
     run_radar_eod_cleanup,
     run_wr_radar_scan,
 )
@@ -109,13 +112,15 @@ def _schedule_ema_fetch_retry(*, delay: timedelta = EMA_RETRY_DELAY) -> None:
 
 
 def _tick() -> None:
-    """Main 2h tick: WR Radar scan then EMA arm/demote."""
+    """Main 2h tick: left-master cleanup, WR Radar scan, then EMA arm/demote."""
     global _ema_retry_chain
     if should_skip_scheduled_market_jobs_ist():
         logger.info("stock_option ema: skipped (weekend/holiday)")
         return
     try:
         _ema_retry_chain = 0
+        left = run_left_arbitrage_master_cleanup()
+        logger.info("stock_option left_master cleanup: %s", left)
         scan_out = run_wr_radar_scan()
         logger.info("stock_option WR scan: %s", scan_out)
         out = run_ema_tick()
@@ -127,7 +132,7 @@ def _tick() -> None:
 
 
 def _post_market_tick() -> None:
-    """15:45: EMA only (no full WR universe scan) + Radar EOD WR cleanup."""
+    """15:45: EMA only (no full WR universe scan) + Radar EOD WR + left-master cleanup."""
     global _ema_retry_chain
     if should_skip_scheduled_market_jobs_ist():
         logger.info("stock_option post-market: skipped (weekend/holiday)")
@@ -140,6 +145,8 @@ def _post_market_tick() -> None:
             _schedule_ema_fetch_retry()
         cleanup = run_radar_eod_cleanup()
         logger.info("stock_option Radar EOD cleanup: %s", cleanup)
+        left = run_left_arbitrage_master_cleanup()
+        logger.info("stock_option left_master cleanup: %s", left)
     except Exception:
         logger.exception("stock_option post-market tick failed")
 
@@ -206,13 +213,18 @@ def _ws_ltp_sync() -> None:
 
 
 def _contract_rollover_tick() -> None:
-    """Morning 09:12 / EOD 15:50: roll Active (and Radar-with-contract) to master currmth."""
+    """Morning 09:12 / EOD 15:50: roll Active (and Radar-with-contract) to master currmth.
+
+    After rollover, drop Radar/Active symbols that are no longer in arbitrage_master.
+    """
     if should_skip_scheduled_market_jobs_ist():
         logger.info("stock_option contract rollover: skipped (weekend/holiday)")
         return
     try:
         out = run_contract_rollover()
         logger.info("stock_option contract rollover: %s", out)
+        left = run_left_arbitrage_master_cleanup()
+        logger.info("stock_option left_master cleanup: %s", left)
     except Exception:
         logger.exception("stock_option contract rollover failed")
 
@@ -227,6 +239,11 @@ def start_stock_option_scheduler() -> None:
             logger.info("stock_option seeded %s permanent index Radar row(s) on start", n)
     except Exception:
         logger.exception("stock_option index Radar seed on start failed")
+    try:
+        left = run_left_arbitrage_master_cleanup(skip_breakfast_defer=True)
+        logger.info("stock_option left_master cleanup on start: %s", left)
+    except Exception:
+        logger.exception("stock_option left_master cleanup on start failed")
     sch = BackgroundScheduler(timezone="Asia/Kolkata")
     sch.add_job(
         _tick,
@@ -336,8 +353,8 @@ def start_stock_option_scheduler() -> None:
         logger.exception("stock_option_ws_ltp initial sync failed")
     logger.info(
         "Stock Options scheduler started "
-        "(WR+EMA 11:15/13:15/15:15; EMA+EOD cleanup 15:45; catch-up 11:45/13:45; "
-        "contract rollover 09:12/15:50; "
+        "(WR+EMA 11:15/13:15/15:15; EMA+EOD+left-master 15:45; catch-up 11:45/13:45; "
+        "contract rollover + left-master 09:12/15:50; "
         "fetch-fail +10m chained retry + Executed WS LTP from 09:30 IST)"
     )
 

@@ -1,7 +1,9 @@
 """Stock Options algo: scheduled WR(280) Radar scan, Upstox 2h EMA arm/demote.
 
-Permanent indices NIFTY/BANKNIFTY (arbitrage_master): always on Radar, no WR gate,
-arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads; Active→Radar demote on hold fail.
+Permanent indices NIFTY/BANKNIFTY (arbitrage_master): always on Radar when present
+in master, no WR gate, arm only on EMA9 cross vs EMA30+EMA100, ~15Δ/~2Δ spreads;
+Active→Radar demote on hold fail. Radar/Active symbols absent from arbitrage_master
+are soft-deleted to Rejected (``left arbitrage_master``).
 
 Stocks: Radar entry from the 2h WR scan (not ChartInk) — WR > -2 BEAR / WR < -98 BULL.
 Radar→Active requires ema_condition_holds(side) AND a fresh 1-candle EMA9 cross matching
@@ -76,6 +78,7 @@ WR_CHUNK_DAYS = 60
 WR_CHUNK_STEP_DAYS = 50
 WR_MAX_CHUNKS = 5
 DEMOTE_REMARKS = "Demoted to Radar: EMA hold failed after arm"
+LEFT_ARBITRAGE_MASTER_REMARKS = "left arbitrage_master"
 SCAN_NAME_WR = "WR280-2h-scan"
 DELTA_SELL = 28.0
 DELTA_BUY = 18.0
@@ -2291,13 +2294,23 @@ def ensure_index_radar_row(
     symbol: str,
     *,
     now: Optional[datetime] = None,
+    master_symbols: Optional[set[str]] = None,
 ) -> bool:
     """Insert a fresh Radar row for NIFTY/BANKNIFTY when no Radar/Active exists.
 
-    Side and WR stay blank until a 2h EMA cross arms the row. Returns True if inserted.
+    Only seeds when the index is present in ``arbitrage_master`` (stock +
+    stock_instrument_key), matching Radar/Active left-master cleanup. Side and WR
+    stay blank until a 2h EMA cross arms the row. Returns True if inserted.
     """
     sym = _norm_symbol(symbol)
     if not is_index_symbol(sym):
+        return False
+    master = (
+        master_symbols
+        if master_symbols is not None
+        else list_arbitrage_master_membership_symbols(db)
+    )
+    if sym not in master:
         return False
     if not should_insert_new_signal(
         _statuses_for_symbol(db, sym), block_executed=False
@@ -2335,14 +2348,15 @@ def ensure_index_radar_row(
 
 
 def ensure_index_radar_rows(now: Optional[datetime] = None) -> int:
-    """Ensure Radar availability for NIFTY and BANKNIFTY (seed if missing)."""
+    """Ensure Radar for NIFTY/BANKNIFTY when present in arbitrage_master."""
     ensure_stock_option_tables()
     ts = now_ist_second() if now is None else naive_ist(now)
     n = 0
     db = SessionLocal()
     try:
+        master = list_arbitrage_master_membership_symbols(db)
         for sym in INDEX_PIN_ORDER:
-            if ensure_index_radar_row(db, sym, now=ts):
+            if ensure_index_radar_row(db, sym, now=ts, master_symbols=master):
                 n += 1
         if n:
             db.commit()
@@ -3233,6 +3247,27 @@ def _flag_executed_arm_caution(now: Optional[datetime] = None) -> int:
         db.close()
 
 
+def list_arbitrage_master_membership_symbols(db: Any) -> set[str]:
+    """Symbols in arbitrage_master with non-empty stock + stock_instrument_key.
+
+    Same presence rule as the WR scan universe, but **includes** NIFTY/BANKNIFTY
+    when they appear in master (permanent index seed / left-master cleanup).
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT UPPER(TRIM(stock)) AS stock
+            FROM arbitrage_master
+            WHERE stock IS NOT NULL
+              AND TRIM(stock) <> ''
+              AND stock_instrument_key IS NOT NULL
+              AND TRIM(stock_instrument_key) <> ''
+            """
+        )
+    ).fetchall()
+    return {_norm_symbol(r[0]) for r in rows if r and r[0]}
+
+
 def list_arbitrage_master_equity_universe(db: Any) -> List[Tuple[str, str]]:
     """(symbol, stock_instrument_key) from arbitrage_master — equity keys for WR scan."""
     rows = db.execute(
@@ -3491,6 +3526,121 @@ def run_radar_eod_cleanup(now: Optional[datetime] = None) -> Dict[str, Any]:
         "asof": now_naive.isoformat(sep=" "),
     }
     logger.info("stock_option Radar EOD cleanup: %s", out)
+    return out
+
+
+def run_left_arbitrage_master_cleanup(
+    now: Optional[datetime] = None,
+    *,
+    skip_breakfast_defer: bool = False,
+) -> Dict[str, Any]:
+    """Soft-delete Radar/Active rows whose symbol left arbitrage_master.
+
+    Membership = non-empty ``stock`` + ``stock_instrument_key`` (same as WR scan,
+    including NIFTY/BANKNIFTY when present). Sets status to Rejected with remark
+    ``left arbitrage_master`` so rows leave UI tabs. Never touches Executed,
+    Completed, Rejected, or any row with submitted trade data (``date_traded`` /
+    sell+buy costs).
+    """
+    ensure_stock_option_tables()
+    if not skip_breakfast_defer:
+        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
+
+        if defer_job_for_breakfast_exclusivity("stock_option_left_master"):
+            return {"ok": True, "skipped": "breakfast_exclusivity"}
+
+    now_naive = now_ist_second() if now is None else naive_ist(now)
+    db = SessionLocal()
+    try:
+        master = list_arbitrage_master_membership_symbols(db)
+        rows = db.execute(
+            text(
+                """
+                SELECT id, symbol, status, date_traded, sell_cost, buy_cost
+                FROM stock_option_signals
+                WHERE status IN (:radar, :active)
+                ORDER BY id
+                """
+            ),
+            {"radar": STATUS_RADAR, "active": STATUS_ACTIVE},
+        ).mappings().all()
+        candidates = [dict(r) for r in rows]
+    finally:
+        db.close()
+
+    checked = dropped = skipped_in_master = skipped_submitted = failed = 0
+    dropped_rows: List[Dict[str, Any]] = []
+    for row in candidates:
+        checked += 1
+        sym = _norm_symbol(row.get("symbol"))
+        if trade_is_submitted(row.get("date_traded"), row.get("sell_cost"), row.get("buy_cost")):
+            skipped_submitted += 1
+            continue
+        if sym in master:
+            skipped_in_master += 1
+            continue
+        db = SessionLocal()
+        try:
+            result = db.execute(
+                text(
+                    """
+                    UPDATE stock_option_signals
+                    SET status = :rejected,
+                        remarks = :remarks,
+                        updated_at = :ts
+                    WHERE id = :id
+                      AND status IN (:radar, :active)
+                      AND date_traded IS NULL
+                    """
+                ),
+                {
+                    "rejected": STATUS_REJECTED,
+                    "remarks": LEFT_ARBITRAGE_MASTER_REMARKS,
+                    "ts": now_naive,
+                    "id": row["id"],
+                    "radar": STATUS_RADAR,
+                    "active": STATUS_ACTIVE,
+                },
+            )
+            db.commit()
+            if int(getattr(result, "rowcount", 0) or 0) > 0:
+                dropped += 1
+                dropped_rows.append(
+                    {
+                        "id": row["id"],
+                        "symbol": sym,
+                        "status": row.get("status"),
+                    }
+                )
+                logger.info(
+                    "stock_option left_master Rejected id=%s %s was=%s",
+                    row["id"],
+                    sym,
+                    row.get("status"),
+                )
+            else:
+                skipped_submitted += 1
+        except Exception:
+            db.rollback()
+            failed += 1
+            logger.exception(
+                "stock_option left_master reject failed id=%s", row.get("id")
+            )
+        finally:
+            db.close()
+
+    out = {
+        "ok": True,
+        "checked": checked,
+        "dropped": dropped,
+        "skipped_in_master": skipped_in_master,
+        "skipped_submitted": skipped_submitted,
+        "failed": failed,
+        "master_size": len(master),
+        "dropped_rows": dropped_rows,
+        "asof": now_naive.isoformat(sep=" "),
+    }
+    logger.info("stock_option left_arbitrage_master cleanup: %s", out)
     return out
 
 
