@@ -725,23 +725,40 @@ def side_from_williamsr(williamsr: Any) -> Optional[str]:
     return None
 
 
+def _status_and_trade_mode(item: Any) -> Tuple[str, str]:
+    """Normalize a status row to ``(status_lower, PAPER|LIVE)``.
+
+    Accepts a bare status string, ``(status, trade_mode)`` / ``[status, trade_mode]``,
+    or a mapping with ``status`` / ``trade_mode``. Missing mode → PAPER.
+    """
+    if isinstance(item, (tuple, list)) and len(item) >= 1:
+        st = str(item[0] or "").strip().lower()
+        mode = item[1] if len(item) > 1 else None
+        return st, normalize_trade_mode(mode)
+    if isinstance(item, dict):
+        st = str(item.get("status") or "").strip().lower()
+        return st, normalize_trade_mode(item.get("trade_mode"))
+    return str(item or "").strip().lower(), TRADE_MODE_PAPER
+
+
 def should_insert_new_signal(
-    existing_statuses: Sequence[str],
+    existing_statuses: Sequence[Any],
     *,
     block_executed: bool = True,
 ) -> bool:
     """New Radar only when no open-lifecycle row exists for the symbol.
 
-    By default blocks Radar, Active, and Executed (stock WR scan). Completed /
-    Rejected (and empty history) are eligible. Permanent index seeding passes
-    ``block_executed=False`` so a prior Executed index trade does not prevent
-    re-pinning Radar.
+    Always blocks Radar / Active. Executed blocks stock WR scan only when
+    ``trade_mode`` is LIVE (PAPER Executed may co-exist with a new Radar row).
+    Completed / Rejected (and empty history) are eligible. Permanent index
+    seeding passes ``block_executed=False`` so any prior Executed index trade
+    does not prevent re-pinning Radar.
     """
     for raw in existing_statuses or []:
-        st = (raw or "").strip().lower()
+        st, mode = _status_and_trade_mode(raw)
         if st in ("radar", "active"):
             return False
-        if block_executed and st == "executed":
+        if block_executed and st == "executed" and mode == TRADE_MODE_LIVE:
             return False
     return True
 
@@ -2281,12 +2298,22 @@ def _fetch_2h_closes_for_ema(
     return _fetch_2h_closes(fut_ik, now=now)
 
 
-def _statuses_for_symbol(db: Any, symbol: str) -> List[str]:
+def _statuses_for_symbol(db: Any, symbol: str) -> List[Tuple[str, str]]:
+    """Return ``(status, trade_mode)`` pairs for insert-gate checks."""
     rows = db.execute(
-        text("SELECT status FROM stock_option_signals WHERE symbol = :s"),
+        text(
+            """
+            SELECT status, trade_mode
+            FROM stock_option_signals
+            WHERE symbol = :s
+            """
+        ),
         {"s": symbol},
     ).fetchall()
-    return [str(r[0]) for r in rows]
+    return [
+        (str(r[0]), normalize_trade_mode(r[1] if len(r) > 1 else None))
+        for r in rows
+    ]
 
 
 def ensure_index_radar_row(
@@ -3296,13 +3323,20 @@ def list_arbitrage_master_equity_universe(db: Any) -> List[Tuple[str, str]]:
 
 
 def _blocked_open_lifecycle_symbols(db: Any) -> set[str]:
-    """Symbols with Radar / Active / Executed — ineligible for new Radar insert."""
+    """Symbols ineligible for new Radar: Radar, Active, or LIVE Executed.
+
+    PAPER Executed does not block — a new WR Radar row may be inserted.
+    """
     rows = db.execute(
         text(
             """
             SELECT DISTINCT UPPER(TRIM(symbol))
             FROM stock_option_signals
-            WHERE LOWER(TRIM(status)) IN ('radar', 'active', 'executed')
+            WHERE LOWER(TRIM(status)) IN ('radar', 'active')
+               OR (
+                    LOWER(TRIM(status)) = 'executed'
+                    AND UPPER(TRIM(COALESCE(trade_mode, 'PAPER'))) = 'LIVE'
+                  )
             """
         )
     ).fetchall()
@@ -3354,8 +3388,9 @@ def run_wr_radar_scan(now: Optional[datetime] = None) -> Dict[str, Any]:
     """Universe WR(280) scan → Radar inserts (BEAR CALL / BULL PUT).
 
     Universe = arbitrage_master equities with instrument keys. Skips symbols that
-    already have Radar / Active / Executed. Completed / Rejected are eligible.
-    Shares OHLC via the per-tick cache for the subsequent EMA pass.
+    already have Radar / Active / LIVE Executed. PAPER Executed and Completed /
+    Rejected are eligible. Shares OHLC via the per-tick cache for the subsequent
+    EMA pass.
     """
     ensure_stock_option_tables()
     from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity

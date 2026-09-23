@@ -142,14 +142,25 @@ def test_ignore_if_open_lifecycle_allow_completed_rejected():
     assert should_insert_new_signal([STATUS_RADAR]) is False
     assert should_insert_new_signal([STATUS_ACTIVE]) is False
     assert should_insert_new_signal([STATUS_EXECUTED, STATUS_RADAR]) is False
-    # Executed is open lifecycle — block until Completed / Trade Report
-    assert should_insert_new_signal([STATUS_EXECUTED]) is False
-    assert should_insert_new_signal([STATUS_EXECUTED, STATUS_EXECUTED]) is False
+    # Bare Executed (no mode) → PAPER — does not block new Radar
+    assert should_insert_new_signal([STATUS_EXECUTED]) is True
+    assert should_insert_new_signal([STATUS_EXECUTED, STATUS_EXECUTED]) is True
+    assert should_insert_new_signal([(STATUS_EXECUTED, "PAPER")]) is True
+    assert should_insert_new_signal([{"status": STATUS_EXECUTED, "trade_mode": "PAPER"}]) is True
+    # LIVE Executed blocks stock WR → Radar insert
+    assert should_insert_new_signal([(STATUS_EXECUTED, "LIVE")]) is False
+    assert should_insert_new_signal([(STATUS_EXECUTED, "live")]) is False
+    assert should_insert_new_signal([{"status": STATUS_EXECUTED, "trade_mode": "LIVE"}]) is False
+    assert should_insert_new_signal([(STATUS_EXECUTED, "PAPER"), (STATUS_EXECUTED, "LIVE")]) is False
+    # Active / Radar still block even alongside PAPER Executed
+    assert should_insert_new_signal([(STATUS_EXECUTED, "PAPER"), STATUS_ACTIVE]) is False
+    assert should_insert_new_signal([(STATUS_EXECUTED, "PAPER"), STATUS_RADAR]) is False
     assert should_insert_new_signal([STATUS_REJECTED]) is True
     assert should_insert_new_signal([STATUS_COMPLETED]) is True
     assert should_insert_new_signal([STATUS_COMPLETED, STATUS_REJECTED]) is True
-    # Index re-seed may ignore Executed
+    # Index re-seed may ignore Executed (any trade_mode)
     assert should_insert_new_signal([STATUS_EXECUTED], block_executed=False) is True
+    assert should_insert_new_signal([(STATUS_EXECUTED, "LIVE")], block_executed=False) is True
     assert should_insert_new_signal([STATUS_RADAR], block_executed=False) is False
 
 
