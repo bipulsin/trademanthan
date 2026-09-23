@@ -3,11 +3,16 @@ Arbitrage Daily Setup Scheduler
 
 Scheduled (Asia/Kolkata, Mon–Fri, not NSE holidays / weekends):
 - 09:10 — primary daily run. Updates instruments + LTPs.
-- 09:20 — only if 09:10 did not complete successfully the same day (safety backstop).
+- 09:20 — only if morning setup has not succeeded the same day (safety backstop).
+- 09:25 — post–Breakfast exclusivity backstop (exclusivity blocks 09:10–lock/09:25);
+  runs full morning metadata+LTP (incl. futures roll) if still not succeeded today.
 - 09:15–15:30 every 30 minutes — intraday LTP refresh only (arbitrage_master LTP columns).
 
+Breakfast exclusivity still defers 09:10/09:20; 09:25 is after the hard ceiling so
+roll/metadata is not starved. LTP-only jobs never apply the roll window.
+
 On-demand: POST /scan/arbitrage/daily-setup/run (and helper scripts) — does not
-set the 09:10 success flag, so 09:20 logic is unchanged.
+set the morning success flag, so scheduled backstops are unchanged.
 
 Tasks (full daily setup):
 1) Updates instrument/symbol fields in arbitrage_master from instruments JSON.
@@ -48,7 +53,10 @@ logger = logging.getLogger(__name__)
 _PROJ_LOGS = Path(__file__).resolve().parents[2] / "logs"
 MORNING_STATE_FILE = _PROJ_LOGS / "arbitrage_daily_setup_morning_state.json"
 
-_Execution = Optional[Literal["morning_910", "morning_920", "intraday_ltp"]]
+_Execution = Optional[Literal["morning_910", "morning_920", "morning_925", "intraday_ltp"]]
+
+# Morning slots that apply futures roll window (currmth/nextmth metadata).
+_MORNING_ROLL_EXECUTIONS = frozenset({"morning_910", "morning_920", "morning_925"})
 
 # Mon–Fri IST: 09:15, 09:45, …, 15:15, 15:30 (no 15:45 — after cash close).
 INTRADAY_LTP_CRON_SLOTS: Tuple[Tuple[int, int], ...] = tuple(
@@ -153,6 +161,17 @@ class ArbitrageDailySetupScheduler:
             max_instances=1,
             coalesce=True,
         )
+        # After Breakfast exclusivity hard ceiling (09:25) so roll/metadata still runs
+        # when 09:10/09:20 were deferred every day.
+        self.scheduler.add_job(
+            self._run_morning_925,
+            trigger=CronTrigger(day_of_week="mon-fri", hour=9, minute=25, timezone="Asia/Kolkata"),
+            id="arbitrage_dailySetup_925",
+            name="Arbitrage Daily Setup 09:25 (post-exclusivity)",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         for hour, minute in INTRADAY_LTP_CRON_SLOTS:
             self.scheduler.add_job(
                 self._run_intraday_ltp_refresh,
@@ -171,7 +190,7 @@ class ArbitrageDailySetupScheduler:
         self.scheduler.start()
         self.is_running = True
         logger.info(
-            "Arbitrage daily setup scheduler started (09:10 primary, 09:20 backstop, "
+            "Arbitrage daily setup scheduler started (09:10 primary, 09:20 / 09:25 backstops, "
             "intraday LTP %s slots 09:15–15:30, Asia/Kolkata, Mon–Fri)",
             len(INTRADAY_LTP_CRON_SLOTS),
         )
@@ -188,37 +207,47 @@ class ArbitrageDailySetupScheduler:
     def run_now(self) -> Dict:
         return run_arbitrage_daily_setup(execution=None)
 
+    def _complete_morning_slot(self, execution: str, label: str) -> None:
+        """Run one morning setup slot; mark day succeeded only on true success (not exclusivity skip)."""
+        try:
+            out = run_arbitrage_daily_setup(execution=execution)  # type: ignore[arg-type]
+            if out.get("success"):
+                _set_morning_910_state(True)
+                logger.info("arbitrage daily setup %s completed: %s", label, out)
+            elif out.get("skipped") and out.get("reason") == "breakfast_exclusivity":
+                # Do not flip morning_910_ok on defer — later backstops (09:20/09:25) must retry.
+                logger.info("arbitrage daily setup %s deferred (breakfast exclusivity)", label)
+            else:
+                _set_morning_910_state(False)
+                logger.error("arbitrage daily setup %s reported failure: %s", label, out)
+        except Exception as exc:
+            _set_morning_910_state(False)
+            logger.error("arbitrage daily setup %s failed: %s", label, exc, exc_info=True)
+
     def _run_morning_910(self) -> None:
         if should_skip_scheduled_market_jobs_ist():
             logger.debug("IST non-trading day — skip arbitrage daily setup 09:10")
             return
-        try:
-            out = run_arbitrage_daily_setup(execution="morning_910")
-            if out.get("success"):
-                _set_morning_910_state(True)
-                logger.info("arbitrage daily setup 09:10 completed: %s", out)
-            else:
-                _set_morning_910_state(False)
-                logger.error("arbitrage daily setup 09:10 reported failure: %s", out)
-        except Exception as exc:
-            _set_morning_910_state(False)
-            logger.error("arbitrage daily setup 09:10 failed: %s", exc, exc_info=True)
+        self._complete_morning_slot("morning_910", "09:10")
 
     def _run_morning_920(self) -> None:
         if should_skip_scheduled_market_jobs_ist():
             logger.debug("IST non-trading day — skip arbitrage daily setup 09:20")
             return
         if _morning_910_succeeded_today_ist():
-            logger.info("arbitrage daily setup 09:20 skipped (09:10 already succeeded today)")
+            logger.info("arbitrage daily setup 09:20 skipped (morning setup already succeeded today)")
             return
-        try:
-            out = run_arbitrage_daily_setup(execution="morning_920")
-            if out.get("success"):
-                logger.info("arbitrage daily setup 09:20 completed: %s", out)
-            else:
-                logger.error("arbitrage daily setup 09:20 reported failure: %s", out)
-        except Exception as exc:
-            logger.error("arbitrage daily setup 09:20 failed: %s", exc, exc_info=True)
+        self._complete_morning_slot("morning_920", "09:20")
+
+    def _run_morning_925(self) -> None:
+        """Post–Breakfast exclusivity: guaranteed roll/metadata if 09:10/09:20 were deferred."""
+        if should_skip_scheduled_market_jobs_ist():
+            logger.debug("IST non-trading day — skip arbitrage daily setup 09:25")
+            return
+        if _morning_910_succeeded_today_ist():
+            logger.info("arbitrage daily setup 09:25 skipped (morning setup already succeeded today)")
+            return
+        self._complete_morning_slot("morning_925", "09:25")
 
     def _run_intraday_ltp_refresh(self) -> None:
         if should_skip_scheduled_market_jobs_ist():
@@ -533,7 +562,7 @@ def _run_arbitrage_daily_setup_impl(execution: _Execution = None) -> Dict:
         ]
 
     # Rollover (skip-front after 20th until expiry) is intentionally morning-flow only.
-    apply_roll_window = execution in ("morning_910", "morning_920")
+    apply_roll_window = execution in _MORNING_ROLL_EXECUTIONS
     metadata_updates = _build_arbitrage_metadata_updates(
         stocks, eq_map, fut_map, apply_roll_window=apply_roll_window
     )
