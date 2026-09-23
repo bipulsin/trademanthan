@@ -90,6 +90,25 @@ def test_parse_free_text_other_commodities():
     assert zinc["underlying"] == "ZINC"
     assert zinc["month"] == 9
 
+    zinc_m = parse_free_text_commodity("ZINCMINI OCT FUT", as_of=AS_OF)
+    assert zinc_m["underlying"] == "ZINCMINI"
+    assert zinc_m["month"] == 10
+
+    zinc_m2 = parse_free_text_commodity("ZINCMINISEPFUT", as_of=AS_OF)
+    assert zinc_m2["underlying"] == "ZINCMINI"
+    assert zinc_m2["month"] == 9
+
+    alu_m = parse_free_text_commodity("ALUMINI SEP FUT", as_of=AS_OF)
+    assert alu_m["underlying"] == "ALUMINI"
+    assert alu_m["month"] == 9
+
+    alu_m2 = parse_free_text_commodity("ALUMINIFUT", as_of=AS_OF)
+    assert alu_m2["underlying"] == "ALUMINI"
+
+    alu_full = parse_free_text_commodity("ALUMINIUM SEP FUT", as_of=AS_OF)
+    assert alu_full["underlying"] == "ALUMINIUM"
+    assert alu_full["month"] == 9
+
 
 def test_parse_tv_symbol_still_prefers_letter_year():
     p = parse_tv_symbol("NATURALGASV2026")

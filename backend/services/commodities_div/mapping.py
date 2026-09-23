@@ -1,15 +1,18 @@
 """TV symbol parse → fixed MCX underlyings + Upstox FUT resolve by contract month.
 
 No user mapping table required. Webhook / desk underlyings (TV alerts):
-  CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI
+  CRUDEOIL, NATURALGAS, COPPER, GOLDPETAL, SILVERMINI, ZINCMINI, ALUMINI
 
 Manual free-text also accepts GOLD, GOLDM, SILVER, CRUDEOILM, ZINC, LEAD,
-NICKEL, MENTHAOIL, ALUMINIUM, etc.
+NICKEL, MENTHAOIL, ALUMINIUM, ZINCMINI, ALUMINI, etc.
 
 TradingView webhook symbols encode the futures month in the trailing 5 chars
 (letter + 4-digit year), e.g. NATURALGASV2026 → NATURALGAS Oct 2026.
 Continuous forms (CRUDEOIL1!) fall back to front-month.
 Free-text forms (COPPER SEP FUT / COPPERSEPFUT) map via month name → same resolve.
+
+MCX mini metals (Upstox underlying_symbol): ZINCMINI, ALUMINI — distinct from
+full-lot ZINC / ALUMINIUM.
 """
 from __future__ import annotations
 
@@ -94,20 +97,25 @@ WEBHOOK_UNDERLYINGS: Tuple[str, ...] = (
     "NATURALGAS",
     "SILVERMINI",
     "GOLDPETAL",
+    "ZINCMINI",
+    "ALUMINI",
     "CRUDEOIL",
     "COPPER",
 )
 
 # Broader MCX underlyings for manual free-text (longest first).
 # Includes webhook set plus GOLD / SILVER / base metals / mini crude / etc.
+# ZINCMINI before ZINC; ALUMINIUM before ALUMINI (both valid, distinct contracts).
 ALLOWED_UNDERLYINGS: Tuple[str, ...] = (
     "NATURALGAS",
     "SILVERMINI",
     "GOLDPETAL",
     "MENTHAOIL",
     "ALUMINIUM",
+    "ZINCMINI",
     "CRUDEOILM",
     "CRUDEOIL",
+    "ALUMINI",
     "SILVER",
     "COPPER",
     "NICKEL",
@@ -122,6 +130,10 @@ TV_CORE_ALIASES: Dict[str, str] = {
     "SILVERM": "SILVERMINI",
     "NATGAS": "NATURALGAS",
     "ALUMINUM": "ALUMINIUM",
+    # Mini aluminium: Upstox / MCX symbol is ALUMINI (not ALUMINIUM).
+    "ALUMINIMINI": "ALUMINI",
+    "ALUMINIUMMINI": "ALUMINI",
+    "ALUMINUMMINI": "ALUMINI",
 }
 
 # Lookup keys tried against Upstox master (SILVERMINI → SILVERM on Upstox).
@@ -135,10 +147,12 @@ UPSTOX_RESOLVE_ALIASES: Dict[str, List[str]] = {
     "GOLD": ["GOLD"],
     "SILVERMINI": ["SILVERM", "SILVERMINI"],
     "SILVER": ["SILVER"],
+    "ZINCMINI": ["ZINCMINI"],
     "ZINC": ["ZINC"],
     "LEAD": ["LEAD"],
     "NICKEL": ["NICKEL"],
     "MENTHAOIL": ["MENTHAOIL"],
+    "ALUMINI": ["ALUMINI"],
     "ALUMINIUM": ["ALUMINIUM"],
 }
 
@@ -154,10 +168,12 @@ PREFERRED_UNDERLYING_SYMBOL: Dict[str, str] = {
     "GOLD": "GOLD",
     "SILVERMINI": "SILVERM",
     "SILVER": "SILVER",
+    "ZINCMINI": "ZINCMINI",
     "ZINC": "ZINC",
     "LEAD": "LEAD",
     "NICKEL": "NICKEL",
     "MENTHAOIL": "MENTHAOIL",
+    "ALUMINI": "ALUMINI",
     "ALUMINIUM": "ALUMINIUM",
 }
 
@@ -568,6 +584,8 @@ def parse_underlying(symbol_raw: str) -> Optional[str]:
     Accepts:
       CRUDEOIL1!, MCX:CRUDEOIL1!, CRUDEOILZ2026, CRUDEOIL, NATURALGAS1!, …
       SILVERMX2026, SILVERM (→ SILVERMINI / Upstox SILVERM)
+      ZINCMINIV2026, ZINCMINIFUT, ALUMINIV2026, ALUMINIFUT (→ ZINCMINI / ALUMINI)
+      CRUDEOILMV2026 (→ CRUDEOILM)
     """
     core = _strip_to_core(symbol_raw)
     if not core:

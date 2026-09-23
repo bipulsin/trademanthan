@@ -107,6 +107,14 @@ def _fake_mcx_rows():
         row("NATURALGAS", "MCX_FO|NG_DEC", "NATURALGAS 28 DEC FUT", 2026, 12, 28),
         row("NATURALGAS", "MCX_FO|NG_JAN", "NATURALGAS 26 JAN FUT", 2027, 1, 26),
         row("SILVERM", "MCX_FO|SM_NOV", "SILVERM 30 NOV FUT", 2026, 11, 30, lot=1),
+        row("CRUDEOILM", "MCX_FO|COM_OCT", "CRUDEOILM 15 OCT FUT", 2026, 10, 15, lot=10),
+        row("ZINCMINI", "MCX_FO|ZM_SEP", "ZINCMINI 30 SEP FUT", 2026, 9, 30, lot=1),
+        row("ZINCMINI", "MCX_FO|ZM_OCT", "ZINCMINI 30 OCT FUT", 2026, 10, 30, lot=1),
+        row("ALUMINI", "MCX_FO|AM_SEP", "ALUMINI 30 SEP FUT", 2026, 9, 30, lot=1),
+        row("ALUMINI", "MCX_FO|AM_OCT", "ALUMINI 30 OCT FUT", 2026, 10, 30, lot=1),
+        # Full-lot metals must stay distinct from minis.
+        row("ZINC", "MCX_FO|ZN_SEP", "ZINC 30 SEP FUT", 2026, 9, 30, lot=5),
+        row("ALUMINIUM", "MCX_FO|AL_SEP", "ALUMINIUM 30 SEP FUT", 2026, 9, 30, lot=5),
     ]
 
 
@@ -208,6 +216,23 @@ def test_attach_instrument_fields_resolves_tv_month():
         assert silver["symbol_mapped"] == "SILVERMINI"
         assert silver["instrument_key"] == "MCX_FO|SM_NOV"
         assert silver["match_mode"] == "exact_month"
+
+        crude_m = attach_instrument_fields("CRUDEOILMV2026", resolve_contract=True)
+        assert crude_m["symbol_mapped"] == "CRUDEOILM"
+        assert crude_m["instrument_key"] == "MCX_FO|COM_OCT"
+        assert crude_m["match_mode"] == "exact_month"
+
+        zinc_m = attach_instrument_fields("ZINCMINIV2026", resolve_contract=True)
+        assert zinc_m["symbol_mapped"] == "ZINCMINI"
+        assert zinc_m["instrument_key"] == "MCX_FO|ZM_OCT"
+        assert zinc_m["resolved_as"] == "ZINCMINI"
+        assert zinc_m["match_mode"] == "exact_month"
+
+        alu_m = attach_instrument_fields("ALUMINIV2026", resolve_contract=True)
+        assert alu_m["symbol_mapped"] == "ALUMINI"
+        assert alu_m["instrument_key"] == "MCX_FO|AM_OCT"
+        assert alu_m["resolved_as"] == "ALUMINI"
+        assert alu_m["match_mode"] == "exact_month"
 
 
 def test_resolve_cache_keyed_by_month_not_underlying_only():
@@ -354,7 +379,118 @@ def test_parse_underlying_gold_and_base_metals():
     assert parse_underlying("SILVER") == "SILVER"
     assert parse_underlying("ZINC") == "ZINC"
     assert parse_underlying("CRUDEOILM") == "CRUDEOILM"
+    assert parse_underlying("CRUDEOILMV2026") == "CRUDEOILM"
     assert parse_underlying("MENTHAOIL1!") == "MENTHAOIL"
+
+
+def test_parse_underlying_zincmini_and_alumini_aliases():
+    """Zinc Mini / Aluminium Mini → MCX ZINCMINI / ALUMINI (not full ZINC / ALUMINIUM)."""
+    zinc_aliases = [
+        "ZINCMINI",
+        "ZINCMINI1!",
+        "MCX:ZINCMINI1!",
+        "ZINCMINIFUT",
+        "ZINCMINI FUT",
+        "ZINC MINI",
+        "ZINCMINIV2026",
+        "ZINCMINIU2026",
+        "MCX:ZINCMINIV2026",
+    ]
+    for raw in zinc_aliases:
+        assert parse_underlying(raw) == "ZINCMINI", raw
+
+    alu_aliases = [
+        "ALUMINI",
+        "ALUMINI1!",
+        "MCX:ALUMINI1!",
+        "ALUMINIFUT",
+        "ALUMINI FUT",
+        "ALUMINIV2026",
+        "ALUMINIU2026",
+        "MCX:ALUMINIV2026",
+        "ALUMINIMINI",
+        "ALUMINIUMMINI",
+        "ALUMINUMMINI",
+        "ALUMINIUM MINI",
+    ]
+    for raw in alu_aliases:
+        assert parse_underlying(raw) == "ALUMINI", raw
+
+    # Full-lot metals must not collapse onto minis.
+    assert parse_underlying("ZINC") == "ZINC"
+    assert parse_underlying("ZINCU2026") == "ZINC"
+    assert parse_underlying("ALUMINIUM") == "ALUMINIUM"
+    assert parse_underlying("ALUMINIUMV2026") == "ALUMINIUM"
+    assert parse_underlying("ALUMINUM") == "ALUMINIUM"
+
+    assert normalize_tv_ticker("ZINCMINIV2026") == "ZINCMINI"
+    assert normalize_tv_ticker("ALUMINIV2026") == "ALUMINI"
+    assert normalize_tv_ticker("CRUDEOILMV2026") == "CRUDEOILM"
+
+
+def test_attach_instrument_fields_zincmini_alumini_preferred_keys():
+    rows = _fake_mcx_rows()
+
+    def parse_exp(v):
+        return int(v) if v else None
+
+    with patch(
+        "backend.services.divtest.instruments.ensure_instrument_master",
+        return_value=rows,
+    ), patch(
+        "backend.services.divtest.instruments._parse_expiry_ms",
+        side_effect=parse_exp,
+    ):
+        for raw in ("ZINCMINIFUT", "ZINCMINI1!", "ZINC MINI"):
+            # "ZINC MINI" free-text joins to ZINCMINI
+            inst = attach_instrument_fields(
+                raw if raw != "ZINC MINI" else "ZINCMINI",
+                resolve_contract=True,
+            )
+            assert inst["symbol_mapped"] == "ZINCMINI", raw
+            assert inst["instrument_key"] in (
+                "MCX_FO|ZM_SEP",
+                "MCX_FO|ZM_OCT",
+            ), raw
+            assert inst["resolved_as"] == "ZINCMINI", raw
+            # Must not pick full ZINC.
+            assert inst["instrument_key"] != "MCX_FO|ZN_SEP", raw
+
+        for raw in ("ALUMINIFUT", "ALUMINI1!", "ALUMINIMINI"):
+            inst = attach_instrument_fields(raw, resolve_contract=True)
+            assert inst["symbol_mapped"] == "ALUMINI", raw
+            assert inst["instrument_key"] in (
+                "MCX_FO|AM_SEP",
+                "MCX_FO|AM_OCT",
+            ), raw
+            assert inst["resolved_as"] == "ALUMINI", raw
+            assert inst["instrument_key"] != "MCX_FO|AL_SEP", raw
+
+        # Exact month from letter+year
+        z = attach_instrument_fields("ZINCMINIU2026", resolve_contract=True)
+        assert z["instrument_key"] == "MCX_FO|ZM_SEP"
+        a = attach_instrument_fields("ALUMINIU2026", resolve_contract=True)
+        assert a["instrument_key"] == "MCX_FO|AM_SEP"
+
+        # Full lot still resolves to full contracts
+        full_z = attach_instrument_fields("ZINCU2026", resolve_contract=True)
+        assert full_z["symbol_mapped"] == "ZINC"
+        assert full_z["instrument_key"] == "MCX_FO|ZN_SEP"
+        full_a = attach_instrument_fields("ALUMINIUMU2026", resolve_contract=True)
+        assert full_a["symbol_mapped"] == "ALUMINIUM"
+        assert full_a["instrument_key"] == "MCX_FO|AL_SEP"
+
+
+def test_symbols_match_zincmini_alumini_variants():
+    zinc = {"symbol_raw": "ZINCMINI1!", "symbol_mapped": "ZINCMINI"}
+    assert _symbols_match(zinc, "ZINCMINIV2026", "ZINCMINI")
+    assert _symbols_match(zinc, "ZINCMINIFUT", "ZINCMINI")
+    assert not _symbols_match(zinc, "ZINC", "ZINC")
+
+    alu = {"symbol_raw": "ALUMINIV2026", "symbol_mapped": "ALUMINI"}
+    assert _symbols_match(alu, "ALUMINIFUT", "ALUMINI")
+    assert _symbols_match(alu, "ALUMINIMINI", "ALUMINI")
+    assert not _symbols_match(alu, "ALUMINIUM", "ALUMINIUM")
 
 
 def test_attach_instrument_fields_fast_path_skips_upstox():
