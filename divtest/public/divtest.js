@@ -3,6 +3,7 @@
   const state = {
     jobId: null,
     es: null,
+    pollTimer: null,
     page: 1,
     pageSize: 50,
     sortKey: 'entry_datetime',
@@ -216,15 +217,37 @@
       state.es.close();
       state.es = null;
     }
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+      state.pollTimer = null;
+    }
     state.jobId = jobId;
     const es = new EventSource(`/api/jobs/${jobId}/events`);
     state.es = es;
+
+    const finish = async (msg) => {
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+      if (state.es) {
+        try {
+          state.es.close();
+        } catch (_) {
+          /* ignore */
+        }
+        state.es = null;
+      }
+      if (msg) logLine(msg);
+      setProgress(100, 'Completed');
+      $('btnRun').disabled = false;
+      await loadResults();
+    };
 
     es.addEventListener('progress', async (ev) => {
       const p = JSON.parse(ev.data);
       const pct = p.total ? (p.done / p.total) * 100 : 0;
       setProgress(pct, p.message || `${p.done}/${p.total}`);
-      // Refresh results incrementally
       try {
         await loadResults();
       } catch (_) {
@@ -236,20 +259,39 @@
       logLine(entry.message, entry.level || 'info');
     });
     es.addEventListener('done', async () => {
-      logLine('Backtest completed — results appended to history');
-      setProgress(100, 'Completed');
-      $('btnRun').disabled = false;
-      es.close();
-      await loadResults();
+      await finish('Backtest completed — results appended to history');
     });
-    es.addEventListener('error', (ev) => {
+    es.addEventListener('error', async (ev) => {
       try {
-        const data = JSON.parse(ev.data);
-        logLine(data.message || 'Job error', 'error');
+        if (ev.data) {
+          const data = JSON.parse(ev.data);
+          logLine(data.message || 'Job error', 'error');
+          $('btnRun').disabled = false;
+        }
       } catch {
         /* SSE reconnect noise */
       }
     });
+
+    // Fallback poll in case SSE misses the terminal event on fast jobs
+    state.pollTimer = setInterval(async () => {
+      try {
+        const job = await api(`/api/jobs/${jobId}`);
+        const p = job.progress || {};
+        const pct = p.total ? (p.done / p.total) * 100 : 0;
+        setProgress(pct, p.message || `${p.done}/${p.total}`);
+        if (job.status === 'completed') {
+          await finish('Backtest completed — results appended to history');
+        } else if (job.status === 'failed') {
+          clearInterval(state.pollTimer);
+          state.pollTimer = null;
+          logLine(job.error || 'Job failed', 'error');
+          $('btnRun').disabled = false;
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }, 1000);
   }
 
   $('runForm').addEventListener('submit', async (e) => {
@@ -299,14 +341,14 @@
     await loadResults();
   });
 
-  document.querySelectorAll('#tfTabs .tab').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      document.querySelectorAll('#tfTabs .tab').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      state.timeframe = btn.getAttribute('data-tf');
-      state.page = 1;
-      await loadResults();
-    });
+  document.getElementById('tfTabs').addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('.tab');
+    if (!btn) return;
+    document.querySelectorAll('#tfTabs .tab').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.timeframe = btn.getAttribute('data-tf');
+    state.page = 1;
+    await loadResults();
   });
 
   document.querySelectorAll('#tradesTable th[data-sort]').forEach((th) => {
