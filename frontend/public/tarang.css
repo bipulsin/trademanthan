@@ -583,7 +583,62 @@ body.tarang-page .mobile-logo {
 .tg-row-main { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tg-one-line { margin: 8px 0 0; color: var(--text); font-size: 0.92rem; }
 .tg-why { font-size: 0.82rem; color: var(--muted); }
-.tg-why ul { margin: 6px 0 0; padding-left: 1.1rem; }
+.tg-why-list {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.tg-why-item {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    line-height: 1.35;
+}
+.tg-why-icon {
+    flex: 0 0 auto;
+    width: 1.15rem;
+    height: 1.15rem;
+    margin-top: 0.05rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.tg-why-pass {
+    color: #0b3d24;
+    background: #8ef0b8;
+}
+.tg-why-fail {
+    color: #4a1010;
+    background: #f5a8a8;
+}
+.tg-why-neutral {
+    color: #243044;
+    background: #b8d4f0;
+}
+.tg-why-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.tg-why-label { color: var(--text); }
+.tg-why-metrics {
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+.tg-why-metrics strong {
+    color: var(--text);
+    font-weight: 600;
+}
+.tg-why-item.tg-why-fail .tg-why-label { color: #f5a8a8; }
+.tg-why-item.tg-why-pass .tg-why-label { color: #8ef0b8; }
 .tg-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .tg-chip {
     border: 1px solid var(--line);

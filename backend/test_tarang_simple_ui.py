@@ -28,6 +28,48 @@ def test_gate_plain_map():
     assert friendly_symbol("CL")["code"] == "CL"
 
 
+def test_gate_check_row_observed_accepted():
+    from backend.services.tarang.labels import format_gate_observed_accepted, gate_check_row
+
+    fail = gate_check_row(
+        {
+            "name": "iv_vs_rv",
+            "passed": False,
+            "evaluability": "failed",
+            "actual": {"relative": -0.03, "atm_iv": 0.22, "rv_20d": 0.25},
+            "threshold": 0.10,
+            "detail": "IV vs RV relative -3.0% (need ≥10%)",
+        }
+    )
+    assert fail["outcome"] == "fail"
+    assert fail["passed"] is False
+    assert "IV vs RV" in fail["observed"]
+    assert "≥ 10.0%" in fail["accepted"] or "10%" in fail["accepted"]
+
+    ok = gate_check_row(
+        {
+            "name": "expiry_dte",
+            "passed": True,
+            "evaluability": "passed",
+            "actual": 5,
+            "threshold": {"min": 3, "max": 7},
+        }
+    )
+    assert ok["outcome"] == "pass"
+    assert "DTE 5" in ok["observed"]
+    assert "3–7" in ok["accepted"]
+
+    obs, acc = format_gate_observed_accepted(
+        {
+            "name": "credit_fraction",
+            "actual": 0.12,
+            "threshold": 0.20,
+        }
+    )
+    assert "12.0%" in obs
+    assert "20.0%" in acc
+
+
 def test_live_metrics_exclude_unconfirmed():
     confirmed = {
         "record_type": "LIVE",

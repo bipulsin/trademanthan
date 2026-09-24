@@ -105,10 +105,44 @@
     if (tradeTab && !tradeTab.hidden) refreshActiveQuiet();
   });
 
+  function escHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function whyIcon(outcome) {
+    if (outcome === 'pass') {
+      return '<span class="tg-why-icon tg-why-pass" title="Passed" aria-label="Passed">✓</span>';
+    }
+    if (outcome === 'neutral') {
+      return '<span class="tg-why-icon tg-why-neutral" title="Not evaluated" aria-label="Not evaluated">–</span>';
+    }
+    return '<span class="tg-why-icon tg-why-fail" title="Failed" aria-label="Failed">✕</span>';
+  }
+
   function whyPop(why) {
-    const items = (why || []).slice(0, 3);
+    const items = why || [];
     if (!items.length) return '';
-    return `<details class="tg-why"><summary>Why?</summary><ul>${items.map((w) => `<li>${w}</li>`).join('')}</ul></details>`;
+    const lis = items.map((w) => {
+      if (typeof w === 'string') {
+        return `<li class="tg-why-item"><span class="tg-why-icon tg-why-fail" aria-hidden="true">✕</span><span class="tg-why-body">${escHtml(w)}</span></li>`;
+      }
+      const outcome = w.outcome || (w.passed ? 'pass' : 'fail');
+      const label = w.label || w.text || '';
+      const obs = w.observed != null && w.observed !== '' ? w.observed : '—';
+      const acc = w.accepted != null && w.accepted !== '' ? w.accepted : '—';
+      return `<li class="tg-why-item tg-why-${outcome}">
+        ${whyIcon(outcome)}
+        <span class="tg-why-body">
+          <span class="tg-why-label">${escHtml(label)}</span>
+          <span class="tg-why-metrics">observed <strong>${escHtml(obs)}</strong> · need <strong>${escHtml(acc)}</strong></span>
+        </span>
+      </li>`;
+    }).join('');
+    return `<details class="tg-why"><summary>Why?</summary><ul class="tg-why-list">${lis}</ul></details>`;
   }
 
   function renderScreener(data) {

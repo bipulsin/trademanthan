@@ -614,7 +614,7 @@ def build_screener_simple() -> Dict[str, Any]:
         auto_lock_label,
         format_inr,
         friendly_symbol,
-        gate_plain,
+        gate_check_row,
         mode_badge,
         structure_plain,
         GATE_PLAIN,
@@ -642,7 +642,17 @@ def build_screener_simple() -> Dict[str, Any]:
                     "display_name": fr["display_name"],
                     "status": "WATCHING",
                     "headline": "Market closed" if pid in ("CL", "NG") else "No screen yet",
-                    "why": ["No recent screen"],
+                    "why": [
+                        {
+                            "name": "screen",
+                            "label": "No recent screen",
+                            "passed": False,
+                            "outcome": "fail",
+                            "observed": "—",
+                            "accepted": "fresh screener result",
+                            "text": "No recent screen",
+                        }
+                    ],
                     "candidate_id": None,
                     "qualified": False,
                 }
@@ -659,15 +669,17 @@ def build_screener_simple() -> Dict[str, Any]:
         created = c.get("created_at")
         if created and (last_checked is None or str(created) > str(last_checked)):
             last_checked = created
-        failed = []
-        for g in p.get("gates") or []:
-            if not g.get("passed") or g.get("evaluability") in ("failed", "not_evaluable"):
-                failed.append(gate_plain(g.get("name"), g.get("detail")))
-        for name in (p.get("failed_gates") or [])[:3]:
-            line = gate_plain(name)
-            if line not in failed:
-                failed.append(line)
-        why = failed[:3]
+
+        why_rows = [gate_check_row(g) for g in (p.get("gates") or []) if isinstance(g, dict)]
+        # Keep failed / neutral first so Why? opens on what blocked entry
+        why_rows.sort(key=lambda r: 0 if r.get("outcome") == "fail" else (1 if r.get("outcome") == "neutral" else 2))
+        if not why_rows:
+            for name in (p.get("failed_gates") or [])[:3]:
+                why_rows.append(
+                    gate_check_row({"name": name, "passed": False, "evaluability": "failed", "actual": None, "threshold": None})
+                )
+
+        fail_labels = [r["label"] for r in why_rows if r.get("outcome") == "fail"]
         if chip == "QUALIFIED":
             headline = (
                 f"{structure_plain(c.get('structure') or p.get('structure'))} · "
@@ -676,7 +688,7 @@ def build_screener_simple() -> Dict[str, Any]:
                 f"max loss {format_inr(p.get('candidate_risk_inr') or p.get('max_loss_per_unit_inr'))}"
             )
         else:
-            headline = why[0] if why else (p.get("detail") or "Watching")
+            headline = fail_labels[0] if fail_labels else (p.get("detail") or "Watching")
             if "closed" in str(p.get("detail") or "").lower() or st == "BLOCKED":
                 if "token" in str(p.get("detail") or "").lower():
                     headline = "Market data unavailable"
@@ -686,7 +698,7 @@ def build_screener_simple() -> Dict[str, Any]:
                 "display_name": fr["display_name"],
                 "status": chip,
                 "headline": headline,
-                "why": why,
+                "why": why_rows,
                 "candidate_id": c.get("id"),
                 "qualified": chip == "QUALIFIED",
                 "structure": structure_plain(c.get("structure") or p.get("structure")),

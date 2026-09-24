@@ -60,7 +60,200 @@ GATE_PLAIN = {
     "short_delta": "Short-option delta is outside the band",
     "fee_gate": "Fees would eat too much of the credit",
     "market_closed": "Market closed",
+    "structure": "Could not build the option structure",
 }
+
+
+def _fmt_num(n: Any, *, pct: bool = False, digits: int = 2) -> str:
+    try:
+        v = float(n)
+    except (TypeError, ValueError):
+        return "—"
+    if pct:
+        return f"{v * 100:.1f}%"
+    if abs(v) >= 100:
+        return f"{v:.0f}"
+    return f"{v:.{digits}f}"
+
+
+def _fmt_threshold_band(threshold: Any) -> str:
+    if isinstance(threshold, dict):
+        lo = threshold.get("min")
+        hi = threshold.get("max")
+        if lo is not None and hi is not None:
+            return f"{lo}–{hi}"
+        if lo is not None:
+            return f"≥ {lo}"
+        if hi is not None:
+            return f"≤ {hi}"
+        if "min_percentile" in threshold:
+            return f"≥ {_fmt_num(threshold.get('min_percentile'), digits=0)}"
+        if "max_spread_pct_of_mid" in threshold:
+            oi = threshold.get("min_oi")
+            return f"spread ≤ {_fmt_num(threshold.get('max_spread_pct_of_mid'), digits=0)}% of mid · OI ≥ {_fmt_num(oi, digits=0)}"
+        if "hours_before" in threshold:
+            return f"clear of events within {_fmt_num(threshold.get('hours_before'), digits=1)}h"
+        if "open" in threshold or "projected" in threshold:
+            return f"≤ {format_inr(threshold.get('threshold') or threshold.get('cap'))}"
+    if isinstance(threshold, (int, float)):
+        # Relative mins often 0.10 / 0.20
+        if 0 < float(threshold) < 1:
+            return f"≥ {_fmt_num(threshold, pct=True)}"
+        return f"≥ {_fmt_num(threshold)}"
+    if threshold is None:
+        return "—"
+    return str(threshold)
+
+
+def format_gate_observed_accepted(gate: Dict[str, Any]) -> tuple[str, str]:
+    """Return (observed, accepted) display strings for a gate payload dict."""
+    name = str(gate.get("name") or "").strip()
+    actual = gate.get("actual")
+    threshold = gate.get("threshold")
+    detail = str(gate.get("detail") or "").strip()
+
+    if name == "iv_vs_rv":
+        if isinstance(actual, dict):
+            rel = actual.get("relative")
+            atm = actual.get("atm_iv")
+            rv = actual.get("rv_20d")
+            if rel is not None:
+                obs = f"IV vs RV {_fmt_num(rel, pct=True)} (IV {_fmt_num(atm)} · RV {_fmt_num(rv)})"
+            else:
+                obs = f"IV {_fmt_num(atm)} · RV {_fmt_num(rv)}"
+        else:
+            obs = detail or "—"
+        acc = f"≥ {_fmt_num(threshold, pct=True)}" if threshold is not None else "≥ +10%"
+        return obs, acc
+
+    if name == "iv_percentile":
+        if isinstance(actual, dict):
+            p = actual.get("percentile")
+            snaps = actual.get("snapshots")
+            obs = f"percentile {_fmt_num(p, digits=1)}" + (f" · {snaps} snapshots" if snaps is not None else "")
+        else:
+            obs = _fmt_num(actual, digits=1) if actual is not None else (detail or "—")
+        if isinstance(threshold, dict):
+            acc = f"≥ {_fmt_num(threshold.get('min_percentile'), digits=0)}"
+        else:
+            acc = _fmt_threshold_band(threshold)
+        return obs, acc
+
+    if name == "expiry_dte":
+        obs = f"DTE {_fmt_num(actual, digits=0)}" if actual is not None else (detail or "DTE unknown")
+        acc = f"allowed {_fmt_threshold_band(threshold)}" if threshold is not None else "—"
+        return obs, acc
+
+    if name == "credit_fraction":
+        obs = _fmt_num(actual, pct=True) if actual is not None else (detail or "—")
+        acc = f"≥ {_fmt_num(threshold, pct=True)}" if threshold is not None else "≥ 20%"
+        return obs, acc
+
+    if name == "short_delta":
+        try:
+            ad = abs(float(actual)) if actual is not None else None
+        except (TypeError, ValueError):
+            ad = None
+        obs = f"|δ| {_fmt_num(ad, digits=3)}" if ad is not None else (detail or "—")
+        acc = f"band {_fmt_threshold_band(threshold)}" if threshold is not None else "—"
+        return obs, acc
+
+    if name == "liquidity":
+        if isinstance(actual, dict) and actual.get("fails"):
+            fails = actual.get("fails") or []
+            obs = "; ".join(str(x) for x in fails[:2]) or "thin"
+        else:
+            obs = "ok" if actual == "ok" else (detail or str(actual or "—"))
+        acc = _fmt_threshold_band(threshold) if threshold is not None else "tight spreads · enough OI"
+        return obs, acc
+
+    if name == "two_sided_quotes":
+        if isinstance(actual, dict) and actual.get("fails"):
+            obs = "; ".join(str(x) for x in (actual.get("fails") or [])[:2])
+        else:
+            obs = "ok" if actual == "ok" else (detail or "—")
+        return obs, "live bid and ask on every leg"
+
+    if name == "sizing":
+        if isinstance(actual, dict):
+            units = actual.get("units")
+            ml = actual.get("max_loss_per_unit")
+            total = actual.get("total")
+            obs = f"{units or 0} lot(s) · max loss {format_inr(total if total is not None else ml)}"
+        else:
+            obs = detail or "—"
+        acc = f"budget ≤ {format_inr(threshold)}" if threshold is not None else "within risk budget"
+        return obs, acc
+
+    if name == "portfolio_limit":
+        if isinstance(actual, dict):
+            obs = f"projected {format_inr(actual.get('projected'))}"
+        else:
+            obs = detail or "—"
+        acc = f"cap ≤ {format_inr(threshold)}" if threshold is not None else "within portfolio cap"
+        return obs, acc
+
+    if name == "stale_data":
+        obs = f"{_fmt_num(actual, digits=0)}s old" if isinstance(actual, (int, float)) else (detail or str(actual or "—"))
+        acc = f"≤ {_fmt_num(threshold, digits=0)}s" if threshold is not None else "fresh quotes"
+        return obs, acc
+
+    if name == "structure":
+        obs = str(actual or detail or "build failed")
+        return obs, "valid credit structure on chain"
+
+    if name == "event_blackout":
+        obs = detail if detail and detail != "no blackout" else (str(actual) if actual not in (None, "clear") else "clear")
+        acc = _fmt_threshold_band(threshold) if threshold is not None else "outside event blackout"
+        return obs, acc
+
+    if name == "fee_gate":
+        obs = detail or str(actual or "—")
+        acc = str(threshold) if threshold is not None else "fees within credit"
+        return obs, acc
+
+    # Generic fallback
+    if isinstance(actual, dict):
+        obs = detail or ", ".join(f"{k}={v}" for k, v in list(actual.items())[:3])
+    elif actual is None:
+        obs = detail or "—"
+    else:
+        obs = str(actual)
+    acc = _fmt_threshold_band(threshold)
+    return obs, acc
+
+
+def gate_check_row(gate: Dict[str, Any]) -> Dict[str, Any]:
+    """Structured Why? row: label + observed/accepted + pass/fail/neutral."""
+    name = str(gate.get("name") or "").strip()
+    evaluability = str(gate.get("evaluability") or "").lower()
+    status_hint = str(gate.get("status_hint") or "").upper()
+    if evaluability == "not_evaluable" or status_hint == "NOT_EVALUABLE":
+        outcome = "neutral"
+    elif bool(gate.get("passed")) and evaluability != "failed":
+        outcome = "pass"
+    else:
+        outcome = "fail"
+
+    if name in GATE_PLAIN:
+        label = GATE_PLAIN[name]
+        if name == "structure" and gate.get("detail"):
+            label = str(gate.get("detail"))
+        elif name == "iv_percentile" and status_hint == "WARMING_UP":
+            label = "IV percentile is still warming up"
+    else:
+        label = gate_plain(name, gate.get("detail"))
+
+    observed, accepted = format_gate_observed_accepted(gate)
+    return {
+        "name": name,
+        "label": label,
+        "passed": outcome == "pass",
+        "outcome": outcome,
+        "observed": observed,
+        "accepted": accepted,
+        "text": f"{label} · observed {observed} · need {accepted}",
+    }
 
 STRUCTURE_PLAIN = {
     "put_credit_spread": "Put credit spread",
