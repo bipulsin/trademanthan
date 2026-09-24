@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.48';
+const MENU_HTML_PATH = 'left-menu.html?v=3.50';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|tarang/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
     }
 
     getCurrentPage() {
@@ -69,6 +69,7 @@ class LeftMenu {
         if (path.includes('divtest')) return 'divtest';
         if (path.includes('analysis')) return 'analysis';
         if (path.includes('iron-condor')) return 'iron-condor';
+        if (path.includes('dailyRSchecklist')) return 'dailyRSchecklist';
         if (path.includes('tarang')) return 'tarang';
         return 'desktop';
     }
@@ -424,6 +425,10 @@ class LeftMenu {
                 <li class="nav-item" data-page="iron-condor.html">
                     <a class="nav-item-link" href="iron-condor.html"><i class="fas fa-layer-group"></i>
                     <span>Iron Condor</span></a>
+                </li>
+                <li class="nav-item" data-page="dailyRSchecklist.html">
+                    <a class="nav-item-link" href="https://www.tradewithcto.com/dailyRSchecklist.html"><i class="fas fa-clipboard-check" style="color:#f59e0b;"></i>
+                    <span>TWCTO Kavach</span></a>
                 </li>
                 <li class="nav-item nav-item-admin" data-page="tarang.html" style="display: none;" title="Administrator only through Phase 2">
                     <a class="nav-item-link" href="tarang.html"><i class="fas fa-wave-square" style="color:#3dba7a;"></i>
@@ -1020,6 +1025,7 @@ class LeftMenu {
             future_screener: 'Future Screener',
             breakfast: 'Breakfast Strategy',
             commdiv: 'Commodities Div',
+            dailyRSchecklist: 'TWCTO Kavach',
             settings: 'Settings',
             algo: 'Algo Trading',
             admin: 'Admin',
@@ -1084,19 +1090,24 @@ class LeftMenu {
                 link.href = page;
                 while (item.firstChild) link.appendChild(item.firstChild);
                 item.appendChild(link);
-            } else if (link.getAttribute('href') !== page) {
-                link.setAttribute('href', page);
+            } else {
+                const existing = (link.getAttribute('href') || '').trim();
+                // Keep authored absolute URLs (e.g. TWCTO Kavach → tradewithcto.com)
+                if (!/^https?:\/\//i.test(existing) && existing !== page) {
+                    link.setAttribute('href', page);
+                }
             }
 
             item.addEventListener('click', (e) => {
                 // Allow modified clicks (new tab) via native anchor
                 if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
                 e.preventDefault();
+                const href = (link.getAttribute('href') || page).trim();
                 // Track in background; navigate immediately (do not wait on API)
                 try {
                     this.trackPageVisit(page, document.title);
                 } catch (_) { /* ignore */ }
-                window.location.assign(page);
+                window.location.assign(href);
             });
         });
         document.querySelectorAll('.nav-item[data-action="logout"]').forEach(item => {
@@ -1137,6 +1148,7 @@ class LeftMenu {
             case 'havwap': return 'havwap.html';
             case 'divtest': return 'divtest.html';
             case 'iron-condor': return 'iron-condor.html';
+            case 'dailyRSchecklist': return 'dailyRSchecklist.html';
             case 'tarang': return 'tarang.html';
             case 'analysis': return 'analysis.html';
             case 'kavachIgnitionDiag': return 'kavachIgnitionDiag.html';
