@@ -208,8 +208,28 @@ def format_gate_observed_accepted(gate: Dict[str, Any]) -> tuple[str, str]:
         return obs, acc
 
     if name == "fee_gate":
-        obs = detail or str(actual or "—")
-        acc = str(threshold) if threshold is not None else "fees within credit"
+        if isinstance(actual, dict):
+            frac = actual.get("frac")
+            net = actual.get("net_per_contract_inr")
+            parts = []
+            if frac is not None:
+                parts.append(f"fees {_fmt_num(frac, pct=True)} of credit")
+            if net is not None:
+                parts.append(f"net {format_inr(net)}/contract")
+            obs = detail or (" · ".join(parts) if parts else "—")
+        else:
+            obs = detail or str(actual or "—")
+        if isinstance(threshold, dict):
+            max_frac = threshold.get("max_fees_frac_of_credit")
+            min_net = threshold.get("min_net_credit_per_contract_inr")
+            bits = []
+            if max_frac is not None:
+                bits.append(f"fees ≤ {_fmt_num(max_frac, pct=True)} of credit")
+            if min_net is not None:
+                bits.append(f"net ≥ {format_inr(min_net)}/contract")
+            acc = " · ".join(bits) if bits else "fees within credit"
+        else:
+            acc = "fees within credit"
         return obs, acc
 
     # Generic fallback

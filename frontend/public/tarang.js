@@ -128,7 +128,10 @@
     if (!items.length) return '';
     const lis = items.map((w) => {
       if (typeof w === 'string') {
-        return `<li class="tg-why-item"><span class="tg-why-icon tg-why-fail" aria-hidden="true">✕</span><span class="tg-why-body">${escHtml(w)}</span></li>`;
+        return `<li class="tg-why-item tg-why-fail">
+          <span class="tg-why-icon tg-why-fail" aria-hidden="true">✕</span>
+          <span class="tg-why-body"><span class="tg-why-label">${escHtml(w)}</span></span>
+        </li>`;
       }
       const outcome = w.outcome || (w.passed ? 'pass' : 'fail');
       const label = w.label || w.text || '';
@@ -138,7 +141,10 @@
         ${whyIcon(outcome)}
         <span class="tg-why-body">
           <span class="tg-why-label">${escHtml(label)}</span>
-          <span class="tg-why-metrics">observed <strong>${escHtml(obs)}</strong> · need <strong>${escHtml(acc)}</strong></span>
+          <span class="tg-why-metrics">
+            <span class="tg-why-k">Observed</span><span class="tg-why-v">${escHtml(obs)}</span>
+            <span class="tg-why-k">Need</span><span class="tg-why-v">${escHtml(acc)}</span>
+          </span>
         </span>
       </li>`;
     }).join('');
