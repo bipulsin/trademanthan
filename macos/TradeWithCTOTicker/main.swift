@@ -4,6 +4,7 @@ import Security
 
 let service = "com.tradewithcto.ticker"
 let defaultBase = "https://www.tradewithcto.com"
+let pollSeconds: TimeInterval = 120
 let minW: CGFloat = 300
 let minH: CGFloat = 300
 let maxH: CGFloat = 640
@@ -51,7 +52,7 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         reload()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: pollSeconds, repeats: true) { [weak self] _ in
             self?.reload()
         }
     }
@@ -347,18 +348,24 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stack.addArrangedSubview(heading("Live trades"))
         if let message = message {
             stack.addArrangedSubview(line(message, color: NSColor(calibratedWhite: 0.75, alpha: 1)))
-        } else if trades.isEmpty {
-            stack.addArrangedSubview(line("None", color: NSColor(calibratedWhite: 0.55, alpha: 1)))
         } else {
-            trades.forEach { stack.addArrangedSubview(tradeRow($0)) }
+            let rows = trades.compactMap { tradeRow($0) }
+            if rows.isEmpty {
+                stack.addArrangedSubview(line("None", color: NSColor(calibratedWhite: 0.55, alpha: 1)))
+            } else {
+                rows.forEach { stack.addArrangedSubview($0) }
+            }
         }
         stack.addArrangedSubview(heading("Active signals"))
         if message != nil {
             stack.addArrangedSubview(line("—", color: NSColor(calibratedWhite: 0.45, alpha: 1)))
-        } else if signals.isEmpty {
-            stack.addArrangedSubview(line("None", color: NSColor(calibratedWhite: 0.55, alpha: 1)))
         } else {
-            signals.forEach { stack.addArrangedSubview(signalRow($0)) }
+            let rows = signals.compactMap { signalRow($0) }
+            if rows.isEmpty {
+                stack.addArrangedSubview(line("None", color: NSColor(calibratedWhite: 0.55, alpha: 1)))
+            } else {
+                rows.forEach { stack.addArrangedSubview($0) }
+            }
         }
         stack.layoutSubtreeIfNeeded()
         form.layoutSubtreeIfNeeded()
@@ -393,25 +400,27 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return label
     }
 
-    func tradeRow(_ row: [String: Any]) -> NSView {
-        let sym = "\(row["algo_label"] ?? "")  \(row["symbol"] ?? "")"
-        let pnl = row["pnl"] as? Double
-        let value: String
-        let color: NSColor
-        if let pnl = pnl {
-            value = (pnl >= 0 ? "+" : "") + String(format: "₹%.0f", pnl)
-            color = pnl >= 0
-                ? NSColor(calibratedRed: 0.45, green: 0.86, blue: 0.55, alpha: 1)
-                : NSColor(calibratedRed: 0.93, green: 0.45, blue: 0.42, alpha: 1)
-        } else {
-            value = "—"
-            color = NSColor(calibratedWhite: 0.7, alpha: 1)
-        }
+    func scriptName(_ row: [String: Any]) -> String {
+        "\(row["symbol"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func usableScript(_ name: String) -> Bool {
+        !name.isEmpty && name != "—" && name != "-" && name != "–"
+    }
+
+    func tradeRow(_ row: [String: Any]) -> NSView? {
+        let sym = scriptName(row)
+        guard usableScript(sym), let pnl = row["pnl"] as? Double else { return nil }
+        let value = (pnl >= 0 ? "+" : "") + String(format: "₹%.0f", pnl)
+        let color = pnl >= 0
+            ? NSColor(calibratedRed: 0.45, green: 0.86, blue: 0.55, alpha: 1)
+            : NSColor(calibratedRed: 0.93, green: 0.45, blue: 0.42, alpha: 1)
         return pair(sym, value, color)
     }
 
-    func signalRow(_ row: [String: Any]) -> NSView {
-        let left = "\(row["algo_label"] ?? "")  \(row["symbol"] ?? "")"
+    func signalRow(_ row: [String: Any]) -> NSView? {
+        let left = scriptName(row)
+        guard usableScript(left) else { return nil }
         let right = "\(row["label"] ?? "")"
         return pair(left, right, NSColor(calibratedWhite: 0.82, alpha: 1))
     }

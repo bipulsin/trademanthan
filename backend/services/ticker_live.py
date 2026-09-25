@@ -38,6 +38,17 @@ ALGO_LABELS = {
     "tarang": "Kosmic Tarang",
 }
 TOKEN_PREFIX = "twt_"
+# Mac menu-bar poll, and how long a desk read may be reused.
+TICKER_REFRESH_SEC = 120.0
+
+# Active-signal windows are inclusive of the closing minute (09:15–15:30, 09:00–23:30).
+NSE_SIGNAL_OPEN_MIN = 9 * 60 + 15
+NSE_SIGNAL_CLOSE_MIN = 15 * 60 + 30
+MCX_SIGNAL_OPEN_MIN = 9 * 60
+MCX_SIGNAL_CLOSE_MIN = 23 * 60 + 30
+NSE_SIGNAL_ALGOS = frozenset({"stock_options", "premium_futures", "kavach", "breakfast"})
+MCX_SIGNAL_ALGOS = frozenset({"commdiv"})
+_BLANK_SYMBOLS = {"", "—", "-", "–"}
 
 _CACHE: Dict[str, tuple] = {}
 _tables_ready = False
@@ -237,6 +248,88 @@ def _row(algo: str, symbol: str, *, pnl: Any = None, label: str = "") -> Dict[st
     }
 
 
+def _symbol_ok(symbol: Any) -> bool:
+    return str(symbol or "").strip() not in _BLANK_SYMBOLS
+
+
+def _as_ist(now: Optional[datetime] = None) -> datetime:
+    now = now or _now()
+    if now.tzinfo is None:
+        return IST.localize(now)
+    return now.astimezone(IST)
+
+
+def _nse_closed_day(now: datetime) -> bool:
+    """Weekends and the project's NSE ``holiday`` calendar. Weekdays if that table is down."""
+    try:
+        from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
+
+        return bool(should_skip_scheduled_market_jobs_ist(now))
+    except Exception:
+        logger.debug("ticker nse calendar unavailable", exc_info=True)
+        return _as_ist(now).weekday() >= 5
+
+
+def _mcx_closed_day(now: datetime) -> bool:
+    """Weekends and the same holiday calendar MCX already uses. Weekdays if that lookup fails."""
+    try:
+        from backend.services.tarang.calendar import mcx_is_holiday_or_weekend
+
+        return bool(mcx_is_holiday_or_weekend(now))
+    except Exception:
+        logger.debug("ticker mcx calendar unavailable", exc_info=True)
+        return _as_ist(now).weekday() >= 5
+
+
+def signal_visible(algo: str, now: Optional[datetime] = None) -> bool:
+    """Whether this desk's active signals may appear at ``now`` (IST).
+
+    Live trades are not gated here — they stay up around the clock.
+    Stock Options, Premium Futures, and the other NSE desks: 09:15–15:30.
+    CommDiv: 09:00–23:30. Closed days drop the desk entirely.
+    """
+    ist = _as_ist(now)
+    minute = ist.hour * 60 + ist.minute
+    if algo in MCX_SIGNAL_ALGOS:
+        if _mcx_closed_day(ist):
+            return False
+        return MCX_SIGNAL_OPEN_MIN <= minute <= MCX_SIGNAL_CLOSE_MIN
+    if algo in NSE_SIGNAL_ALGOS:
+        if _nse_closed_day(ist):
+            return False
+        return NSE_SIGNAL_OPEN_MIN <= minute <= NSE_SIGNAL_CLOSE_MIN
+    return True
+
+
+def _for_client(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Line is the script name (and PnL or status). Desk labels stay out of the payload."""
+    out = dict(row)
+    out["symbol"] = str(out.get("symbol") or "").strip()
+    out["algo_label"] = ""
+    return out
+
+
+def _live_trades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Open rows that have a script and a current PnL. Blanks never reach the ticker."""
+    out = []
+    for row in rows:
+        if row.get("pnl") is None or not _symbol_ok(row.get("symbol")):
+            continue
+        out.append(_for_client(row))
+    return out
+
+
+def _active_signals(rows: List[Dict[str, Any]], now: datetime) -> List[Dict[str, Any]]:
+    out = []
+    for row in rows:
+        if not signal_visible(str(row.get("algo") or ""), now):
+            continue
+        if not _symbol_ok(row.get("symbol")):
+            continue
+        out.append(_for_client(row))
+    return out
+
+
 def _submit_collector(key: str, fn: Callable[[], Any]) -> concurrent.futures.Future:
     """One in-flight read per desk. A hung call is not started again until it ends."""
     with _INFLIGHT_LOCK:
@@ -291,15 +384,17 @@ def _collect(
 def _commdiv_trades() -> List[Dict[str, Any]]:
     """Open CommDiv In-Trade rows for both PAPER and LIVE.
 
-    The panel heading says Live trades, but this desk is the commodity book
-    the user is watching. PAPER is included on purpose.
+    History and Exit Trade are not in this list. Rows without a script or a
+    current PnL are dropped so the ticker never shows a dash.
     """
     from backend.services.commodities_div.actions import list_in_trade_signals
 
     out = []
     for r in list_in_trade_signals() or []:
-        sym = r.get("display_symbol") or r.get("symbol_mapped") or r.get("symbol_raw") or "—"
-        out.append(_row("commdiv", str(sym), pnl=r.get("pnl"), label="In-Trade"))
+        sym = str(r.get("display_symbol") or r.get("symbol_mapped") or r.get("symbol_raw") or "").strip()
+        if not _symbol_ok(sym) or r.get("pnl") is None:
+            continue
+        out.append(_row("commdiv", sym, pnl=r.get("pnl"), label="In-Trade"))
     return out
 
 
@@ -317,19 +412,29 @@ def _commdiv_signals() -> List[Dict[str, Any]]:
 
 
 def _stock_options() -> tuple:
+    """Live trades are LIVE Executed rows that still have a rupee PnL.
+
+    Radar, Active (untraded), PAPER, and the rest of the Executed tab are not
+    open live trades. Completed / history never enter this read. Active-tab
+    rows are signals, and the snapshot hides them outside 09:15–15:30 IST.
+    """
     from backend.services.stock_option_signals import list_workspace
 
     ws = list_workspace() or {}
     trades, signals = [], []
     for r in ws.get("executed") or []:
-        sym = r.get("symbol") or "—"
-        side = r.get("side") or ""
+        if str(r.get("trade_mode") or "").strip().upper() != "LIVE":
+            continue
         pnl = r.get("combined_pnl_inr")
-        if pnl is None:
-            pnl = r.get("combined_pnl")
-        trades.append(_row("stock_options", str(sym), pnl=pnl, label=str(side or "Executed")))
+        sym = str(r.get("symbol") or "").strip()
+        if pnl is None or not _symbol_ok(sym):
+            continue
+        trades.append(_row("stock_options", sym, pnl=pnl, label="LIVE"))
     for r in ws.get("active") or []:
-        signals.append(_row("stock_options", str(r.get("symbol") or "—"), label="Active"))
+        sym = str(r.get("symbol") or "").strip()
+        if not _symbol_ok(sym):
+            continue
+        signals.append(_row("stock_options", sym, label="Active"))
     return trades, signals
 
 
@@ -463,10 +568,13 @@ def _premium(user_id: int) -> tuple:
                 if str(r["direction_type"] or "").upper() == "SHORT":
                     pts = entry - ltp
                 pnl = round(pts * lot, 2)
+            sym = str(r["sym"] or "").strip()
+            if pnl is None or not _symbol_ok(sym):
+                continue
             trades.append(
                 _row(
                     "premium_futures",
-                    str(r["sym"] or "—"),
+                    sym,
                     pnl=pnl,
                     label=str(r["direction_type"] or "Running"),
                 )
@@ -494,9 +602,12 @@ def _premium(user_id: int) -> tuple:
         ).mappings().all()
         signals = []
         for r in picks:
+            sym = str(r["sym"] or "").strip()
+            if not _symbol_ok(sym):
+                continue
             conv = _num(r["conv"])
             label = f"Pick · {int(conv)}" if conv is not None else "Pick"
-            signals.append(_row("premium_futures", str(r["sym"] or "—"), label=label))
+            signals.append(_row("premium_futures", sym, label=label))
         return trades, signals
     finally:
         db.close()
@@ -543,19 +654,19 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
     signals: List[Dict[str, Any]] = []
     jobs: List[Tuple[str, float, Callable[[], Any], Any]] = []
     if algos.get("commdiv"):
-        jobs.append(("commdiv_trades", 2, _commdiv_trades, []))
-        jobs.append(("commdiv_signals", 2, _commdiv_signals, []))
+        jobs.append(("commdiv_trades", TICKER_REFRESH_SEC, _commdiv_trades, []))
+        jobs.append(("commdiv_signals", TICKER_REFRESH_SEC, _commdiv_signals, []))
     if algos.get("stock_options"):
-        jobs.append(("stock_options", 3, _stock_options, ([], [])))
+        jobs.append(("stock_options", TICKER_REFRESH_SEC, _stock_options, ([], [])))
     if algos.get("kavach"):
-        jobs.append(("kavach_trades", 3, _kavach_trades, []))
-        jobs.append(("kavach_ready", 15, _kavach_ready, []))
+        jobs.append(("kavach_trades", TICKER_REFRESH_SEC, _kavach_trades, []))
+        jobs.append(("kavach_ready", TICKER_REFRESH_SEC, _kavach_ready, []))
     if algos.get("breakfast"):
-        jobs.append(("breakfast", 15, _breakfast_signals, []))
+        jobs.append(("breakfast", TICKER_REFRESH_SEC, _breakfast_signals, []))
     if algos.get("premium_futures"):
-        jobs.append((f"premium:{user_id}", 3, lambda: _premium(user_id), ([], [])))
+        jobs.append((f"premium:{user_id}", TICKER_REFRESH_SEC, lambda: _premium(user_id), ([], [])))
     if algos.get("tarang"):
-        jobs.append(("tarang", 5, _tarang_trades, []))
+        jobs.append(("tarang", TICKER_REFRESH_SEC, _tarang_trades, []))
 
     got = _collect(jobs)
     if algos.get("commdiv"):
@@ -577,11 +688,13 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
     if algos.get("tarang"):
         trades.extend(got.get("tarang") or [])
 
+    # Gate signals at publish time so a cached desk read cannot outlive its window.
+    now = _now()
     return {
         "ok": True,
         "enabled": True,
-        "server_time": _now().isoformat(),
-        "trades": trades,
-        "signals": signals,
+        "server_time": now.isoformat(),
+        "trades": _live_trades(trades),
+        "signals": _active_signals(signals, now),
         "settings": settings,
     }
