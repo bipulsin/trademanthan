@@ -55,6 +55,7 @@ import backend.routers.ready_shadow_review as ready_shadow_review
 import backend.routers.top10_vs_ready_now as top10_vs_ready_now
 import backend.routers.trade_log as trade_log_journal
 import backend.routers.kavach_bt_checkpoint as kavach_bt_checkpoint
+import backend.routers.ticker as ticker
 import backend.routers.analysis as analysis_page_router
 import backend.routers.left_menu_visibility as left_menu_visibility
 # OLD SCHEDULERS - DISABLED - Migrated to smart_future_algo
@@ -554,6 +555,7 @@ app.include_router(ready_shadow_review.router)
 app.include_router(top10_vs_ready_now.router)
 app.include_router(trade_log_journal.router)
 app.include_router(kavach_bt_checkpoint.router)
+app.include_router(ticker.router)
 app.include_router(analysis_page_router.router)
 app.include_router(left_menu_visibility.router, prefix="/api/left-menu")
 app.include_router(left_menu_visibility.router, prefix="/left-menu")
