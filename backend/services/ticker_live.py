@@ -5,13 +5,14 @@ This module does not open a broker feed.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import logging
 import secrets
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pytz
 from sqlalchemy import text
@@ -41,6 +42,12 @@ TOKEN_PREFIX = "twt_"
 _CACHE: Dict[str, tuple] = {}
 _tables_ready = False
 _tables_lock = threading.Lock()
+_COLLECT_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="ticker")
+_INFLIGHT: Dict[str, concurrent.futures.Future] = {}
+_INFLIGHT_LOCK = threading.Lock()
+# Mac client drops the connection at 8s (nginx 499 → "Waiting for TradeWithCTO…").
+# Keep the whole snapshot inside that window even if one desk never returns.
+SNAPSHOT_BUDGET_SEC = 4.0
 
 
 def _now() -> datetime:
@@ -230,21 +237,63 @@ def _row(algo: str, symbol: str, *, pnl: Any = None, label: str = "") -> Dict[st
     }
 
 
-def _cached(key: str, ttl: float, fn):
-    hit = _CACHE.get(key)
+def _submit_collector(key: str, fn: Callable[[], Any]) -> concurrent.futures.Future:
+    """One in-flight read per desk. A hung call is not started again until it ends."""
+    with _INFLIGHT_LOCK:
+        fut = _INFLIGHT.get(key)
+        if fut is None or fut.done():
+            fut = _COLLECT_POOL.submit(fn)
+            _INFLIGHT[key] = fut
+        return fut
+
+
+def _collect(
+    jobs: List[Tuple[str, float, Callable[[], Any], Any]],
+    budget: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Read desks together. A stall returns the previous value for that desk only."""
+    if budget is None:
+        budget = SNAPSHOT_BUDGET_SEC
     now = time.monotonic()
-    if hit and now - hit[0] < ttl:
-        return hit[1]
-    try:
-        val = fn()
-    except Exception:
-        logger.exception("ticker collector %s failed", key)
-        val = hit[1] if hit else []
-    _CACHE[key] = (now, val)
-    return val
+    ready: Dict[str, Any] = {}
+    pending: List[Tuple[str, concurrent.futures.Future, Any]] = []
+    for key, ttl, fn, empty in jobs:
+        hit = _CACHE.get(key)
+        if hit and now - hit[0] < ttl:
+            ready[key] = hit[1]
+            continue
+        pending.append((key, _submit_collector(key, fn), empty))
+    deadline = time.monotonic() + budget
+    for key, fut, empty in pending:
+        left = deadline - time.monotonic()
+        hit = _CACHE.get(key)
+        if not fut.done() and left <= 0:
+            logger.warning("ticker collector %s skipped; snapshot budget spent", key)
+            ready[key] = hit[1] if hit else empty
+            continue
+        try:
+            val = fut.result(timeout=0 if fut.done() else left)
+        except concurrent.futures.TimeoutError:
+            logger.warning("ticker collector %s still running after %.1fs", key, budget)
+            ready[key] = hit[1] if hit else empty
+            continue
+        except Exception:
+            logger.exception("ticker collector %s failed", key)
+            val = hit[1] if hit else empty
+            _CACHE[key] = (time.monotonic(), val)
+            ready[key] = val
+            continue
+        _CACHE[key] = (time.monotonic(), val)
+        ready[key] = val
+    return ready
 
 
 def _commdiv_trades() -> List[Dict[str, Any]]:
+    """Open CommDiv In-Trade rows for both PAPER and LIVE.
+
+    The panel heading says Live trades, but this desk is the commodity book
+    the user is watching. PAPER is included on purpose.
+    """
     from backend.services.commodities_div.actions import list_in_trade_signals
 
     out = []
@@ -324,21 +373,44 @@ def _kavach_trades() -> List[Dict[str, Any]]:
 
 
 def _kavach_ready() -> List[Dict[str, Any]]:
-    from backend.services.daily_checklist import get_state
+    """Latest READY badges from the consistency log.
 
-    state = get_state()
-    out = []
-    seen = set()
-    for s in state.get("stocks") or []:
-        ts = str(s.get("trade_state") or "")
-        if not ts.startswith("READY"):
-            continue
-        sym = str(s.get("symbol") or "")
-        if not sym or sym in seen:
-            continue
-        seen.add(sym)
-        out.append(_row("kavach", sym, label=ts))
-    return out
+    daily_checklist.get_state() rebuilds the whole checklist page (radar,
+    ignition, go-board) and was hanging /api/ticker/live until the Mac client
+    gave up. This read is the recent rendered state only.
+    """
+    from backend.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        db.execute(text("SET LOCAL statement_timeout = '1200ms'"))
+        rows = db.execute(
+            text(
+                """
+                SELECT symbol, rendered_state
+                FROM (
+                    SELECT DISTINCT ON (symbol) symbol, rendered_state
+                    FROM kavach_ready_consistency_log
+                    WHERE session_date = CAST(:d AS date)
+                      AND logged_at > NOW() - INTERVAL '20 minutes'
+                    ORDER BY symbol, logged_at DESC
+                ) latest
+                WHERE rendered_state LIKE 'READY%'
+                ORDER BY symbol
+                """
+            ),
+            {"d": _now().date().isoformat()},
+        ).mappings().all()
+        return [
+            _row("kavach", str(r["symbol"]), label=str(r["rendered_state"] or "READY"))
+            for r in rows
+            if r.get("symbol")
+        ]
+    except Exception:
+        logger.exception("ticker kavach ready lookup failed")
+        return []
+    finally:
+        db.close()
 
 
 def _breakfast_signals() -> List[Dict[str, Any]]:
@@ -469,25 +541,41 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
 
     trades: List[Dict[str, Any]] = []
     signals: List[Dict[str, Any]] = []
-
+    jobs: List[Tuple[str, float, Callable[[], Any], Any]] = []
     if algos.get("commdiv"):
-        trades.extend(_cached("commdiv_trades", 2, _commdiv_trades))
-        signals.extend(_cached("commdiv_signals", 2, _commdiv_signals))
+        jobs.append(("commdiv_trades", 2, _commdiv_trades, []))
+        jobs.append(("commdiv_signals", 2, _commdiv_signals, []))
     if algos.get("stock_options"):
-        so_t, so_s = _cached("stock_options", 3, _stock_options)
+        jobs.append(("stock_options", 3, _stock_options, ([], [])))
+    if algos.get("kavach"):
+        jobs.append(("kavach_trades", 3, _kavach_trades, []))
+        jobs.append(("kavach_ready", 15, _kavach_ready, []))
+    if algos.get("breakfast"):
+        jobs.append(("breakfast", 15, _breakfast_signals, []))
+    if algos.get("premium_futures"):
+        jobs.append((f"premium:{user_id}", 3, lambda: _premium(user_id), ([], [])))
+    if algos.get("tarang"):
+        jobs.append(("tarang", 5, _tarang_trades, []))
+
+    got = _collect(jobs)
+    if algos.get("commdiv"):
+        trades.extend(got.get("commdiv_trades") or [])
+        signals.extend(got.get("commdiv_signals") or [])
+    if algos.get("stock_options"):
+        so_t, so_s = got.get("stock_options") or ([], [])
         trades.extend(so_t)
         signals.extend(so_s)
     if algos.get("kavach"):
-        trades.extend(_cached("kavach_trades", 3, _kavach_trades))
-        signals.extend(_cached("kavach_ready", 15, _kavach_ready))
+        trades.extend(got.get("kavach_trades") or [])
+        signals.extend(got.get("kavach_ready") or [])
     if algos.get("breakfast"):
-        signals.extend(_cached("breakfast", 15, _breakfast_signals))
+        signals.extend(got.get("breakfast") or [])
     if algos.get("premium_futures"):
-        pf_t, pf_s = _cached(f"premium:{user_id}", 3, lambda: _premium(user_id))
+        pf_t, pf_s = got.get(f"premium:{user_id}") or ([], [])
         trades.extend(pf_t)
         signals.extend(pf_s)
     if algos.get("tarang"):
-        trades.extend(_cached("tarang", 5, _tarang_trades))
+        trades.extend(got.get("tarang") or [])
 
     return {
         "ok": True,
