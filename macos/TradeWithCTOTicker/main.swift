@@ -6,8 +6,18 @@ let service = "com.tradewithcto.ticker"
 let defaultBase = "https://www.tradewithcto.com"
 let pollSeconds: TimeInterval = 120
 let minW: CGFloat = 300
-let minH: CGFloat = 300
-let maxH: CGFloat = 640
+let defaultLines: CGFloat = 7
+let maxLines: CGFloat = 20
+let liveYellow = NSColor(calibratedRed: 1, green: 0.93, blue: 0.05, alpha: 1)
+
+final class TopClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var rect = super.constrainBoundsRect(proposedBounds)
+        guard let doc = documentView, doc.frame.height < rect.height else { return rect }
+        rect.origin.y = doc.frame.height - rect.height
+        return rect
+    }
+}
 
 final class PanelTextField: NSTextField {
     override func mouseDown(with event: NSEvent) {
@@ -25,7 +35,7 @@ final class PanelTextField: NSTextField {
 final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let panel = NSPanel(
-        contentRect: NSRect(x: 0, y: 0, width: minW, height: minH),
+        contentRect: NSRect(x: 0, y: 0, width: minW, height: 220),
         styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .utilityWindow],
         backing: .buffered,
         defer: false
@@ -103,8 +113,8 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = NSColor(calibratedRed: 0.07, green: 0.09, blue: 0.08, alpha: 1)
         panel.appearance = NSAppearance(named: .darkAqua)
-        panel.minSize = NSSize(width: minW, height: minH)
-        panel.maxSize = NSSize(width: 460, height: maxH)
+        panel.minSize = NSSize(width: minW, height: 180)
+        panel.maxSize = NSSize(width: 460, height: 900)
         panel.delegate = self
 
         form.orientation = .vertical
@@ -125,6 +135,9 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         form.addArrangedSubview(tokenField)
         form.addArrangedSubview(save)
 
+        let clip = TopClipView()
+        clip.drawsBackground = false
+        scroll.contentView = clip
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.autohidesScrollers = true
@@ -169,6 +182,7 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.contentView = root
         setupPinnedOpen = loadToken().isEmpty
         applySetupVisibility()
+        applyWindowHeight(contentHeight: listHeight(lines: defaultLines))
     }
 
     func styleField(_ field: NSTextField, placeholder: String) {
@@ -371,17 +385,56 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         form.layoutSubtreeIfNeeded()
         let stackSize = stack.fittingSize
         stack.setFrameSize(NSSize(width: max(stackSize.width, 276), height: stackSize.height))
+        applyWindowHeight(contentHeight: stackSize.height)
+        scrollContentToTop()
+    }
+
+    func rowHeight() -> CGFloat {
+        max(16, ceil(line("X", color: .labelColor).fittingSize.height))
+    }
+
+    func listHeight(lines: CGFloat) -> CGFloat {
+        let gap = stack.spacing
+        let insets = stack.edgeInsets.top + stack.edgeInsets.bottom
+        return rowHeight() * lines + gap * max(0, lines - 1) + insets
+    }
+
+    func applyWindowHeight(contentHeight: CGFloat) {
+        let minList = listHeight(lines: defaultLines)
+        let maxList = listHeight(lines: maxLines)
         let layoutH = panel.contentLayoutRect.height
         let chrome: CGFloat = layoutH > 1 ? panel.frame.height - layoutH : 28
         let formH: CGFloat = form.isHidden ? 0 : form.fittingSize.height
         let footerH: CGFloat = setupFooter.isHidden ? 0 : 28
-        let height = min(maxH, max(minH, formH + footerH + stackSize.height + chrome))
+        let screenH = (panel.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+        let screenCap = max(chrome + formH + footerH + rowHeight() * 3, screenH - 16)
+        var height = formH + footerH + min(maxList, max(minList, contentHeight)) + chrome
+        if height > screenCap { height = screenCap }
+        let minWindow = min(height, formH + footerH + minList + chrome)
+        panel.minSize = NSSize(width: minW, height: max(160, minWindow))
+        let maxWindow = min(screenCap, formH + footerH + maxList + chrome)
+        panel.maxSize = NSSize(width: 460, height: max(panel.minSize.height, maxWindow))
+        height = min(max(height, panel.minSize.height), panel.maxSize.height)
         var frame = panel.frame
         let bottom = frame.minY
         frame.size.height = height
         frame.size.width = max(minW, frame.width)
         frame.origin.y = bottom
+        if let vis = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            if frame.maxY > vis.maxY { frame.origin.y = vis.maxY - frame.height }
+            if frame.minY < vis.minY { frame.origin.y = vis.minY }
+        }
         panel.setFrame(frame, display: true)
+    }
+
+    func scrollContentToTop() {
+        panel.layoutIfNeeded()
+        guard let doc = scroll.documentView else { return }
+        let clipH = scroll.contentView.bounds.height
+        guard doc.frame.height > clipH + 1 else { return }
+        let y: CGFloat = doc.isFlipped ? 0 : doc.frame.height - clipH
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     func heading(_ text: String) -> NSTextField {
@@ -411,11 +464,14 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func tradeRow(_ row: [String: Any]) -> NSView? {
         let sym = scriptName(row)
         guard usableScript(sym), let pnl = row["pnl"] as? Double else { return nil }
-        let value = (pnl >= 0 ? "+" : "") + String(format: "₹%.0f", pnl)
-        let color = pnl >= 0
-            ? NSColor(calibratedRed: 0.45, green: 0.86, blue: 0.55, alpha: 1)
-            : NSColor(calibratedRed: 0.93, green: 0.45, blue: 0.42, alpha: 1)
-        return pair(sym, value, color)
+        return pair(sym, formatRupees(pnl), liveYellow)
+    }
+
+    func formatRupees(_ amount: Double) -> String {
+        let rounded = amount.rounded()
+        if rounded == 0 { return "₹0" }
+        let sign = rounded > 0 ? "+" : "-"
+        return sign + "₹" + String(format: "%.0f", abs(rounded))
     }
 
     func signalRow(_ row: [String: Any]) -> NSView? {
