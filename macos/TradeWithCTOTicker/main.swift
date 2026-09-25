@@ -51,14 +51,17 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var lastOrigin: NSPoint?
     var loadingLive = false
     var setupPinnedOpen = false
+    var cachedBase = defaultBase
+    var cachedToken = ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        loadStoredCredentials()
         NSApp.setActivationPolicy(.regular)
         applyStatusIcon()
         applyDockIcon()
         status.menu = makeMenu()
         configurePanel()
-        placePanel(remembered: loadToken().isEmpty ? false : true)
+        placePanel(remembered: !cachedToken.isEmpty)
         panel.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         reload()
@@ -123,8 +126,8 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         form.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 8, right: 12)
         styleField(urlField, placeholder: defaultBase)
         styleField(tokenField, placeholder: "twt_…")
-        urlField.stringValue = UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase
-        tokenField.stringValue = loadToken()
+        urlField.stringValue = cachedBase
+        tokenField.stringValue = cachedToken
         let save = NSButton(title: "Save", target: self, action: #selector(saveFromPanel))
         save.bezelStyle = .rounded
         save.contentTintColor = NSColor(calibratedRed: 0.45, green: 0.86, blue: 0.55, alpha: 1)
@@ -180,7 +183,7 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             setupFooter.widthAnchor.constraint(equalTo: root.widthAnchor)
         ])
         panel.contentView = root
-        setupPinnedOpen = loadToken().isEmpty
+        setupPinnedOpen = cachedToken.isEmpty
         applySetupVisibility()
         applyWindowHeight(contentHeight: listHeight(lines: defaultLines))
     }
@@ -238,7 +241,7 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applySetupVisibility() {
-        let showForm = setupPinnedOpen || loadToken().isEmpty
+        let showForm = setupPinnedOpen || cachedToken.isEmpty
         form.isHidden = !showForm
         setupFooter.isHidden = showForm
     }
@@ -255,9 +258,9 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alert.addButton(withTitle: "Cancel")
         let box = NSStackView()
         box.orientation = .vertical
-        let url = NSTextField(string: UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase)
+        let url = NSTextField(string: cachedBase)
         url.placeholderString = defaultBase
-        let token = NSTextField(string: loadToken())
+        let token = NSTextField(string: cachedToken)
         token.placeholderString = "twt_…"
         url.frame.size.width = 320
         token.frame.size.width = 320
@@ -274,9 +277,11 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func persist(url rawURL: String, token rawToken: String) {
         let url = rawURL.trimmingCharacters(in: .whitespaces)
         let token = rawToken.trimmingCharacters(in: .whitespaces)
-        UserDefaults.standard.set(url.isEmpty ? defaultBase : url, forKey: "ticker.base")
-        saveToken(token)
-        urlField.stringValue = UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase
+        cachedBase = url.isEmpty ? defaultBase : url
+        cachedToken = token
+        UserDefaults.standard.set(cachedBase, forKey: "ticker.base")
+        writeTokenFile(token)
+        urlField.stringValue = cachedBase
         tokenField.stringValue = token
         if !token.isEmpty {
             setupPinnedOpen = false
@@ -286,24 +291,77 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func baseURL() -> String {
-        let raw = (UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let raw = cachedBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return raw.isEmpty ? defaultBase : raw
     }
 
-    func saveToken(_ token: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: "token"
-        ]
-        SecItemDelete(query as CFDictionary)
-        var add = query
-        add[kSecValueData as String] = Data(token.utf8)
-        SecItemAdd(add as CFDictionary, nil)
+    func supportDirectory() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(service, isDirectory: true)
     }
 
-    func loadToken() -> String {
+    func tokenFileURL() -> URL {
+        supportDirectory().appendingPathComponent("token")
+    }
+
+    func migrationMarkerURL() -> URL {
+        supportDirectory().appendingPathComponent("keychain-migrated")
+    }
+
+    func ensureSupportDirectory() {
+        let path = supportDirectory().path
+        try? FileManager.default.createDirectory(
+            atPath: path,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+    }
+
+    func readTokenFile() -> String? {
+        let url = tokenFileURL()
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return "" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func writePrivateFile(_ url: URL, _ contents: Data) {
+        ensureSupportDirectory()
+        do {
+            try contents.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            NSLog("TradeWithCTO ticker could not write \(url.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    func writeTokenFile(_ token: String) {
+        writePrivateFile(tokenFileURL(), Data(token.utf8))
+        if !FileManager.default.fileExists(atPath: migrationMarkerURL().path) {
+            writePrivateFile(migrationMarkerURL(), Data("1".utf8))
+        }
+    }
+
+    func loadStoredCredentials() {
+        cachedBase = UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase
+        if let stored = readTokenFile() {
+            cachedToken = stored
+            return
+        }
+        if FileManager.default.fileExists(atPath: migrationMarkerURL().path) {
+            cachedToken = ""
+            return
+        }
+        cachedToken = migrateTokenFromKeychainOnce()
+        writePrivateFile(migrationMarkerURL(), Data("1".utf8))
+        if !cachedToken.isEmpty {
+            writePrivateFile(tokenFileURL(), Data(cachedToken.utf8))
+        }
+    }
+
+    /// One keychain read for upgrades from the old store. The poll path never calls this.
+    func migrateTokenFromKeychainOnce() -> String {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -313,13 +371,13 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data,
-              let s = String(data: data, encoding: .utf8) else { return "" }
-        return s
+              let text = String(data: data, encoding: .utf8) else { return "" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func reload() {
         if loadingLive { return }
-        let token = loadToken()
+        let token = cachedToken
         guard !token.isEmpty else {
             setupPinnedOpen = true
             applySetupVisibility()
