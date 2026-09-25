@@ -60,14 +60,35 @@
     $("tickerTokenOut").textContent = res.ok ? "Ticker settings saved." : (data.detail || "Save failed");
   }
 
-  async function mint() {
-    var res = await fetch(apiBase() + "/api/ticker/token", { method: "POST", headers: headers() });
-    var data = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
-      $("tickerTokenOut").textContent = data.detail || "Could not create token";
-      return;
+  function detailText(data, fallback) {
+    var d = data && data.detail;
+    if (Array.isArray(d)) {
+      return d.map(function (x) { return (x && x.msg) || String(x); }).join("; ");
     }
-    $("tickerTokenOut").textContent = "Copy this into the Mac app now. It will not be shown again: " + data.token;
+    if (d && typeof d !== "string") return JSON.stringify(d);
+    return d || fallback;
+  }
+
+  async function mint() {
+    var btn = $("tickerNewToken");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Creating…";
+    }
+    try {
+      var res = await fetch(apiBase() + "/api/ticker/token", { method: "POST", headers: headers() });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.token) {
+        $("tickerTokenOut").textContent = detailText(data, "Could not create token (HTTP " + res.status + ")");
+        return;
+      }
+      $("tickerTokenOut").textContent = "Copy this into the Mac app now. It will not be shown again: " + data.token;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Create app token";
+      }
+    }
   }
 
   async function revoke() {

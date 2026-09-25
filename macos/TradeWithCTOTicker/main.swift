@@ -5,35 +5,77 @@ import Security
 let service = "com.tradewithcto.ticker"
 let defaultBase = "https://www.tradewithcto.com"
 let minW: CGFloat = 300
-let minH: CGFloat = 180
-let maxH: CGFloat = 560
+let minH: CGFloat = 300
+let maxH: CGFloat = 640
+
+final class PanelTextField: NSTextField {
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        super.mouseDown(with: event)
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        window?.makeKeyAndOrderFront(nil)
+        return super.becomeFirstResponder()
+    }
+}
 
 final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let panel = NSPanel(
         contentRect: NSRect(x: 0, y: 0, width: minW, height: minH),
         styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .utilityWindow],
         backing: .buffered,
         defer: false
     )
+    let form = NSStackView()
+    let urlField = PanelTextField(string: "")
+    let tokenField = PanelTextField(string: "")
     let scroll = NSScrollView()
     let stack = NSStackView()
+    let setupFooter = NSView()
+    var changeButton: NSButton!
     var timer: Timer?
     var lastOrigin: NSPoint?
+    var loadingLive = false
+    var setupPinnedOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-        if let button = status.button {
-            button.image = NSImage(systemSymbolName: "chart.line.uptrend.xyaxis", accessibilityDescription: "TradeWithCTO")
-            button.image?.isTemplate = true
-        }
+        NSApp.setActivationPolicy(.regular)
+        applyStatusIcon()
+        applyDockIcon()
         status.menu = makeMenu()
         configurePanel()
-        placePanel(remembered: true)
+        placePanel(remembered: loadToken().isEmpty ? false : true)
         panel.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
         reload()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.reload()
+        }
+    }
+
+    func applyStatusIcon() {
+        guard let button = status.button else { return }
+        if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 28, height: 18)
+            image.isTemplate = false
+            button.image = image
+            button.imagePosition = .imageOnly
+            button.title = ""
+        } else {
+            button.title = "TWCTO"
+            button.image = NSImage(systemSymbolName: "chart.line.uptrend.xyaxis", accessibilityDescription: "TradeWithCTO")
+            button.imagePosition = .imageLeading
+        }
+    }
+
+    func applyDockIcon() {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
         }
     }
 
@@ -59,18 +101,98 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.becomesKeyOnlyIfNeeded = true
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = NSColor(calibratedRed: 0.07, green: 0.09, blue: 0.08, alpha: 1)
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.minSize = NSSize(width: minW, height: minH)
         panel.maxSize = NSSize(width: 460, height: maxH)
         panel.delegate = self
+
+        form.orientation = .vertical
+        form.alignment = .leading
+        form.spacing = 6
+        form.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 8, right: 12)
+        styleField(urlField, placeholder: defaultBase)
+        styleField(tokenField, placeholder: "twt_…")
+        urlField.stringValue = UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase
+        tokenField.stringValue = loadToken()
+        let save = NSButton(title: "Save", target: self, action: #selector(saveFromPanel))
+        save.bezelStyle = .rounded
+        save.contentTintColor = NSColor(calibratedRed: 0.45, green: 0.86, blue: 0.55, alpha: 1)
+        save.keyEquivalent = "\r"
+        form.addArrangedSubview(heading("Server URL"))
+        form.addArrangedSubview(urlField)
+        form.addArrangedSubview(heading("Token"))
+        form.addArrangedSubview(tokenField)
+        form.addArrangedSubview(save)
+
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         scroll.autohidesScrollers = true
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 12, right: 12)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 12, right: 12)
         scroll.documentView = stack
-        panel.contentView = scroll
+
+        changeButton = NSButton(title: "Change server or token", target: self, action: #selector(revealSetup))
+        changeButton.bezelStyle = .inline
+        changeButton.font = NSFont.systemFont(ofSize: 11)
+        changeButton.contentTintColor = NSColor(calibratedWhite: 0.62, alpha: 1)
+        changeButton.translatesAutoresizingMaskIntoConstraints = false
+        setupFooter.addSubview(changeButton)
+        NSLayoutConstraint.activate([
+            changeButton.topAnchor.constraint(equalTo: setupFooter.topAnchor, constant: 2),
+            changeButton.bottomAnchor.constraint(equalTo: setupFooter.bottomAnchor, constant: -6),
+            changeButton.leadingAnchor.constraint(equalTo: setupFooter.leadingAnchor, constant: 10)
+        ])
+
+        let root = NSStackView()
+        root.orientation = .vertical
+        root.alignment = .leading
+        root.spacing = 0
+        root.detachesHiddenViews = true
+        root.addArrangedSubview(form)
+        root.addArrangedSubview(scroll)
+        root.addArrangedSubview(setupFooter)
+        form.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        setupFooter.translatesAutoresizingMaskIntoConstraints = false
+        form.setContentHuggingPriority(.required, for: .vertical)
+        setupFooter.setContentHuggingPriority(.required, for: .vertical)
+        scroll.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        scroll.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        NSLayoutConstraint.activate([
+            form.widthAnchor.constraint(equalTo: root.widthAnchor),
+            scroll.widthAnchor.constraint(equalTo: root.widthAnchor),
+            setupFooter.widthAnchor.constraint(equalTo: root.widthAnchor)
+        ])
+        panel.contentView = root
+        setupPinnedOpen = loadToken().isEmpty
+        applySetupVisibility()
+    }
+
+    func styleField(_ field: NSTextField, placeholder: String) {
+        field.font = NSFont.systemFont(ofSize: 12)
+        field.textColor = NSColor(calibratedWhite: 0.96, alpha: 1)
+        field.backgroundColor = NSColor(calibratedRed: 0.13, green: 0.16, blue: 0.14, alpha: 1)
+        field.drawsBackground = true
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.focusRingType = .exterior
+        field.maximumNumberOfLines = 1
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .foregroundColor: NSColor(calibratedWhite: 0.45, alpha: 1),
+                .font: NSFont.systemFont(ofSize: 12)
+            ]
+        )
+        if let cell = field.cell as? NSTextFieldCell {
+            cell.wraps = false
+            cell.isScrollable = true
+            cell.usesSingleLineMode = true
+        }
+        field.translatesAutoresizingMaskIntoConstraints = false
+        field.widthAnchor.constraint(equalToConstant: 276).isActive = true
     }
 
     func placePanel(remembered: Bool) {
@@ -93,6 +215,23 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func showPanel() { panel.orderFrontRegardless() }
     @objc func quit() { NSApp.terminate(nil) }
 
+    @objc func revealSetup() {
+        setupPinnedOpen = true
+        applySetupVisibility()
+        panel.makeKeyAndOrderFront(nil)
+        tokenField.window?.makeFirstResponder(tokenField)
+    }
+
+    func applySetupVisibility() {
+        let showForm = setupPinnedOpen || loadToken().isEmpty
+        form.isHidden = !showForm
+        setupFooter.isHidden = showForm
+    }
+
+    @objc func saveFromPanel() {
+        persist(url: urlField.stringValue, token: tokenField.stringValue)
+    }
+
     @objc func editToken() {
         let alert = NSAlert()
         alert.messageText = "TradeWithCTO ticker"
@@ -111,11 +250,24 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         box.addArrangedSubview(token)
         alert.accessoryView = box
         NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
         if alert.runModal() == .alertFirstButtonReturn {
-            UserDefaults.standard.set(url.stringValue.trimmingCharacters(in: .whitespaces), forKey: "ticker.base")
-            saveToken(token.stringValue.trimmingCharacters(in: .whitespaces))
-            reload()
+            persist(url: url.stringValue, token: token.stringValue)
         }
+    }
+
+    func persist(url rawURL: String, token rawToken: String) {
+        let url = rawURL.trimmingCharacters(in: .whitespaces)
+        let token = rawToken.trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(url.isEmpty ? defaultBase : url, forKey: "ticker.base")
+        saveToken(token)
+        urlField.stringValue = UserDefaults.standard.string(forKey: "ticker.base") ?? defaultBase
+        tokenField.stringValue = token
+        if !token.isEmpty {
+            setupPinnedOpen = false
+        }
+        applySetupVisibility()
+        reload()
     }
 
     func baseURL() -> String {
@@ -151,20 +303,27 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func reload() {
+        if loadingLive { return }
         let token = loadToken()
         guard !token.isEmpty else {
-            render(message: "Set the app token from Settings.", trades: [], signals: [])
+            setupPinnedOpen = true
+            applySetupVisibility()
+            render(message: "Paste your app token above and click Save.", trades: [], signals: [])
             return
         }
         guard let url = URL(string: baseURL() + "/api/ticker/live") else { return }
+        loadingLive = true
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                self.loadingLive = false
                 if code == 401 {
-                    self.render(message: "Token was rejected. Create a new one in Settings.", trades: [], signals: [])
+                    self.setupPinnedOpen = true
+                    self.applySetupVisibility()
+                    self.render(message: "Token was rejected. Paste a new one and click Save.", trades: [], signals: [])
                     return
                 }
                 guard let data = data,
@@ -202,7 +361,14 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             signals.forEach { stack.addArrangedSubview(signalRow($0)) }
         }
         stack.layoutSubtreeIfNeeded()
-        let height = min(maxH, max(minH, stack.fittingSize.height + 28))
+        form.layoutSubtreeIfNeeded()
+        let stackSize = stack.fittingSize
+        stack.setFrameSize(NSSize(width: max(stackSize.width, 276), height: stackSize.height))
+        let layoutH = panel.contentLayoutRect.height
+        let chrome: CGFloat = layoutH > 1 ? panel.frame.height - layoutH : 28
+        let formH: CGFloat = form.isHidden ? 0 : form.fittingSize.height
+        let footerH: CGFloat = setupFooter.isHidden ? 0 : 28
+        let height = min(maxH, max(minH, formH + footerH + stackSize.height + chrome))
         var frame = panel.frame
         let bottom = frame.minY
         frame.size.height = height

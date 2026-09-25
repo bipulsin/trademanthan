@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -38,6 +39,8 @@ ALGO_LABELS = {
 TOKEN_PREFIX = "twt_"
 
 _CACHE: Dict[str, tuple] = {}
+_tables_ready = False
+_tables_lock = threading.Lock()
 
 
 def _now() -> datetime:
@@ -48,36 +51,66 @@ def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def ensure_ticker_tables() -> None:
-    from backend.database import engine
+def ensure_ticker_tables(db: Optional[Session] = None) -> None:
+    """Create ticker tables once, on the caller's connection.
 
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS ticker_settings (
-                    user_id INTEGER PRIMARY KEY,
-                    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                    algos JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    Opening a second pooled connection (engine.begin) while the request
+    already holds a session deadlocks the pool: each /api/ticker/live poll
+    keeps its connection and waits for another, until Create app token
+    cannot get a connection at all.
+    """
+    global _tables_ready
+    if _tables_ready:
+        return
+    own = False
+    if db is None:
+        from backend.database import SessionLocal
+
+        if SessionLocal is None:
+            return
+        db = SessionLocal()
+        own = True
+    try:
+        with _tables_lock:
+            if _tables_ready:
+                return
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS ticker_settings (
+                        user_id INTEGER PRIMARY KEY,
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        algos JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
                 )
-                """
             )
-        )
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS ticker_tokens (
-                    id BIGSERIAL PRIMARY KEY,
-                    user_id INTEGER NOT NULL,
-                    token_hash TEXT NOT NULL UNIQUE,
-                    token_hint TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    revoked_at TIMESTAMPTZ
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS ticker_tokens (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        token_hash TEXT NOT NULL UNIQUE,
+                        token_hint TEXT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        revoked_at TIMESTAMPTZ
+                    )
+                    """
                 )
-                """
             )
-        )
+            db.commit()
+            _tables_ready = True
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        if own:
+            db.close()
 
 
 def default_algos() -> Dict[str, bool]:
@@ -99,7 +132,7 @@ def _merge_algos(raw: Any) -> Dict[str, bool]:
 
 
 def get_settings(db: Session, user_id: int) -> Dict[str, Any]:
-    ensure_ticker_tables()
+    ensure_ticker_tables(db)
     row = db.execute(
         text("SELECT enabled, algos FROM ticker_settings WHERE user_id = :u"),
         {"u": user_id},
@@ -114,7 +147,7 @@ def get_settings(db: Session, user_id: int) -> Dict[str, Any]:
 
 
 def save_settings(db: Session, user_id: int, enabled: bool, algos: Dict[str, bool]) -> Dict[str, Any]:
-    ensure_ticker_tables()
+    ensure_ticker_tables(db)
     merged = _merge_algos(algos)
     db.execute(
         text(
@@ -133,7 +166,7 @@ def save_settings(db: Session, user_id: int, enabled: bool, algos: Dict[str, boo
 
 
 def issue_token(db: Session, user_id: int) -> Dict[str, Any]:
-    ensure_ticker_tables()
+    ensure_ticker_tables(db)
     raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
     db.execute(
         text(
@@ -148,7 +181,7 @@ def issue_token(db: Session, user_id: int) -> Dict[str, Any]:
 
 
 def revoke_tokens(db: Session, user_id: int) -> int:
-    ensure_ticker_tables()
+    ensure_ticker_tables(db)
     res = db.execute(
         text(
             """
@@ -165,7 +198,7 @@ def revoke_tokens(db: Session, user_id: int) -> int:
 def user_id_for_ticker_token(db: Session, raw: str) -> Optional[int]:
     if not raw or not raw.startswith(TOKEN_PREFIX):
         return None
-    ensure_ticker_tables()
+    ensure_ticker_tables(db)
     row = db.execute(
         text(
             """
@@ -418,6 +451,10 @@ def _tarang_trades() -> List[Dict[str, Any]]:
 
 def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
     settings = get_settings(db, user_id)
+    try:
+        db.close()
+    except Exception:
+        logger.debug("ticker snapshot session close skipped", exc_info=True)
     enabled = bool(settings["enabled"])
     algos = settings["algos"]
     if not enabled:

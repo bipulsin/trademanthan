@@ -565,6 +565,9 @@ app.include_router(left_menu_visibility.router, prefix="/left-menu")
 def _create_tables_background() -> None:
     try:
         create_tables()
+        from backend.services.ticker_live import ensure_ticker_tables
+
+        ensure_ticker_tables()
         logger.info("✅ Database tables created successfully (background)")
     except Exception as e:
         logger.warning(f"⚠️ Could not create database tables: {e}")
