@@ -14,6 +14,9 @@ ENV/
 # IDE
 .vscode/
 .idea/
+xcuserdata/
+*.xcuserstate
+DerivedData/
 *.swp
 *.swo
 *~
