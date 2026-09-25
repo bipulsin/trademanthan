@@ -124,3 +124,102 @@ def test_date_from_val_formats():
     assert _date_from_val("20-08-2026") == "2026-08-20"
     assert _date_from_val("08/20/2026") == "2026-08-20"  # month/day when day>12
 
+
+def test_parse_option_symbol_ignores_futures():
+    from backend.services.trade_log_journal import parse_option_symbol
+
+    assert parse_option_symbol("ITC") is None
+    assert parse_option_symbol("ITC FUT 25 AUG 26") is None
+    assert parse_option_symbol("PFCQ2026") is None
+    parsed = parse_option_symbol("reliance 1200 ce")
+    assert parsed["underlying"] == "RELIANCE"
+    assert parsed["strike"] == 1200
+    assert parsed["right"] == "CE"
+    assert parsed["display"] == "RELIANCE 1200 CE"
+    pe = parse_option_symbol("HDFCBANK 1520.5 PE")
+    assert pe["strike"] == 1520.5
+    assert pe["display"] == "HDFCBANK 1520.5 PE"
+
+
+def test_enrich_option_uses_currmth_expiry_and_option_lot(monkeypatch):
+    from backend.services import trade_log_journal as j
+    import backend.services.stock_option_signals as sos
+
+    monkeypatch.setattr(
+        j,
+        "lookup_master",
+        lambda db, s: {
+            "stock": "RELIANCE",
+            "future_symbol": "RELIANCE FUT 29 SEP 26",
+            "instrument_key": "NSE_FO|RELIANCE26SEPFUT",
+        },
+    )
+    monkeypatch.setattr(sos, "contract_from_arbitrage_master", lambda db, s: "SEP-2026")
+    monkeypatch.setattr(
+        sos,
+        "lookup_option_instrument_key",
+        lambda symbol, strike, right, month, instruments=None: "NSE_FO|RELIANCE26SEP1200CE",
+    )
+    monkeypatch.setattr(
+        sos,
+        "find_option_instrument_by_key",
+        lambda ik, instruments=None: {
+            "instrument_key": ik,
+            "trading_symbol": "RELIANCE 29 SEP 26 1200 CE",
+            "lot_size": 500,
+        },
+    )
+    out = j.enrich_from_master(
+        None,
+        {
+            "symbol": "RELIANCE 1200 CE",
+            "direction": "LONG",
+            "entry_price": 12.15,
+            "exit_price": 14.20,
+            "session_date": "2026-09-25",
+            "entry_time": "10:05:00",
+            "parse_warnings": [],
+        },
+    )
+    assert out["master_ok"] is True
+    assert out["instrument_type"] == "OPT"
+    assert out["symbol"] == "RELIANCE 1200 CE"
+    assert out["contract"] == "RELIANCE 29 SEP 26 1200 CE"
+    assert out["qty"] == 500
+    assert out["points_captured"] == 2.05
+    assert out["option_expiry"] == "SEP-2026"
+
+
+def test_enrich_futures_path_still_uses_future_contract(monkeypatch):
+    from backend.services import trade_log_journal as j
+
+    monkeypatch.setattr(
+        j,
+        "lookup_master",
+        lambda db, s: {
+            "stock": "ITC",
+            "future_symbol": "ITC FUT 29 SEP 26",
+            "instrument_key": "NSE_FO|ITCFUT",
+        },
+    )
+    monkeypatch.setattr(j, "get_futures_lot_size_by_instrument_key", lambda ik: 1600)
+    monkeypatch.setattr(j, "_trading_symbol_index", lambda: {"NSE_FO|ITCFUT": "ITC26SEPFUT"})
+    out = j.enrich_from_master(
+        None,
+        {
+            "symbol": "ITC",
+            "direction": "SHORT",
+            "entry_price": 400,
+            "exit_price": 398,
+            "session_date": "2026-09-25",
+            "entry_time": "10:05:00",
+            "parse_warnings": [],
+        },
+    )
+    assert out["instrument_type"] == "FUT"
+    assert out["symbol"] == "ITC"
+    assert out["contract"] == "ITC26SEPFUT"
+    assert out["qty"] == 1600
+    assert out["points_captured"] == 2
+
+

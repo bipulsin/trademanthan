@@ -32,8 +32,9 @@
                     <div class="tl-title-section">
                         <h1 class="tl-page-title"><i class="fas fa-book" aria-hidden="true"></i> Kavach Trade Log</h1>
                         <p class="tl-subtitle">
-                            Journal executed futures into <code>trade_log</code>.
-                            Contract and lot size come from arbitrage_master; gross P&amp;L is points × qty.
+                            Journal executed futures, or a stock option as <code>RELIANCE 1200 CE</code>.
+                            Futures stay on the current-month future from arbitrage_master.
+                            An option uses that future’s expiry, with option lot size. Gross P&amp;L is points × qty.
                         </p>
                     </div>
                 </div>
@@ -57,11 +58,11 @@
                     </section>
 
                     <section class="tl-card" id="tlPaneForm" role="tabpanel" aria-labelledby="tlTabForm" hidden>
-                        <p class="tl-hint">Use the date picker for a past session. Leave qty blank to use 1 futures lot from master. Selecting a row on Existing trades opens this tab for edit.</p>
+                        <p class="tl-hint">Use the date picker for a past session. Leave qty blank to use 1 lot (futures lot, or the option lot when the symbol is like RELIANCE 1200 CE). Selecting a row on Existing trades opens this tab for edit.</p>
                         <input type="hidden" id="tlEditId" value="">
                         <div class="tl-form">
                             <label>Session date <input type="date" id="tlDate"></label>
-                            <label>Symbol <input type="text" id="tlSymbol" placeholder="ITC or ITC FUT"></label>
+                            <label>Symbol <input type="text" id="tlSymbol" placeholder="ITC or RELIANCE 1200 CE"></label>
                             <label>Side
                                 <select id="tlDir">
                                     <option value="LONG">LONG</option>
@@ -69,12 +70,12 @@
                                 </select>
                             </label>
                             <label>Entry time <input type="time" id="tlEntryTime" step="1"></label>
-                            <label>Entry price <input type="number" id="tlEntryPx" step="0.05"></label>
+                            <label>Entry price <input type="number" id="tlEntryPx" step="0.01"></label>
                             <label>Exit time <input type="time" id="tlExitTime" step="1"></label>
-                            <label>Exit price <input type="number" id="tlExitPx" step="0.05"></label>
+                            <label>Exit price <input type="number" id="tlExitPx" step="0.01"></label>
                             <label>Qty (optional) <input type="number" id="tlQty" step="1" min="1" placeholder="lot size if empty"></label>
                             <label>Slippage pts <input type="number" id="tlSlip" step="0.01" placeholder="optional"></label>
-                            <label>Intended exit <input type="number" id="tlIntended" step="0.05" placeholder="optional"></label>
+                            <label>Intended exit <input type="number" id="tlIntended" step="0.01" placeholder="optional"></label>
                             <label>Exit type
                                 <select id="tlExitType">
                                     <option value="rule_compliant">rule_compliant</option>
@@ -123,6 +124,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.48"></script>
-    <script src="tradelog.js?v=5"></script>
+    <script src="tradelog.js?v=6"></script>
 </body>
 </html>

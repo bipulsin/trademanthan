@@ -315,6 +315,30 @@ def parse_journal_text(text_in: str) -> Dict[str, Any]:
     return out
 
 
+_OPTION_ENTRY = re.compile(
+    r"^([A-Z][A-Z0-9]{0,20})\s+(\d+(?:\.\d+)?)\s*(CE|PE)\s*$",
+    re.I,
+)
+
+
+def parse_option_symbol(symbol_raw: str) -> Optional[Dict[str, Any]]:
+    """``RELIANCE 1200 CE`` → underlying, strike, right. Futures tickers return None."""
+    s = re.sub(r"\s+", " ", (symbol_raw or "").strip().upper())
+    m = _OPTION_ENTRY.match(s)
+    if not m:
+        return None
+    strike = float(m.group(2))
+    strike_label = str(int(strike)) if strike == int(strike) else str(strike)
+    underlying = m.group(1)
+    right = m.group(3)
+    return {
+        "underlying": underlying,
+        "strike": strike,
+        "right": right,
+        "display": f"{underlying} {strike_label} {right}",
+    }
+
+
 def lookup_master(db: Session, symbol_raw: str) -> Optional[Dict[str, Any]]:
     token = (symbol_raw or "").strip()
     if not token:
@@ -361,24 +385,9 @@ def _trading_symbol_index() -> Dict[str, str]:
     return out
 
 
-def enrich_from_master(db: Session, parsed: Dict[str, Any]) -> Dict[str, Any]:
-    """Fill contract, qty (1 lot if omitted), points, gross PnL from master + prices."""
-    out = dict(parsed)
-    warnings = list(parsed.get("parse_warnings") or [])
-    master = lookup_master(db, str(parsed.get("symbol") or ""))
-    if not master:
-        warnings.append("symbol not found in arbitrage_master")
-        out["parse_warnings"] = warnings
-        out["master_ok"] = False
-        return out
-    out["master_ok"] = True
-    out["symbol"] = str(master["stock"]).upper()
-    ikey = master.get("instrument_key") or ""
-    lot = get_futures_lot_size_by_instrument_key(ikey) if ikey else 0
+def _finalize_trade_math(out: Dict[str, Any], warnings: list, lot: Optional[int]) -> Dict[str, Any]:
+    """Qty default, points, and gross P&L. Shared by futures and option fills."""
     out["lot_size"] = lot or None
-    compact = _trading_symbol_index().get(ikey) if ikey else None
-    out["contract"] = compact or master.get("future_symbol")
-    out["future_symbol"] = master.get("future_symbol")
     if out.get("qty") is None:
         if lot and lot > 0:
             out["qty"] = int(lot)
@@ -416,13 +425,86 @@ def enrich_from_master(db: Session, parsed: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _enrich_stock_option(
+    db: Session,
+    out: Dict[str, Any],
+    opt: Dict[str, Any],
+    warnings: list,
+) -> Dict[str, Any]:
+    """``SYMBOL STRIKE CE|PE`` uses the current-month future expiry, not the future contract."""
+    from backend.services.stock_option_signals import (
+        contract_from_arbitrage_master,
+        find_option_instrument_by_key,
+        lookup_option_instrument_key,
+    )
+
+    master = lookup_master(db, opt["underlying"])
+    if not master:
+        warnings.append("symbol not found in arbitrage_master")
+        out["parse_warnings"] = warnings
+        out["master_ok"] = False
+        return out
+    month = contract_from_arbitrage_master(db, opt["underlying"])
+    if not month:
+        warnings.append("current-month future not found for option")
+        out["parse_warnings"] = warnings
+        out["master_ok"] = False
+        return out
+    ikey = lookup_option_instrument_key(opt["underlying"], opt["strike"], opt["right"], month)
+    inst = find_option_instrument_by_key(ikey) if ikey else None
+    if not inst:
+        warnings.append(f"option contract not found for {opt['display']} ({month})")
+        out["parse_warnings"] = warnings
+        out["master_ok"] = False
+        return out
+    try:
+        lot = int(float(inst.get("lot_size") or inst.get("lotSize") or 0))
+    except (TypeError, ValueError):
+        lot = 0
+    out["master_ok"] = True
+    out["instrument_type"] = "OPT"
+    out["symbol"] = opt["display"]
+    out["underlying"] = opt["underlying"]
+    out["contract"] = str(inst.get("trading_symbol") or "").strip() or ikey
+    out["future_symbol"] = master.get("future_symbol")
+    out["option_expiry"] = month
+    out["strike"] = opt["strike"]
+    out["option_right"] = opt["right"]
+    return _finalize_trade_math(out, warnings, lot or None)
+
+
+def enrich_from_master(db: Session, parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill contract, qty (1 lot if omitted), points, gross PnL from master + prices."""
+    out = dict(parsed)
+    warnings = list(parsed.get("parse_warnings") or [])
+    opt = parse_option_symbol(str(parsed.get("symbol") or ""))
+    if opt:
+        return _enrich_stock_option(db, out, opt, warnings)
+    master = lookup_master(db, str(parsed.get("symbol") or ""))
+    if not master:
+        warnings.append("symbol not found in arbitrage_master")
+        out["parse_warnings"] = warnings
+        out["master_ok"] = False
+        return out
+    out["master_ok"] = True
+    out["instrument_type"] = "FUT"
+    out["symbol"] = str(master["stock"]).upper()
+    ikey = master.get("instrument_key") or ""
+    lot = get_futures_lot_size_by_instrument_key(ikey) if ikey else 0
+    compact = _trading_symbol_index().get(ikey) if ikey else None
+    out["contract"] = compact or master.get("future_symbol")
+    out["future_symbol"] = master.get("future_symbol")
+    return _finalize_trade_math(out, warnings, int(lot) if lot else None)
+
+
 def payload_from_enriched(enriched: Dict[str, Any], *, source: str) -> Dict[str, Any]:
     required = ("symbol", "direction", "session_date", "entry_time", "entry_price")
     missing = [k for k in required if not enriched.get(k)]
     if missing:
         raise ValueError("missing required fields: " + ", ".join(missing))
     if not enriched.get("master_ok"):
-        raise ValueError("symbol not found in arbitrage_master")
+        warns = [str(w) for w in (enriched.get("parse_warnings") or []) if not str(w).startswith("missing:")]
+        raise ValueError(warns[-1] if warns else "symbol not found in arbitrage_master")
     if enriched.get("qty") is None:
         raise ValueError("qty missing and lot size unavailable")
     notes = enriched.get("notes") or ""

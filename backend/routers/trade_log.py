@@ -167,7 +167,12 @@ def patch_journal(
                 },
             )
             if not enriched.get("master_ok"):
-                raise ValueError("symbol not found in arbitrage_master")
+                warns = [
+                    str(w)
+                    for w in (enriched.get("parse_warnings") or [])
+                    if not str(w).startswith("missing:")
+                ]
+                raise ValueError(warns[-1] if warns else "symbol not found in arbitrage_master")
             patch["symbol"] = enriched["symbol"]
             if enriched.get("contract"):
                 patch["contract"] = enriched["contract"]

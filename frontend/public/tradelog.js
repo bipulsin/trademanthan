@@ -148,6 +148,7 @@
         var pnl = t.gross_pnl_inr;
         setStatus(
             "Saved #" + (t.id || editId) + " " + t.symbol + " " + t.direction +
+            (t.contract ? (" · " + t.contract) : "") +
             (pnl != null ? (" · gross ₹" + pnl) : ""),
             true
         );
