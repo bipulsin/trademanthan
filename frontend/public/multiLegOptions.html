@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=3" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=4" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -40,15 +40,12 @@
                     </div>
                     <div class="so-header-aside">
                         <div class="mlo-header-actions">
-                            <button type="button" class="button-41" id="mloSyncUpstox"><span class="text">Sync from Upstox</span></button>
+                            <button type="button" class="button-41" id="mloSyncUpstox"><span class="text">Sync frm Broker</span></button>
                             <button type="button" class="button-41" id="mloNewTrade"><span class="text">+ New Trade</span></button>
                         </div>
                     </div>
                 </div>
                 <div class="settings-content">
-                <div class="mlo-ticker" id="mloTickerWrap" hidden>
-                    <div class="mlo-ticker-track" id="mloTicker"></div>
-                </div>
                 <p class="mlo-banner so-note" id="mloBanner" hidden></p>
                 <p class="mlo-sync-banner" id="mloSyncBanner" hidden></p>
                 <nav class="bf-tabs" aria-label="Multi-leg views">
@@ -148,7 +145,26 @@
             </form>
         </div>
     </div>
+    <div class="mlo-modal so-modal" id="mloSyncModal" hidden>
+        <div class="mlo-modal-card so-modal-card mlo-sync-card" role="dialog" aria-modal="true" aria-labelledby="mloSyncTitle">
+            <form id="mloSyncForm">
+                <div class="mlo-modal-head">
+                    <h2 id="mloSyncTitle">Sync frm Broker</h2>
+                    <button type="button" class="mlo-icon-btn" id="mloSyncClose" aria-label="Close">&times;</button>
+                </div>
+                <label class="mlo-sync-date">Trade date
+                    <input id="mloSyncDate" type="date" required />
+                </label>
+                <p class="mlo-meta">NIFTY, BANKNIFTY, and SENSEX option fills placed on this date.</p>
+                <p class="mlo-err" id="mloSyncErr" hidden></p>
+                <div class="mlo-modal-actions">
+                    <button type="button" class="mlo-btn so-modal-btn secondary" id="mloSyncCancel">Cancel</button>
+                    <button type="submit" class="mlo-btn so-modal-btn primary">Sync</button>
+                </div>
+            </form>
+        </div>
+    </div>
     <script src="left-menu.js?v=3.52"></script>
-    <script src="multiLegOptions.js?v=3"></script>
+    <script src="multiLegOptions.js?v=4"></script>
 </body>
 </html>

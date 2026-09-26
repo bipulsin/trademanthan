@@ -7,10 +7,12 @@ from backend.services.multi_leg_options import (
     MultiLegValidationError,
     assert_min_legs,
     assert_ready_to_close,
+    assign_missing_trade_numbers,
     close_block_reason,
     direction_sign,
     leg_pnl,
     next_monthly_option_expiry,
+    next_trade_number,
     status_after_save,
     trade_pnl,
 )
@@ -98,3 +100,28 @@ def test_partial_exit_keeps_trade_active():
     # Saving still leaves the trade ACTIVE until the close endpoint.
     assert status_after_save(closing=False, legs=complete) == "ACTIVE"
     assert status_after_save(closing=True, legs=complete) == "CLOSED"
+
+
+def test_trade_numbers_are_stable_integers():
+    rows = [
+        {"id": "a", "created_at": "2026-01-03T00:00:00", "trade_no": None},
+        {"id": "b", "created_at": "2026-01-01T00:00:00", "trade_no": None},
+        {"id": "c", "created_at": "2026-01-02T00:00:00", "trade_no": None},
+    ]
+    assert assign_missing_trade_numbers(rows) == {"b": 1, "c": 2, "a": 3}
+    # Deleting the middle trade must not renumber the ones that remain.
+    kept = assign_missing_trade_numbers([
+        {"id": "b", "created_at": "2026-01-01T00:00:00", "trade_no": 1},
+        {"id": "a", "created_at": "2026-01-03T00:00:00", "trade_no": 3},
+    ])
+    assert kept == {"b": 1, "a": 3}
+    assert next_trade_number(3) == 4
+    assert next_trade_number(None) == 1
+    again = assign_missing_trade_numbers([
+        {"id": "b", "created_at": "2026-01-01T00:00:00", "trade_no": 1},
+        {"id": "a", "created_at": "2026-01-03T00:00:00", "trade_no": 3},
+        {"id": "d", "created_at": "2026-01-04T00:00:00", "trade_no": None},
+    ])
+    assert again["b"] == 1
+    assert again["a"] == 3
+    assert again["d"] == 4

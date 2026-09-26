@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS multi_leg_trades (
         CHECK (status IN ('ACTIVE', 'CLOSED')),
     exit_date TIMESTAMPTZ,
     total_pnl NUMERIC(18, 4),
+    trade_no INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -12,6 +12,8 @@ from backend.services.multi_leg_upstox_sync import (
     build_sync_plan,
     classify_leg_count,
     group_new_legs,
+    historical_row_to_order,
+    parse_trade_date,
 )
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -218,6 +220,61 @@ def test_missing_lot_is_skipped_without_failing_the_group():
     assert plan["new_legs"] == 1
     assert plan["creates"][0]["trade_type"] == "UNCLASSIFIED"
     assert plan["creates"][0]["legs"][0]["upstox_order_id"] == "B"
+
+
+def test_sync_date_filter_does_not_import_another_day():
+    index = _index(_contract("NSE_FO|1", "CE", 25000))
+    later = _order("NEXT", "NSE_FO|1", "SELL", 12, _stamp(5))
+    # 20:30 UTC on the 26th is 02:00 IST on the 27th.
+    later["order_timestamp"] = "2026-09-26T20:30:00+00:00"
+    orders = [
+        _order("TODAY", "NSE_FO|1", "SELL", 10, _stamp(0)),
+        _order("YDAY", "NSE_FO|1", "SELL", 9, datetime(2026, 9, 25, 15, 10)),
+        later,
+    ]
+    plan = _plan(orders, index)
+    imported = {leg["upstox_order_id"] for item in plan["creates"] for leg in item["legs"]}
+    imported.update(leg["upstox_order_id"] for leg in plan["orphan_legs"])
+    assert imported == {"TODAY"}
+    assert plan["new_legs"] == 1
+    assert plan["new_trades"] == 1
+    other_day = build_sync_plan(
+        orders,
+        index,
+        existing_order_ids=(),
+        existing_trades=(),
+        today=date(2026, 9, 25),
+    )
+    yday_ids = {leg["upstox_order_id"] for item in other_day["creates"] for leg in item["legs"]}
+    assert yday_ids == {"YDAY"}
+    assert "TODAY" not in yday_ids
+
+
+def test_historical_row_from_another_date_is_dropped():
+    index = _index(_contract("NSE_FO|25000", "CE", 25000))
+    row = {
+        "exchange": "NSE",
+        "segment": "FO",
+        "option_type": "CE",
+        "quantity": 75,
+        "trade_id": "T-OTHER",
+        "trade_date": "2026-09-25",
+        "transaction_type": "SELL",
+        "strike_price": 25000,
+        "expiry": "2026-09-29",
+        "price": 100,
+        "symbol": "NIFTY",
+    }
+    assert historical_row_to_order(row, TODAY, index) is None
+    same = dict(row)
+    same["trade_date"] = TODAY.isoformat()
+    same["trade_id"] = "T-TODAY"
+    mapped = historical_row_to_order(same, TODAY, index)
+    assert mapped["order_id"] == "T-TODAY"
+    assert mapped["order_timestamp"].startswith(TODAY.isoformat())
+    assert mapped["instrument_token"] == "NSE_FO|25000"
+    with pytest.raises(MultiLegValidationError, match="YYYY-MM-DD"):
+        parse_trade_date("26-09-2026")
 
 
 def test_assign_sets_trade_id(monkeypatch):

@@ -73,6 +73,10 @@ class AssignBody(BaseModel):
     trade_id: str
 
 
+class SyncBody(BaseModel):
+    trade_date: Optional[str] = None
+
+
 def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -135,9 +139,13 @@ def active(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
 
 
 @router.post("/sync/upstox")
-def sync_upstox(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    """Manual import of today's executed NIFTY, BANKNIFTY, and SENSEX option fills."""
-    return _call(sync_from_upstox)
+def sync_upstox(
+    body: Optional[SyncBody] = None,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Import executed NIFTY, BANKNIFTY, and SENSEX option fills for one IST day."""
+    raw = body.trade_date if body is not None else None
+    return _call(sync_from_upstox, raw)
 
 
 @router.post("/orphans/{leg_id}/assign")

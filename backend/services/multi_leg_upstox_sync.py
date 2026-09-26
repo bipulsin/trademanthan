@@ -1,8 +1,9 @@
-"""Import today's executed NIFTY, BANKNIFTY, and SENSEX option fills into the journal.
+"""Import executed NIFTY, BANKNIFTY, and SENSEX option fills for one IST day.
 
-Uses the existing Upstox client (``get_order_book_today``) and the same
-instrument master the journal already resolves contracts from. Manual New
-Trade still goes through ``create_trade``. This module never places orders.
+Today uses the Upstox order book (``get_order_book_today``). Any other date
+uses FO trade history for that calendar day only. Both paths keep the same
+dedupe, 5-minute grouping, and orphan rules. Manual New Trade still goes
+through ``create_trade``. This module never places orders.
 
 Orphan rule: a new fill whose underlying and expiry already belong to any
 trade (Active or Closed, manual or synced) is stored with trade_id null.
@@ -29,6 +30,7 @@ from backend.services.multi_leg_options import (
     _parse_date,
     _parse_dt,
     _upstox,
+    allocate_trade_no,
     ensure_multi_leg_tables,
 )
 from backend.services.stock_option_signals import expiry_date_from_instrument
@@ -57,6 +59,7 @@ class ContractIndex:
     def __init__(self) -> None:
         self.by_key: Dict[str, Dict[str, Any]] = {}
         self.by_suffix: Dict[str, List[Dict[str, Any]]] = {}
+        self.by_spec: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
 
     def __bool__(self) -> bool:
         return bool(self.by_key)
@@ -165,7 +168,40 @@ def build_contract_index(rows: Sequence[Dict[str, Any]]) -> ContractIndex:
         index.by_key[norm] = contract
         suffix = norm.split("|")[-1]
         index.by_suffix.setdefault(suffix, []).append(contract)
+        spec = (
+            contract["instrument"],
+            contract["expiry"].isoformat(),
+            _strike_token(contract["strike_price"]),
+            contract["option_type"],
+        )
+        index.by_spec[spec] = contract
     return index
+
+
+def _strike_token(raw: Any) -> str:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return ""
+    if abs(value - round(value)) < 1e-6:
+        return str(int(round(value)))
+    return str(value)
+
+
+def contract_for_spec(
+    index: ContractIndex,
+    instrument: Any,
+    expiry: Any,
+    strike: Any,
+    option_type: Any,
+) -> Optional[Dict[str, Any]]:
+    exp = expiry if isinstance(expiry, date) and not isinstance(expiry, datetime) else _parse_date(expiry)
+    name = canonical_underlying(instrument) or str(instrument or "").strip().upper()
+    right = str(option_type or "").strip().upper()
+    token = _strike_token(strike)
+    if exp is None or not name or not token or right not in ("CE", "PE"):
+        return None
+    return index.by_spec.get((name, exp.isoformat(), token, right))
 
 
 def lookup_contract(index: ContractIndex, token: Any) -> Optional[Dict[str, Any]]:
@@ -495,13 +531,16 @@ def _persist_plan(plan: Dict[str, Any], spots: Dict[str, Optional[float]]) -> No
                     spot,
                 )
             trade_id = str(uuid.uuid4())
+            trade_no = allocate_trade_no(db)
             db.execute(
                 text(
                     """
                     INSERT INTO multi_leg_trades (
-                        id, trade_type, instrument, spot_price_entry, entry_date, expiry_date, status, total_pnl
+                        id, trade_type, instrument, spot_price_entry, entry_date, expiry_date,
+                        status, total_pnl, trade_no
                     ) VALUES (
-                        CAST(:id AS uuid), :trade_type, :instrument, :spot, :entry_date, :expiry_date, 'ACTIVE', NULL
+                        CAST(:id AS uuid), :trade_type, :instrument, :spot, :entry_date, :expiry_date,
+                        'ACTIVE', NULL, :trade_no
                     )
                     """
                 ),
@@ -512,6 +551,7 @@ def _persist_plan(plan: Dict[str, Any], spots: Dict[str, Optional[float]]) -> No
                     "spot": spot,
                     "entry_date": created["entry_date"],
                     "expiry_date": created["expiry"],
+                    "trade_no": trade_no,
                 },
             )
             for index, leg in enumerate(created["legs"]):
@@ -540,6 +580,136 @@ def _refresh_subscriptions() -> None:
         logger.info("multi_leg upstox sync: quote subscription refresh failed")
 
 
+def parse_trade_date(raw: Optional[str]) -> date:
+    """YYYY-MM-DD IST calendar day. Empty means today in IST."""
+    text_raw = str(raw or "").strip()
+    if not text_raw:
+        return datetime.now(IST).date()
+    if len(text_raw) != 10:
+        raise MultiLegValidationError("trade_date must be YYYY-MM-DD")
+    try:
+        return date.fromisoformat(text_raw)
+    except ValueError as exc:
+        raise MultiLegValidationError("trade_date must be YYYY-MM-DD") from exc
+
+
+def _historical_stamp(row: Dict[str, Any], trade_date: date) -> str:
+    """Keep a real fill time when the history row has one on this IST day."""
+    for key in ("order_timestamp", "exchange_timestamp", "trade_timestamp", "trade_time"):
+        parsed = _parse_dt(row.get(key))
+        if parsed is not None and parsed.astimezone(IST).date() == trade_date:
+            return parsed.astimezone(IST).strftime("%Y-%m-%d %H:%M:%S")
+    return trade_date.isoformat() + " 15:10:00"
+
+
+def historical_row_to_order(
+    row: Dict[str, Any],
+    trade_date: date,
+    contracts: ContractIndex,
+) -> Optional[Dict[str, Any]]:
+    """Shape one FO history row like an executed order, or skip it.
+
+    Rows whose trade_date is not the requested IST day are dropped here so a
+    wider history payload cannot leak into the sync.
+    """
+    if not isinstance(row, dict):
+        return None
+    row_day = str(row.get("trade_date") or "").strip()[:10]
+    if row_day and row_day != trade_date.isoformat():
+        return None
+    right = str(row.get("option_type") or "").strip().upper()
+    if right not in ("CE", "PE"):
+        return None
+    instrument = canonical_underlying(row.get("symbol") or row.get("scrip_name"))
+    if instrument not in INDEX_UNDERLYINGS:
+        return None
+    expiry = _parse_date(row.get("expiry"))
+    strike = _row_strike(row)
+    trade_id = str(row.get("trade_id") or row.get("order_id") or "").strip()
+    if expiry is None or strike is None or not trade_id:
+        return None
+    contract = contract_for_spec(contracts, instrument, expiry, strike, right)
+    token = str(row.get("instrument_token") or "").strip()
+    if not token and contract:
+        token = str(contract.get("instrument_key") or "").strip()
+    if not token:
+        return None
+    try:
+        qty = float(row.get("quantity") or row.get("filled_quantity") or 0)
+    except (TypeError, ValueError):
+        return None
+    if qty <= 0:
+        return None
+    price = row.get("price")
+    if price is None:
+        price = row.get("average_price")
+    return {
+        "order_id": trade_id,
+        "instrument_token": token,
+        "transaction_type": row.get("transaction_type"),
+        "average_price": price,
+        "filled_quantity": qty,
+        "status": "complete",
+        "order_timestamp": _historical_stamp(row, trade_date),
+        "trading_symbol": f"{instrument}{right}",
+    }
+
+
+def _historical_orders(ux, trade_date: date, contracts: ContractIndex) -> List[Dict[str, Any]]:
+    """FO fills whose trade_date equals the requested day. No other dates."""
+    orders: List[Dict[str, Any]] = []
+    page = 1
+    total_pages = 1
+    while page <= total_pages and page <= 40:
+        response = ux.make_api_request(
+            url="https://api.upstox.com/v2/charges/historical-trades",
+            method="GET",
+            params={
+                "segment": "FO",
+                "start_date": trade_date.isoformat(),
+                "end_date": trade_date.isoformat(),
+                "page_number": page,
+                "page_size": 500,
+            },
+            timeout=20,
+        )
+        if not isinstance(response, dict) or response.get("status") != "success":
+            err = response.get("message") if isinstance(response, dict) else "Upstox trade history failed"
+            errors = response.get("errors") if isinstance(response, dict) else None
+            if isinstance(errors, list) and errors:
+                first = errors[0]
+                if isinstance(first, dict) and first.get("message"):
+                    err = first.get("message")
+            raise _token_error(str(err or "Upstox trade history failed"))
+        data = response.get("data") or []
+        if not isinstance(data, list):
+            data = []
+        for row in data:
+            mapped = historical_row_to_order(row, trade_date, contracts)
+            if mapped:
+                orders.append(mapped)
+        meta = response.get("metadata") if isinstance(response.get("metadata"), dict) else {}
+        page_meta = meta.get("page") if isinstance(meta.get("page"), dict) else {}
+        try:
+            total_pages = int(page_meta.get("total_pages") or 1)
+        except (TypeError, ValueError):
+            total_pages = 1
+        page += 1
+    return orders
+
+
+def _orders_for_trade_date(ux, trade_date: date, contracts: ContractIndex) -> List[Dict[str, Any]]:
+    """Today comes from the order book. Any other day comes only from that day's history."""
+    if trade_date == datetime.now(IST).date():
+        book = ux.get_order_book_today()
+        if not isinstance(book, dict) or not book.get("success"):
+            err = book.get("error") if isinstance(book, dict) else "Upstox order book failed"
+            raise _token_error(str(err or "Upstox order book failed"))
+        orders = book.get("orders") or []
+        return orders if isinstance(orders, list) else []
+    return _historical_orders(ux, trade_date, contracts)
+
+
 def _token_error(message: str) -> MultiLegValidationError:
     text_msg = str(message or "Upstox order book failed").strip()
     low = text_msg.lower()
@@ -548,20 +718,15 @@ def _token_error(message: str) -> MultiLegValidationError:
     return MultiLegValidationError(text_msg)
 
 
-def sync_from_upstox() -> Dict[str, Any]:
-    """Pull today's executed index-option orders and write new legs once."""
+def sync_from_upstox(trade_date: Optional[str] = None) -> Dict[str, Any]:
+    """Pull executed index-option orders for one IST day and write new legs once."""
+    as_of = parse_trade_date(trade_date)
     ensure_multi_leg_tables()
     ux = _upstox()
     if not getattr(ux, "access_token", None):
         raise MultiLegValidationError("Upstox access token is missing or expired")
-    book = ux.get_order_book_today()
-    if not isinstance(book, dict) or not book.get("success"):
-        err = book.get("error") if isinstance(book, dict) else "Upstox order book failed"
-        raise _token_error(str(err or "Upstox order book failed"))
-    orders = book.get("orders") or []
-    if not isinstance(orders, list):
-        orders = []
     contracts = journal_contract_index()
+    orders = _orders_for_trade_date(ux, as_of, contracts)
     db = SessionLocal()
     try:
         existing_ids, existing_trades = _load_existing(db)
@@ -572,7 +737,7 @@ def sync_from_upstox() -> Dict[str, Any]:
         contracts,
         existing_order_ids=existing_ids,
         existing_trades=existing_trades,
-        today=datetime.now(IST).date(),
+        today=as_of,
     )
     spots = _spot_prices(item["instrument"] for item in plan["creates"])
     if plan["creates"] or plan["orphan_legs"]:
@@ -587,6 +752,7 @@ def sync_from_upstox() -> Dict[str, Any]:
         "skipped_no_lot": plan["skipped_no_lot"],
         "skipped_unmapped": plan["skipped_unmapped"],
         "master_empty": not contracts,
+        "trade_date": as_of.isoformat(),
     }
     logger.info("multi_leg upstox sync: %s", summary)
     return summary
@@ -640,7 +806,7 @@ def list_assignable_trades() -> List[Dict[str, Any]]:
     try:
         rows = db.execute(text(
             """
-            SELECT CAST(id AS text) AS id, trade_type, instrument,
+            SELECT CAST(id AS text) AS id, trade_no, trade_type, instrument,
                    expiry_date, status, entry_date
             FROM multi_leg_trades
             ORDER BY entry_date DESC, created_at DESC
@@ -654,6 +820,7 @@ def list_assignable_trades() -> List[Dict[str, Any]]:
         entry = _parse_date(row.get("entry_date"))
         out.append({
             "id": str(row.get("id")),
+            "trade_no": int(row["trade_no"]) if row.get("trade_no") is not None else None,
             "trade_type": row.get("trade_type"),
             "instrument": row.get("instrument"),
             "expiry_date": expiry.isoformat() if expiry else None,

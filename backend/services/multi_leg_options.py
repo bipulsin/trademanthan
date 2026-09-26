@@ -611,6 +611,53 @@ def get_quote(
     }
 
 
+def next_trade_number(current_max: Optional[int]) -> int:
+    """Next stable Trade No. Existing numbers stay put; delete does not reuse a gap."""
+    if current_max is None:
+        return 1
+    return int(current_max) + 1
+
+
+def assign_missing_trade_numbers(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    """Keep stored numbers. Rows without one get the next integers by created_at.
+
+    Oldest created_at is numbered first. A later delete does not renumber the rest.
+    """
+    def sort_key(row: Dict[str, Any]) -> Tuple[str, str]:
+        raw = row.get("created_at")
+        stamp = raw.isoformat() if isinstance(raw, datetime) else str(raw or "")
+        return stamp, str(row.get("id") or "")
+
+    kept: Dict[str, int] = {}
+    highest = 0
+    missing: List[Dict[str, Any]] = []
+    for row in rows or []:
+        tid = str(row.get("id") or "")
+        if not tid:
+            continue
+        current = _as_int(row.get("trade_no"))
+        if current is None:
+            missing.append(row)
+            continue
+        kept[tid] = current
+        if current > highest:
+            highest = current
+    assigned = dict(kept)
+    cursor = highest
+    for row in sorted(missing, key=sort_key):
+        cursor = next_trade_number(cursor if cursor else None)
+        assigned[str(row.get("id"))] = cursor
+    return assigned
+
+
+def allocate_trade_no(conn) -> int:
+    """Lock, then take max(trade_no)+1. Call inside the insert transaction."""
+    conn.execute(text("SELECT pg_advisory_xact_lock(845221937)"))
+    row = conn.execute(text("SELECT MAX(trade_no) AS n FROM multi_leg_trades")).fetchone()
+    current = int(row[0]) if row and row[0] is not None else None
+    return next_trade_number(current)
+
+
 def dte_days(expiry: Any, as_of: Optional[date] = None) -> Optional[int]:
     exp = _parse_date(expiry)
     if exp is None:
@@ -660,6 +707,42 @@ def _ensure_upstox_sync_schema(conn) -> None:
     ))
 
 
+def _ensure_trade_numbers(conn) -> None:
+    """Add trade_no and backfill 1..n by created_at. Stored numbers are never rewritten."""
+    conn.execute(text("ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS trade_no INTEGER"))
+    conn.execute(text("SELECT pg_advisory_xact_lock(845221937)"))
+    rows = conn.execute(text(
+        """
+        SELECT CAST(id AS text) AS id, trade_no, created_at
+        FROM multi_leg_trades
+        """
+    )).mappings().all()
+    assigned = assign_missing_trade_numbers([dict(row) for row in rows])
+    for row in rows:
+        if _as_int(row.get("trade_no")) is not None:
+            continue
+        tid = str(row.get("id") or "")
+        number = assigned.get(tid)
+        if number is None:
+            continue
+        conn.execute(
+            text(
+                """
+                UPDATE multi_leg_trades
+                SET trade_no = :n
+                WHERE id = CAST(:id AS uuid) AND trade_no IS NULL
+                """
+            ),
+            {"id": tid, "n": number},
+        )
+    conn.execute(text(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_multi_leg_trades_trade_no
+        ON multi_leg_trades (trade_no)
+        """
+    ))
+
+
 def ensure_multi_leg_tables() -> None:
     global _ENSURED
     if _ENSURED:
@@ -670,6 +753,7 @@ def ensure_multi_leg_tables() -> None:
     with engine.begin() as conn:
         conn.execute(text(sql))
         _ensure_upstox_sync_schema(conn)
+        _ensure_trade_numbers(conn)
     _ENSURED = True
     logger.info("multi_leg tables ensured")
 
@@ -797,7 +881,7 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
             f"""
             SELECT t.id AS trade_id, t.trade_type, t.instrument, t.spot_price_entry,
                    t.entry_date, t.expiry_date, t.status, t.exit_date, t.total_pnl,
-                   t.created_at, t.updated_at,
+                   t.trade_no, t.created_at, t.updated_at,
                    l.id AS leg_id, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
                    l.entry_price, l.entry_time, l.exit_price, l.exit_time, l.ltp, l.delta,
                    l.lot_size, l.instrument_key, l.leg_pnl, l.upstox_order_id, l.sort_order
@@ -852,6 +936,7 @@ def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dic
     entry = _parse_date(header.get("entry_date"))
     return {
         "id": str(header.get("trade_id") or header.get("id")),
+        "trade_no": _as_int(header.get("trade_no")),
         "trade_type": header.get("trade_type"),
         "instrument": header.get("instrument"),
         "spot_price_entry": _as_float(header.get("spot_price_entry")),
@@ -933,13 +1018,16 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
     total = trade_pnl(l.get("leg_pnl") for l in legs)
     db = SessionLocal()
     try:
+        trade_no = allocate_trade_no(db)
         db.execute(
             text(
                 """
                 INSERT INTO multi_leg_trades (
-                    id, trade_type, instrument, spot_price_entry, entry_date, expiry_date, status, total_pnl
+                    id, trade_type, instrument, spot_price_entry, entry_date, expiry_date,
+                    status, total_pnl, trade_no
                 ) VALUES (
-                    CAST(:id AS uuid), :trade_type, :instrument, :spot, :entry_date, :expiry_date, :status, :pnl
+                    CAST(:id AS uuid), :trade_type, :instrument, :spot, :entry_date, :expiry_date,
+                    :status, :pnl, :trade_no
                 )
                 """
             ),
@@ -952,6 +1040,7 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
                 "expiry_date": header["expiry_date"],
                 "status": status,
                 "pnl": total,
+                "trade_no": trade_no,
             },
         )
         for i, leg in enumerate(legs):

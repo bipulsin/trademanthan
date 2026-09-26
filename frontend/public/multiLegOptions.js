@@ -10,6 +10,7 @@
   var reportRows = [];
   var reportSort = { key: "entry_date", dir: -1 };
   var tab = "active";
+  var expandedTrades = {};
   var mode = "new";
   var editingId = null;
   var expiryTouched = false;
@@ -63,10 +64,56 @@
   }
 
   function todayISO() {
+    try {
+      var parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      if (/^\d{4}-\d{2}-\d{2}$/.test(parts)) return parts;
+    } catch (e) { /* local date below */ }
     var d = new Date();
     var m = String(d.getMonth() + 1).padStart(2, "0");
     var day = String(d.getDate()).padStart(2, "0");
     return d.getFullYear() + "-" + m + "-" + day;
+  }
+
+  function pad2(n) { return String(n).padStart(2, "0"); }
+
+  function hourLabel(h) {
+    var period = h >= 12 ? "PM" : "AM";
+    var hr = h % 12;
+    if (hr === 0) hr = 12;
+    return pad2(hr) + " " + period;
+  }
+
+  function hourOptions(selected) {
+    var html = "";
+    for (var h = 0; h < 24; h++) {
+      html += '<option value="' + h + '"' + (h === selected ? " selected" : "") + ">" + hourLabel(h) + "</option>";
+    }
+    return html;
+  }
+
+  function minuteOptions(selected) {
+    var html = "";
+    for (var m = 0; m < 60; m++) {
+      html += '<option value="' + m + '"' + (m === selected ? " selected" : "") + ">" + pad2(m) + "</option>";
+    }
+    return html;
+  }
+
+  function timeSelects(hourName, minuteName, hour, minute) {
+    return '<span class="mlo-time">' +
+      '<select data-f="' + hourName + '" aria-label="Hour" required>' + hourOptions(hour) + "</select>" +
+      '<select data-f="' + minuteName + '" aria-label="Minute" required>' + minuteOptions(minute) + "</select>" +
+      "</span>";
+  }
+
+  function composeLocal(dateStr, hour, minute) {
+    if (!dateStr && dateStr !== 0) return "";
+    return String(dateStr) + "T" + pad2(hour) + ":" + pad2(minute);
   }
 
   function parseISODate(s) {
@@ -174,48 +221,80 @@
     $("mloDte").textContent = days == null ? "DTE —" : "DTE " + days;
   }
 
+  function clockParts(iso) {
+    if (!iso) return null;
+    var d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) {
+      var bag = {};
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(d).forEach(function (part) { bag[part.type] = part.value; });
+      var hour = Number(bag.hour);
+      if (hour === 24) hour = 0;
+      return {
+        date: bag.year + "-" + bag.month + "-" + bag.day,
+        hour: hour,
+        minute: Number(bag.minute),
+      };
+    }
+    var match = String(iso).match(/(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/);
+    if (!match) return null;
+    return { date: match[1], hour: Number(match[2]), minute: Number(match[3]) };
+  }
+
   function legCard(leg, exitMode) {
     var wrap = document.createElement("div");
     wrap.className = "mlo-leg";
     if (leg && leg.id) wrap.dataset.id = leg.id;
-    var exit = exitMode
-      ? '<label>Exit price<input data-f="exit_price" type="number" min="0" step="0.01" value="' + esc(leg && leg.exit_price != null ? leg.exit_price : "") + '"></label>' +
-        '<label>Exit time<input data-f="exit_time" type="datetime-local" value="' + esc(toLocal(leg && leg.exit_time)) + '"></label>'
-      : "";
+    var entryClock = clockParts(leg && leg.entry_time);
+    var entryHour = entryClock ? entryClock.hour : 15;
+    var entryMinute = entryClock ? entryClock.minute : 10;
+    var exit = "";
+    if (exitMode) {
+      var exitClock = clockParts(leg && leg.exit_time);
+      var exitDate = exitClock ? exitClock.date : todayISO();
+      var exitHour = exitClock ? exitClock.hour : 15;
+      var exitMinute = exitClock ? exitClock.minute : 10;
+      exit = '<label>Exit price<input data-f="exit_price" type="number" min="0" step="0.01" value="' + esc(leg && leg.exit_price != null ? leg.exit_price : "") + '"></label>' +
+        '<label>Exit date<input data-f="exit_date" type="date" value="' + esc(exitDate) + '"></label>' +
+        '<label>Exit time' + timeSelects("exit_hour", "exit_minute", exitHour, exitMinute) + "</label>";
+    }
     wrap.innerHTML =
       '<label>Side<select data-f="side"><option>BUY</option><option>SELL</option></select></label>' +
       '<label>Type<select data-f="option_type"><option>CE</option><option>PE</option></select></label>' +
       '<label>Strike<input data-f="strike_price" type="number" min="0" step="0.01" required></label>' +
       '<label>Expiry<input data-f="leg_expiry_date" type="date" required></label>' +
       '<label>Entry price<input data-f="entry_price" type="number" min="0" step="0.01" required></label>' +
-      '<label>Entry time<input data-f="entry_time" type="datetime-local" required></label>' +
+      '<label>Time' + timeSelects("entry_hour", "entry_minute", entryHour, entryMinute) + "</label>" +
       exit +
-      '<button type="button" class="mlo-btn so-modal-btn secondary mlo-remove">Remove</button>';
+      '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
     wrap.querySelector('[data-f="side"]').value = (leg && leg.side) || "SELL";
     wrap.querySelector('[data-f="option_type"]').value = (leg && leg.option_type) || "CE";
     wrap.querySelector('[data-f="strike_price"]').value = leg && leg.strike_price != null ? leg.strike_price : "";
     wrap.querySelector('[data-f="leg_expiry_date"]').value = (leg && leg.leg_expiry_date) || $("mloExpiry").value || "";
     wrap.querySelector('[data-f="entry_price"]').value = leg && leg.entry_price != null ? leg.entry_price : "";
-    wrap.querySelector('[data-f="entry_time"]').value = toLocal(leg && leg.entry_time) || nowLocal();
     wrap.querySelector(".mlo-remove").addEventListener("click", function () {
       wrap.remove();
       refreshSaveGate();
     });
-    wrap.querySelectorAll("input").forEach(function (inp) {
+    wrap.querySelectorAll("input, select").forEach(function (inp) {
       inp.addEventListener("input", refreshSaveGate);
+      inp.addEventListener("change", refreshSaveGate);
     });
     return wrap;
   }
 
   function toLocal(iso) {
-    if (!iso) return "";
-    var d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso).slice(0, 16);
-    var pad = function (n) { return String(n).padStart(2, "0"); };
-    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    var parts = clockParts(iso);
+    if (!parts) return "";
+    return parts.date + "T" + pad2(parts.hour) + ":" + pad2(parts.minute);
   }
-
-  function nowLocal() { return toLocal(new Date().toISOString()); }
 
   function addLeg(leg) {
     $("mloLegs").appendChild(legCard(leg, mode === "exit"));
@@ -227,8 +306,11 @@
     if (!rows.length) return false;
     for (var i = 0; i < rows.length; i++) {
       var px = rows[i].querySelector('[data-f="exit_price"]');
-      var tm = rows[i].querySelector('[data-f="exit_time"]');
-      if (!px || !tm || px.value === "" || !tm.value) return false;
+      var day = rows[i].querySelector('[data-f="exit_date"]');
+      var hour = rows[i].querySelector('[data-f="exit_hour"]');
+      var minute = rows[i].querySelector('[data-f="exit_minute"]');
+      if (!px || !day || !hour || !minute) return false;
+      if (px.value === "" || !day.value || hour.value === "" || minute.value === "") return false;
     }
     return true;
   }
@@ -245,14 +327,15 @@
         strike_price: Number(val("strike_price")),
         leg_expiry_date: val("leg_expiry_date"),
         entry_price: Number(val("entry_price")),
-        entry_time: val("entry_time"),
+        entry_time: composeLocal($("mloEntryDate").value, val("entry_hour"), val("entry_minute")),
       };
       if (row.dataset.id) leg.id = row.dataset.id;
       var exitPx = val("exit_price");
-      var exitTm = val("exit_time");
+      var exitDay = val("exit_date");
       if (exitPx !== "") leg.exit_price = Number(exitPx);
       else leg.exit_price = null;
-      leg.exit_time = exitTm || null;
+      if (exitDay) leg.exit_time = composeLocal(exitDay, val("exit_hour"), val("exit_minute"));
+      else leg.exit_time = null;
       return leg;
     });
   }
@@ -341,26 +424,25 @@
     $("mloModal").hidden = true;
   }
 
-  function renderTicker(trades) {
-    var wrap = $("mloTickerWrap");
-    var track = $("mloTicker");
-    if (!trades.length) { wrap.hidden = true; track.innerHTML = ""; return; }
-    var bits = trades.map(function (t) {
-      return '<span class="mlo-ticker-item">' + esc(t.instrument) + " " +
-        '<span class="' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</span></span>";
-    }).join("");
-    track.innerHTML = bits + bits;
-    wrap.hidden = false;
-  }
-
   function assignFieldFocused() {
     var el = document.activeElement;
     return !!(el && el.closest && el.closest(".mlo-orphan-assign"));
   }
 
   function tradeChoiceLabel(t) {
-    return t.id + " · " + t.instrument + " · " + t.expiry_date + " · " + typeLabel(t.trade_type) +
-      (t.status === "CLOSED" ? " · Closed" : "");
+    var num = t.trade_no != null ? String(t.trade_no) : "—";
+    return num + " · " + t.instrument + " · " + t.expiry_date;
+  }
+
+  function rowField(label, value, extraClass) {
+    return '<span class="mlo-row-field"><span class="mlo-row-k">' + label + "</span>" +
+      '<span class="' + (extraClass || "") + '">' + esc(value) + "</span></span>";
+  }
+
+  function iconButton(act, label, icon, expanded) {
+    return '<button type="button" class="mlo-icon-btn" data-act="' + act + '" aria-label="' + esc(label) + '"' +
+      (act === "toggle" ? ' aria-expanded="' + (expanded ? "true" : "false") + '"' : "") + ">" +
+      '<i class="fas ' + icon + '" aria-hidden="true"></i></button>';
   }
 
   function renderOrphans(orphans) {
@@ -378,7 +460,7 @@
           '<span class="mlo-badge">Orphan</span>' +
         "</div>" +
         '<div class="mlo-combo mlo-orphan-assign">' +
-          '<input type="text" placeholder="Assign to trade — search id or underlying + expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
+          '<input type="text" placeholder="Assign to trade — search number, instrument, or expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
           '<div class="mlo-combo-list" hidden></div>' +
         "</div></article>";
     }).join("");
@@ -390,11 +472,11 @@
   function renderActive(trades, orphans) {
     activeTrades = trades || [];
     if (orphans) orphanLegs = orphans;
-    renderTicker(activeTrades);
     if (assignFieldFocused()) return;
     var host = $("mloActive");
     var empty = '<p class="mlo-empty">No active trades. Use + New Trade to record a straddle, iron fly, or iron condor.</p>';
     var cards = activeTrades.length ? activeTrades.map(function (t) {
+      var open = !!expandedTrades[t.id];
       var legs = (t.legs || []).map(function (leg) {
         var mark = leg.exited ? leg.exit_price : leg.ltp;
         var markLabel = leg.exited ? "Exit" : "LTP";
@@ -409,19 +491,20 @@
           "</div>";
       }).join("");
       var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
-      return '<article class="mlo-card so-card" data-id="' + esc(t.id) + '">' +
-        '<div class="mlo-card-head">' +
-          '<div><h2>' + esc(t.instrument) + " · " + esc(typeLabel(t.trade_type)) + "</h2>" +
-          '<div class="mlo-meta">Trade ID <span class="mlo-trade-id">' + esc(t.id) + "</span></div>" +
-          '<div class="mlo-meta">Expiry ' + esc(t.expiry_date) + " · spot " + esc(t.spot_price_entry) + "</div></div>" +
-          '<div class="mlo-dte-lg">DTE ' + esc(t.dte) + "</div>" +
-          '<div class="mlo-total ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</div>" +
-        "</div>" + head + legs +
-        '<div class="mlo-card-actions" style="margin-top:10px">' +
-          '<button type="button" class="mlo-btn so-modal-btn secondary" data-act="edit">Edit</button>' +
-          '<button type="button" class="mlo-btn so-modal-btn secondary" data-act="exit">Exit Trade</button>' +
-          '<button type="button" class="mlo-btn so-modal-btn danger" data-act="delete">Delete</button>' +
-        "</div></article>";
+      return '<article class="mlo-trade so-card" data-id="' + esc(t.id) + '">' +
+        '<div class="mlo-row-summary">' +
+          rowField("Trade No", t.trade_no == null ? "—" : t.trade_no) +
+          rowField("Instrument and Type", t.instrument + " · " + typeLabel(t.trade_type)) +
+          rowField("Expiry date", t.expiry_date || "—") +
+          rowField("DTE", t.dte == null ? "—" : t.dte) +
+          rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl)) +
+          '<span class="mlo-row-actions">' +
+            iconButton("edit", "Edit", "fa-pen") +
+            iconButton("delete", "Delete", "fa-trash") +
+            iconButton("exit", "Exit Trade", "fa-right-from-bracket") +
+            iconButton("toggle", open ? "Collapse" : "Expand", open ? "fa-chevron-up" : "fa-chevron-down", open) +
+          "</span></div>" +
+        '<div class="mlo-row-body"' + (open ? "" : " hidden") + ">" + head + legs + "</div></article>";
     }).join("") : empty;
     host.innerHTML = renderOrphans(orphanLegs) + cards;
   }
@@ -543,7 +626,7 @@
   }
 
   $("mloNewTrade").addEventListener("click", function () { openModal("new", null); });
-  $("mloSyncUpstox").addEventListener("click", syncFromUpstox);
+  $("mloSyncUpstox").addEventListener("click", openSyncModal);
   $("mloCancel").addEventListener("click", closeModal);
   $("mloModalClose").addEventListener("click", closeModal);
   $("mloAddLeg").addEventListener("click", function () { addLeg(null); });
@@ -610,7 +693,7 @@
     var q = input.value.trim().toUpperCase();
     var hits = assignableTrades.filter(function (t) {
       if (!q) return true;
-      var hay = (t.id + " " + t.instrument + " " + t.expiry_date + " " + t.trade_type).toUpperCase();
+      var hay = ((t.trade_no == null ? "" : t.trade_no) + " " + t.instrument + " " + t.expiry_date + " " + t.trade_type).toUpperCase();
       return hay.indexOf(q) >= 0;
     }).slice(0, 30);
     list.innerHTML = hits.length ? hits.map(function (t) {
@@ -632,22 +715,53 @@
     }
   }
 
-  async function syncFromUpstox() {
+  function openSyncModal() {
+    $("mloSyncDate").value = todayISO();
+    $("mloSyncErr").hidden = true;
+    $("mloSyncErr").textContent = "";
+    $("mloSyncModal").hidden = false;
+  }
+
+  function closeSyncModal() {
+    $("mloSyncModal").hidden = true;
+  }
+
+  async function syncFromUpstox(tradeDate) {
     var btn = $("mloSyncUpstox");
     var label = btn.querySelector(".text");
     btn.disabled = true;
     if (label) label.textContent = "Syncing…";
     try {
-      var data = await api("/sync/upstox", { method: "POST" });
-      setSyncBanner(syncSummary(data), false);
+      var data = await api("/sync/upstox", {
+        method: "POST",
+        body: JSON.stringify({ trade_date: tradeDate }),
+      });
+      var dated = data.trade_date ? data.trade_date + ": " : "";
+      setSyncBanner(dated + syncSummary(data), false);
+      closeSyncModal();
       await loadActive(true);
     } catch (e) {
-      setSyncBanner(e.message || "Sync from Upstox failed", true);
+      $("mloSyncErr").hidden = false;
+      $("mloSyncErr").textContent = e.message || "Sync failed";
+      setSyncBanner(e.message || "Sync failed", true);
     } finally {
       btn.disabled = false;
-      if (label) label.textContent = "Sync from Upstox";
+      if (label) label.textContent = "Sync frm Broker";
     }
   }
+
+  $("mloSyncCancel").addEventListener("click", closeSyncModal);
+  $("mloSyncClose").addEventListener("click", closeSyncModal);
+  $("mloSyncForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var day = $("mloSyncDate").value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      $("mloSyncErr").hidden = false;
+      $("mloSyncErr").textContent = "Choose a trade date";
+      return;
+    }
+    syncFromUpstox(day);
+  });
 
   $("mloActive").addEventListener("input", function (ev) {
     var input = ev.target.closest(".mlo-orphan-assign input");
@@ -668,10 +782,23 @@
     }
     var btn = ev.target.closest("button[data-act]");
     if (!btn) return;
-    var card = btn.closest(".mlo-card");
+    var card = btn.closest(".mlo-trade");
+    if (!card) return;
     var trade = tradeById(card.getAttribute("data-id"));
     if (!trade) return;
     var act = btn.getAttribute("data-act");
+    if (act === "toggle") {
+      var body = card.querySelector(".mlo-row-body");
+      var willOpen = !!(body && body.hidden);
+      if (body) body.hidden = !willOpen;
+      if (willOpen) expandedTrades[trade.id] = true;
+      else delete expandedTrades[trade.id];
+      var icon = btn.querySelector("i");
+      if (icon) icon.className = willOpen ? "fas fa-chevron-up" : "fas fa-chevron-down";
+      btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      btn.setAttribute("aria-label", willOpen ? "Collapse" : "Expand");
+      return;
+    }
     if (act === "edit") openModal("edit", trade);
     if (act === "exit") openModal("exit", trade);
     if (act === "delete") {
