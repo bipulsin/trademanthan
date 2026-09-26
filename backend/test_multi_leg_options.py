@@ -177,3 +177,146 @@ def test_parse_clock_03_10_pm():
     plain = _parse_dt("2026-09-17T15:10")
     assert plain is not None
     assert plain.hour == 15 and plain.minute == 10
+
+
+class _Fetch:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class _RecordingDB:
+    def __init__(self):
+        self.statements = []
+
+    def execute(self, stmt, params=None):
+        sql = str(stmt)
+        self.statements.append((sql, dict(params or {})))
+        if "MAX(trade_no)" in sql:
+            return _Fetch((None,))
+        return _Fetch(None)
+
+    def commit(self):
+        return None
+
+    def rollback(self):
+        return None
+
+    def close(self):
+        return None
+
+
+def _leg(right):
+    return {
+        "side": "SELL",
+        "option_type": right,
+        "strike_price": 25000,
+        "entry_price": 100,
+        "entry_time": "2026-09-26T09:20:00+05:30",
+        "leg_expiry_date": "2026-11-24",
+    }
+
+
+def _trade_body(**extra):
+    body = {
+        "trade_type": "STRADDLE",
+        "instrument": "NIFTY",
+        "spot_price_entry": 25000,
+        "entry_date": "2026-09-26",
+        "expiry_date": "2026-11-24",
+        "legs": [_leg("CE"), _leg("PE")],
+    }
+    body.update(extra)
+    return body
+
+
+def _bind_multi_leg_db(monkeypatch, db, stored=None):
+    from backend.services import multi_leg_options as mlo
+
+    monkeypatch.setattr(mlo, "ensure_multi_leg_tables", lambda: None)
+    monkeypatch.setattr(mlo, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        mlo,
+        "resolve_option_contract",
+        lambda instrument, strike, option_type, expiry: {
+            "lot_size": 75,
+            "instrument_key": "NSE_FO|NIFTY",
+        },
+    )
+    monkeypatch.setattr(mlo, "get_trade", lambda trade_id: stored if stored is not None else {"id": trade_id})
+    monkeypatch.setattr(
+        "backend.services.multi_leg_ws_ltp.sync_subscriptions",
+        lambda **kwargs: None,
+    )
+    return mlo
+
+
+def _sql_params(db, marker):
+    matches = [params for sql, params in db.statements if marker in sql]
+    assert matches, marker
+    return matches[0], next(sql for sql, params in db.statements if marker in sql)
+
+
+def test_create_stores_max_profit(monkeypatch):
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db)
+    mlo.create_trade(_trade_body(max_profit=1234.5))
+    params, sql = _sql_params(db, "INSERT INTO multi_leg_trades")
+    assert "max_profit" in sql
+    assert params["max_profit"] == 1234.5
+
+    empty = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, empty)
+    mlo.create_trade(_trade_body(max_profit=""))
+    params, _sql = _sql_params(empty, "INSERT INTO multi_leg_trades")
+    assert params["max_profit"] is None
+
+
+def test_edit_updates_max_profit(monkeypatch):
+    stored = _trade_body(max_profit=1000)
+    stored["id"] = "11111111-1111-1111-1111-111111111111"
+    stored["status"] = "ACTIVE"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    mlo.update_trade(stored["id"], _trade_body(max_profit=2500))
+    params, sql = _sql_params(db, "UPDATE multi_leg_trades SET")
+    assert "max_profit = :max_profit" in sql
+    assert params["max_profit"] == 2500
+
+
+def test_save_omitting_max_profit_keeps_previous_value(monkeypatch):
+    stored = _trade_body(max_profit=1800)
+    stored["id"] = "22222222-2222-2222-2222-222222222222"
+    stored["status"] = "ACTIVE"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    body = _trade_body()
+    assert "max_profit" not in body
+    mlo.update_trade(stored["id"], body)
+    params, sql = _sql_params(db, "UPDATE multi_leg_trades SET")
+    assert "max_profit" not in sql
+    assert "max_profit" not in params
+
+
+def test_close_without_max_profit_does_not_clear_it(monkeypatch):
+    ce = _leg("CE")
+    pe = _leg("PE")
+    ce["exit_price"] = 10
+    ce["exit_time"] = "2026-09-26T15:30:00+05:30"
+    pe["exit_price"] = 8
+    pe["exit_time"] = "2026-09-26T15:30:00+05:30"
+    stored = _trade_body(max_profit=1800, legs=[ce, pe])
+    stored["id"] = "33333333-3333-3333-3333-333333333333"
+    stored["status"] = "ACTIVE"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    mlo.close_trade(stored["id"], {"legs": [ce, pe]})
+    updates = [(sql, params) for sql, params in db.statements if "UPDATE multi_leg_trades SET" in sql]
+    assert updates
+    for sql, params in updates:
+        if "max_profit" in sql:
+            assert params["max_profit"] == 1800
+        else:
+            assert "max_profit" not in params

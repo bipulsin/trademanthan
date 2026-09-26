@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS multi_leg_trades (
     exit_date TIMESTAMPTZ,
     total_pnl NUMERIC(18, 4),
     trade_no INTEGER,
+    max_profit NUMERIC(18, 4),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -45,6 +46,9 @@ CREATE TABLE IF NOT EXISTS multi_leg_trade_legs (
 
 CREATE INDEX IF NOT EXISTS ix_multi_leg_trade_legs_trade
     ON multi_leg_trade_legs (trade_id, sort_order);
+
+-- Existing databases created before max_profit: additive and nullable.
+ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS max_profit NUMERIC(18, 4);
 
 -- upstox_order_id unique index is created in ensure_multi_leg_tables after the
 -- additive column exists on databases created from an older copy of this file.

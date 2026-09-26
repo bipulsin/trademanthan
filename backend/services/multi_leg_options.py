@@ -813,6 +813,9 @@ def _ensure_trade_numbers(conn) -> None:
         ON multi_leg_trades (trade_no)
         """
     ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS max_profit NUMERIC(18, 4)"
+    ))
 
 
 def ensure_multi_leg_tables() -> None:
@@ -939,6 +942,22 @@ def _header_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def max_profit_from_body(body: Dict[str, Any]) -> Tuple[bool, Optional[float]]:
+    """(present, value). Missing key means leave the stored value alone.
+
+    An empty string or null is present and stores NULL.
+    """
+    if "max_profit" not in body:
+        return False, None
+    raw = body.get("max_profit")
+    if raw is None or str(raw).strip() == "":
+        return True, None
+    value = _as_float(raw)
+    if value is None or value != value or value in (float("inf"), float("-inf")):
+        raise MultiLegValidationError("max_profit must be a number")
+    return True, value
+
+
 def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     clauses = []
     bind = dict(params or {})
@@ -953,7 +972,7 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
             f"""
             SELECT t.id AS trade_id, t.trade_type, t.instrument, t.spot_price_entry,
                    t.entry_date, t.expiry_date, t.status, t.exit_date, t.total_pnl,
-                   t.trade_no, t.created_at, t.updated_at,
+                   t.trade_no, t.max_profit, t.created_at, t.updated_at,
                    l.id AS leg_id, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
                    l.entry_price, l.entry_time, l.exit_price, l.exit_time, l.ltp, l.delta,
                    l.lot_size, l.instrument_key, l.leg_pnl, l.upstox_order_id, l.sort_order
@@ -1014,6 +1033,7 @@ def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dic
         "spot_price_entry": _as_float(header.get("spot_price_entry")),
         "entry_date": entry.isoformat() if entry else None,
         "expiry_date": expiry.isoformat() if expiry else None,
+        "max_profit": _as_float(header.get("max_profit")),
         "status": header.get("status"),
         "exit_date": _iso_dt(header.get("exit_date")),
         "dte": dte_days(expiry),
@@ -1088,6 +1108,7 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
     status = status_after_save(closing=False, legs=legs)
     trade_id = str(uuid.uuid4())
     total = trade_pnl(l.get("leg_pnl") for l in legs)
+    _, max_profit = max_profit_from_body(body)
     db = SessionLocal()
     try:
         trade_no = allocate_trade_no(db)
@@ -1096,10 +1117,10 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
                 """
                 INSERT INTO multi_leg_trades (
                     id, trade_type, instrument, spot_price_entry, entry_date, expiry_date,
-                    status, total_pnl, trade_no
+                    status, total_pnl, trade_no, max_profit
                 ) VALUES (
                     CAST(:id AS uuid), :trade_type, :instrument, :spot, :entry_date, :expiry_date,
-                    :status, :pnl, :trade_no
+                    :status, :pnl, :trade_no, :max_profit
                 )
                 """
             ),
@@ -1113,6 +1134,7 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
                 "status": status,
                 "pnl": total,
                 "trade_no": trade_no,
+                "max_profit": max_profit,
             },
         )
         for i, leg in enumerate(legs):
@@ -1249,11 +1271,26 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         assert_min_legs(header["trade_type"], len(prepared))
     status = status_after_save(closing=False, legs=prepared)
     total = trade_pnl(l.get("leg_pnl") for l in prepared)
+    # Exit and other saves that omit max_profit must not null the stored value.
+    max_set, max_profit = max_profit_from_body(body)
+    max_sql = "max_profit = :max_profit," if max_set else ""
+    params: Dict[str, Any] = {
+        "id": trade_id,
+        "trade_type": header["trade_type"],
+        "instrument": header["instrument"],
+        "spot": header["spot_price_entry"],
+        "entry_date": header["entry_date"],
+        "expiry_date": header["expiry_date"],
+        "status": status,
+        "pnl": total,
+    }
+    if max_set:
+        params["max_profit"] = max_profit
     db = SessionLocal()
     try:
         db.execute(
             text(
-                """
+                f"""
                 UPDATE multi_leg_trades SET
                     trade_type = :trade_type,
                     instrument = :instrument,
@@ -1262,20 +1299,12 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                     expiry_date = :expiry_date,
                     status = :status,
                     total_pnl = :pnl,
+                    {max_sql}
                     updated_at = NOW()
                 WHERE id = CAST(:id AS uuid) AND status = 'ACTIVE'
                 """
             ),
-            {
-                "id": trade_id,
-                "trade_type": header["trade_type"],
-                "instrument": header["instrument"],
-                "spot": header["spot_price_entry"],
-                "entry_date": header["entry_date"],
-                "expiry_date": header["expiry_date"],
-                "status": status,
-                "pnl": total,
-            },
+            params,
         )
         db.execute(
             text("DELETE FROM multi_leg_trade_legs WHERE trade_id = CAST(:id AS uuid)"),

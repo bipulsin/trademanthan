@@ -271,7 +271,8 @@ body.mlo-page .right-panel {
     color: var(--muted);
 }
 
-.mlo-trade-no[hidden] { display: none; }
+.mlo-trade-no[hidden],
+.mlo-form-grid label[hidden] { display: none; }
 
 .mlo-trade-no #mloTradeNoVal {
     font: 500 0.9rem var(--font-mono);

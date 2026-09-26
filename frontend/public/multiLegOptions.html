@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=5" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=6" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -133,6 +133,9 @@
                     <label>Expiry
                         <input id="mloExpiry" type="date" required />
                     </label>
+                    <label id="mloMaxProfitField">Max Profit
+                        <input id="mloMaxProfit" type="number" step="0.01" inputmode="decimal" />
+                    </label>
                     <div class="mlo-dte" id="mloDte" title="Days to expiry from today (IST)">DTE —</div>
                 </div>
                 <div class="mlo-legs-head">
@@ -169,6 +172,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.52"></script>
-    <script src="multiLegOptions.js?v=6"></script>
+    <script src="multiLegOptions.js?v=7"></script>
 </body>
 </html>

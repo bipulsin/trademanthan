@@ -387,7 +387,7 @@
   }
 
   function payload() {
-    return {
+    var body = {
       trade_type: $("mloType").value,
       instrument: $("mloInstrument").value.trim().toUpperCase(),
       spot_price_entry: Number($("mloSpot").value),
@@ -395,6 +395,12 @@
       expiry_date: $("mloExpiry").value,
       legs: readLegs(),
     };
+    // Exit saves omit the field so the stored value stays.
+    if (mode !== "exit") {
+      var rawMax = $("mloMaxProfit").value.trim();
+      body.max_profit = rawMax === "" ? null : Number(rawMax);
+    }
+    return body;
   }
 
   function showFormError(msg) {
@@ -461,6 +467,9 @@
     $("mloSpot").value = trade && trade.spot_price_entry != null ? trade.spot_price_entry : "";
     $("mloEntryDate").value = (trade && trade.entry_date) || todayISO();
     $("mloExpiry").value = (trade && trade.expiry_date) || "";
+    var showMaxProfit = nextMode !== "exit";
+    $("mloMaxProfitField").hidden = !showMaxProfit;
+    $("mloMaxProfit").value = showMaxProfit && trade && trade.max_profit != null ? trade.max_profit : "";
     $("mloLegs").innerHTML = "";
     showFormError("");
     var legs = (trade && trade.legs) || [];
