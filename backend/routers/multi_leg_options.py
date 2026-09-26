@@ -27,6 +27,11 @@ from backend.services.multi_leg_options import (
     suggested_expiry,
     update_trade,
 )
+from backend.services.multi_leg_upstox_sync import (
+    assign_orphan,
+    journal_orphan_state,
+    sync_from_upstox,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,10 @@ class TradeBody(BaseModel):
 
 class CloseBody(BaseModel):
     legs: Optional[List[LegBody]] = None
+
+
+class AssignBody(BaseModel):
+    trade_id: str
 
 
 def _call(fn, *args, **kwargs):
@@ -114,13 +123,30 @@ def quote_one(
 
 @router.get("/quotes")
 def quotes_active(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    return refresh_active_quotes()
+    payload = refresh_active_quotes()
+    payload.update(journal_orphan_state())
+    return payload
 
 
 @router.get("/trades/active")
 def active(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
     trades = list_active()
-    return {"ok": True, "count": len(trades), "trades": trades}
+    return {"ok": True, "count": len(trades), "trades": trades, **journal_orphan_state()}
+
+
+@router.post("/sync/upstox")
+def sync_upstox(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
+    """Manual import of today's executed NIFTY, BANKNIFTY, and SENSEX option fills."""
+    return _call(sync_from_upstox)
+
+
+@router.post("/orphans/{leg_id}/assign")
+def assign_orphan_leg(
+    leg_id: str,
+    body: AssignBody,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    return _call(assign_orphan, leg_id, body.trade_id)
 
 
 @router.get("/trades/report")

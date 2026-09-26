@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 TRADE_TYPES = ("STRADDLE", "IRON_FLY", "IRON_CONDOR")
+# UNCLASSIFIED is written by Upstox sync (and kept on edit). Manual create still
+# goes through assert_min_legs, which only accepts TRADE_TYPES.
+ACCEPTED_TRADE_TYPES = TRADE_TYPES + ("UNCLASSIFIED",)
 MIN_LEGS = {"STRADDLE": 2, "IRON_FLY": 4, "IRON_CONDOR": 4}
 SIDES = ("BUY", "SELL")
 OPTION_TYPES = ("CE", "PE")
@@ -616,6 +619,47 @@ def dte_days(expiry: Any, as_of: Optional[date] = None) -> Optional[int]:
     return (exp - base).days
 
 
+def _ensure_upstox_sync_schema(conn) -> None:
+    """Additive columns for databases created before Upstox sync.
+
+    trade_id null = orphan leg. upstox_order_id is the dedupe key (manual legs
+    stay null). trade_type also accepts UNCLASSIFIED.
+    """
+    conn.execute(text("ALTER TABLE multi_leg_trade_legs ALTER COLUMN trade_id DROP NOT NULL"))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trade_legs ADD COLUMN IF NOT EXISTS upstox_order_id TEXT"
+    ))
+    conn.execute(text(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_multi_leg_trade_legs_upstox_order
+        ON multi_leg_trade_legs (upstox_order_id)
+        WHERE upstox_order_id IS NOT NULL
+        """
+    ))
+    names = conn.execute(text(
+        """
+        SELECT con.conname AS name
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        WHERE rel.relname = 'multi_leg_trades'
+          AND con.contype = 'c'
+          AND pg_get_constraintdef(con.oid) ILIKE '%trade_type%'
+        """
+    )).mappings().all()
+    for row in names:
+        name = str(row.get("name") or "")
+        if not name.replace("_", "").isalnum():
+            continue
+        conn.execute(text(f'ALTER TABLE multi_leg_trades DROP CONSTRAINT "{name}"'))
+    conn.execute(text(
+        """
+        ALTER TABLE multi_leg_trades
+        ADD CONSTRAINT multi_leg_trades_trade_type_check
+        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'UNCLASSIFIED'))
+        """
+    ))
+
+
 def ensure_multi_leg_tables() -> None:
     global _ENSURED
     if _ENSURED:
@@ -625,6 +669,7 @@ def ensure_multi_leg_tables() -> None:
     sql = _MIGRATION.read_text(encoding="utf-8")
     with engine.begin() as conn:
         conn.execute(text(sql))
+        _ensure_upstox_sync_schema(conn)
     _ENSURED = True
     logger.info("multi_leg tables ensured")
 
@@ -694,6 +739,7 @@ def _normalize_leg_input(raw: Dict[str, Any], *, instrument: str, header_expiry:
             raise
     ltp = _as_float(raw.get("ltp"))
     delta = _as_float(raw.get("delta"))
+    order_id = str(raw.get("upstox_order_id") or "").strip() or None
     leg = {
         "id": _uuid_or_none(raw.get("id")),
         "side": side,
@@ -708,6 +754,7 @@ def _normalize_leg_input(raw: Dict[str, Any], *, instrument: str, header_expiry:
         "delta": delta,
         "lot_size": int(lot),
         "instrument_key": key,
+        "upstox_order_id": order_id,
     }
     leg["leg_pnl"] = leg_pnl_from_row(leg)
     return leg
@@ -715,7 +762,7 @@ def _normalize_leg_input(raw: Dict[str, Any], *, instrument: str, header_expiry:
 
 def _header_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
     kind = str(body.get("trade_type") or "").strip().upper()
-    if kind not in TRADE_TYPES:
+    if kind not in ACCEPTED_TRADE_TYPES:
         raise MultiLegValidationError("trade_type must be STRADDLE, IRON_FLY, or IRON_CONDOR")
     instrument = str(body.get("instrument") or "").strip().upper()
     if not instrument:
@@ -753,7 +800,7 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
                    t.created_at, t.updated_at,
                    l.id AS leg_id, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
                    l.entry_price, l.entry_time, l.exit_price, l.exit_time, l.ltp, l.delta,
-                   l.lot_size, l.instrument_key, l.leg_pnl, l.sort_order
+                   l.lot_size, l.instrument_key, l.leg_pnl, l.upstox_order_id, l.sort_order
             FROM multi_leg_trades t
             LEFT JOIN multi_leg_trade_legs l ON l.trade_id = t.id
             {where}
@@ -789,6 +836,7 @@ def _public_leg(row: Dict[str, Any]) -> Dict[str, Any]:
         "delta": _as_float(row.get("delta")),
         "lot_size": _as_int(row.get("lot_size")),
         "instrument_key": row.get("instrument_key"),
+        "upstox_order_id": (str(row.get("upstox_order_id")).strip() if row.get("upstox_order_id") else None) or None,
     }
     pnl = leg_pnl_from_row(leg)
     leg["leg_pnl"] = pnl
@@ -826,11 +874,11 @@ def _insert_leg(conn, trade_id: str, leg: Dict[str, Any], sort_order: int) -> No
             INSERT INTO multi_leg_trade_legs (
                 id, trade_id, side, option_type, strike_price, leg_expiry_date,
                 entry_price, entry_time, exit_price, exit_time, ltp, delta,
-                lot_size, instrument_key, leg_pnl, sort_order
+                lot_size, instrument_key, leg_pnl, upstox_order_id, sort_order
             ) VALUES (
                 CAST(:id AS uuid), CAST(:trade_id AS uuid), :side, :option_type, :strike_price, :leg_expiry_date,
                 :entry_price, :entry_time, :exit_price, :exit_time, :ltp, :delta,
-                :lot_size, :instrument_key, :leg_pnl, :sort_order
+                :lot_size, :instrument_key, :leg_pnl, :upstox_order_id, :sort_order
             )
             """
         ),
@@ -850,6 +898,7 @@ def _insert_leg(conn, trade_id: str, leg: Dict[str, Any], sort_order: int) -> No
             "lot_size": leg["lot_size"],
             "instrument_key": leg["instrument_key"],
             "leg_pnl": leg.get("leg_pnl"),
+            "upstox_order_id": (str(leg.get("upstox_order_id")).strip() if leg.get("upstox_order_id") else None) or None,
             "sort_order": sort_order,
         },
     )
@@ -967,7 +1016,7 @@ def list_report(
         params["instrument"] = inst
     kind = str(trade_type or "").strip().upper()
     if kind:
-        if kind not in TRADE_TYPES:
+        if kind not in ACCEPTED_TRADE_TYPES:
             raise MultiLegValidationError("trade_type filter is invalid")
         clauses.append("t.trade_type = :trade_type")
         params["trade_type"] = kind
@@ -1013,8 +1062,8 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         raw_legs = legs_in
     if not isinstance(raw_legs, list):
         raise MultiLegValidationError("legs must be a list")
-    assert_min_legs(header["trade_type"], len(raw_legs))
     # Keep stored LTP/delta when the client omits them so a field edit does not blank quotes.
+    # upstox_order_id stays on the leg so a later sync still dedupes after Edit.
     by_id = {str(l.get("id")): l for l in (current.get("legs") or [])}
     prepared: List[Dict[str, Any]] = []
     for raw in raw_legs:
@@ -1025,9 +1074,18 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                 filled["ltp"] = prev.get("ltp")
             if filled.get("delta") is None:
                 filled["delta"] = prev.get("delta")
+            if not str(filled.get("upstox_order_id") or "").strip():
+                filled["upstox_order_id"] = prev.get("upstox_order_id")
         prepared.append(
             _normalize_leg_input(filled, instrument=header["instrument"], header_expiry=header["expiry_date"])
         )
+    # Manual min-leg rules stay for the three typed structures. Sync may save
+    # UNCLASSIFIED with any leg count; Edit keeps that type until the user corrects it.
+    if header["trade_type"] == "UNCLASSIFIED":
+        if not prepared:
+            raise MultiLegValidationError("UNCLASSIFIED trade needs at least one leg")
+    else:
+        assert_min_legs(header["trade_type"], len(prepared))
     status = status_after_save(closing=False, legs=prepared)
     total = trade_pnl(l.get("leg_pnl") for l in prepared)
     db = SessionLocal()
@@ -1247,6 +1305,7 @@ def refresh_active_quotes() -> Dict[str, Any]:
                 FROM (
                     SELECT trade_id, SUM(leg_pnl) AS pnl
                     FROM multi_leg_trade_legs
+                    WHERE trade_id IS NOT NULL
                     GROUP BY trade_id
                 ) s
                 WHERE t.id = s.trade_id AND t.status = 'ACTIVE'

@@ -92,6 +92,70 @@ body.mlo-page .right-panel {
     font-size: 0.92rem;
 }
 
+.mlo-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.button-41:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.mlo-sync-banner {
+    background: rgba(61, 186, 122, 0.12);
+    border: 1px solid rgba(61, 186, 122, 0.4);
+    color: #c9f5dd;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 0 0 12px;
+}
+
+.mlo-sync-banner.is-error {
+    background: rgba(224, 107, 107, 0.12);
+    border-color: rgba(224, 107, 107, 0.35);
+    color: #f3c1c1;
+}
+
+.mlo-trade-id {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.82rem;
+}
+
+.mlo-badge {
+    display: inline-block;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border: 1px solid rgba(232, 184, 74, 0.7);
+    color: #f0d48a;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.mlo-orphans { margin: 0 0 18px; }
+
+.mlo-orphans-title {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    margin: 0 0 6px;
+}
+
+.mlo-orphan-assign {
+    max-width: 460px;
+    margin-top: 10px;
+}
+
+.mlo-orphan-assign input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .mlo-dte,
 .mlo-card .mlo-dte-lg {
     font-family: var(--font-display);

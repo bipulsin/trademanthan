@@ -5,6 +5,8 @@
   var MIN_LEGS = { STRADDLE: 2, IRON_FLY: 4, IRON_CONDOR: 4 };
   var instruments = { indices: [], equities: [], commodities: [] };
   var activeTrades = [];
+  var orphanLegs = [];
+  var assignableTrades = [];
   var reportRows = [];
   var reportSort = { key: "entry_date", dir: -1 };
   var tab = "active";
@@ -81,7 +83,7 @@
   }
 
   function typeLabel(t) {
-    return { STRADDLE: "Straddle", IRON_FLY: "Iron Fly", IRON_CONDOR: "Iron Condor" }[t] || t;
+    return { STRADDLE: "Straddle", IRON_FLY: "Iron Fly", IRON_CONDOR: "Iron Condor", UNCLASSIFIED: "Unclassified" }[t] || t;
   }
 
   function lastWeekday(year, month, weekday) {
@@ -120,7 +122,34 @@
     el.textContent = msg;
   }
 
+  function setSyncBanner(msg, isError) {
+    var el = $("mloSyncBanner");
+    if (!msg) { el.hidden = true; el.textContent = ""; el.classList.remove("is-error"); return; }
+    el.hidden = false;
+    el.classList.toggle("is-error", !!isError);
+    el.textContent = msg;
+  }
+
+  function countPhrase(n, singular, plural) {
+    var value = Number(n) || 0;
+    return value + " " + (value === 1 ? singular : plural);
+  }
+
+  function syncSummary(data) {
+    var parts = [
+      countPhrase(data.new_legs, "new leg", "new legs"),
+      countPhrase(data.new_trades, "new trade created", "new trades created"),
+      countPhrase(data.orphans, "orphan flagged", "orphans flagged"),
+      countPhrase(data.duplicates_skipped, "duplicate skipped", "duplicates skipped"),
+    ];
+    if (data.skipped_no_lot) parts.push(countPhrase(data.skipped_no_lot, "skipped (no lot)", "skipped (no lot)"));
+    if (data.skipped_unmapped) parts.push(countPhrase(data.skipped_unmapped, "skipped (unmapped)", "skipped (unmapped)"));
+    if (data.master_empty) parts.push("instrument master had no index option contracts");
+    return parts.join(", ") + ".";
+  }
+
   function minForType() {
+    if ($("mloType").value === "UNCLASSIFIED") return 1;
     return MIN_LEGS[$("mloType").value] || 2;
   }
 
@@ -266,10 +295,26 @@
     });
   }
 
+  function ensureTypeOptions(trade) {
+    var sel = $("mloType");
+    var opt = sel.querySelector('option[value="UNCLASSIFIED"]');
+    if (trade && trade.trade_type === "UNCLASSIFIED") {
+      if (!opt) {
+        opt = document.createElement("option");
+        opt.value = "UNCLASSIFIED";
+        opt.textContent = "Unclassified";
+        sel.appendChild(opt);
+      }
+    } else if (opt) {
+      opt.remove();
+    }
+  }
+
   function openModal(nextMode, trade) {
     mode = nextMode;
     editingId = trade ? trade.id : null;
     expiryTouched = !!trade;
+    ensureTypeOptions(trade);
     $("mloModalTitle").textContent = nextMode === "new" ? "New Trade" : nextMode === "exit" ? "Exit Trade" : "Edit Trade";
     $("mloCloseTrade").hidden = nextMode !== "exit";
     $("mloType").value = (trade && trade.trade_type) || "STRADDLE";
@@ -308,15 +353,48 @@
     wrap.hidden = false;
   }
 
-  function renderActive(trades) {
+  function assignFieldFocused() {
+    var el = document.activeElement;
+    return !!(el && el.closest && el.closest(".mlo-orphan-assign"));
+  }
+
+  function tradeChoiceLabel(t) {
+    return t.id + " · " + t.instrument + " · " + t.expiry_date + " · " + typeLabel(t.trade_type) +
+      (t.status === "CLOSED" ? " · Closed" : "");
+  }
+
+  function renderOrphans(orphans) {
+    if (!orphans || !orphans.length) return "";
+    var cards = orphans.map(function (leg) {
+      return '<article class="mlo-card mlo-orphan so-card" data-leg="' + esc(leg.id) + '">' +
+        '<div class="mlo-leg-ro">' +
+          '<span data-label="Underlying">' + esc(leg.instrument || "—") + "</span>" +
+          '<span data-label="Expiry">' + esc(leg.expiry_date) + "</span>" +
+          '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
+          '<span data-label="Side">' + esc(leg.side) + "</span>" +
+          '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
+          '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
+          '<span data-label="Entry time">' + esc(toLocal(leg.entry_time) || leg.entry_time || "—") + "</span>" +
+          '<span class="mlo-badge">Orphan</span>' +
+        "</div>" +
+        '<div class="mlo-combo mlo-orphan-assign">' +
+          '<input type="text" placeholder="Assign to trade — search id or underlying + expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
+          '<div class="mlo-combo-list" hidden></div>' +
+        "</div></article>";
+    }).join("");
+    return '<section class="mlo-orphans"><h2 class="mlo-orphans-title">Orphan legs</h2>' +
+      '<p class="mlo-meta">These fills are not on a trade. Assign one to count it in that trade’s P&amp;L.</p>' +
+      cards + "</section>";
+  }
+
+  function renderActive(trades, orphans) {
     activeTrades = trades || [];
+    if (orphans) orphanLegs = orphans;
     renderTicker(activeTrades);
+    if (assignFieldFocused()) return;
     var host = $("mloActive");
-    if (!activeTrades.length) {
-      host.innerHTML = '<p class="mlo-empty">No active trades. Use + New Trade to record a straddle, iron fly, or iron condor.</p>';
-      return;
-    }
-    host.innerHTML = activeTrades.map(function (t) {
+    var empty = '<p class="mlo-empty">No active trades. Use + New Trade to record a straddle, iron fly, or iron condor.</p>';
+    var cards = activeTrades.length ? activeTrades.map(function (t) {
       var legs = (t.legs || []).map(function (leg) {
         var mark = leg.exited ? leg.exit_price : leg.ltp;
         var markLabel = leg.exited ? "Exit" : "LTP";
@@ -334,6 +412,7 @@
       return '<article class="mlo-card so-card" data-id="' + esc(t.id) + '">' +
         '<div class="mlo-card-head">' +
           '<div><h2>' + esc(t.instrument) + " · " + esc(typeLabel(t.trade_type)) + "</h2>" +
+          '<div class="mlo-meta">Trade ID <span class="mlo-trade-id">' + esc(t.id) + "</span></div>" +
           '<div class="mlo-meta">Expiry ' + esc(t.expiry_date) + " · spot " + esc(t.spot_price_entry) + "</div></div>" +
           '<div class="mlo-dte-lg">DTE ' + esc(t.dte) + "</div>" +
           '<div class="mlo-total ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</div>" +
@@ -343,7 +422,8 @@
           '<button type="button" class="mlo-btn so-modal-btn secondary" data-act="exit">Exit Trade</button>' +
           '<button type="button" class="mlo-btn so-modal-btn danger" data-act="delete">Delete</button>' +
         "</div></article>";
-    }).join("");
+    }).join("") : empty;
+    host.innerHTML = renderOrphans(orphanLegs) + cards;
   }
 
   function cmp(a, b, key) {
@@ -392,7 +472,8 @@
     try {
       var data = refreshQuotes ? await api("/quotes") : await api("/trades/active");
       setBanner(data.quote_error ? "Live quotes unavailable. Showing last saved LTP. " + data.quote_error : "");
-      renderActive(data.trades || []);
+      assignableTrades = data.assignable_trades || [];
+      renderActive(data.trades || [], data.orphans || []);
     } catch (e) {
       setBanner(e.message || "Could not load active trades");
     }
@@ -462,6 +543,7 @@
   }
 
   $("mloNewTrade").addEventListener("click", function () { openModal("new", null); });
+  $("mloSyncUpstox").addEventListener("click", syncFromUpstox);
   $("mloCancel").addEventListener("click", closeModal);
   $("mloModalClose").addEventListener("click", closeModal);
   $("mloAddLeg").addEventListener("click", function () { addLeg(null); });
@@ -484,7 +566,9 @@
     loadExpiry();
   });
   document.addEventListener("click", function (ev) {
-    if (!ev.target.closest(".mlo-combo")) $("mloInstrumentList").hidden = true;
+    if (ev.target.closest(".mlo-combo")) return;
+    $("mloInstrumentList").hidden = true;
+    document.querySelectorAll(".mlo-orphan-assign .mlo-combo-list").forEach(function (el) { el.hidden = true; });
   });
 
   $("mloForm").addEventListener("submit", async function (ev) {
@@ -520,7 +604,68 @@
     }
   });
 
+  function showAssignList(input) {
+    var list = input.parentElement.querySelector(".mlo-combo-list");
+    if (!list) return;
+    var q = input.value.trim().toUpperCase();
+    var hits = assignableTrades.filter(function (t) {
+      if (!q) return true;
+      var hay = (t.id + " " + t.instrument + " " + t.expiry_date + " " + t.trade_type).toUpperCase();
+      return hay.indexOf(q) >= 0;
+    }).slice(0, 30);
+    list.innerHTML = hits.length ? hits.map(function (t) {
+      return '<button type="button" data-trade="' + esc(t.id) + '" data-leg="' + esc(input.getAttribute("data-leg")) + '">' +
+        esc(tradeChoiceLabel(t)) + "</button>";
+    }).join("") : '<div class="mlo-combo-group">No matching trade</div>';
+    list.hidden = false;
+  }
+
+  async function assignOrphan(legId, tradeId) {
+    try {
+      await api("/orphans/" + encodeURIComponent(legId) + "/assign", {
+        method: "POST",
+        body: JSON.stringify({ trade_id: tradeId }),
+      });
+      await loadActive(true);
+    } catch (e) {
+      setBanner(e.message || "Could not assign the leg");
+    }
+  }
+
+  async function syncFromUpstox() {
+    var btn = $("mloSyncUpstox");
+    var label = btn.querySelector(".text");
+    btn.disabled = true;
+    if (label) label.textContent = "Syncing…";
+    try {
+      var data = await api("/sync/upstox", { method: "POST" });
+      setSyncBanner(syncSummary(data), false);
+      await loadActive(true);
+    } catch (e) {
+      setSyncBanner(e.message || "Sync from Upstox failed", true);
+    } finally {
+      btn.disabled = false;
+      if (label) label.textContent = "Sync from Upstox";
+    }
+  }
+
+  $("mloActive").addEventListener("input", function (ev) {
+    var input = ev.target.closest(".mlo-orphan-assign input");
+    if (input) showAssignList(input);
+  });
+  $("mloActive").addEventListener("focusin", function (ev) {
+    var input = ev.target.closest && ev.target.closest(".mlo-orphan-assign input");
+    if (input) showAssignList(input);
+  });
+
   $("mloActive").addEventListener("click", async function (ev) {
+    var pick = ev.target.closest("button[data-trade]");
+    if (pick) {
+      var legId = pick.getAttribute("data-leg");
+      var tradeId = pick.getAttribute("data-trade");
+      if (legId && tradeId) await assignOrphan(legId, tradeId);
+      return;
+    }
     var btn = ev.target.closest("button[data-act]");
     if (!btn) return;
     var card = btn.closest(".mlo-card");
