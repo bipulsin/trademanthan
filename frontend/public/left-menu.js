@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.51';
+const MENU_HTML_PATH = 'left-menu.html?v=3.52';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
@@ -411,13 +411,13 @@ class LeftMenu {
                     <a class="nav-item-link" href="stockOptions.html"><i class="fas fa-chart-line" style="color:#38bdf8;"></i>
                     <span>Stock Options</span></a>
                 </li>
-                <li class="nav-item" data-page="commDiv.html">
-                    <a class="nav-item-link" href="commDiv.html"><i class="fas fa-oil-can" style="color:#fbbf24;"></i>
-                    <span>Commodities Div</span></a>
-                </li>
                 <li class="nav-item" data-page="multiLegOptions.html">
                     <a class="nav-item-link" href="multiLegOptions.html"><i class="fas fa-sitemap" style="color:#c4b5fd;"></i>
                     <span>Multi-Leg Options</span></a>
+                </li>
+                <li class="nav-item" data-page="commDiv.html">
+                    <a class="nav-item-link" href="commDiv.html"><i class="fas fa-oil-can" style="color:#fbbf24;"></i>
+                    <span>Commodities Div</span></a>
                 </li>
                 <li class="nav-item" data-page="dailyfutures.html">
                     <a class="nav-item-link" href="dailyfutures.html"><i class="fas fa-calendar-day"></i>
@@ -1016,6 +1016,7 @@ class LeftMenu {
             dashboard: 'Dashboard',
             intraoption: 'Intraday Stock Options Algo',
             stockoptions: 'Stock Options',
+            multilegoptions: 'Multi-Leg Options',
             smartfuture: 'Smart Futures',
             dailyfutures: 'Premium Futures',
             volumemismatchfutures: 'Volume Mismatch Futures',

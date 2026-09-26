@@ -161,7 +161,7 @@
       '<label>Entry price<input data-f="entry_price" type="number" min="0" step="0.01" required></label>' +
       '<label>Entry time<input data-f="entry_time" type="datetime-local" required></label>' +
       exit +
-      '<button type="button" class="mlo-btn mlo-remove">Remove</button>';
+      '<button type="button" class="mlo-btn so-modal-btn secondary mlo-remove">Remove</button>';
     wrap.querySelector('[data-f="side"]').value = (leg && leg.side) || "SELL";
     wrap.querySelector('[data-f="option_type"]').value = (leg && leg.option_type) || "CE";
     wrap.querySelector('[data-f="strike_price"]').value = leg && leg.strike_price != null ? leg.strike_price : "";
@@ -331,7 +331,7 @@
           "</div>";
       }).join("");
       var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
-      return '<article class="mlo-card" data-id="' + esc(t.id) + '">' +
+      return '<article class="mlo-card so-card" data-id="' + esc(t.id) + '">' +
         '<div class="mlo-card-head">' +
           '<div><h2>' + esc(t.instrument) + " · " + esc(typeLabel(t.trade_type)) + "</h2>" +
           '<div class="mlo-meta">Expiry ' + esc(t.expiry_date) + " · spot " + esc(t.spot_price_entry) + "</div></div>" +
@@ -339,9 +339,9 @@
           '<div class="mlo-total ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</div>" +
         "</div>" + head + legs +
         '<div class="mlo-card-actions" style="margin-top:10px">' +
-          '<button type="button" class="mlo-btn" data-act="edit">Edit</button>' +
-          '<button type="button" class="mlo-btn" data-act="exit">Exit Trade</button>' +
-          '<button type="button" class="mlo-btn danger" data-act="delete">Delete</button>' +
+          '<button type="button" class="mlo-btn so-modal-btn secondary" data-act="edit">Edit</button>' +
+          '<button type="button" class="mlo-btn so-modal-btn secondary" data-act="exit">Exit Trade</button>' +
+          '<button type="button" class="mlo-btn so-modal-btn danger" data-act="delete">Delete</button>' +
         "</div></article>";
     }).join("");
   }
@@ -420,7 +420,7 @@
 
   function showTab(name) {
     tab = name;
-    document.querySelectorAll(".mlo-tab").forEach(function (btn) {
+    document.querySelectorAll(".bf-tab").forEach(function (btn) {
       btn.classList.toggle("active", btn.dataset.tab === name);
     });
     $("mloActive").hidden = name !== "active";
@@ -540,7 +540,7 @@
     }
   });
 
-  document.querySelectorAll(".mlo-tab").forEach(function (btn) {
+  document.querySelectorAll(".bf-tab").forEach(function (btn) {
     btn.addEventListener("click", function () { showTab(btn.dataset.tab); });
   });
   $("mloApplyFilters").addEventListener("click", loadReport);
