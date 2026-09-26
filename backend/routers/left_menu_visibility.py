@@ -39,6 +39,7 @@ MENU_ITEMS: List[Dict[str, str]] = [
     {"key": "intraoption.html", "label": "Intraday Option"},
     {"key": "stockOptions.html", "label": "Stock Options"},
     {"key": "commDiv.html", "label": "Commodities Div"},
+    {"key": "multiLegOptions.html", "label": "Multi-Leg Options"},
     {"key": "dailyfutures.html", "label": "Premium Futures"},
     {"key": "volumemismatchfutures.html", "label": "Volume Mismatch Futures"},
     {"key": "iron-condor.html", "label": "Iron Condor"},

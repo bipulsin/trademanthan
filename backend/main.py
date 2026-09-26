@@ -41,6 +41,7 @@ import backend.routers.commodities_div_webhook as commodities_div_webhook
 import backend.routers.commodities_div as commodities_div
 import backend.routers.tarang as tarang
 import backend.routers.stock_option as stock_option
+import backend.routers.multi_leg_options as multi_leg_options
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -529,6 +530,8 @@ app.include_router(tarang.router, prefix="/api/tarang")
 app.include_router(tarang.router, prefix="/tarang")
 app.include_router(stock_option.router)
 app.include_router(stock_option.router, prefix="/api")
+app.include_router(multi_leg_options.router)
+app.include_router(multi_leg_options.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")

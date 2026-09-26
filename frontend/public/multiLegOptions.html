@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <title>Multi-Leg Options - TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+    <script src="auth-check.js?v=1"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <link rel="stylesheet" href="settings.css?v=2" />
+    <link rel="stylesheet" href="left-menu.css?v=3.48" />
+    <link rel="stylesheet" href="theme.css?v=1.4" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=1" />
+</head>
+<body class="mlo-page theme-page left-menu-web-hamburger" data-theme="dark">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
+            <h1 class="mobile-title">Multi-Leg Options</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="mlo-wrap">
+                <header class="mlo-header">
+                    <div>
+                        <h1 class="mlo-title"><i class="fas fa-sitemap" aria-hidden="true"></i> Multi-Leg Options</h1>
+                        <p class="mlo-sub">Manual journal for Straddle, Iron Fly, and Iron Condor. Live P&amp;L only.</p>
+                    </div>
+                    <button type="button" class="mlo-btn primary" id="mloNewTrade">+ New Trade</button>
+                </header>
+                <div class="mlo-ticker" id="mloTickerWrap" hidden>
+                    <div class="mlo-ticker-track" id="mloTicker"></div>
+                </div>
+                <p class="mlo-banner" id="mloBanner" hidden></p>
+                <nav class="mlo-tabs" aria-label="Multi-leg views">
+                    <button type="button" class="mlo-tab active" data-tab="active">Active</button>
+                    <button type="button" class="mlo-tab" data-tab="report">Trade Report</button>
+                </nav>
+                <section id="mloActive" class="mlo-panel"></section>
+                <section id="mloReport" class="mlo-panel" hidden>
+                    <div class="mlo-filters">
+                        <label>Instrument <input id="mloFInstrument" type="text" placeholder="Any" /></label>
+                        <label>Type
+                            <select id="mloFType">
+                                <option value="">Any</option>
+                                <option value="STRADDLE">Straddle</option>
+                                <option value="IRON_FLY">Iron Fly</option>
+                                <option value="IRON_CONDOR">Iron Condor</option>
+                            </select>
+                        </label>
+                        <label>Status
+                            <select id="mloFStatus">
+                                <option value="">Any</option>
+                                <option value="ACTIVE">Active</option>
+                                <option value="CLOSED">Closed</option>
+                            </select>
+                        </label>
+                        <label>From <input id="mloFFrom" type="date" /></label>
+                        <label>To <input id="mloFTo" type="date" /></label>
+                        <button type="button" class="mlo-btn" id="mloApplyFilters">Apply</button>
+                    </div>
+                    <div class="mlo-table-wrap">
+                        <table class="mlo-table" id="mloReportTable">
+                            <thead>
+                                <tr>
+                                    <th data-sort="instrument">Instrument</th>
+                                    <th data-sort="expiry_date">Contract expiry</th>
+                                    <th data-sort="entry_date">Entry date</th>
+                                    <th data-sort="exit_date">Exit date</th>
+                                    <th data-sort="total_pnl">Total P&amp;L</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mloReportBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="mlo-modal" id="mloModal" hidden>
+        <div class="mlo-modal-card" role="dialog" aria-modal="true" aria-labelledby="mloModalTitle">
+            <form id="mloForm">
+                <div class="mlo-modal-head">
+                    <h2 id="mloModalTitle">New Trade</h2>
+                    <button type="button" class="mlo-icon-btn" id="mloModalClose" aria-label="Close">&times;</button>
+                </div>
+                <div class="mlo-form-grid">
+                    <label>Type
+                        <select id="mloType" required>
+                            <option value="STRADDLE">Straddle</option>
+                            <option value="IRON_FLY">Iron Fly</option>
+                            <option value="IRON_CONDOR">Iron Condor</option>
+                        </select>
+                    </label>
+                    <label class="mlo-combo-label">Instrument
+                        <div class="mlo-combo">
+                            <input id="mloInstrument" type="text" placeholder="Search NIFTY, stock, MCX…" autocomplete="off" required />
+                            <div class="mlo-combo-list" id="mloInstrumentList" hidden></div>
+                        </div>
+                    </label>
+                    <label>Spot
+                        <input id="mloSpot" type="number" min="0" step="0.01" required />
+                    </label>
+                    <label>Entry date
+                        <input id="mloEntryDate" type="date" required />
+                    </label>
+                    <label>Expiry
+                        <input id="mloExpiry" type="date" required />
+                    </label>
+                    <div class="mlo-dte" id="mloDte" title="Days from entry to expiry">DTE —</div>
+                </div>
+                <div class="mlo-legs-head">
+                    <h3>Legs</h3>
+                    <button type="button" class="mlo-btn" id="mloAddLeg">Add Leg</button>
+                </div>
+                <div id="mloLegs"></div>
+                <p class="mlo-err" id="mloFormErr" hidden></p>
+                <div class="mlo-modal-actions">
+                    <button type="button" class="mlo-btn" id="mloCancel">Cancel</button>
+                    <button type="submit" class="mlo-btn primary" id="mloSave">Save</button>
+                    <button type="button" class="mlo-btn danger" id="mloCloseTrade" hidden>Close Trade</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="left-menu.js?v=3.51"></script>
+    <script src="multiLegOptions.js?v=1"></script>
+</body>
+</html>

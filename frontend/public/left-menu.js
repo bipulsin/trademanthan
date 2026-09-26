@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.50';
+const MENU_HTML_PATH = 'left-menu.html?v=3.51';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
     }
 
     getCurrentPage() {
@@ -64,6 +64,7 @@ class LeftMenu {
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         if (path.includes('breakfast')) return 'breakfast';
+        if (path.toLowerCase().includes('multilegoptions')) return 'multilegoptions';
         if (path.toLowerCase().includes('commdiv')) return 'commdiv';
         if (path.includes('havwap')) return 'havwap';
         if (path.includes('divtest')) return 'divtest';
@@ -413,6 +414,10 @@ class LeftMenu {
                 <li class="nav-item" data-page="commDiv.html">
                     <a class="nav-item-link" href="commDiv.html"><i class="fas fa-oil-can" style="color:#fbbf24;"></i>
                     <span>Commodities Div</span></a>
+                </li>
+                <li class="nav-item" data-page="multiLegOptions.html">
+                    <a class="nav-item-link" href="multiLegOptions.html"><i class="fas fa-sitemap" style="color:#c4b5fd;"></i>
+                    <span>Multi-Leg Options</span></a>
                 </li>
                 <li class="nav-item" data-page="dailyfutures.html">
                     <a class="nav-item-link" href="dailyfutures.html"><i class="fas fa-calendar-day"></i>
@@ -1145,6 +1150,7 @@ class LeftMenu {
             case 'future_screener': return 'future_screener.html';
             case 'breakfast': return 'breakfast.html';
             case 'commdiv': return 'commDiv.html';
+            case 'multilegoptions': return 'multiLegOptions.html';
             case 'havwap': return 'havwap.html';
             case 'divtest': return 'divtest.html';
             case 'iron-condor': return 'iron-condor.html';
