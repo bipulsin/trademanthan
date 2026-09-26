@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=4" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=5" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -107,6 +107,10 @@
                     <button type="button" class="mlo-icon-btn" id="mloModalClose" aria-label="Close">&times;</button>
                 </div>
                 <div class="mlo-form-grid">
+                    <div class="mlo-trade-no" id="mloTradeNo" hidden>
+                        <span>Trade No</span>
+                        <span id="mloTradeNoVal"></span>
+                    </div>
                     <label>Type
                         <select id="mloType" required>
                             <option value="STRADDLE">Straddle</option>
@@ -165,6 +169,6 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.52"></script>
-    <script src="multiLegOptions.js?v=4"></script>
+    <script src="multiLegOptions.js?v=5"></script>
 </body>
 </html>

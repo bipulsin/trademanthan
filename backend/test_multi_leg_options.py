@@ -5,6 +5,7 @@ import pytest
 
 from backend.services.multi_leg_options import (
     MultiLegValidationError,
+    _parse_dt,
     assert_min_legs,
     assert_ready_to_close,
     assign_missing_trade_numbers,
@@ -13,6 +14,7 @@ from backend.services.multi_leg_options import (
     leg_pnl,
     next_monthly_option_expiry,
     next_trade_number,
+    parse_clock_ampm,
     status_after_save,
     trade_pnl,
 )
@@ -125,3 +127,18 @@ def test_trade_numbers_are_stable_integers():
     assert again["b"] == 1
     assert again["a"] == 3
     assert again["d"] == 4
+
+
+def test_parse_clock_03_10_pm():
+    assert parse_clock_ampm("03:10 PM") == (15, 10)
+    assert parse_clock_ampm("03:10 AM") == (3, 10)
+    assert parse_clock_ampm("12:00 AM") == (0, 0)
+    assert parse_clock_ampm("12:00 PM") == (12, 0)
+    saved = _parse_dt("2026-09-17T03:10 PM")
+    assert saved is not None
+    assert saved.hour == 15
+    assert saved.minute == 10
+    assert saved.date().isoformat() == "2026-09-17"
+    plain = _parse_dt("2026-09-17T15:10")
+    assert plain is not None
+    assert plain.hour == 15 and plain.minute == 10

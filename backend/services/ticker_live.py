@@ -24,6 +24,7 @@ IST = pytz.timezone("Asia/Kolkata")
 ALGOS = (
     "commdiv",
     "stock_options",
+    "multi_leg_options",
     "kavach",
     "breakfast",
     "premium_futures",
@@ -32,11 +33,19 @@ ALGOS = (
 ALGO_LABELS = {
     "commdiv": "CommDiv",
     "stock_options": "Stock Options",
+    "multi_leg_options": "Multi-Leg Options",
     "kavach": "Kavach",
     "breakfast": "Breakfast",
     "premium_futures": "Premium Futures",
     "tarang": "Kosmic Tarang",
 }
+_MLO_TYPES = {
+    "STRADDLE": "Straddle",
+    "IRON_FLY": "IronFly",
+    "IRON_CONDOR": "IronCondor",
+    "UNCLASSIFIED": "Unclassified",
+}
+_MLO_MON = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 TOKEN_PREFIX = "twt_"
 # Mac menu-bar poll, and how long a desk read may be reused.
 TICKER_REFRESH_SEC = 120.0
@@ -613,6 +622,61 @@ def _premium(user_id: int) -> tuple:
         db.close()
 
 
+def multi_leg_ticker_symbol(trade_type: Any, instrument: Any, expiry: Any) -> str:
+    """One ticker label: ``IronFly-NIFTY-27Oct26``. Desk names are not included."""
+    kind = str(trade_type or "").strip().upper().replace(" ", "_").replace("-", "")
+    if kind == "IRONFLY":
+        kind = "IRON_FLY"
+    elif kind == "IRONCONDOR":
+        kind = "IRON_CONDOR"
+    compact = _MLO_TYPES.get(kind)
+    if not compact:
+        return ""
+    name = str(instrument or "").strip()
+    exp = _compact_expiry(expiry)
+    if not name or not exp:
+        return ""
+    return f"{compact}-{name}-{exp}"
+
+
+def _compact_expiry(raw: Any) -> str:
+    if raw is None or str(raw).strip() == "":
+        return ""
+    if hasattr(raw, "year") and hasattr(raw, "month") and hasattr(raw, "day"):
+        day, month, year = int(raw.day), int(raw.month), int(raw.year)
+    else:
+        try:
+            parsed = datetime.strptime(str(raw).strip()[:10], "%Y-%m-%d")
+        except ValueError:
+            return ""
+        day, month, year = parsed.day, parsed.month, parsed.year
+    if month < 1 or month > 12:
+        return ""
+    return f"{day:02d}{_MLO_MON[month - 1]}{year % 100:02d}"
+
+
+def _multi_leg_trades() -> List[Dict[str, Any]]:
+    """Active multi-leg journal rows. Shown all day, same 120s cache as other desks.
+
+    The line is ``IronFly-NIFTY-27Oct26`` plus the trade total. Closed trades
+    and rows without a current PnL stay off the ticker.
+    """
+    from backend.services.multi_leg_options import list_active
+
+    out = []
+    for trade in list_active() or []:
+        if str(trade.get("status") or "").upper() != "ACTIVE":
+            continue
+        sym = multi_leg_ticker_symbol(
+            trade.get("trade_type"), trade.get("instrument"), trade.get("expiry_date")
+        )
+        pnl = trade.get("total_pnl")
+        if pnl is None or not _symbol_ok(sym):
+            continue
+        out.append(_row("multi_leg_options", sym, pnl=pnl, label="ACTIVE"))
+    return out
+
+
 def _tarang_trades() -> List[Dict[str, Any]]:
     from backend.services.tarang.lifecycle import build_in_trade_view, list_open_trades
 
@@ -658,6 +722,8 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
         jobs.append(("commdiv_signals", TICKER_REFRESH_SEC, _commdiv_signals, []))
     if algos.get("stock_options"):
         jobs.append(("stock_options", TICKER_REFRESH_SEC, _stock_options, ([], [])))
+    if algos.get("multi_leg_options"):
+        jobs.append(("multi_leg", TICKER_REFRESH_SEC, _multi_leg_trades, []))
     if algos.get("kavach"):
         jobs.append(("kavach_trades", TICKER_REFRESH_SEC, _kavach_trades, []))
         jobs.append(("kavach_ready", TICKER_REFRESH_SEC, _kavach_ready, []))
@@ -676,6 +742,8 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
         so_t, so_s = got.get("stock_options") or ([], [])
         trades.extend(so_t)
         signals.extend(so_s)
+    if algos.get("multi_leg_options"):
+        trades.extend(got.get("multi_leg") or [])
     if algos.get("kavach"):
         trades.extend(got.get("kavach_trades") or [])
         signals.extend(got.get("kavach_ready") or [])

@@ -81,39 +81,36 @@
 
   function pad2(n) { return String(n).padStart(2, "0"); }
 
-  function hourLabel(h) {
-    var period = h >= 12 ? "PM" : "AM";
-    var hr = h % 12;
-    if (hr === 0) hr = 12;
-    return pad2(hr) + " " + period;
+  var DEFAULT_CLOCK = "03:10 PM";
+
+  function parseClock(text) {
+    var match = String(text || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (!match) return null;
+    var hour = Number(match[1]);
+    var minute = Number(match[2]);
+    if (hour < 1 || hour > 12 || minute > 59) return null;
+    var ap = match[3].toUpperCase();
+    var hour24 = ap === "AM" ? (hour === 12 ? 0 : hour) : (hour === 12 ? 12 : hour + 12);
+    return { hour: hour24, minute: minute };
   }
 
-  function hourOptions(selected) {
-    var html = "";
-    for (var h = 0; h < 24; h++) {
-      html += '<option value="' + h + '"' + (h === selected ? " selected" : "") + ">" + hourLabel(h) + "</option>";
-    }
-    return html;
+  function formatClock(hour24, minute) {
+    var ap = hour24 >= 12 ? "PM" : "AM";
+    var hour = hour24 % 12;
+    if (hour === 0) hour = 12;
+    return pad2(hour) + ":" + pad2(minute) + " " + ap;
   }
 
-  function minuteOptions(selected) {
-    var html = "";
-    for (var m = 0; m < 60; m++) {
-      html += '<option value="' + m + '"' + (m === selected ? " selected" : "") + ">" + pad2(m) + "</option>";
-    }
-    return html;
+  function normalizeClock(text) {
+    var parsed = parseClock(text);
+    if (!parsed) return "";
+    return formatClock(parsed.hour, parsed.minute);
   }
 
-  function timeSelects(hourName, minuteName, hour, minute) {
-    return '<span class="mlo-time">' +
-      '<select data-f="' + hourName + '" aria-label="Hour" required>' + hourOptions(hour) + "</select>" +
-      '<select data-f="' + minuteName + '" aria-label="Minute" required>' + minuteOptions(minute) + "</select>" +
-      "</span>";
-  }
-
-  function composeLocal(dateStr, hour, minute) {
-    if (!dateStr && dateStr !== 0) return "";
-    return String(dateStr) + "T" + pad2(hour) + ":" + pad2(minute);
+  function composeClock(dateStr, clockText) {
+    var shown = normalizeClock(clockText);
+    if (!dateStr || !shown) return "";
+    return String(dateStr) + "T" + shown;
   }
 
   function parseISODate(s) {
@@ -248,37 +245,62 @@
     return { date: match[1], hour: Number(match[2]), minute: Number(match[3]) };
   }
 
+  function dateField(name, value, placeholder) {
+    var shown = value ? ' value="' + esc(value) + '"' : "";
+    var typ = value ? "date" : "text";
+    return '<input data-f="' + name + '" data-ph="' + esc(placeholder) + '" type="' + typ +
+      '" placeholder="' + esc(placeholder) + '" aria-label="' + esc(placeholder) + '" required' + shown + ">";
+  }
+
+  function bindDateField(inp) {
+    function show() {
+      inp.type = inp.value ? "date" : "text";
+    }
+    inp.addEventListener("focus", function () { inp.type = "date"; });
+    inp.addEventListener("blur", show);
+  }
+
+  function bindClockField(inp) {
+    inp.addEventListener("blur", function () {
+      var shown = normalizeClock(inp.value);
+      if (shown) inp.value = shown;
+    });
+  }
+
   function legCard(leg, exitMode) {
     var wrap = document.createElement("div");
     wrap.className = "mlo-leg";
     if (leg && leg.id) wrap.dataset.id = leg.id;
     var entryClock = clockParts(leg && leg.entry_time);
-    var entryHour = entryClock ? entryClock.hour : 15;
-    var entryMinute = entryClock ? entryClock.minute : 10;
+    var entryText = entryClock ? formatClock(entryClock.hour, entryClock.minute) : DEFAULT_CLOCK;
     var exit = "";
     if (exitMode) {
       var exitClock = clockParts(leg && leg.exit_time);
       var exitDate = exitClock ? exitClock.date : todayISO();
-      var exitHour = exitClock ? exitClock.hour : 15;
-      var exitMinute = exitClock ? exitClock.minute : 10;
-      exit = '<label>Exit price<input data-f="exit_price" type="number" min="0" step="0.01" value="' + esc(leg && leg.exit_price != null ? leg.exit_price : "") + '"></label>' +
-        '<label>Exit date<input data-f="exit_date" type="date" value="' + esc(exitDate) + '"></label>' +
-        '<label>Exit time' + timeSelects("exit_hour", "exit_minute", exitHour, exitMinute) + "</label>";
+      var exitText = exitClock ? formatClock(exitClock.hour, exitClock.minute) : DEFAULT_CLOCK;
+      exit = '<input data-f="exit_price" type="number" min="0" step="0.01" placeholder="Exit price" aria-label="Exit price" value="' + esc(leg && leg.exit_price != null ? leg.exit_price : "") + '">' +
+        dateField("exit_date", exitDate, "Exit date") +
+        '<input data-f="exit_clock" type="text" placeholder="Time" aria-label="Exit time" value="' + esc(exitText) + '" required>';
     }
     wrap.innerHTML =
-      '<label>Side<select data-f="side"><option>BUY</option><option>SELL</option></select></label>' +
-      '<label>Type<select data-f="option_type"><option>CE</option><option>PE</option></select></label>' +
-      '<label>Strike<input data-f="strike_price" type="number" min="0" step="0.01" required></label>' +
-      '<label>Expiry<input data-f="leg_expiry_date" type="date" required></label>' +
-      '<label>Entry price<input data-f="entry_price" type="number" min="0" step="0.01" required></label>' +
-      '<label>Time' + timeSelects("entry_hour", "entry_minute", entryHour, entryMinute) + "</label>" +
+      '<select data-f="side" aria-label="Side" required><option value="" hidden>Side</option><option>BUY</option><option>SELL</option></select>' +
+      '<select data-f="option_type" aria-label="Type" required><option value="" hidden>Type</option><option>CE</option><option>PE</option></select>' +
+      '<input data-f="strike_price" type="number" min="0" step="0.01" placeholder="Strike" aria-label="Strike" required>' +
+      dateField("leg_expiry_date", "", "Expiry") +
+      '<input data-f="entry_price" type="number" min="0" step="0.01" placeholder="Entry price" aria-label="Entry price" required>' +
+      '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
       exit +
       '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
     wrap.querySelector('[data-f="side"]').value = (leg && leg.side) || "SELL";
     wrap.querySelector('[data-f="option_type"]').value = (leg && leg.option_type) || "CE";
     wrap.querySelector('[data-f="strike_price"]').value = leg && leg.strike_price != null ? leg.strike_price : "";
-    wrap.querySelector('[data-f="leg_expiry_date"]').value = (leg && leg.leg_expiry_date) || $("mloExpiry").value || "";
+    var expiryInp = wrap.querySelector('[data-f="leg_expiry_date"]');
+    expiryInp.value = (leg && leg.leg_expiry_date) || $("mloExpiry").value || "";
+    if (expiryInp.value) expiryInp.type = "date";
     wrap.querySelector('[data-f="entry_price"]').value = leg && leg.entry_price != null ? leg.entry_price : "";
+    wrap.querySelectorAll("input[data-ph]").forEach(bindDateField);
+    wrap.querySelectorAll('[data-f="entry_clock"], [data-f="exit_clock"]').forEach(bindClockField);
+    expiryInp.addEventListener("input", function () { expiryInp.dataset.touched = "1"; });
     wrap.querySelector(".mlo-remove").addEventListener("click", function () {
       wrap.remove();
       refreshSaveGate();
@@ -293,7 +315,7 @@
   function toLocal(iso) {
     var parts = clockParts(iso);
     if (!parts) return "";
-    return parts.date + "T" + pad2(parts.hour) + ":" + pad2(parts.minute);
+    return parts.date + " " + formatClock(parts.hour, parts.minute);
   }
 
   function addLeg(leg) {
@@ -307,10 +329,9 @@
     for (var i = 0; i < rows.length; i++) {
       var px = rows[i].querySelector('[data-f="exit_price"]');
       var day = rows[i].querySelector('[data-f="exit_date"]');
-      var hour = rows[i].querySelector('[data-f="exit_hour"]');
-      var minute = rows[i].querySelector('[data-f="exit_minute"]');
-      if (!px || !day || !hour || !minute) return false;
-      if (px.value === "" || !day.value || hour.value === "" || minute.value === "") return false;
+      var clock = rows[i].querySelector('[data-f="exit_clock"]');
+      if (!px || !day || !clock) return false;
+      if (px.value === "" || !day.value || !parseClock(clock.value)) return false;
     }
     return true;
   }
@@ -327,17 +348,34 @@
         strike_price: Number(val("strike_price")),
         leg_expiry_date: val("leg_expiry_date"),
         entry_price: Number(val("entry_price")),
-        entry_time: composeLocal($("mloEntryDate").value, val("entry_hour"), val("entry_minute")),
+        entry_time: composeClock($("mloEntryDate").value, val("entry_clock")),
       };
       if (row.dataset.id) leg.id = row.dataset.id;
       var exitPx = val("exit_price");
       var exitDay = val("exit_date");
-      if (exitPx !== "") leg.exit_price = Number(exitPx);
-      else leg.exit_price = null;
-      if (exitDay) leg.exit_time = composeLocal(exitDay, val("exit_hour"), val("exit_minute"));
-      else leg.exit_time = null;
+      if (exitPx !== "") {
+        leg.exit_price = Number(exitPx);
+        leg.exit_time = composeClock(exitDay, val("exit_clock")) || null;
+      } else {
+        leg.exit_price = null;
+        leg.exit_time = null;
+      }
       return leg;
     });
+  }
+
+  function legClockError() {
+    var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    for (var i = 0; i < rows.length; i++) {
+      var entry = rows[i].querySelector('[data-f="entry_clock"]');
+      if (!entry || !parseClock(entry.value)) return "Time must look like 03:10 PM";
+      var exitPx = rows[i].querySelector('[data-f="exit_price"]');
+      var exitClock = rows[i].querySelector('[data-f="exit_clock"]');
+      if (exitPx && exitPx.value !== "" && exitClock && !parseClock(exitClock.value)) {
+        return "Exit time must look like 03:10 PM";
+      }
+    }
+    return "";
   }
 
   function payload() {
@@ -374,7 +412,10 @@
   function syncLegExpiries() {
     var exp = $("mloExpiry").value;
     $("mloLegs").querySelectorAll('[data-f="leg_expiry_date"]').forEach(function (inp) {
-      if (!inp.dataset.touched) inp.value = exp;
+      if (!inp.dataset.touched) {
+        inp.value = exp;
+        inp.type = exp ? "date" : "text";
+      }
     });
   }
 
@@ -400,6 +441,13 @@
     ensureTypeOptions(trade);
     $("mloModalTitle").textContent = nextMode === "new" ? "New Trade" : nextMode === "exit" ? "Exit Trade" : "Edit Trade";
     $("mloCloseTrade").hidden = nextMode !== "exit";
+    var tradeNo = $("mloTradeNo");
+    if (nextMode === "new") {
+      tradeNo.hidden = true;
+    } else {
+      tradeNo.hidden = false;
+      $("mloTradeNoVal").textContent = trade && trade.trade_no != null ? String(trade.trade_no) : "—";
+    }
     $("mloType").value = (trade && trade.trade_type) || "STRADDLE";
     $("mloInstrument").value = (trade && trade.instrument) || "";
     $("mloSpot").value = trade && trade.spot_price_entry != null ? trade.spot_price_entry : "";
@@ -659,6 +707,11 @@
     showFormError("");
     if (legCount() < minForType()) {
       showFormError(typeLabel($("mloType").value) + " needs at least " + minForType() + " legs");
+      return;
+    }
+    var clockErr = legClockError();
+    if (clockErr) {
+      showFormError(clockErr);
       return;
     }
     var body = payload();

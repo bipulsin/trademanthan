@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import calendar
 import logging
+import re
 import threading
 import time
 import uuid
@@ -196,6 +197,31 @@ def _parse_date(raw: Any) -> Optional[date]:
         return None
 
 
+_CLOCK_AMPM = re.compile(
+    r"^(?P<h>\d{1,2}):(?P<m>\d{2})\s*(?P<ap>AM|PM)$",
+    re.IGNORECASE,
+)
+_DATE_CLOCK_AMPM = re.compile(
+    r"^(?P<d>\d{4}-\d{2}-\d{2})[T ](?P<clock>\d{1,2}:\d{2}\s*[AaPp][Mm])$"
+)
+
+
+def parse_clock_ampm(text: str) -> Optional[Tuple[int, int]]:
+    """Parse ``hh:mm AM/PM`` into 24-hour ``(hour, minute)``. ``03:10 PM`` is 15:10."""
+    match = _CLOCK_AMPM.match(str(text or "").strip())
+    if not match:
+        return None
+    hour = int(match.group("h"))
+    minute = int(match.group("m"))
+    if hour < 1 or hour > 12 or minute > 59:
+        return None
+    if match.group("ap").upper() == "AM":
+        hour24 = 0 if hour == 12 else hour
+    else:
+        hour24 = 12 if hour == 12 else hour + 12
+    return hour24, minute
+
+
 def _parse_dt(raw: Any) -> Optional[datetime]:
     if raw is None or str(raw).strip() == "":
         return None
@@ -204,6 +230,13 @@ def _parse_dt(raw: Any) -> Optional[datetime]:
             return IST.localize(raw)
         return raw.astimezone(IST)
     s = str(raw).strip().replace("Z", "+00:00")
+    ampm = _DATE_CLOCK_AMPM.match(s)
+    if ampm:
+        clock = parse_clock_ampm(ampm.group("clock"))
+        day = _parse_date(ampm.group("d"))
+        if clock is None or day is None:
+            return None
+        return IST.localize(datetime(day.year, day.month, day.day, clock[0], clock[1]))
     try:
         if "T" not in s and " " in s:
             s = s.replace(" ", "T", 1)

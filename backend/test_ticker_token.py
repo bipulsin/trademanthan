@@ -128,6 +128,7 @@ def test_snapshot_keeps_commdiv_when_another_desk_stalls(monkeypatch):
     monkeypatch.setattr(tl, "_breakfast_signals", lambda: [])
     monkeypatch.setattr(tl, "_premium", lambda uid: ([], []))
     monkeypatch.setattr(tl, "_tarang_trades", lambda: [])
+    monkeypatch.setattr(tl, "_multi_leg_trades", lambda: [])
 
     class _DB:
         def close(self):

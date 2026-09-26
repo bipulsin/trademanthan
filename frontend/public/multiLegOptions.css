@@ -240,16 +240,44 @@ body.mlo-page .right-panel {
     font: 500 0.9rem var(--font-mono);
 }
 
+#mloLegs {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    overflow-x: auto;
+}
+
 .mlo-leg {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-    gap: 8px;
-    padding: 10px;
-    margin-top: 8px;
-    align-items: end;
-    background: var(--bg2);
-    border: 1px solid var(--line);
-    border-radius: 14px;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    min-height: 0;
+}
+
+.mlo-trade-no {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 4px;
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.mlo-trade-no[hidden] { display: none; }
+
+.mlo-trade-no #mloTradeNoVal {
+    font: 500 0.9rem var(--font-mono);
+    color: var(--text);
+    line-height: 34px;
+    user-select: text;
 }
 
 .mlo-leg label,
@@ -275,6 +303,28 @@ body.mlo-page .right-panel {
     padding: 8px;
     font: 500 0.9rem var(--font-mono);
 }
+
+.mlo-leg input,
+.mlo-leg select {
+    height: 30px;
+    margin: 0;
+    padding: 0 6px;
+    min-width: 0;
+    flex: 1 1 72px;
+    box-sizing: border-box;
+    font-size: 0.78rem;
+    line-height: 30px;
+}
+
+.mlo-leg select[data-f="side"] { flex: 0 0 72px; width: 72px; }
+.mlo-leg select[data-f="option_type"] { flex: 0 0 58px; width: 58px; }
+.mlo-leg input[data-f="entry_clock"],
+.mlo-leg input[data-f="exit_clock"] { flex: 0 0 92px; width: 92px; }
+.mlo-leg input[data-f="strike_price"],
+.mlo-leg input[data-f="entry_price"],
+.mlo-leg input[data-f="exit_price"] { flex: 0 0 88px; width: 88px; }
+.mlo-leg input[type="date"],
+.mlo-leg input[data-ph] { flex: 1 1 124px; min-width: 118px; }
 
 .mlo-form-grid {
     display: grid;
@@ -327,8 +377,8 @@ body.mlo-page .right-panel {
 
 .mlo-leg .mlo-remove,
 .mlo-row-actions .mlo-icon-btn {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -336,7 +386,10 @@ body.mlo-page .right-panel {
     border-radius: 8px;
     font-size: 0.85rem;
     padding: 0;
+    margin: 0;
     line-height: 1;
+    flex: 0 0 30px;
+    align-self: center;
 }
 
 .mlo-leg .mlo-remove:hover,
@@ -422,9 +475,12 @@ body.mlo-page .right-panel {
 
 @media (max-width: 800px) {
     .mlo-form-grid,
-    .mlo-leg,
     .mlo-leg-ro {
         grid-template-columns: 1fr 1fr;
+    }
+    .mlo-leg {
+        display: flex;
+        flex-wrap: nowrap;
     }
     body.mlo-page .so-header-aside { align-items: stretch; width: 100%; }
     .mlo-leg-head { display: none; }

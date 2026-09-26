@@ -1,5 +1,5 @@
 """Ticker snapshot: open trades only, no desk prefixes, signals inside IST windows."""
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import backend.services.ticker_live as tl
@@ -135,6 +135,7 @@ def test_snapshot_open_trades_all_day_signals_follow_window(monkeypatch):
         ),
     )
     monkeypatch.setattr(tl, "_tarang_trades", lambda: [])
+    monkeypatch.setattr(tl, "_multi_leg_trades", lambda: [])
 
     monkeypatch.setattr(tl, "_now", lambda: IST.localize(datetime(2026, 9, 25, 10, 0)))
     snap = tl.build_snapshot(_DB(), 4)
@@ -168,3 +169,92 @@ def test_snapshot_open_trades_all_day_signals_follow_window(monkeypatch):
     holiday = tl.build_snapshot(_DB(), 4)
     assert [r["symbol"] for r in holiday["trades"]] == symbols
     assert holiday["signals"] == []
+
+
+def test_multi_leg_ticker_line_and_toggle_off(monkeypatch):
+    assert tl.multi_leg_ticker_symbol("IRON_FLY", "NIFTY", date(2026, 10, 27)) == "IronFly-NIFTY-27Oct26"
+    assert tl.multi_leg_ticker_symbol("Iron Fly", "NIFTY", "2026-10-27") == "IronFly-NIFTY-27Oct26"
+    assert tl.multi_leg_ticker_symbol("IRON_CONDOR", "NIFTY", date(2026, 10, 27)) == "IronCondor-NIFTY-27Oct26"
+    assert tl.multi_leg_ticker_symbol("STRADDLE", "BANKNIFTY", "2026-10-05") == "Straddle-BANKNIFTY-05Oct26"
+    assert tl.multi_leg_ticker_symbol("UNCLASSIFIED", "NIFTY", date(2026, 10, 27)) == "Unclassified-NIFTY-27Oct26"
+    line = tl.multi_leg_ticker_symbol("IRON_FLY", "NIFTY", date(2026, 10, 27))
+    assert "Multi-Leg" not in line
+    assert "Stock Options" not in line
+    assert tl.default_algos()["multi_leg_options"] is True
+    assert tl._merge_algos({})["multi_leg_options"] is True
+    assert tl._merge_algos({"multi_leg_options": False})["multi_leg_options"] is False
+
+    _clear()
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.list_active",
+        lambda: [
+            {
+                "status": "ACTIVE",
+                "trade_type": "IRON_FLY",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": 343,
+            },
+            {
+                "status": "ACTIVE",
+                "trade_type": "STRADDLE",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": 0,
+            },
+            {
+                "status": "ACTIVE",
+                "trade_type": "IRON_CONDOR",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": -12,
+            },
+            {
+                "status": "CLOSED",
+                "trade_type": "STRADDLE",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": 10,
+            },
+            {
+                "status": "ACTIVE",
+                "trade_type": "IRON_FLY",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": None,
+            },
+        ],
+    )
+    rows = tl._multi_leg_trades()
+    assert [r["symbol"] for r in rows] == [
+        "IronFly-NIFTY-27Oct26",
+        "Straddle-NIFTY-27Oct26",
+        "IronCondor-NIFTY-27Oct26",
+    ]
+    assert [r["pnl"] for r in rows] == [343.0, 0.0, -12.0]
+
+    def settings_for(on):
+        algos = {k: False for k in tl.ALGOS}
+        algos["multi_leg_options"] = on
+        return {"enabled": True, "algos": algos}
+
+    monkeypatch.setattr(tl, "get_settings", lambda db, uid: settings_for(True))
+    snap = tl.build_snapshot(_DB(), 4)
+    assert [r["symbol"] for r in snap["trades"]] == [r["symbol"] for r in rows]
+    assert snap["trades"][0]["algo_label"] == ""
+    assert snap["trades"][0]["pnl"] == 343.0
+    assert "Multi-Leg" not in snap["trades"][0]["symbol"]
+    assert "Stock Options" not in snap["trades"][0]["symbol"]
+
+    _clear()
+    calls = {"n": 0}
+
+    def counted():
+        calls["n"] += 1
+        return rows
+
+    monkeypatch.setattr(tl, "_multi_leg_trades", counted)
+    monkeypatch.setattr(tl, "get_settings", lambda db, uid: settings_for(False))
+    off = tl.build_snapshot(_DB(), 4)
+    assert calls["n"] == 0
+    assert off["trades"] == []

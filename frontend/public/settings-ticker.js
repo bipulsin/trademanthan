@@ -15,6 +15,7 @@
   var LABELS = {
     commdiv: "CommDiv",
     stock_options: "Stock Options",
+    multi_leg_options: "Multi-Leg Options",
     kavach: "Kavach",
     breakfast: "Breakfast",
     premium_futures: "Premium Futures",
