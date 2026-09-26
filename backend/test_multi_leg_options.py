@@ -16,6 +16,7 @@ from backend.services.multi_leg_options import (
     next_trade_number,
     parse_clock_ampm,
     status_after_save,
+    suggested_expiry,
     trade_pnl,
 )
 
@@ -83,6 +84,40 @@ def test_next_month_expiry_when_entry_is_after_this_months_expiry():
     # MCX fallback is last Thursday (24 Sep 2026). 26 Sep has already passed it.
     assert next_monthly_option_expiry(date(2026, 9, 24), "CRUDEOIL") == date(2026, 9, 24)
     assert next_monthly_option_expiry(date(2026, 9, 26), "CRUDEOIL") == date(2026, 10, 29)
+
+
+def test_suggested_expiry_skips_two_months_under_40_dte():
+    # 26 Sep 2026. Last Tuesday 29 Sep is 3 DTE and 27 Oct is 31 DTE, both under 40.
+    # November's last Tuesday is 24 Nov, an NSE holiday, so the helper uses 23 Nov (58 DTE).
+    as_of = date(2026, 9, 26)
+    assert (date(2026, 9, 29) - as_of).days < 40
+    assert (date(2026, 10, 27) - as_of).days < 40
+    assert suggested_expiry(as_of, "NIFTY", as_of=as_of) == date(2026, 11, 23)
+    assert suggested_expiry(as_of, "BANKNIFTY", as_of=as_of) == date(2026, 11, 23)
+    assert suggested_expiry(as_of, "SENSEX", as_of=as_of) == date(2026, 11, 23)
+    assert suggested_expiry(as_of, "RELIANCE", as_of=as_of) == date(2026, 11, 23)
+
+
+def test_mcx_suggested_expiry_takes_soonest_listed_with_40_dte(monkeypatch):
+    as_of = date(2026, 9, 26)
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.listed_option_expiries",
+        lambda instrument, on_or_after=None: [
+            date(2026, 10, 15),
+            date(2026, 11, 17),
+            date(2026, 12, 15),
+        ],
+    )
+    assert suggested_expiry(as_of, "CRUDEOIL", as_of=as_of) == date(2026, 11, 17)
+
+
+def test_mcx_suggested_expiry_steps_monthly_when_master_is_short(monkeypatch):
+    as_of = date(2026, 9, 26)
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.listed_option_expiries",
+        lambda instrument, on_or_after=None: [date(2026, 10, 15)],
+    )
+    assert suggested_expiry(as_of, "CRUDEOIL", as_of=as_of) == date(2026, 11, 26)
 
 
 def test_partial_exit_keeps_trade_active():

@@ -143,7 +143,9 @@
   }
 
   // Client preview. Server /expiry is the source of truth (NSE holiday shift + MCX master).
-  // JS weekday: Sun=0 … Tue=2, Thu=4.
+  // JS weekday: Sun=0 … Tue=2, Thu=4. Step one month at a time until DTE from IST today is 40+.
+  var MIN_DTE = 40;
+
   function clientExpiry(entryIso, instrument) {
     var p = String(entryIso || "").split("-");
     if (p.length < 3) return "";
@@ -155,6 +157,12 @@
     if (entryIso > exp) {
       var nm = nextMonth(y, m);
       exp = lastWeekday(nm[0], nm[1] + 1, weekday);
+    }
+    var today = todayISO();
+    for (var i = 0; i < 24 && dayDiff(today, exp) < MIN_DTE; i++) {
+      var parts = exp.split("-");
+      var nxt = nextMonth(+parts[0], +parts[1] - 1);
+      exp = lastWeekday(nxt[0], nxt[1] + 1, weekday);
     }
     return exp;
   }
@@ -212,9 +220,8 @@
   }
 
   function refreshDte() {
-    var entry = $("mloEntryDate").value;
     var exp = $("mloExpiry").value;
-    var days = dayDiff(entry, exp);
+    var days = dayDiff(todayISO(), exp);
     $("mloDte").textContent = days == null ? "DTE —" : "DTE " + days;
   }
 
@@ -300,6 +307,7 @@
     wrap.querySelector('[data-f="entry_price"]').value = leg && leg.entry_price != null ? leg.entry_price : "";
     wrap.querySelectorAll("input[data-ph]").forEach(bindDateField);
     wrap.querySelectorAll('[data-f="entry_clock"], [data-f="exit_clock"]').forEach(bindClockField);
+    if (leg && leg.leg_expiry_date) expiryInp.dataset.touched = "1";
     expiryInp.addEventListener("input", function () { expiryInp.dataset.touched = "1"; });
     wrap.querySelector(".mlo-remove").addEventListener("click", function () {
       wrap.remove();
@@ -396,7 +404,7 @@
   }
 
   async function loadExpiry() {
-    if (expiryTouched) return;
+    if (mode !== "new" || expiryTouched) return;
     var inst = $("mloInstrument").value.trim();
     var entry = $("mloEntryDate").value;
     if (!inst || !entry) return;
@@ -684,15 +692,25 @@
     }
     refreshSaveGate();
   });
-  $("mloEntryDate").addEventListener("change", function () { expiryTouched = false; loadExpiry(); });
+  $("mloEntryDate").addEventListener("change", function () {
+    if (mode !== "new") return;
+    expiryTouched = false;
+    loadExpiry();
+  });
   $("mloExpiry").addEventListener("input", function () { expiryTouched = true; refreshDte(); syncLegExpiries(); });
   $("mloInstrument").addEventListener("focus", function () { fillCombo(this.value); });
-  $("mloInstrument").addEventListener("input", function () { expiryTouched = false; fillCombo(this.value); loadExpiry(); });
+  $("mloInstrument").addEventListener("input", function () {
+    fillCombo(this.value);
+    if (mode !== "new") return;
+    expiryTouched = false;
+    loadExpiry();
+  });
   $("mloInstrumentList").addEventListener("click", function (ev) {
     var btn = ev.target.closest("button[data-sym]");
     if (!btn) return;
     $("mloInstrument").value = btn.getAttribute("data-sym");
     $("mloInstrumentList").hidden = true;
+    if (mode !== "new") return;
     expiryTouched = false;
     loadExpiry();
   });

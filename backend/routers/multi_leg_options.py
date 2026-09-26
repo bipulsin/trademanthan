@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,11 +13,13 @@ from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
 from backend.services.multi_leg_options import (
+    IST,
     MultiLegNotFound,
     MultiLegValidationError,
     close_trade,
     create_trade,
     delete_trade,
+    dte_days,
     get_quote,
     get_trade,
     list_active,
@@ -102,15 +104,18 @@ def expiry_default(
         entry = date.fromisoformat(raw) if raw else date.today()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="entry_date must be YYYY-MM-DD") from exc
+    today = datetime.now(IST).date()
     try:
-        exp = suggested_expiry(entry, instrument.strip().upper())
+        exp = suggested_expiry(entry, instrument.strip().upper(), as_of=today)
     except MultiLegValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "ok": True,
         "instrument": instrument.strip().upper(),
         "entry_date": entry.isoformat(),
+        "as_of": today.isoformat(),
         "expiry_date": exp.isoformat(),
+        "dte": dte_days(exp, today),
     }
 
 

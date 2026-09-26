@@ -50,6 +50,8 @@ _NSE_EXPIRY_WEEKDAY = 1  # Tuesday
 # No MCX monthly-option calendar function exists in this repo. When the
 # instrument master has no listed expiries, fall back to last Thursday.
 _MCX_EXPIRY_WEEKDAY = 3  # Thursday
+# New-trade default: nearest expiry whose DTE (expiry − today IST) is at least this.
+MIN_SUGGESTED_DTE = 40
 
 INDEX_INSTRUMENTS = ("NIFTY", "BANKNIFTY", "SENSEX")
 _BSE_INDEXES = {"SENSEX", "BANKEX"}
@@ -304,8 +306,9 @@ def next_monthly_option_expiry(entry: date, instrument: str) -> date:
     last-Tuesday rule.
 
     MCX: no monthly option calendar exists in the repo. This calendar fallback
-    is last Thursday, same roll-forward rule. The API default prefers a listed
-    master expiry when one is available (see ``suggested_expiry``).
+    is last Thursday, same roll-forward rule. The API default prefers the
+    soonest listed master expiry with at least 40 DTE, then steps this
+    fallback the same way (see ``suggested_expiry``).
     """
     if not isinstance(entry, date):
         raise MultiLegValidationError("entry date is required")
@@ -445,19 +448,55 @@ def listed_option_expiries(instrument: str, on_or_after: Optional[date] = None) 
     return sorted(dates)
 
 
-def suggested_expiry(entry: date, instrument: str) -> date:
-    """UI default. MCX prefers the next listed master expiry; otherwise the calendar rule."""
-    cal = next_monthly_option_expiry(entry, instrument)
-    if not is_mcx_instrument(instrument):
-        return cal
-    try:
-        listed = listed_option_expiries(instrument, on_or_after=entry)
-    except Exception:
-        logger.info("multi_leg MCX expiry master lookup failed for %s", instrument)
-        return cal
-    if not listed:
-        return cal
-    return listed[0]
+def _monthly_expiry_at_least(entry: date, instrument: str, as_of: date, min_dte: int) -> date:
+    """Nearest monthly expiry with DTE of at least ``min_dte``.
+
+    Starts at ``next_monthly_option_expiry`` and steps one month at a time by
+    calling that helper the day after the previous expiry. Stops at the first
+    month that qualifies (not the farthest).
+    """
+    expiry = next_monthly_option_expiry(entry, instrument)
+    for _ in range(36):
+        dte = dte_days(expiry, as_of)
+        if dte is not None and dte >= min_dte:
+            return expiry
+        nxt = next_monthly_option_expiry(expiry + timedelta(days=1), instrument)
+        if nxt <= expiry:
+            break
+        expiry = nxt
+    return expiry
+
+
+def suggested_expiry(entry: date, instrument: str, *, as_of: Optional[date] = None) -> date:
+    """Nearest expiry with at least 40 days to expiry.
+
+    DTE is the expiry date minus ``as_of`` (today in IST when omitted). The
+    nearest qualifying month or listed date is used.
+
+    NSE index, stock, and SENSEX names use the last-Tuesday monthly rule. If
+    that month is under 40 DTE, the next month is tried, then the one after,
+    until DTE is at least 40.
+
+    MCX walks upcoming listed option expiries and takes the soonest with DTE
+    of at least 40. If the master has none that far, the last-Thursday monthly
+    fallback is stepped the same way.
+    """
+    if not isinstance(entry, date):
+        raise MultiLegValidationError("entry date is required")
+    today = as_of if isinstance(as_of, date) and not isinstance(as_of, datetime) else datetime.now(IST).date()
+    if is_mcx_instrument(instrument):
+        floor = entry if entry > today else today
+        try:
+            listed = listed_option_expiries(instrument, on_or_after=floor)
+        except Exception:
+            logger.info("multi_leg MCX expiry master lookup failed for %s", instrument)
+            listed = []
+        for exp in listed:
+            dte = dte_days(exp, today)
+            if dte is not None and dte >= MIN_SUGGESTED_DTE:
+                return exp
+        return _monthly_expiry_at_least(entry, instrument, today, MIN_SUGGESTED_DTE)
+    return _monthly_expiry_at_least(entry, instrument, today, MIN_SUGGESTED_DTE)
 
 
 def resolve_option_contract(
