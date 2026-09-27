@@ -329,6 +329,7 @@ body.mlo-page .right-panel {
 .mlo-leg input[data-f="strike_price"],
 .mlo-leg input[data-f="entry_price"],
 .mlo-leg input[data-f="exit_price"] { flex: 0 0 88px; width: 88px; }
+.mlo-leg input[data-f="lot_size"] { flex: 0 0 64px; width: 64px; }
 .mlo-leg input[type="date"],
 .mlo-leg input[data-ph] { flex: 1 1 124px; min-width: 118px; }
 
@@ -461,6 +462,58 @@ body.mlo-page .right-panel {
 .mlo-table th { cursor: pointer; color: var(--muted); }
 .mlo-legs-detail td { background: rgba(0, 0, 0, 0.2); }
 .mlo-empty { color: var(--muted); padding: 20px 4px; }
+
+.mlo-payoff {
+    margin-top: 14px;
+    padding: 12px 12px 8px;
+    background: #101614;
+    border: 1px solid rgba(61, 186, 122, 0.45);
+    border-radius: 12px;
+}
+
+.mlo-payoff[hidden],
+.mlo-payoff:empty { display: none; }
+
+.mlo-payoff-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 18px;
+    margin: 0 0 8px;
+}
+
+.mlo-payoff-stat { min-width: 108px; }
+
+.mlo-payoff-lbl {
+    display: block;
+    color: var(--muted);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.mlo-payoff-val {
+    display: block;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--text);
+}
+
+.mlo-payoff-val.mlo-pos { color: #3dba7a; }
+.mlo-payoff-val.mlo-neg { color: #e06b6b; }
+
+.mlo-payoff-canvas {
+    width: 100%;
+    height: 230px;
+    display: block;
+}
+
+.mlo-payoff-note,
+.mlo-payoff-empty {
+    margin: 4px 0 8px;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
 
 .mlo-leg-ro {
     display: grid;

@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=8" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=11" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -149,6 +149,7 @@
                     <button type="button" class="mlo-btn so-modal-btn secondary" id="mloAddLeg">Add Leg</button>
                 </div>
                 <div id="mloLegs"></div>
+                <div id="mloPayoff" class="mlo-payoff" hidden></div>
                 <p class="mlo-err" id="mloFormErr" hidden></p>
                 <div class="mlo-modal-actions">
                     <button type="button" class="mlo-btn so-modal-btn secondary" id="mloCancel">Cancel</button>
@@ -178,6 +179,7 @@
         </div>
     </div>
     <script src="left-menu.js?v=3.52"></script>
-    <script src="multiLegOptions.js?v=9"></script>
+    <script src="multiLegPayoff.js?v=3"></script>
+    <script src="multiLegOptions.js?v=11"></script>
 </body>
 </html>

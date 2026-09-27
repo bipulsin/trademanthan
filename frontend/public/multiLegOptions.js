@@ -15,7 +15,15 @@
   var editingId = null;
   var expiryTouched = false;
   var pollTimer = null;
+  var payoffTimer = null;
   var alertLatch = {};
+  var PAYOFF_REFRESH_MS = 10 * 60 * 1000;
+  var payoffClock = {};
+  var lastInstrumentSpot = {};
+  var lotCache = {};
+  var lotFlight = {};
+  var lotMiss = {};
+  var modalPayoffTimer = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -268,6 +276,7 @@
     if (!closeBtn.hidden) {
       closeBtn.disabled = !allLegsExited();
     }
+    scheduleModalPayoff();
   }
 
   function refreshDte() {
@@ -347,6 +356,7 @@
       '<input data-f="strike_price" type="number" min="0" step="0.01" placeholder="Strike" aria-label="Strike" required>' +
       dateField("leg_expiry_date", "", "Expiry") +
       '<input data-f="entry_price" type="number" min="0" step="0.01" placeholder="Entry price" aria-label="Entry price" required>' +
+      '<input data-f="lot_size" type="number" min="1" step="1" placeholder="Lot" aria-label="Lot size">' +
       '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
       exit +
       '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
@@ -359,8 +369,15 @@
     expiryInp.value = (leg && leg.leg_expiry_date) || $("mloExpiry").value || "";
     if (expiryInp.value) expiryInp.type = "date";
     wrap.querySelector('[data-f="entry_price"]').value = leg && leg.entry_price != null ? leg.entry_price : "";
+    var lotInp = wrap.querySelector('[data-f="lot_size"]');
+    if (leg && leg.lot_size) {
+      lotInp.value = String(leg.lot_size);
+      lotInp.dataset.auto = "1";
+    }
+    lotInp.addEventListener("input", function () { lotInp.dataset.auto = ""; });
     wrap.querySelectorAll("input[data-ph]").forEach(bindDateField);
     wrap.querySelectorAll('[data-f="entry_clock"], [data-f="exit_clock"]').forEach(bindClockField);
+    if (leg && leg.lot_size) wrap.dataset.lotSize = String(leg.lot_size);
     if (leg && leg.leg_expiry_date) expiryInp.dataset.touched = "1";
     expiryInp.addEventListener("input", function () { expiryInp.dataset.touched = "1"; });
     wrap.querySelector(".mlo-remove").addEventListener("click", function () {
@@ -493,6 +510,7 @@
     } catch (e) { /* keep client preview */ }
     syncLegExpiries();
     refreshDte();
+    scheduleModalPayoff();
   }
 
   function syncLegExpiries() {
@@ -560,10 +578,12 @@
     refreshDte();
     refreshSaveGate();
     $("mloModal").hidden = false;
+    scheduleModalPayoff();
   }
 
   function closeModal() {
     $("mloModal").hidden = true;
+    if ($("mloPayoff")) $("mloPayoff").hidden = true;
   }
 
   function assignFieldFocused() {
@@ -648,9 +668,16 @@
             iconButton("exit", "Exit Trade", "fa-right-from-bracket") +
             iconButton("toggle", open ? "Collapse" : "Expand", open ? "fa-chevron-up" : "fa-chevron-down", open) +
           "</span></div>" +
-        '<div class="mlo-row-body"' + (open ? "" : " hidden") + ">" + head + legs + "</div></article>";
+        '<div class="mlo-row-body"' + (open ? "" : " hidden") + ">" + head + legs +
+          '<div class="mlo-payoff" data-payoff="' + esc(t.id) + '"></div></div></article>';
     }).join("") : empty;
     host.innerHTML = renderOrphans(orphanLegs) + cards;
+    activeTrades.forEach(function (t) {
+      if (t.spot_ltp != null && !isNaN(Number(t.spot_ltp))) {
+        lastInstrumentSpot[String(t.instrument || "").toUpperCase()] = Number(t.spot_ltp);
+      }
+    });
+    paintExpandedPayoffs(false);
   }
 
   function cmp(a, b, key) {
@@ -792,10 +819,11 @@
     expiryTouched = false;
     loadExpiry();
   });
-  $("mloExpiry").addEventListener("input", function () { expiryTouched = true; refreshDte(); syncLegExpiries(); });
+  $("mloExpiry").addEventListener("input", function () { expiryTouched = true; refreshDte(); syncLegExpiries(); scheduleModalPayoff(); });
   $("mloInstrument").addEventListener("focus", function () { fillCombo(this.value); });
   $("mloInstrument").addEventListener("input", function () {
     fillCombo(this.value);
+    scheduleModalPayoff();
     if (mode !== "new") return;
     expiryTouched = false;
     loadExpiry();
@@ -805,6 +833,7 @@
     if (!btn) return;
     $("mloInstrument").value = btn.getAttribute("data-sym");
     $("mloInstrumentList").hidden = true;
+    scheduleModalPayoff();
     if (mode !== "new") return;
     expiryTouched = false;
     loadExpiry();
@@ -962,8 +991,10 @@
       var body = card.querySelector(".mlo-row-body");
       var willOpen = !!(body && body.hidden);
       if (body) body.hidden = !willOpen;
-      if (willOpen) expandedTrades[trade.id] = true;
-      else delete expandedTrades[trade.id];
+      if (willOpen) {
+        expandedTrades[trade.id] = true;
+        paintTradePayoff(trade, false);
+      } else delete expandedTrades[trade.id];
       var icon = btn.querySelector("i");
       if (icon) icon.className = willOpen ? "fas fa-chevron-up" : "fas fa-chevron-down";
       btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
@@ -1044,9 +1075,241 @@
     }).catch(function () {});
   }
 
+  $("mloSpot").addEventListener("input", scheduleModalPayoff);
+
+  function payoffSnapshot(key, spot, livePnl, force) {
+    var now = Date.now();
+    var spotNum = spot != null && spot !== "" && !isNaN(Number(spot)) ? Number(spot) : null;
+    var row = payoffClock[key];
+    if (!row) {
+      payoffClock[key] = { spot: spotNum, livePnl: livePnl, at: now };
+      return payoffClock[key];
+    }
+    if (force || now - row.at >= PAYOFF_REFRESH_MS) {
+      if (spotNum != null) row.spot = spotNum;
+      row.livePnl = livePnl;
+      row.at = now;
+    } else if (row.spot == null && spotNum != null) {
+      row.spot = spotNum;
+      row.at = now;
+    }
+    if (row.livePnl == null && livePnl != null && !force && now - row.at < PAYOFF_REFRESH_MS) {
+      row.livePnl = livePnl;
+    }
+    return row;
+  }
+
+  function paintTradePayoff(trade, force) {
+    if (!trade || !window.MultiLegPayoff) return;
+    var host = document.querySelector('[data-payoff="' + trade.id + '"]');
+    if (!host) return;
+    var body = host.closest(".mlo-row-body");
+    if (body && body.hidden) return;
+    var spot = trade.spot_ltp;
+    var snap = payoffSnapshot(String(trade.id), spot, trade.total_pnl, force);
+    window.MultiLegPayoff.renderPayoff(host, {
+      legs: trade.legs || [],
+      spot: snap.spot,
+      instrument: trade.instrument,
+      livePnl: snap.livePnl,
+    });
+  }
+
+  function paintExpandedPayoffs(force) {
+    activeTrades.forEach(function (trade) {
+      if (!expandedTrades[trade.id]) return;
+      paintTradePayoff(trade, force);
+    });
+  }
+
+  function modalClockKey() {
+    var inst = $("mloInstrument").value.trim().toUpperCase();
+    return "modal:" + (editingId || "new") + ":" + inst;
+  }
+
+  function modalLivePnl() {
+    if (!editingId) return null;
+    var trade = tradeById(editingId);
+    return trade ? trade.total_pnl : null;
+  }
+
+  function modalSpotCandidate() {
+    var inst = $("mloInstrument").value.trim().toUpperCase();
+    if (editingId) {
+      var trade = tradeById(editingId);
+      if (trade && trade.spot_ltp != null && !isNaN(Number(trade.spot_ltp))) return Number(trade.spot_ltp);
+    }
+    if (lastInstrumentSpot[inst] != null) return lastInstrumentSpot[inst];
+    return null;
+  }
+
+  function contractKey(inst, strike, right, expiry) {
+    return [inst, strike, right, expiry].join("|");
+  }
+
+  function ensureFormLots() {
+    var inst = $("mloInstrument").value.trim().toUpperCase();
+    $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+      var strike = row.querySelector('[data-f="strike_price"]').value;
+      var right = row.querySelector('[data-f="option_type"]').value;
+      var expiryEl = row.querySelector('[data-f="leg_expiry_date"]');
+      var expiry = (expiryEl && expiryEl.value) || $("mloExpiry").value;
+      if (!inst || !strike || !right || !expiry || !(Number(strike) > 0)) return;
+      var key = contractKey(inst, strike, right, expiry);
+      var lotField = row.querySelector('[data-f="lot_size"]');
+      if (row.dataset.lotKey && row.dataset.lotKey !== key) {
+        row.dataset.lotSize = "";
+        delete row.dataset.lotKey;
+        if (lotField && lotField.dataset.auto === "1") lotField.value = "";
+      }
+      if (lotCache[key]) {
+        row.dataset.lotSize = String(lotCache[key]);
+        row.dataset.lotKey = key;
+        if (lotField && lotField.value === "" && lotField.dataset.auto !== "") {
+          lotField.value = String(lotCache[key]);
+          lotField.dataset.auto = "1";
+        }
+        return;
+      }
+      if (row.dataset.lotSize && !row.dataset.lotKey) {
+        lotCache[key] = Number(row.dataset.lotSize);
+        row.dataset.lotKey = key;
+        return;
+      }
+      if (row.dataset.lotKey === key && Number(row.dataset.lotSize) > 0) return;
+      if (lotMiss[key] === true) return;
+      if (typeof lotMiss[key] === "number" && Date.now() < lotMiss[key]) return;
+      if (lotFlight[key]) return;
+      var path = "/quote?instrument=" + encodeURIComponent(inst) +
+        "&strike=" + encodeURIComponent(strike) +
+        "&option_type=" + encodeURIComponent(right) +
+        "&expiry=" + encodeURIComponent(expiry);
+      lotFlight[key] = api(path).then(function (data) {
+        var lot = data && data.quote && Number(data.quote.lot_size);
+        if (lot > 0) {
+          lotCache[key] = lot;
+          delete lotMiss[key];
+          if (row.dataset.lotKey === key || !row.dataset.lotKey) {
+            row.dataset.lotSize = String(lot);
+            row.dataset.lotKey = key;
+            var field = row.querySelector('[data-f="lot_size"]');
+            if (field && field.value === "" && field.dataset.auto !== "") {
+              field.value = String(lot);
+              field.dataset.auto = "1";
+            }
+          }
+        } else {
+          lotMiss[key] = true;
+        }
+      }).catch(function () {
+        lotMiss[key] = Date.now() + 30000;
+      }).then(function () {
+        delete lotFlight[key];
+        if ($("mloModal").hidden) return;
+        renderModalPayoff(false);
+      });
+    });
+  }
+
+  function formPayoffLegs() {
+    return Array.prototype.map.call($("mloLegs").querySelectorAll(".mlo-leg"), function (row) {
+      function val(name) {
+        var field = row.querySelector('[data-f="' + name + '"]');
+        return field ? field.value : "";
+      }
+      var exitPx = val("exit_price");
+      var exitDay = val("exit_date");
+      var exitClock = val("exit_clock");
+      var exited = exitPx !== "" && !!exitDay && !!parseClock(exitClock);
+      var lotField = row.querySelector('[data-f="lot_size"]');
+      var typedLot = val("lot_size").trim();
+      var cleared = !!(lotField && lotField.dataset.auto === "" && typedLot === "");
+      var lot = typedLot !== "" ? Number(typedLot) : (cleared ? NaN : Number(row.dataset.lotSize));
+      return {
+        side: val("side"),
+        option_type: val("option_type"),
+        strike_price: val("strike_price") === "" ? null : Number(val("strike_price")),
+        entry_price: val("entry_price") === "" ? null : Number(val("entry_price")),
+        lot_size: lot,
+        exit_price: exited ? Number(exitPx) : null,
+        exit_time: exited ? "set" : null,
+      };
+    });
+  }
+
+  function renderModalPayoff(force) {
+    var host = $("mloPayoff");
+    if (!host || $("mloModal").hidden || !window.MultiLegPayoff) return;
+    ensureFormLots();
+    var legs = formPayoffLegs();
+    var lotPending = legs.some(function (leg) {
+      return leg.strike_price > 0 && leg.entry_price != null && !(leg.lot_size > 0);
+    });
+    var lotLoading = lotPending && Object.keys(lotFlight).length > 0;
+    var liveCandidate = modalSpotCandidate();
+    var typed = Number($("mloSpot").value);
+    var spot;
+    var livePnl;
+    if (liveCandidate == null) {
+      spot = typed > 0 ? typed : null;
+      var fresh = payoffSnapshot(modalClockKey(), null, modalLivePnl(), force);
+      livePnl = fresh.livePnl;
+    } else {
+      var snap = payoffSnapshot(modalClockKey(), liveCandidate, modalLivePnl(), force);
+      spot = snap.spot;
+      livePnl = snap.livePnl;
+    }
+    window.MultiLegPayoff.renderPayoff(host, {
+      legs: legs,
+      spot: spot,
+      instrument: $("mloInstrument").value.trim(),
+      livePnl: livePnl,
+      note: lotPending
+        ? (lotLoading
+          ? "Lot size is still loading for a leg."
+          : "Lot size is unavailable for a leg, so it is left off the curve.")
+        : "",
+    });
+  }
+
+  function scheduleModalPayoff() {
+    if (!$("mloPayoff") || $("mloModal").hidden) return;
+    clearTimeout(modalPayoffTimer);
+    modalPayoffTimer = setTimeout(function () { renderModalPayoff(false); }, 200);
+  }
+
+  function refreshPayoffClock() {
+    var apply = function () {
+      paintExpandedPayoffs(true);
+      if (!$("mloModal").hidden) renderModalPayoff(true);
+    };
+    if (!$("mloModal").hidden) {
+      api("/trades/active").then(function (data) {
+        (data.trades || []).forEach(function (trade) {
+          var current = tradeById(trade.id);
+          if (current) {
+            current.spot_ltp = trade.spot_ltp;
+            current.total_pnl = trade.total_pnl;
+          }
+          if (trade.spot_ltp != null && !isNaN(Number(trade.spot_ltp))) {
+            lastInstrumentSpot[String(trade.instrument || "").toUpperCase()] = Number(trade.spot_ltp);
+          }
+        });
+      }).catch(function () {}).then(apply);
+      return;
+    }
+    activeTrades.forEach(function (trade) {
+      if (trade.spot_ltp != null && !isNaN(Number(trade.spot_ltp))) {
+        lastInstrumentSpot[String(trade.instrument || "").toUpperCase()] = Number(trade.spot_ltp);
+      }
+    });
+    apply();
+  }
+
   loadInstruments().then(function () { return loadActive(true); });
   pollTimer = setInterval(function () {
     if (tab === "active" && $("mloModal").hidden) loadActive(true);
     else pollAlertsOnly();
   }, 8000);
+  payoffTimer = setInterval(refreshPayoffClock, PAYOFF_REFRESH_MS);
 })();
