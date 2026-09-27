@@ -15,6 +15,7 @@
   var editingId = null;
   var expiryTouched = false;
   var pollTimer = null;
+  var alertLatch = {};
 
   function $(id) { return document.getElementById(id); }
 
@@ -205,6 +206,40 @@
     return MIN_LEGS[$("mloType").value] || 2;
   }
 
+  function typeTemplate(kind) {
+    if (kind === "IRON_FLY" || kind === "IRON_CONDOR") {
+      return [
+        { qualifier: "MAIN", option_type: "CE" },
+        { qualifier: "MAIN", option_type: "PE" },
+        { qualifier: "WING", option_type: "CE" },
+        { qualifier: "WING", option_type: "PE" },
+      ];
+    }
+    if (kind === "STRADDLE") {
+      return [
+        { qualifier: "MAIN", option_type: "CE" },
+        { qualifier: "MAIN", option_type: "PE" },
+      ];
+    }
+    return [];
+  }
+
+  function applyTypeTemplate() {
+    if (mode !== "new") return;
+    var slots = typeTemplate($("mloType").value);
+    while (legCount() < slots.length) addLeg(null);
+    var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    slots.forEach(function (slot, i) {
+      var row = rows[i];
+      if (!row) return;
+      var role = row.querySelector('[data-f="qualifier"]');
+      var right = row.querySelector('[data-f="option_type"]');
+      if (role) role.value = slot.qualifier;
+      if (right) right.value = slot.option_type;
+    });
+    refreshSaveGate();
+  }
+
   function legCount() {
     return $("mloLegs").querySelectorAll(".mlo-leg").length;
   }
@@ -290,6 +325,7 @@
         '<input data-f="exit_clock" type="text" placeholder="Time" aria-label="Exit time" value="' + esc(exitText) + '" required>';
     }
     wrap.innerHTML =
+      '<select data-f="qualifier" aria-label="Qualifier"><option value="" hidden>Role</option><option value="MAIN">Main</option><option value="WING">Wing</option><option value="ADJ">Adj</option></select>' +
       '<select data-f="side" aria-label="Side" required><option value="" hidden>Side</option><option>BUY</option><option>SELL</option></select>' +
       '<select data-f="option_type" aria-label="Type" required><option value="" hidden>Type</option><option>CE</option><option>PE</option></select>' +
       '<input data-f="strike_price" type="number" min="0" step="0.01" placeholder="Strike" aria-label="Strike" required>' +
@@ -298,6 +334,8 @@
       '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
       exit +
       '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
+    var role = wrap.querySelector('[data-f="qualifier"]');
+    if (leg && leg.qualifier) role.value = String(leg.qualifier).toUpperCase();
     wrap.querySelector('[data-f="side"]').value = (leg && leg.side) || "SELL";
     wrap.querySelector('[data-f="option_type"]').value = (leg && leg.option_type) || "CE";
     wrap.querySelector('[data-f="strike_price"]').value = leg && leg.strike_price != null ? leg.strike_price : "";
@@ -351,6 +389,7 @@
         return el ? el.value : "";
       }
       var leg = {
+        qualifier: val("qualifier") || null,
         side: val("side"),
         option_type: val("option_type"),
         strike_price: Number(val("strike_price")),
@@ -386,6 +425,17 @@
     return "";
   }
 
+  function qualifierError() {
+    var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    for (var i = 0; i < rows.length; i++) {
+      var role = rows[i].querySelector('[data-f="qualifier"]');
+      if (role && role.value) continue;
+      if (rows[i].dataset.id) continue;
+      return "Each new leg needs Main, Wing, or Adj";
+    }
+    return "";
+  }
+
   function payload() {
     var body = {
       trade_type: $("mloType").value,
@@ -399,6 +449,12 @@
     if (mode !== "exit") {
       var rawMax = $("mloMaxProfit").value.trim();
       body.max_profit = rawMax === "" ? null : Number(rawMax);
+      function zone(id) {
+        var raw = $(id).value.trim();
+        return raw === "" ? null : Number(raw);
+      }
+      body.green_zone_ce = zone("mloGreenCe");
+      body.green_zone_pe = zone("mloGreenPe");
     }
     return body;
   }
@@ -467,9 +523,13 @@
     $("mloSpot").value = trade && trade.spot_price_entry != null ? trade.spot_price_entry : "";
     $("mloEntryDate").value = (trade && trade.entry_date) || todayISO();
     $("mloExpiry").value = (trade && trade.expiry_date) || "";
-    var showMaxProfit = nextMode !== "exit";
-    $("mloMaxProfitField").hidden = !showMaxProfit;
-    $("mloMaxProfit").value = showMaxProfit && trade && trade.max_profit != null ? trade.max_profit : "";
+    var showHeaderExtras = nextMode !== "exit";
+    $("mloMaxProfitField").hidden = !showHeaderExtras;
+    $("mloMaxProfit").value = showHeaderExtras && trade && trade.max_profit != null ? trade.max_profit : "";
+    $("mloGreenCeField").hidden = !showHeaderExtras;
+    $("mloGreenPeField").hidden = !showHeaderExtras;
+    $("mloGreenCe").value = showHeaderExtras && trade && trade.green_zone_ce != null ? trade.green_zone_ce : "";
+    $("mloGreenPe").value = showHeaderExtras && trade && trade.green_zone_pe != null ? trade.green_zone_pe : "";
     $("mloLegs").innerHTML = "";
     showFormError("");
     var legs = (trade && trade.legs) || [];
@@ -479,6 +539,7 @@
     } else {
       legs.forEach(function (leg) { addLeg(leg); });
     }
+    if (nextMode === "new") applyTypeTemplate();
     if (!trade) loadExpiry();
     refreshDte();
     refreshSaveGate();
@@ -622,6 +683,7 @@
       setBanner(data.quote_error ? "Live quotes unavailable. Showing last saved LTP. " + data.quote_error : "");
       assignableTrades = data.assignable_trades || [];
       renderActive(data.trades || [], data.orphans || []);
+      handleAlerts(data.trades || []);
     } catch (e) {
       setBanner(e.message || "Could not load active trades");
     }
@@ -694,11 +756,17 @@
   $("mloSyncUpstox").addEventListener("click", openSyncModal);
   $("mloCancel").addEventListener("click", closeModal);
   $("mloModalClose").addEventListener("click", closeModal);
-  $("mloAddLeg").addEventListener("click", function () { addLeg(null); });
-  $("mloType").addEventListener("change", function () {
-    if (mode === "new" && legCount() < minForType()) {
-      while (legCount() < minForType()) addLeg(null);
+  $("mloAddLeg").addEventListener("click", function () {
+    if (mode !== "new") {
+      addLeg({ qualifier: "ADJ" });
+      return;
     }
+    var slots = typeTemplate($("mloType").value);
+    if (legCount() >= slots.length) addLeg({ qualifier: "ADJ" });
+    else addLeg(slots[legCount()]);
+  });
+  $("mloType").addEventListener("change", function () {
+    if (mode === "new") applyTypeTemplate();
     refreshSaveGate();
   });
   $("mloEntryDate").addEventListener("change", function () {
@@ -739,6 +807,11 @@
     var clockErr = legClockError();
     if (clockErr) {
       showFormError(clockErr);
+      return;
+    }
+    var roleErr = qualifierError();
+    if (roleErr) {
+      showFormError(roleErr);
       return;
     }
     var body = payload();
@@ -911,8 +984,51 @@
     if (detail) detail.hidden = !detail.hidden;
   });
 
+  function playAlert(file) {
+    try {
+      var audio = new Audio(file);
+      var played = audio.play();
+      if (played && typeof played.catch === "function") played.catch(function () {});
+    } catch (e) { /* autoplay can be blocked until a click */ }
+  }
+
+  function considerAlert(key, active, message, file) {
+    if (!active) {
+      alertLatch[key] = false;
+      return;
+    }
+    if (alertLatch[key]) return;
+    alertLatch[key] = true;
+    playAlert(file);
+    if (message) window.alert(message);
+  }
+
+  function handleAlerts(trades) {
+    var seen = {};
+    (trades || []).forEach(function (t) {
+      if (!t || (t.status && t.status !== "ACTIVE")) return;
+      var id = t.id || ((t.trade_type || "") + ":" + (t.instrument || ""));
+      var adjKey = id + ":adj";
+      var exitKey = id + ":exit";
+      seen[adjKey] = true;
+      seen[exitKey] = true;
+      considerAlert(adjKey, !!t.adjustment_alert, t.adjustment_message || "Adjustment", "adjustment.mp3");
+      considerAlert(exitKey, !!t.exit_adjustment_alert, "Exit Adjustment", "adjustment_exit.mp3");
+    });
+    Object.keys(alertLatch).forEach(function (key) {
+      if (!seen[key]) alertLatch[key] = false;
+    });
+  }
+
+  function pollAlertsOnly() {
+    api("/trades/active").then(function (data) {
+      handleAlerts(data.trades || []);
+    }).catch(function () {});
+  }
+
   loadInstruments().then(function () { return loadActive(true); });
   pollTimer = setInterval(function () {
     if (tab === "active" && $("mloModal").hidden) loadActive(true);
+    else pollAlertsOnly();
   }, 8000);
 })();

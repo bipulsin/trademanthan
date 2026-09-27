@@ -43,7 +43,16 @@ ACCEPTED_TRADE_TYPES = TRADE_TYPES + ("UNCLASSIFIED",)
 MIN_LEGS = {"STRADDLE": 2, "IRON_FLY": 4, "IRON_CONDOR": 4}
 SIDES = ("BUY", "SELL")
 OPTION_TYPES = ("CE", "PE")
+QUALIFIERS = ("MAIN", "WING", "ADJ")
+# Spot must clear the green-zone strike by this many points before an adjustment alert.
+GREEN_ZONE_BUFFER = 50
 STATUSES = ("ACTIVE", "CLOSED")
+_COMPACT_TYPES = {
+    "STRADDLE": "Straddle",
+    "IRON_FLY": "IronFly",
+    "IRON_CONDOR": "IronCondor",
+    "UNCLASSIFIED": "Unclassified",
+}
 
 # Same weekday as UpstoxService.get_monthly_expiry (last Tuesday, 2025+ NSE monthly).
 _NSE_EXPIRY_WEEKDAY = 1  # Tuesday
@@ -101,6 +110,107 @@ def trade_pnl(leg_pnls: Iterable[Optional[float]]) -> Optional[float]:
     if not vals:
         return None
     return float(sum(vals))
+
+
+def _normalize_trade_type(trade_type: Any) -> str:
+    kind = str(trade_type or "").strip().upper().replace(" ", "_").replace("-", "")
+    if kind == "IRONFLY":
+        return "IRON_FLY"
+    if kind == "IRONCONDOR":
+        return "IRON_CONDOR"
+    return kind
+
+
+def compact_trade_type(trade_type: Any) -> str:
+    """Same short names as the ticker PnL line: IronFly, IronCondor, Straddle, Unclassified."""
+    return _COMPACT_TYPES.get(_normalize_trade_type(trade_type), "")
+
+
+def default_leg_slots(trade_type: Any) -> List[Dict[str, str]]:
+    """Qualifier and CE/PE for the first legs when a new trade's type is chosen.
+
+    Iron Fly and Iron Condor: Main CE, Main PE, Wing CE, Wing PE.
+    Straddle: Main CE, Main PE. Legs added past this list default to Adj.
+    """
+    kind = _normalize_trade_type(trade_type)
+    if kind in ("IRON_FLY", "IRON_CONDOR"):
+        return [
+            {"qualifier": "MAIN", "option_type": "CE"},
+            {"qualifier": "MAIN", "option_type": "PE"},
+            {"qualifier": "WING", "option_type": "CE"},
+            {"qualifier": "WING", "option_type": "PE"},
+        ]
+    if kind == "STRADDLE":
+        return [
+            {"qualifier": "MAIN", "option_type": "CE"},
+            {"qualifier": "MAIN", "option_type": "PE"},
+        ]
+    return []
+
+
+def adjustment_alert_text(trade_type: Any, instrument: Any, *, exit: bool = False) -> str:
+    compact = compact_trade_type(trade_type)
+    name = str(instrument or "").strip()
+    if not compact or not name:
+        return ""
+    suffix = "Exit Adjustment" if exit else "Adjustment"
+    return f"{compact} - {name} {suffix}"
+
+
+def green_zone_adjustment(spot: Any, green_zone_ce: Any, green_zone_pe: Any) -> bool:
+    """True when both green zones are set and spot is outside either band.
+
+    Above green_zone_ce + 50, or below green_zone_pe - 50. The +50 / -50
+    points themselves do not fire. Spot between the bands does not fire.
+    """
+    ce = _as_float(green_zone_ce)
+    pe = _as_float(green_zone_pe)
+    px = _as_float(spot)
+    if ce is None or pe is None or px is None:
+        return False
+    return px > ce + GREEN_ZONE_BUFFER or px < pe - GREEN_ZONE_BUFFER
+
+
+def _main_strike(legs: Sequence[Dict[str, Any]], option_type: str) -> Optional[float]:
+    want = str(option_type or "").strip().upper()
+    for leg in legs or []:
+        if str(leg.get("qualifier") or "").strip().upper() != "MAIN":
+            continue
+        if str(leg.get("option_type") or "").strip().upper() != want:
+            continue
+        return _as_float(leg.get("strike_price"))
+    return None
+
+
+def exit_adjustment_due(spot: Any, legs: Sequence[Dict[str, Any]]) -> bool:
+    """CE Adj still open and spot above the PE Main strike, or PE Adj still open and spot below the CE Main strike."""
+    px = _as_float(spot)
+    if px is None:
+        return False
+    pe_main = _main_strike(legs, "PE")
+    ce_main = _main_strike(legs, "CE")
+    for leg in legs or []:
+        if str(leg.get("qualifier") or "").strip().upper() != "ADJ":
+            continue
+        if leg_is_exited(leg):
+            continue
+        right = str(leg.get("option_type") or "").strip().upper()
+        if right == "CE" and pe_main is not None and px > pe_main:
+            return True
+        if right == "PE" and ce_main is not None and px < ce_main:
+            return True
+    return False
+
+
+def _trade_needs_spot(trade: Dict[str, Any]) -> bool:
+    if str(trade.get("status") or "ACTIVE").strip().upper() != "ACTIVE":
+        return False
+    if _as_float(trade.get("green_zone_ce")) is not None or _as_float(trade.get("green_zone_pe")) is not None:
+        return True
+    for leg in trade.get("legs") or []:
+        if str(leg.get("qualifier") or "").strip().upper() == "ADJ" and not leg_is_exited(leg):
+            return True
+    return False
 
 
 def assert_min_legs(trade_type: str, leg_count: int) -> None:
@@ -641,6 +751,72 @@ def _fetch_ltps(keys: Sequence[str]) -> Dict[str, Optional[float]]:
     return out
 
 
+def underlying_spot_ltps(instruments: Iterable[str]) -> Dict[str, Optional[float]]:
+    """Index spot LTP from the same Upstox batch quote path as option premiums.
+
+    NIFTY, BANKNIFTY, and SENSEX use the keys already used when sync stores spot.
+    Other underlyings stay None (this path has no equity/MCX spot key).
+    """
+    from backend.services.upstox_service import UpstoxService
+
+    key_by_name = {
+        "NIFTY": UpstoxService.NIFTY50_KEY,
+        "BANKNIFTY": UpstoxService.BANKNIFTY_KEY,
+        "SENSEX": "BSE_INDEX|SENSEX",
+    }
+    wanted: List[str] = []
+    for name in instruments:
+        token = str(name or "").strip().upper()
+        if token and token not in wanted:
+            wanted.append(token)
+    keys = [key_by_name[name] for name in wanted if name in key_by_name]
+    quotes = _fetch_ltps(keys) if keys else {}
+    out: Dict[str, Optional[float]] = {}
+    for name in wanted:
+        ik = key_by_name.get(name)
+        out[name] = quotes.get(ik) if ik else None
+    return out
+
+
+def annotate_adjustment_alerts(
+    trades: List[Dict[str, Any]],
+    spots: Optional[Dict[str, Optional[float]]] = None,
+) -> List[Dict[str, Any]]:
+    """Attach spot LTP and adjustment flags. Fetches spots only when a trade needs them."""
+    need: List[str] = []
+    for trade in trades or []:
+        if not _trade_needs_spot(trade):
+            continue
+        name = str(trade.get("instrument") or "").strip().upper()
+        if name and name not in need:
+            need.append(name)
+    fetched = spots
+    if fetched is None and need:
+        try:
+            fetched = underlying_spot_ltps(need)
+        except Exception:
+            logger.info("multi_leg underlying spot quote failed", exc_info=True)
+            fetched = {}
+    fetched = fetched or {}
+    for trade in trades or []:
+        active = str(trade.get("status") or "ACTIVE").strip().upper() == "ACTIVE"
+        name = str(trade.get("instrument") or "").strip().upper()
+        spot = _as_float(fetched.get(name)) if active else None
+        legs = trade.get("legs") or []
+        adj = bool(active and green_zone_adjustment(spot, trade.get("green_zone_ce"), trade.get("green_zone_pe")))
+        exit_adj = bool(active and exit_adjustment_due(spot, legs))
+        trade["spot_ltp"] = spot
+        trade["adjustment_alert"] = adj
+        trade["exit_adjustment_alert"] = exit_adj
+        trade["adjustment_message"] = (
+            adjustment_alert_text(trade.get("trade_type"), trade.get("instrument")) if adj else ""
+        )
+        trade["exit_adjustment_message"] = (
+            adjustment_alert_text(trade.get("trade_type"), trade.get("instrument"), exit=True) if exit_adj else ""
+        )
+    return trades
+
+
 def get_quote(
     instrument: str,
     strike: Any,
@@ -816,6 +992,15 @@ def _ensure_trade_numbers(conn) -> None:
     conn.execute(text(
         "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS max_profit NUMERIC(18, 4)"
     ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS green_zone_ce NUMERIC(18, 4)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS green_zone_pe NUMERIC(18, 4)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trade_legs ADD COLUMN IF NOT EXISTS qualifier TEXT"
+    ))
 
 
 def ensure_multi_leg_tables() -> None:
@@ -862,7 +1047,35 @@ def list_instruments() -> Dict[str, Any]:
     }
 
 
-def _normalize_leg_input(raw: Dict[str, Any], *, instrument: str, header_expiry: date) -> Dict[str, Any]:
+def _clean_qualifier(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    token = str(raw).strip().upper()
+    if token == "":
+        return None
+    if token not in QUALIFIERS:
+        raise MultiLegValidationError("leg qualifier must be MAIN, WING, or ADJ")
+    return token
+
+
+def _resolve_qualifier(raw: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Optional[str]:
+    """New legs must be MAIN, WING, or ADJ. A blank on an existing leg keeps the stored value (null on old rows)."""
+    if "qualifier" in raw:
+        cleaned = _clean_qualifier(raw.get("qualifier"))
+        if cleaned is not None:
+            return cleaned
+    if previous is not None:
+        return _clean_qualifier(previous.get("qualifier"))
+    raise MultiLegValidationError("leg qualifier must be MAIN, WING, or ADJ")
+
+
+def _normalize_leg_input(
+    raw: Dict[str, Any],
+    *,
+    instrument: str,
+    header_expiry: date,
+    previous: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     side = str(raw.get("side") or "").strip().upper()
     right = str(raw.get("option_type") or "").strip().upper()
     if side not in SIDES:
@@ -901,6 +1114,7 @@ def _normalize_leg_input(raw: Dict[str, Any], *, instrument: str, header_expiry:
     order_id = str(raw.get("upstox_order_id") or "").strip() or None
     leg = {
         "id": _uuid_or_none(raw.get("id")),
+        "qualifier": _resolve_qualifier(raw, previous),
         "side": side,
         "option_type": right,
         "strike_price": strike,
@@ -942,20 +1156,24 @@ def _header_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def max_profit_from_body(body: Dict[str, Any]) -> Tuple[bool, Optional[float]]:
+def optional_number_from_body(body: Dict[str, Any], key: str) -> Tuple[bool, Optional[float]]:
     """(present, value). Missing key means leave the stored value alone.
 
     An empty string or null is present and stores NULL.
     """
-    if "max_profit" not in body:
+    if key not in body:
         return False, None
-    raw = body.get("max_profit")
+    raw = body.get(key)
     if raw is None or str(raw).strip() == "":
         return True, None
     value = _as_float(raw)
     if value is None or value != value or value in (float("inf"), float("-inf")):
-        raise MultiLegValidationError("max_profit must be a number")
+        raise MultiLegValidationError(f"{key} must be a number")
     return True, value
+
+
+def max_profit_from_body(body: Dict[str, Any]) -> Tuple[bool, Optional[float]]:
+    return optional_number_from_body(body, "max_profit")
 
 
 def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -972,8 +1190,8 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
             f"""
             SELECT t.id AS trade_id, t.trade_type, t.instrument, t.spot_price_entry,
                    t.entry_date, t.expiry_date, t.status, t.exit_date, t.total_pnl,
-                   t.trade_no, t.max_profit, t.created_at, t.updated_at,
-                   l.id AS leg_id, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
+                   t.trade_no, t.max_profit, t.green_zone_ce, t.green_zone_pe, t.created_at, t.updated_at,
+                   l.id AS leg_id, l.qualifier, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
                    l.entry_price, l.entry_time, l.exit_price, l.exit_time, l.ltp, l.delta,
                    l.lot_size, l.instrument_key, l.leg_pnl, l.upstox_order_id, l.sort_order
             FROM multi_leg_trades t
@@ -999,6 +1217,11 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
 def _public_leg(row: Dict[str, Any]) -> Dict[str, Any]:
     leg = {
         "id": str(row.get("leg_id") or row.get("id")),
+        "qualifier": (
+            str(row.get("qualifier")).strip().upper()
+            if str(row.get("qualifier") or "").strip().upper() in QUALIFIERS
+            else None
+        ),
         "side": row.get("side"),
         "option_type": row.get("option_type"),
         "strike_price": _as_float(row.get("strike_price")),
@@ -1034,6 +1257,8 @@ def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dic
         "entry_date": entry.isoformat() if entry else None,
         "expiry_date": expiry.isoformat() if expiry else None,
         "max_profit": _as_float(header.get("max_profit")),
+        "green_zone_ce": _as_float(header.get("green_zone_ce")),
+        "green_zone_pe": _as_float(header.get("green_zone_pe")),
         "status": header.get("status"),
         "exit_date": _iso_dt(header.get("exit_date")),
         "dte": dte_days(expiry),
@@ -1049,11 +1274,11 @@ def _insert_leg(conn, trade_id: str, leg: Dict[str, Any], sort_order: int) -> No
         text(
             """
             INSERT INTO multi_leg_trade_legs (
-                id, trade_id, side, option_type, strike_price, leg_expiry_date,
+                id, trade_id, qualifier, side, option_type, strike_price, leg_expiry_date,
                 entry_price, entry_time, exit_price, exit_time, ltp, delta,
                 lot_size, instrument_key, leg_pnl, upstox_order_id, sort_order
             ) VALUES (
-                CAST(:id AS uuid), CAST(:trade_id AS uuid), :side, :option_type, :strike_price, :leg_expiry_date,
+                CAST(:id AS uuid), CAST(:trade_id AS uuid), :qualifier, :side, :option_type, :strike_price, :leg_expiry_date,
                 :entry_price, :entry_time, :exit_price, :exit_time, :ltp, :delta,
                 :lot_size, :instrument_key, :leg_pnl, :upstox_order_id, :sort_order
             )
@@ -1062,6 +1287,7 @@ def _insert_leg(conn, trade_id: str, leg: Dict[str, Any], sort_order: int) -> No
         {
             "id": leg.get("id") or str(uuid.uuid4()),
             "trade_id": trade_id,
+            "qualifier": leg.get("qualifier"),
             "side": leg["side"],
             "option_type": leg["option_type"],
             "strike_price": leg["strike_price"],
@@ -1109,6 +1335,8 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
     trade_id = str(uuid.uuid4())
     total = trade_pnl(l.get("leg_pnl") for l in legs)
     _, max_profit = max_profit_from_body(body)
+    _, green_ce = optional_number_from_body(body, "green_zone_ce")
+    _, green_pe = optional_number_from_body(body, "green_zone_pe")
     db = SessionLocal()
     try:
         trade_no = allocate_trade_no(db)
@@ -1117,10 +1345,10 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
                 """
                 INSERT INTO multi_leg_trades (
                     id, trade_type, instrument, spot_price_entry, entry_date, expiry_date,
-                    status, total_pnl, trade_no, max_profit
+                    status, total_pnl, trade_no, max_profit, green_zone_ce, green_zone_pe
                 ) VALUES (
                     CAST(:id AS uuid), :trade_type, :instrument, :spot, :entry_date, :expiry_date,
-                    :status, :pnl, :trade_no, :max_profit
+                    :status, :pnl, :trade_no, :max_profit, :green_zone_ce, :green_zone_pe
                 )
                 """
             ),
@@ -1135,6 +1363,8 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
                 "pnl": total,
                 "trade_no": trade_no,
                 "max_profit": max_profit,
+                "green_zone_ce": green_ce,
+                "green_zone_pe": green_pe,
             },
         )
         for i, leg in enumerate(legs):
@@ -1260,7 +1490,12 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
             if not str(filled.get("upstox_order_id") or "").strip():
                 filled["upstox_order_id"] = prev.get("upstox_order_id")
         prepared.append(
-            _normalize_leg_input(filled, instrument=header["instrument"], header_expiry=header["expiry_date"])
+            _normalize_leg_input(
+                filled,
+                instrument=header["instrument"],
+                header_expiry=header["expiry_date"],
+                previous=prev,
+            )
         )
     # Manual min-leg rules stay for the three typed structures. Sync may save
     # UNCLASSIFIED with any leg count; Edit keeps that type until the user corrects it.
@@ -1271,9 +1506,11 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         assert_min_legs(header["trade_type"], len(prepared))
     status = status_after_save(closing=False, legs=prepared)
     total = trade_pnl(l.get("leg_pnl") for l in prepared)
-    # Exit and other saves that omit max_profit must not null the stored value.
+    # Exit and other saves that omit max_profit or green zones must not null the stored values.
     max_set, max_profit = max_profit_from_body(body)
-    max_sql = "max_profit = :max_profit," if max_set else ""
+    ce_set, green_ce = optional_number_from_body(body, "green_zone_ce")
+    pe_set, green_pe = optional_number_from_body(body, "green_zone_pe")
+    extra_sets = []
     params: Dict[str, Any] = {
         "id": trade_id,
         "trade_type": header["trade_type"],
@@ -1285,7 +1522,15 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         "pnl": total,
     }
     if max_set:
+        extra_sets.append("max_profit = :max_profit")
         params["max_profit"] = max_profit
+    if ce_set:
+        extra_sets.append("green_zone_ce = :green_zone_ce")
+        params["green_zone_ce"] = green_ce
+    if pe_set:
+        extra_sets.append("green_zone_pe = :green_zone_pe")
+        params["green_zone_pe"] = green_pe
+    extra_sql = (",\n                    ".join(extra_sets) + ",") if extra_sets else ""
     db = SessionLocal()
     try:
         db.execute(
@@ -1299,7 +1544,7 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                     expiry_date = :expiry_date,
                     status = :status,
                     total_pnl = :pnl,
-                    {max_sql}
+                    {extra_sql}
                     updated_at = NOW()
                 WHERE id = CAST(:id AS uuid) AND status = 'ACTIVE'
                 """
@@ -1514,11 +1759,13 @@ def refresh_active_quotes() -> Dict[str, Any]:
         sync_subscriptions()
     except Exception as exc:
         logger.info("multi_leg ws sync during quote refresh failed: %s", exc)
+    trades = list_active()
+    annotate_adjustment_alerts(trades)
     return {
         "ok": quote_error is None,
         "quote_error": quote_error,
         "keys": len(keys),
-        "trades": list_active(),
+        "trades": trades,
     }
 
 

@@ -50,5 +50,10 @@ CREATE INDEX IF NOT EXISTS ix_multi_leg_trade_legs_trade
 -- Existing databases created before max_profit: additive and nullable.
 ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS max_profit NUMERIC(18, 4);
 
+-- Green-zone strikes and leg role. Nullable so rows saved before this stay valid.
+ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS green_zone_ce NUMERIC(18, 4);
+ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS green_zone_pe NUMERIC(18, 4);
+ALTER TABLE multi_leg_trade_legs ADD COLUMN IF NOT EXISTS qualifier TEXT;
+
 -- upstox_order_id unique index is created in ensure_multi_leg_tables after the
 -- additive column exists on databases created from an older copy of this file.

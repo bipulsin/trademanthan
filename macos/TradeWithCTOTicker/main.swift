@@ -9,6 +9,8 @@ let minW: CGFloat = 300
 let defaultLines: CGFloat = 7
 let maxLines: CGFloat = 20
 let liveYellow = NSColor(calibratedRed: 1, green: 0.93, blue: 0.05, alpha: 1)
+let alertRed = NSColor(calibratedRed: 1, green: 0.22, blue: 0.18, alpha: 1)
+let alertRedDim = NSColor(calibratedRed: 0.55, green: 0.08, blue: 0.08, alpha: 1)
 
 final class TopClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
@@ -53,6 +55,8 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var setupPinnedOpen = false
     var cachedBase = defaultBase
     var cachedToken = ""
+    var blinkTimers: [Timer] = []
+    var alertArmed: [String: Bool] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadStoredCredentials()
@@ -416,8 +420,10 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func render(message: String?, trades: [[String: Any]], signals: [[String: Any]]) {
+        stopBlink()
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         stack.addArrangedSubview(heading("Live trades"))
+        if message == nil { syncAlertSounds(trades) }
         if let message = message {
             stack.addArrangedSubview(line(message, color: NSColor(calibratedWhite: 0.75, alpha: 1)))
         } else {
@@ -519,10 +525,71 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         !name.isEmpty && name != "—" && name != "-" && name != "–"
     }
 
+    func stopBlink() {
+        blinkTimers.forEach { $0.invalidate() }
+        blinkTimers.removeAll()
+    }
+
+    func startBlink(_ label: NSTextField) {
+        label.textColor = alertRed
+        label.tag = 1
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) { _ in
+            let bright = label.tag == 1
+            label.tag = bright ? 0 : 1
+            label.textColor = bright ? alertRedDim : alertRed
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        blinkTimers.append(timer)
+    }
+
+    func playSound(_ name: String) {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else { return }
+        NSSound(contentsOf: url, byReference: false)?.play()
+    }
+
+    func syncAlertSounds(_ trades: [[String: Any]]) {
+        var live = Set<String>()
+        for row in trades {
+            let id = "\(row["id"] ?? "")|\(scriptName(row))"
+            guard let alerts = row["alerts"] as? [[String: Any]] else { continue }
+            for alert in alerts {
+                let sound = "\(alert["sound"] ?? "")"
+                let key = id + "|" + sound
+                live.insert(key)
+                if alertArmed[key] == true { continue }
+                alertArmed[key] = true
+                playSound(sound)
+            }
+        }
+        for key in Array(alertArmed.keys) where !live.contains(key) {
+            alertArmed[key] = false
+        }
+    }
+
+    func alertViews(_ row: [String: Any]) -> [NSView] {
+        guard let alerts = row["alerts"] as? [[String: Any]] else { return [] }
+        return alerts.compactMap { item in
+            let text = "\(item["text"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let label = line(text, color: alertRed)
+            startBlink(label)
+            return label
+        }
+    }
+
     func tradeRow(_ row: [String: Any]) -> NSView? {
         let sym = scriptName(row)
         guard usableScript(sym), let pnl = row["pnl"] as? Double else { return nil }
-        return pair(sym, formatRupees(pnl), liveYellow)
+        let pnlLine = pair(sym, formatRupees(pnl), liveYellow)
+        let alerts = alertViews(row)
+        guard !alerts.isEmpty else { return pnlLine }
+        let box = NSStackView()
+        box.orientation = .vertical
+        box.alignment = .leading
+        box.spacing = 2
+        box.addArrangedSubview(pnlLine)
+        alerts.forEach { box.addArrangedSubview($0) }
+        return box
     }
 
     func formatRupees(_ amount: Double) -> String {

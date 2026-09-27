@@ -258,3 +258,39 @@ def test_multi_leg_ticker_line_and_toggle_off(monkeypatch):
     off = tl.build_snapshot(_DB(), 4)
     assert calls["n"] == 0
     assert off["trades"] == []
+
+
+def test_multi_leg_adjustment_lines_keep_pnl(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.underlying_spot_ltps",
+        lambda names: {"NIFTY": 25100.0},
+    )
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.list_active",
+        lambda: [
+            {
+                "id": "trade-1",
+                "status": "ACTIVE",
+                "trade_type": "IRON_FLY",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": 343,
+                "green_zone_ce": 25000,
+                "green_zone_pe": 24000,
+                "legs": [
+                    {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+                    {"qualifier": "MAIN", "option_type": "PE", "strike_price": 24500},
+                    {"qualifier": "ADJ", "option_type": "CE", "strike_price": 24600},
+                ],
+            }
+        ],
+    )
+    rows = tl._multi_leg_trades()
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "IronFly-NIFTY-27Oct26"
+    assert rows[0]["pnl"] == 343.0
+    assert [a["text"] for a in rows[0]["alerts"]] == [
+        "IronFly - NIFTY Adjustment",
+        "IronFly - NIFTY Exit Adjustment",
+    ]
+    assert [a["sound"] for a in rows[0]["alerts"]] == ["adjustment", "adjustment_exit"]

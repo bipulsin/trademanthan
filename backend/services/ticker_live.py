@@ -39,12 +39,6 @@ ALGO_LABELS = {
     "premium_futures": "Premium Futures",
     "tarang": "Kosmic Tarang",
 }
-_MLO_TYPES = {
-    "STRADDLE": "Straddle",
-    "IRON_FLY": "IronFly",
-    "IRON_CONDOR": "IronCondor",
-    "UNCLASSIFIED": "Unclassified",
-}
 _MLO_MON = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 TOKEN_PREFIX = "twt_"
 # Mac menu-bar poll, and how long a desk read may be reused.
@@ -624,12 +618,9 @@ def _premium(user_id: int) -> tuple:
 
 def multi_leg_ticker_symbol(trade_type: Any, instrument: Any, expiry: Any) -> str:
     """One ticker label: ``IronFly-NIFTY-27Oct26``. Desk names are not included."""
-    kind = str(trade_type or "").strip().upper().replace(" ", "_").replace("-", "")
-    if kind == "IRONFLY":
-        kind = "IRON_FLY"
-    elif kind == "IRONCONDOR":
-        kind = "IRON_CONDOR"
-    compact = _MLO_TYPES.get(kind)
+    from backend.services.multi_leg_options import compact_trade_type
+
+    compact = compact_trade_type(trade_type)
     if not compact:
         return ""
     name = str(instrument or "").strip()
@@ -659,12 +650,14 @@ def _multi_leg_trades() -> List[Dict[str, Any]]:
     """Active multi-leg journal rows. Shown all day, same 120s cache as other desks.
 
     The line is ``IronFly-NIFTY-27Oct26`` plus the trade total. Closed trades
-    and rows without a current PnL stay off the ticker.
+    and rows without a current PnL stay off the ticker. Adjustment lines are
+    extra fields on that same row and appear only while the condition is true.
     """
-    from backend.services.multi_leg_options import list_active
+    from backend.services.multi_leg_options import annotate_adjustment_alerts, list_active
 
     out = []
-    for trade in list_active() or []:
+    trades = annotate_adjustment_alerts(list(list_active() or []))
+    for trade in trades:
         if str(trade.get("status") or "").upper() != "ACTIVE":
             continue
         sym = multi_leg_ticker_symbol(
@@ -673,7 +666,17 @@ def _multi_leg_trades() -> List[Dict[str, Any]]:
         pnl = trade.get("total_pnl")
         if pnl is None or not _symbol_ok(sym):
             continue
-        out.append(_row("multi_leg_options", sym, pnl=pnl, label="ACTIVE"))
+        row = _row("multi_leg_options", sym, pnl=pnl, label="ACTIVE")
+        if trade.get("id"):
+            row["id"] = str(trade["id"])
+        alerts = []
+        if trade.get("adjustment_alert") and trade.get("adjustment_message"):
+            alerts.append({"text": trade["adjustment_message"], "sound": "adjustment"})
+        if trade.get("exit_adjustment_alert") and trade.get("exit_adjustment_message"):
+            alerts.append({"text": trade["exit_adjustment_message"], "sound": "adjustment_exit"})
+        if alerts:
+            row["alerts"] = alerts
+        out.append(row)
     return out
 
 

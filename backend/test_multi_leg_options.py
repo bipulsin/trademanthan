@@ -6,11 +6,15 @@ import pytest
 from backend.services.multi_leg_options import (
     MultiLegValidationError,
     _parse_dt,
+    adjustment_alert_text,
     assert_min_legs,
     assert_ready_to_close,
     assign_missing_trade_numbers,
     close_block_reason,
+    default_leg_slots,
     direction_sign,
+    exit_adjustment_due,
+    green_zone_adjustment,
     leg_pnl,
     next_monthly_option_expiry,
     next_trade_number,
@@ -208,8 +212,9 @@ class _RecordingDB:
         return None
 
 
-def _leg(right):
+def _leg(right, qualifier="MAIN"):
     return {
+        "qualifier": qualifier,
         "side": "SELL",
         "option_type": right,
         "strike_price": 25000,
@@ -298,6 +303,103 @@ def test_save_omitting_max_profit_keeps_previous_value(monkeypatch):
     params, sql = _sql_params(db, "UPDATE multi_leg_trades SET")
     assert "max_profit" not in sql
     assert "max_profit" not in params
+
+
+def test_default_qualifier_iron_fly_and_straddle():
+    fly = default_leg_slots("IRON_FLY")
+    assert fly == [
+        {"qualifier": "MAIN", "option_type": "CE"},
+        {"qualifier": "MAIN", "option_type": "PE"},
+        {"qualifier": "WING", "option_type": "CE"},
+        {"qualifier": "WING", "option_type": "PE"},
+    ]
+    assert len(fly) == 4
+    assert default_leg_slots("IRON_CONDOR") == fly
+    straddle = default_leg_slots("STRADDLE")
+    assert straddle == [
+        {"qualifier": "MAIN", "option_type": "CE"},
+        {"qualifier": "MAIN", "option_type": "PE"},
+    ]
+    assert len(straddle) == 2
+    assert default_leg_slots("UNCLASSIFIED") == []
+
+
+def test_green_zone_spot_and_exit_adjustment():
+    # Spot above green CE + 50. The band edge itself does not fire.
+    assert green_zone_adjustment(25051, 25000, 24000) is True
+    assert green_zone_adjustment(25050, 25000, 24000) is False
+    # Spot between the bands does not.
+    assert green_zone_adjustment(24500, 25000, 24000) is False
+    assert green_zone_adjustment(23949, 25000, 24000) is True
+    assert green_zone_adjustment(26000, None, 24000) is False
+    assert adjustment_alert_text("IRON_FLY", "NIFTY") == "IronFly - NIFTY Adjustment"
+    assert adjustment_alert_text("IRON_FLY", "NIFTY", exit=True) == "IronFly - NIFTY Exit Adjustment"
+
+    legs = [
+        {"qualifier": "MAIN", "option_type": "PE", "strike_price": 24500},
+        {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+        {"qualifier": "ADJ", "option_type": "CE", "strike_price": 24600},
+    ]
+    assert exit_adjustment_due(24501, legs) is True
+    assert exit_adjustment_due(24500, legs) is False
+    closed = dict(legs[2])
+    closed["exit_price"] = 1
+    closed["exit_time"] = "2026-09-26T15:30:00+05:30"
+    assert exit_adjustment_due(25000, [legs[0], legs[1], closed]) is False
+    pe_adj = [
+        {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+        {"qualifier": "ADJ", "option_type": "PE", "strike_price": 24000},
+    ]
+    assert exit_adjustment_due(24799, pe_adj) is True
+    assert exit_adjustment_due(24800, pe_adj) is False
+
+
+def test_create_requires_qualifier_and_stores_green_zones(monkeypatch):
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db)
+    missing = _trade_body()
+    for leg in missing["legs"]:
+        leg.pop("qualifier")
+    with pytest.raises(MultiLegValidationError, match="qualifier"):
+        mlo.create_trade(missing)
+
+    saved = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, saved)
+    mlo.create_trade(_trade_body(green_zone_ce=25000, green_zone_pe=24000, legs=[
+        _leg("CE", "MAIN"),
+        _leg("PE", "MAIN"),
+    ]))
+    params, sql = _sql_params(saved, "INSERT INTO multi_leg_trades")
+    assert params["green_zone_ce"] == 25000
+    assert params["green_zone_pe"] == 24000
+    assert "qualifier" in sql or any(
+        "qualifier" in row_sql and row_params.get("qualifier") == "MAIN"
+        for row_sql, row_params in saved.statements
+    )
+    leg_params = [p for s, p in saved.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert [p["qualifier"] for p in leg_params] == ["MAIN", "MAIN"]
+
+
+def test_save_omitting_green_zones_keeps_previous_value(monkeypatch):
+    stored = _trade_body(green_zone_ce=25000, green_zone_pe=24000)
+    stored["id"] = "44444444-4444-4444-4444-444444444444"
+    stored["status"] = "ACTIVE"
+    stored["legs"][0]["id"] = "55555555-5555-5555-5555-555555555555"
+    stored["legs"][1]["id"] = "66666666-6666-6666-6666-666666666666"
+    stored["legs"][0]["qualifier"] = "MAIN"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    body = _trade_body()
+    body["legs"][0]["id"] = stored["legs"][0]["id"]
+    body["legs"][1]["id"] = stored["legs"][1]["id"]
+    body["legs"][0]["qualifier"] = None
+    assert "green_zone_ce" not in body
+    mlo.update_trade(stored["id"], body)
+    params, sql = _sql_params(db, "UPDATE multi_leg_trades SET")
+    assert "green_zone_ce" not in sql
+    assert "green_zone_pe" not in sql
+    leg_params = [p for s, p in db.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert leg_params[0]["qualifier"] == "MAIN"
 
 
 def test_close_without_max_profit_does_not_clear_it(monkeypatch):

@@ -50,6 +50,8 @@ logo.resize((menu_w, menu_h), Image.LANCZOS).save(menu_path)
 PY
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
+cp "$ROOT/adjustment.mp3" "$APP/Contents/Resources/adjustment.mp3"
+cp "$ROOT/adjustment_exit.mp3" "$APP/Contents/Resources/adjustment_exit.mp3"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>

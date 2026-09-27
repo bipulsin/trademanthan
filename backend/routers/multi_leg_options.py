@@ -16,6 +16,7 @@ from backend.services.multi_leg_options import (
     IST,
     MultiLegNotFound,
     MultiLegValidationError,
+    annotate_adjustment_alerts,
     close_trade,
     create_trade,
     delete_trade,
@@ -46,6 +47,7 @@ def _auth_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db
 
 class LegBody(BaseModel):
     id: Optional[str] = None
+    qualifier: Optional[str] = None
     side: str
     option_type: str
     strike_price: float = Field(..., gt=0)
@@ -64,6 +66,9 @@ class TradeBody(BaseModel):
     spot_price_entry: float = Field(..., gt=0)
     entry_date: Optional[str] = None
     expiry_date: Optional[str] = None
+    max_profit: Optional[float] = None
+    green_zone_ce: Optional[float] = None
+    green_zone_pe: Optional[float] = None
     legs: List[LegBody] = Field(default_factory=list)
 
 
@@ -140,6 +145,7 @@ def quotes_active(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
 @router.get("/trades/active")
 def active(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
     trades = list_active()
+    annotate_adjustment_alerts(trades)
     return {"ok": True, "count": len(trades), "trades": trades, **journal_orphan_state()}
 
 
@@ -182,15 +188,20 @@ def report(
     return {"ok": True, "count": len(trades), "trades": trades}
 
 
+def _journal_body(body: TradeBody) -> Dict[str, Any]:
+    """Omit fields the client left out so a partial save does not null green zones or max profit."""
+    return body.model_dump(exclude_unset=True)
+
+
 @router.post("/trades")
 def post_trade(body: TradeBody, _user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    trade = _call(create_trade, body.model_dump())
+    trade = _call(create_trade, _journal_body(body))
     return {"ok": True, "trade": trade}
 
 
 @router.put("/trades/{trade_id}")
 def put_trade(trade_id: str, body: TradeBody, _user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    trade = _call(update_trade, trade_id, body.model_dump())
+    trade = _call(update_trade, trade_id, _journal_body(body))
     return {"ok": True, "trade": trade}
 
 
