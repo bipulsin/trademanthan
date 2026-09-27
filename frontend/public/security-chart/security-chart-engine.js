@@ -13,13 +13,13 @@
     const TF_OPTIONS = ['5m', '10m', '15m', '30m', '1hr', '2h', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=9';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=11';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
         'security-chart/indicators/movingAverages.js?v=1',
-        'security-chart/indicators/hilega-milega.js?v=1',
-        'security-chart/indicators/macd-divergence.js?v=1',
+        'security-chart/indicators/hilega-milega.js?v=2',
+        'security-chart/indicators/macd-divergence.js?v=2',
     ];
     const CHART_UTIL_SCRIPTS = [
         'security-chart/chart/crosshair-format.js?v=1',
@@ -187,6 +187,32 @@
         if (config.ema3Enabled != null) slots[2].enabled = !!config.ema3Enabled;
         if (config.ema3Period != null) slots[2].period = clampEmaPeriod(config.ema3Period, slots[2].period);
         return slots;
+    }
+
+    function snapshotIndicators(modal) {
+        const slots = modal.emaSlots && modal.emaSlots.length ? modal.emaSlots : defaultEmaSlots();
+        return {
+            emas: slots.map(function (s) {
+                return { enabled: !!s.enabled, period: s.period };
+            }),
+            vwap: !!modal.vwapEnabled,
+            volume: !!modal.volumeEnabled,
+            hm: !!modal.hmEnabled,
+            md: !!modal.mdEnabled,
+        };
+    }
+
+    function applyIndicatorPrefs(modal, prefs) {
+        if (!prefs || typeof prefs !== 'object') return false;
+        if (Array.isArray(prefs.emas) && prefs.emas.length) {
+            modal.emaSlots = normalizeEmaSlots({ emas: prefs.emas });
+        }
+        if (prefs.vwap != null) modal.vwapEnabled = !!prefs.vwap;
+        if (prefs.volume != null) modal.volumeEnabled = !!prefs.volume;
+        if (prefs.hm != null) modal.hmEnabled = !!prefs.hm;
+        if (prefs.md != null) modal.mdEnabled = !!prefs.md;
+        else if (prefs.macd != null) modal.mdEnabled = !!prefs.macd;
+        return true;
     }
 
     function emaOverlaysHtml() {
@@ -420,6 +446,18 @@
         return Number.isFinite(n) ? n : null;
     }
 
+    function isFutureInstrument(instrumentType) {
+        const t = String(instrumentType || '').toUpperCase();
+        return t === 'FUT' || t === 'FUTURE' || t === 'FUTURES';
+    }
+
+    function futureLotNumber(raw) {
+        if (raw == null || raw === '') return null;
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n <= 0) return null;
+        return n;
+    }
+
     function headerPnlHtml(screenerData) {
         const sd = screenerData || {};
         const pct = sd.livePnlPct != null ? sd.livePnlPct : sd.pnlPct;
@@ -589,11 +627,62 @@
         if (dirHost) dirHost.innerHTML = dirBadgeHtml(this._direction);
         const pnlHost = root.querySelector('[data-uscm-header-pnl]');
         if (pnlHost) pnlHost.innerHTML = headerPnlHtml(this._screenerData);
+        this._setQtyLot(null);
         const qual =
             this.config.metadata && this.config.metadata.qualification
                 ? 'Qual: ' + this.config.metadata.qualification
                 : '';
         root.querySelector('[data-uscm-footer-meta]').textContent = qual;
+    };
+
+    SecurityChartModal.prototype._setQtyLot = function (lot) {
+        const root = modalRoot;
+        if (!root) return;
+        const el = root.querySelector('[data-uscm-qty-lot]');
+        if (!el) return;
+        const n =
+            this.config && isFutureInstrument(this.config.instrumentType)
+                ? futureLotNumber(lot)
+                : null;
+        if (n == null) {
+            el.textContent = '';
+            el.classList.add('uscm-hidden');
+            return;
+        }
+        el.textContent = 'Qty/Lot: ' + n;
+        el.classList.remove('uscm-hidden');
+    };
+
+    SecurityChartModal.prototype._loadFutureLotSize = function () {
+        const self = this;
+        const cfg = this.config;
+        if (!cfg || !isFutureInstrument(cfg.instrumentType)) {
+            this._setQtyLot(null);
+            return;
+        }
+        const reqId = this._lotReqId;
+        const params = {
+            symbol: cfg.symbol || cfg.displaySymbol || cfg.instrumentKey || 'FUT',
+            instrument_type: cfg.instrumentType || 'FUT',
+        };
+        if (cfg.instrumentKey) params.instrument_key = cfg.instrumentKey;
+        if (cfg.exchange) params.exchange = cfg.exchange;
+        fetch(API_BASE + '/api/chart/resolve?' + new URLSearchParams(params).toString(), {
+            headers: authHeaders(),
+            credentials: 'same-origin',
+            cache: 'no-store',
+        })
+            .then(function (r) {
+                return r.json();
+            })
+            .then(function (res) {
+                if (self._lotReqId !== reqId || !self._open) return;
+                if (!res || !res.success) return;
+                if (Object.prototype.hasOwnProperty.call(res, 'lot_size')) {
+                    self._setQtyLot(res.lot_size);
+                }
+            })
+            .catch(function () {});
     };
 
     SecurityChartModal.prototype._renderIntelligence = function () {
@@ -688,6 +777,7 @@
             '<div class="uscm-meta" data-uscm-meta>—</div>' +
             '</div>' +
             '<div class="uscm-header-prices">' +
+            '<span class="uscm-qty-lot uscm-hidden" data-uscm-qty-lot></span>' +
             '<div class="uscm-indicator-wrap" data-uscm-indicator-wrap>' +
             '<button type="button" class="uscm-indicator-btn" data-uscm-indicator-toggle aria-haspopup="true" aria-expanded="false" aria-label="Indicators">fx</button>' +
             '<div class="uscm-indicator-menu uscm-hidden" data-uscm-indicator-menu role="menu">' +
@@ -926,6 +1016,8 @@
         volCb._uscmVolBound = true;
         volCb.addEventListener('change', function () {
             modalInstance._readOverlayPrefs();
+            modalInstance._prefsGen = (modalInstance._prefsGen || 0) + 1;
+            modalInstance._persistIndicatorPrefs();
             modalInstance._applyVolumeVisibility();
         });
     }
@@ -1022,6 +1114,8 @@
         hmCb._uscmHmBound = true;
         hmCb.addEventListener('change', function () {
             modalInstance._readOverlayPrefs();
+            modalInstance._prefsGen = (modalInstance._prefsGen || 0) + 1;
+            modalInstance._persistIndicatorPrefs();
             modalInstance._rebuildOverlays();
             modalInstance._applyHmIndicator();
             modalInstance._applyMdIndicator();
@@ -1034,6 +1128,8 @@
         mdCb._uscmMdBound = true;
         mdCb.addEventListener('change', function () {
             modalInstance._readOverlayPrefs();
+            modalInstance._prefsGen = (modalInstance._prefsGen || 0) + 1;
+            modalInstance._persistIndicatorPrefs();
             modalInstance._rebuildOverlays();
             modalInstance._applyHmIndicator();
             modalInstance._applyMdIndicator();
@@ -1202,6 +1298,8 @@
 
         function onOverlayChange() {
             modalInstance._readOverlayPrefs();
+            modalInstance._prefsGen = (modalInstance._prefsGen || 0) + 1;
+            modalInstance._persistIndicatorPrefs();
             modalInstance._rebuildOverlays();
             modalInstance._applyVolumeVisibility();
             modalInstance._applyHmIndicator();
@@ -1497,6 +1595,7 @@
 
     SecurityChartModal.prototype.close = function () {
         this._open = false;
+        this._openSeq = (this._openSeq || 0) + 1;
         if (this.abortLoad) {
             this.abortLoad.aborted = true;
             this.abortLoad = null;
@@ -1549,6 +1648,50 @@
         if (mdCb) this.mdEnabled = mdCb.checked;
         const volCb = root.querySelector('[data-uscm-vol-on]');
         if (volCb) this.volumeEnabled = volCb.checked;
+    };
+
+    SecurityChartModal.prototype._persistIndicatorPrefs = function () {
+        const self = this;
+        const prefs = snapshotIndicators(this);
+        this._savedIndicatorPrefs = prefs;
+        this._prefsInflight = (this._prefsInflight || 0) + 1;
+        fetch(API_BASE + '/api/chart/indicator-prefs', {
+            method: 'PUT',
+            headers: authHeaders(),
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify(prefs),
+        })
+            .catch(function () {})
+            .then(function () {
+                self._prefsInflight = Math.max(0, (self._prefsInflight || 1) - 1);
+            });
+    };
+
+    SecurityChartModal.prototype._refreshIndicatorPrefs = function () {
+        const self = this;
+        const gen = this._prefsGen || 0;
+        return fetch(API_BASE + '/api/chart/indicator-prefs', {
+            headers: authHeaders(),
+            credentials: 'same-origin',
+            cache: 'no-store',
+        })
+            .then(function (r) {
+                return r.json();
+            })
+            .then(function (res) {
+                if (!res || !res.success || self._prefsGen !== gen || !self._open) return;
+                if (self._prefsInflight) return;
+                if (!res.prefs) return;
+                self._savedIndicatorPrefs = res.prefs;
+                applyIndicatorPrefs(self, res.prefs);
+                self._syncOverlayUi();
+                self._rebuildOverlays();
+                self._applyVolumeVisibility();
+                self._applyHmIndicator();
+                self._applyMdIndicator();
+            })
+            .catch(function () {});
     };
 
     SecurityChartModal.prototype._syncOverlayUi = function () {
@@ -1670,12 +1813,12 @@
         this._destroyChart();
         const isDark = isChartDarkTheme();
         const colors = chartThemeColors();
-        const grid = isDark ? '#334155' : '#e2e8f0';
-        const text = isDark ? '#94a3b8' : '#64748b';
+        const grid = isDark ? 'rgba(180, 210, 190, 0.14)' : 'rgba(40, 70, 55, 0.16)';
+        const text = isDark ? '#8fa398' : '#3d5248';
         const tf = this.timeframe;
         this.chart = LWC.createChart(chartEl, {
             layout: {
-                background: { color: isDark ? '#0f172a' : '#ffffff' },
+                background: { color: isDark ? '#0c1210' : '#f4f7f5' },
                 textColor: text,
             },
             grid: { vertLines: { color: grid }, horzLines: { color: grid } },
@@ -1780,6 +1923,7 @@
     SecurityChartModal.prototype._loadHistorical = function () {
         const self = this;
         const token = { aborted: false };
+        const lotReqId = this._lotReqId;
         this.abortLoad = token;
         const root = this._ensureDom();
         this._resetLtpDisplay();
@@ -1800,6 +1944,13 @@
                     return;
                 }
                 self.instrumentKey = res.instrument_key || self.instrumentKey;
+                if (
+                    self._lotReqId === lotReqId &&
+                    res &&
+                    Object.prototype.hasOwnProperty.call(res, 'lot_size')
+                ) {
+                    self._setQtyLot(res.lot_size);
+                }
                 self._applyBars(res.bars || []);
                 if (self.unsubLive) {
                     self.unsubLive();
@@ -1887,6 +2038,7 @@
         this.timeframe = config.timeframe || '5m';
         this.instrumentKey = this.config.instrumentKey;
         this.displaySymbol = this.config.displaySymbol || this.config.symbol;
+        this._lotReqId = (this._lotReqId || 0) + 1;
         this._screenerData = config.screenerData || config.screener || null;
         this._direction =
             config.direction ||
@@ -1914,12 +2066,19 @@
                 this.mdEnabled = false;
             }
         }
+        if (this._savedIndicatorPrefs) {
+            applyIndicatorPrefs(this, this._savedIndicatorPrefs);
+        }
+        this._openSeq = (this._openSeq || 0) + 1;
+        const openSeq = this._openSeq;
+        this._prefsGen = (this._prefsGen || 0) + 1;
 
         return ensureAssets().then(function () {
             const root = self._ensureDom();
             self._upgradeChartDom();
             self._syncOverlayUi();
             self._renderHeader();
+            self._loadFutureLotSize();
             self._renderIntelligence();
             root.querySelectorAll('.uscm-tf-btn').forEach(function (b) {
                 b.classList.toggle('active', b.dataset.tf === self.timeframe);
@@ -1929,7 +2088,10 @@
                 root.classList.add('uscm-open');
             });
             self._open = true;
-            self._loadHistorical();
+            return self._refreshIndicatorPrefs().then(function () {
+                if (!self._open || self._openSeq !== openSeq) return;
+                self._loadHistorical();
+            });
         });
     };
 

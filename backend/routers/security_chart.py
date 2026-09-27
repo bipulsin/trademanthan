@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from backend.services.chart_feed_manager import (
     chart_unsubscribe,
     get_chart_live_quote,
 )
+from backend.services.chart_indicator_prefs import get_indicator_prefs, save_indicator_prefs
 from backend.services.chart_instrument_resolver import resolve_chart_instrument
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,36 @@ router = APIRouter(prefix="/chart", tags=["security-chart"])
 
 def _require_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     return get_user_from_token(token, db)
+
+
+@router.get("/indicator-prefs")
+def chart_indicator_prefs_get(
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        prefs = get_indicator_prefs(db, user.id)
+        return JSONResponse({"success": True, "prefs": prefs})
+    except Exception as e:
+        logger.exception("chart_indicator_prefs_get: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@router.put("/indicator-prefs")
+def chart_indicator_prefs_put(
+    prefs: Dict[str, Any] = Body(...),
+    user: User = Depends(_require_user),
+    db: Session = Depends(get_db),
+):
+    raw = prefs.get("prefs") if isinstance(prefs.get("prefs"), dict) and "emas" not in prefs else prefs
+    try:
+        saved = save_indicator_prefs(db, user.id, raw)
+        return JSONResponse({"success": True, "prefs": saved})
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
+    except Exception as e:
+        logger.exception("chart_indicator_prefs_put: %s", e)
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @router.get("/resolve")

@@ -2610,6 +2610,19 @@ def _run_startup_schema_migrations(db_engine):
                     )
                     print("Applied migration: created app_settings")
 
+            # Per-user chart indicator selection (shared security-chart modal).
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS chart_indicator_prefs (
+                        user_id INTEGER PRIMARY KEY,
+                        prefs TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+
             # Retired: Rocket ML/Layer10f replay tables and Sambhav research tables.
             # Keep rocket_live_state / rocket_crash_event_log (Kavach scoring).
             conn.execute(

@@ -37,17 +37,17 @@
     function mdTheme(isDark) {
         if (isDark) {
             return {
-                grid: '#334155',
-                text: '#94a3b8',
-                bg: '#0f172a',
-                zero: '#64748b',
+                grid: 'rgba(180, 210, 190, 0.14)',
+                text: '#8fa398',
+                bg: '#0c1210',
+                zero: '#8fa398',
             };
         }
         return {
-            grid: '#e2e8f0',
-            text: '#64748b',
-            bg: '#ffffff',
-            zero: '#94a3b8',
+            grid: 'rgba(40, 70, 55, 0.16)',
+            text: '#3d5248',
+            bg: '#f4f7f5',
+            zero: '#3d5248',
         };
     }
 

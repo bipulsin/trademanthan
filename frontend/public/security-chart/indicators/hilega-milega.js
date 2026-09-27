@@ -18,10 +18,10 @@
                 wmaLine: '#e879f9',
                 fillAbove: 'rgba(34, 197, 94, 0.38)',
                 fillBelow: 'rgba(56, 189, 248, 0.38)',
-                medianLine: '#64748b',
-                grid: '#334155',
-                text: '#94a3b8',
-                bg: '#0f172a',
+                medianLine: '#8fa398',
+                grid: 'rgba(180, 210, 190, 0.14)',
+                text: '#8fa398',
+                bg: '#0c1210',
             };
         }
         return {
@@ -30,10 +30,10 @@
             wmaLine: '#a21caf',
             fillAbove: 'rgba(22, 163, 74, 0.32)',
             fillBelow: 'rgba(37, 99, 235, 0.28)',
-            medianLine: '#94a3b8',
-            grid: '#e2e8f0',
-            text: '#64748b',
-            bg: '#ffffff',
+            medianLine: '#3d5248',
+            grid: 'rgba(40, 70, 55, 0.16)',
+            text: '#3d5248',
+            bg: '#f4f7f5',
         };
     }
 

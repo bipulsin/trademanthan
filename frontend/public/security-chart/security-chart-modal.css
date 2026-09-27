@@ -82,6 +82,19 @@ body[data-theme="light"] .uscm-symbol {
     flex-shrink: 0;
 }
 
+.uscm-qty-lot {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e2e8f0;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+}
+
+body[data-theme="light"] .uscm-qty-lot {
+    color: #0f172a;
+}
+
 .uscm-ltp-block {
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -759,6 +772,253 @@ body[data-theme="light"] .vajra-security-link {
         border-top: 1px solid #334155;
     }
     body[data-theme="light"] .uscm-intel-wrap {
-        border-top-color: #e2e8f0;
+        border-top-color: rgba(40, 70, 55, 0.18);
+    }
+}
+
+/* Charcoal / green chrome — same tokens as stock options and the desktop shell.
+   The candle plot stays a dark (or light-theme) chart surface; this restyles the frame. */
+.uscm-backdrop {
+    --uscm-bg0: #0c1210;
+    --uscm-bg1: #121a17;
+    --uscm-bg2: #1a2621;
+    --uscm-line: rgba(180, 210, 190, 0.22);
+    --uscm-text: #e7f0ea;
+    --uscm-muted: #8fa398;
+    --uscm-accent: #3dba7a;
+    --uscm-accent-dim: #2a8f5c;
+    background: rgba(8, 12, 10, 0.82);
+}
+
+body[data-theme="light"] .uscm-backdrop {
+    --uscm-bg0: #f4f7f5;
+    --uscm-bg1: #ffffff;
+    --uscm-bg2: #e4ebe6;
+    --uscm-line: rgba(40, 70, 55, 0.18);
+    --uscm-text: #14201a;
+    --uscm-muted: #3d5248;
+    --uscm-accent: #1f7a4d;
+    --uscm-accent-dim: #2a8f5c;
+    background: rgba(12, 20, 16, 0.45);
+}
+
+.uscm-panel {
+    background: var(--uscm-bg0);
+    border: 1px solid var(--uscm-line);
+    color: var(--uscm-text);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.uscm-header,
+.uscm-footer {
+    background: var(--uscm-bg1);
+    border-color: var(--uscm-line);
+    color: var(--uscm-muted);
+}
+
+.uscm-symbol,
+.uscm-ltp,
+.uscm-qty-lot {
+    color: var(--uscm-text);
+}
+
+.uscm-meta,
+.uscm-chg,
+.uscm-hm-label,
+.uscm-md-label,
+.uscm-footer,
+.tip-section__title,
+.tip-metric__lbl {
+    color: var(--uscm-muted);
+}
+
+.uscm-indicator-btn,
+.uscm-tf-btn,
+.uscm-ema-period,
+.uscm-indicator-menu {
+    background: var(--uscm-bg2);
+    color: var(--uscm-text);
+    border-color: var(--uscm-line);
+}
+
+.uscm-indicator-btn:hover,
+.uscm-indicator-wrap--open .uscm-indicator-btn,
+.uscm-tf-btn:hover,
+.uscm-ema-period:focus {
+    border-color: var(--uscm-accent);
+    color: var(--uscm-text);
+}
+
+.uscm-tf-btn.active {
+    background: var(--uscm-accent-dim);
+    border-color: var(--uscm-accent);
+    color: #e7f0ea;
+}
+
+.uscm-close {
+    color: var(--uscm-muted);
+}
+
+.uscm-close:hover {
+    color: var(--uscm-text);
+    background: var(--uscm-bg2);
+}
+
+.uscm-ov-label {
+    color: var(--uscm-text);
+}
+
+.uscm-ov-label input[type="checkbox"] {
+    accent-color: var(--uscm-accent);
+}
+
+.uscm-ov-label--hm,
+.uscm-panel--hm .uscm-hm-pane,
+.uscm-panel--md .uscm-md-pane {
+    border-color: var(--uscm-line);
+}
+
+.uscm-intel-wrap {
+    background: var(--uscm-bg1);
+    border-left: 1px solid var(--uscm-line);
+}
+
+.tip-insight {
+    color: var(--uscm-text);
+    background: var(--uscm-bg2);
+    border-left-color: var(--uscm-accent);
+}
+
+.tip-metric__val {
+    color: var(--uscm-text);
+}
+
+.tip-metric__val--pos,
+.uscm-dir--long,
+.uscm-header-pnl--pos {
+    color: var(--uscm-accent);
+}
+
+.uscm-dir--long {
+    background: rgba(61, 186, 122, 0.18);
+}
+
+.tip-metric__val--neg,
+.uscm-header-pnl--neg {
+    color: #e06b6b;
+}
+
+.tip-metric__val--neutral,
+.tip-lifecycle-badge {
+    color: var(--uscm-text);
+    background: rgba(61, 186, 122, 0.16);
+    box-shadow: none;
+}
+
+.uscm-hm-splitter,
+.uscm-md-splitter,
+.uscm-splitter::before {
+    background: var(--uscm-line);
+}
+
+.uscm-hm-splitter:hover,
+.uscm-hm-splitter--active,
+.uscm-md-splitter:hover,
+.uscm-md-splitter--active,
+.uscm-splitter:hover::before,
+.uscm-splitter.uscm-splitter--active::before,
+.uscm-splitter:focus-visible::before {
+    background: var(--uscm-accent);
+}
+
+.uscm-skeleton {
+    background: linear-gradient(110deg, #121a17 8%, #1a2621 18%, #121a17 33%);
+    background-size: 200% 100%;
+    color: var(--uscm-muted);
+}
+
+.uscm-crosshair-time {
+    color: var(--uscm-text);
+    background: rgba(12, 18, 16, 0.88);
+    border-color: var(--uscm-line);
+}
+
+body[data-theme="light"] .uscm-panel {
+    background: var(--uscm-bg0);
+    border-color: var(--uscm-line);
+    color: var(--uscm-text);
+}
+
+body[data-theme="light"] .uscm-header,
+body[data-theme="light"] .uscm-footer {
+    background: var(--uscm-bg1);
+    border-color: var(--uscm-line);
+}
+
+body[data-theme="light"] .uscm-symbol,
+body[data-theme="light"] .uscm-ltp,
+body[data-theme="light"] .uscm-qty-lot,
+body[data-theme="light"] .tip-metric__val {
+    color: var(--uscm-text);
+}
+
+body[data-theme="light"] .uscm-indicator-btn,
+body[data-theme="light"] .uscm-tf-btn,
+body[data-theme="light"] .uscm-ema-period,
+body[data-theme="light"] .uscm-indicator-menu {
+    background: var(--uscm-bg2);
+    color: var(--uscm-text);
+    border-color: var(--uscm-line);
+}
+
+body[data-theme="light"] .uscm-ov-label,
+body[data-theme="light"] .uscm-meta,
+body[data-theme="light"] .tip-metric__lbl,
+body[data-theme="light"] .uscm-hm-label,
+body[data-theme="light"] .uscm-md-label {
+    color: var(--uscm-muted);
+}
+
+body[data-theme="light"] .uscm-intel-wrap,
+body[data-theme="light"] .tip-insight {
+    background: var(--uscm-bg1);
+    color: var(--uscm-text);
+    border-color: var(--uscm-line);
+}
+
+body[data-theme="light"] .tip-insight {
+    background: var(--uscm-bg2);
+    border-left-color: var(--uscm-accent);
+}
+
+body[data-theme="light"] .uscm-hm-splitter,
+body[data-theme="light"] .uscm-md-splitter {
+    background: var(--uscm-line);
+}
+
+body[data-theme="light"] .uscm-ov-label--hm,
+body[data-theme="light"] .uscm-panel--hm .uscm-hm-pane,
+body[data-theme="light"] .uscm-panel--md .uscm-md-pane {
+    border-color: var(--uscm-line);
+}
+
+body[data-theme="light"] .uscm-tf-btn.active {
+    color: #f4f7f5;
+}
+
+body[data-theme="light"] .uscm-crosshair-time {
+    color: #14201a;
+    background: rgba(244, 247, 245, 0.94);
+    border-color: rgba(40, 70, 55, 0.18);
+}
+
+body[data-theme="light"] .uscm-skeleton {
+    background: linear-gradient(110deg, #eef3f0 8%, #e4ebe6 18%, #eef3f0 33%);
+    background-size: 200% 100%;
+}
+
+@media (max-width: 768px) {
+    .uscm-intel-wrap {
+        border-top-color: var(--uscm-line);
     }
 }
