@@ -24,7 +24,7 @@
             preload="auto"
             poster="hero-visual.png"
         >
-            <source src="landing-wallpaper.mp4?v=1" type="video/mp4">
+            <source src="landing-wallpaper.mp4?v=2" type="video/mp4">
         </video>
         <video
             class="landing-wallpaper-video landing-wallpaper-video--portrait"
@@ -35,7 +35,7 @@
             preload="metadata"
             poster="hero-visual.png"
         >
-            <source src="landing-wallpaper-mobile.mp4?v=1" type="video/mp4">
+            <source src="landing-wallpaper-mobile.mp4?v=2" type="video/mp4">
         </video>
         <div class="landing-wallpaper-scrim"></div>
     </div>
@@ -210,13 +210,29 @@
             var desktop = document.querySelector('.landing-wallpaper-video--desktop');
             var portrait = document.querySelector('.landing-wallpaper-video--portrait');
             if (!desktop || !portrait) return;
+            function lockHalfSpeed(video) {
+                if (video.playbackRate !== 0.5) {
+                    video.playbackRate = 0.5;
+                }
+            }
+            function hookHalfSpeed(video) {
+                video.defaultPlaybackRate = 0.5;
+                lockHalfSpeed(video);
+                video.addEventListener('loadedmetadata', function () { lockHalfSpeed(video); });
+                video.addEventListener('play', function () { lockHalfSpeed(video); });
+                video.addEventListener('ratechange', function () { lockHalfSpeed(video); });
+            }
+            hookHalfSpeed(desktop);
+            hookHalfSpeed(portrait);
             var mq = window.matchMedia('(max-width: 768px) and (orientation: portrait)');
             function sync() {
                 if (mq.matches) {
                     desktop.pause();
+                    lockHalfSpeed(portrait);
                     portrait.play().catch(function () {});
                 } else {
                     portrait.pause();
+                    lockHalfSpeed(desktop);
                     desktop.play().catch(function () {});
                 }
             }
