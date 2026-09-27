@@ -1,5 +1,5 @@
 """Multi-leg journal rules: min legs, PnL sign, close gate, expiry roll, partial exit."""
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -20,6 +20,7 @@ from backend.services.multi_leg_options import (
     next_trade_number,
     parse_clock_ampm,
     status_after_save,
+    resolve_future_instrument_key,
     suggested_expiry,
     trade_pnl,
 )
@@ -422,3 +423,47 @@ def test_close_without_max_profit_does_not_clear_it(monkeypatch):
             assert params["max_profit"] == 1800
         else:
             assert "max_profit" not in params
+
+
+def _fut_row(und, key, y, m, d, kind="FUT", segment="NSE_FO", weekly=False):
+    exp_ms = int(datetime(y, m, d, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    return {
+        "instrument_type": kind,
+        "segment": segment,
+        "weekly": weekly,
+        "underlying_symbol": und,
+        "instrument_key": key,
+        "trading_symbol": und + " FUT",
+        "expiry": exp_ms,
+    }
+
+
+def test_future_key_is_same_expiry_month_not_the_option():
+    rows = [
+        _fut_row("NIFTY", "NSE_FO|NIFTY26OCTFUT", 2026, 10, 27),
+        _fut_row("NIFTY", "NSE_FO|NIFTY26NOVFUT", 2026, 11, 24),
+        _fut_row("BANKNIFTY", "NSE_FO|BANKNIFTY26OCTFUT", 2026, 10, 27),
+        _fut_row("NIFTY", "NSE_FO|NIFTY26OCT23500CE", 2026, 10, 27, kind="CE"),
+    ]
+    assert resolve_future_instrument_key("NIFTY", date(2026, 10, 27), rows=rows) == "NSE_FO|NIFTY26OCTFUT"
+    assert resolve_future_instrument_key("NIFTY", "2026-10-27", rows=rows) == "NSE_FO|NIFTY26OCTFUT"
+    assert resolve_future_instrument_key("BANKNIFTY", date(2026, 10, 27), rows=rows) == "NSE_FO|BANKNIFTY26OCTFUT"
+    assert resolve_future_instrument_key("NIFTY", date(2026, 12, 29), rows=rows) is None
+
+    same_month = [
+        _fut_row("NIFTY", "NSE_FO|NIFTY26OCTFUT", 2026, 10, 28),
+        _fut_row("NIFTY", "NSE_FO|NIFTY26NOVFUT", 2026, 11, 24),
+    ]
+    assert resolve_future_instrument_key("NIFTY", date(2026, 10, 27), rows=same_month) == "NSE_FO|NIFTY26OCTFUT"
+
+    exact_over_other = [
+        _fut_row("NIFTY", "NSE_FO|EARLY", 2026, 10, 8),
+        _fut_row("NIFTY", "NSE_FO|EXACT", 2026, 10, 27),
+    ]
+    assert resolve_future_instrument_key("NIFTY", date(2026, 10, 27), rows=exact_over_other) == "NSE_FO|EXACT"
+
+    weekly_only = [_fut_row("NIFTY", "NSE_FO|WEEKLY", 2026, 10, 27, weekly=True)]
+    assert resolve_future_instrument_key("NIFTY", date(2026, 10, 27), rows=weekly_only) is None
+
+    mcx = [_fut_row("SILVERM", "MCX_FO|SILVERM", 2026, 11, 30, segment="MCX_FO")]
+    assert resolve_future_instrument_key("SILVERMINI", date(2026, 11, 30), rows=mcx) == "MCX_FO|SILVERM"

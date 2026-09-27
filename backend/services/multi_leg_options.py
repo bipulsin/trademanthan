@@ -677,6 +677,125 @@ def resolve_option_contract(
     }
 
 
+def _is_future_master_row(row: Dict[str, Any]) -> bool:
+    """Listed future from the Upstox master. Weekly and option rows are excluded."""
+    if not isinstance(row, dict) or row.get("weekly"):
+        return False
+    kind = str(row.get("instrument_type") or "").strip().upper()
+    seg = str(row.get("segment") or "").strip().upper()
+    if "FUT" not in kind:
+        return False
+    if not any(token in seg for token in ("FO", "MCX", "NFO", "CDS")):
+        return False
+    return bool(str(row.get("instrument_key") or "").strip())
+
+
+def _future_underlying_token(row: Dict[str, Any]) -> str:
+    """Exact underlying used to match a future. Never a prefix of a longer name."""
+    und = str(row.get("underlying_symbol") or row.get("asset_symbol") or "").strip().upper()
+    if und:
+        return und
+    name = str(row.get("name") or "").strip().upper()
+    if name and " " not in name:
+        return name
+    letters = []
+    for ch in str(row.get("trading_symbol") or "").strip().upper():
+        if ch.isalpha():
+            letters.append(ch)
+        else:
+            break
+    return "".join(letters)
+
+
+def _future_contracts_from_rows(rows: Sequence[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    from backend.services.stock_option_signals import expiry_date_from_instrument
+
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows or []:
+        if not _is_future_master_row(row):
+            continue
+        exp = expiry_date_from_instrument(row)
+        token = _future_underlying_token(row)
+        if exp is None or not token:
+            continue
+        out.setdefault(token, []).append(
+            {
+                "instrument_key": str(row.get("instrument_key") or "").strip(),
+                "segment": str(row.get("segment") or "").upper(),
+                "expiry_date": exp,
+            }
+        )
+    return out
+
+
+def _future_index() -> Dict[str, List[Dict[str, Any]]]:
+    """underlying → futures from the same Upstox complete master as option keys."""
+    now = time.monotonic()
+    with _MASTER_LOCK:
+        cached = _MASTER_CACHE.get("futures_by_und")
+        if cached and (now - float(_MASTER_CACHE.get("futures_loaded_at") or 0)) < _MASTER_TTL:
+            return cached
+    try:
+        from backend.services.divtest.instruments import ensure_instrument_master
+
+        rows = ensure_instrument_master()
+    except Exception as exc:
+        logger.info("multi_leg future master unavailable: %s", exc)
+        return {}
+    out = _future_contracts_from_rows(rows)
+    with _MASTER_LOCK:
+        _MASTER_CACHE["futures_by_und"] = out
+        _MASTER_CACHE["futures_loaded_at"] = time.monotonic()
+    return out
+
+
+def resolve_future_instrument_key(
+    instrument: str,
+    expiry: Any,
+    rows: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Optional[str]:
+    """Future key for the trade's expiry date, otherwise the same contract month.
+
+    A NIFTY trade expiring 2026-10-27 uses the NIFTY future whose expiry falls
+    in October 2026 (exact date when one is listed). Option keys are never
+    returned. None means the collapsed row should show a dash, not an option LTP.
+    """
+    exp = expiry if isinstance(expiry, date) and not isinstance(expiry, datetime) else _parse_date(expiry)
+    names = underlying_candidates(instrument)
+    if not names or exp is None:
+        return None
+    index = _future_contracts_from_rows(rows) if rows is not None else _future_index()
+    pool: List[Dict[str, Any]] = []
+    seen = set()
+    for name in names:
+        for fut in index.get(name, []):
+            ik = str(fut.get("instrument_key") or "")
+            if not ik or ik in seen:
+                continue
+            seen.add(ik)
+            pool.append(fut)
+    exact = [fut for fut in pool if fut.get("expiry_date") == exp]
+    month = [
+        fut
+        for fut in pool
+        if fut.get("expiry_date")
+        and fut["expiry_date"].year == exp.year
+        and fut["expiry_date"].month == exp.month
+    ]
+    chosen_from = exact or month
+    if not chosen_from:
+        return None
+    want = segment_prefix(names[0])
+
+    def rank(fut: Dict[str, Any]) -> Tuple[int, int, str]:
+        seg = str(fut.get("segment") or "")
+        prefer = 0 if want in seg or want.split("_")[0] in seg else 1
+        fut_exp = fut.get("expiry_date") or exp
+        return (prefer, abs((fut_exp - exp).days), str(fut.get("instrument_key") or ""))
+
+    return str(sorted(chosen_from, key=rank)[0]["instrument_key"])
+
+
 def _upstox():
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
@@ -1650,7 +1769,7 @@ def delete_trade(trade_id: str) -> None:
 
 
 def refresh_active_quotes() -> Dict[str, Any]:
-    """Batch LTP + option-greek for open legs, persist, and refresh WS subscriptions."""
+    """Batch LTP + option-greek for open legs, future LTP for the collapsed row, persist, and refresh WS subscriptions."""
     ensure_multi_leg_tables()
     trades = list_active()
     open_legs: List[Dict[str, Any]] = []
@@ -1680,11 +1799,25 @@ def refresh_active_quotes() -> Dict[str, Any]:
         if ik and ik not in seen:
             seen.add(ik)
             keys.append(ik)
+    future_by_trade: Dict[str, Optional[str]] = {}
+    batch_keys = list(keys)
+    batch_seen = set(keys)
+    for trade in trades:
+        tid = str(trade.get("id") or "")
+        try:
+            fik = resolve_future_instrument_key(trade.get("instrument"), trade.get("expiry_date"))
+        except Exception:
+            logger.info("multi_leg future resolve failed for %s", trade.get("instrument"), exc_info=True)
+            fik = None
+        future_by_trade[tid] = fik
+        if fik and fik not in batch_seen:
+            batch_seen.add(fik)
+            batch_keys.append(fik)
     quote_error = None
     ltps: Dict[str, Optional[float]] = {}
     deltas: Dict[str, Optional[float]] = {}
     try:
-        ltps = _fetch_ltps(keys)
+        ltps = _fetch_ltps(batch_keys)
         deltas = _fetch_deltas(keys)
     except Exception as exc:
         quote_error = str(exc)[:200]
@@ -1761,6 +1894,9 @@ def refresh_active_quotes() -> Dict[str, Any]:
         logger.info("multi_leg ws sync during quote refresh failed: %s", exc)
     trades = list_active()
     annotate_adjustment_alerts(trades)
+    for trade in trades:
+        fik = future_by_trade.get(str(trade.get("id") or ""))
+        trade["future_ltp"] = ltps.get(fik) if fik else None
     return {
         "ok": quote_error is None,
         "quote_error": quote_error,

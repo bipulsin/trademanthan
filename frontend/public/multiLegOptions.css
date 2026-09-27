@@ -179,6 +179,10 @@ body.mlo-page .right-panel {
     text-transform: uppercase;
 }
 
+.mlo-row-zone {
+    white-space: nowrap;
+}
+
 .mlo-row-actions {
     display: flex;
     gap: 6px;

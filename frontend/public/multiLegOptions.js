@@ -59,6 +59,22 @@
     }).format(Number(n));
   }
 
+  function zoneNum(n) {
+    if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
+    var num = Number(n);
+    if (Math.abs(num - Math.round(num)) < 1e-4) return String(Math.round(num));
+    return String(num);
+  }
+
+  function futureLtpText(n) {
+    if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
+    return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(Number(n));
+  }
+
+  function greenZoneText(t) {
+    return "PE " + zoneNum(t && t.green_zone_pe) + " - " + zoneNum(t && t.green_zone_ce) + " CE";
+  }
+
   function pnlClass(n) {
     if (n == null || Number.isNaN(Number(n))) return "";
     return Number(n) >= 0 ? "mlo-pos" : "mlo-neg";
@@ -623,6 +639,8 @@
           rowField("Instrument and Type", t.instrument + " · " + typeLabel(t.trade_type)) +
           rowField("Expiry date", t.expiry_date || "—") +
           rowField("DTE", t.dte == null ? "—" : t.dte) +
+          rowField("Future LTP", futureLtpText(t.future_ltp)) +
+          rowField("Green zone", greenZoneText(t), "mlo-row-zone") +
           rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl)) +
           '<span class="mlo-row-actions">' +
             iconButton("edit", "Edit", "fa-pen") +

@@ -54,23 +54,13 @@ body.landing-page #app {
   display: none;
 }
 
-.landing-wallpaper-scrim {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgba(12, 18, 16, 0.32) 0%, rgba(18, 26, 23, 0.38) 45%, rgba(12, 18, 16, 0.5) 100%),
-    linear-gradient(90deg, rgba(12, 18, 16, 0.45) 0%, rgba(12, 18, 16, 0.2) 42%, rgba(12, 18, 16, 0.28) 100%);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .landing-wallpaper-video {
     display: none !important;
   }
 
-  .landing-wallpaper-scrim {
-    background:
-      url('hero-visual.png') center right / cover no-repeat,
-      linear-gradient(90deg, rgba(12, 18, 16, 0.5) 0%, rgba(12, 18, 16, 0.24) 50%, rgba(12, 18, 16, 0.4) 100%);
+  .landing-wallpaper {
+    background: url('hero-visual.png') center center / cover no-repeat;
   }
 }
 
@@ -88,12 +78,6 @@ body.landing-page #app {
     transform: none;
     object-fit: cover;
     object-position: center center;
-  }
-
-  .landing-wallpaper-scrim {
-    background:
-      linear-gradient(180deg, rgba(12, 18, 16, 0.24) 0%, rgba(18, 26, 23, 0.3) 55%, rgba(12, 18, 16, 0.4) 100%),
-      linear-gradient(180deg, transparent 0%, rgba(12, 18, 16, 0.14) 70%, rgba(12, 18, 16, 0.3) 100%);
   }
 
   .landing-hero::before {
