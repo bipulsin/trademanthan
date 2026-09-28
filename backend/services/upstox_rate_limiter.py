@@ -16,10 +16,12 @@ workers.
 Scope: only the candle endpoints are gated (that is where the storm is); order,
 position and quote calls are unaffected.
 
-Priority: ``scheduled_10m`` (and other scheduled warm executions) run with a
-longer per-slot wait and block discretionary callers while active. Discretionary
-callers also yield when the 30-min window is near cap (headroom reserved for the
-next scheduled warm).
+Priority: an open chart's candle fetch (``chart_candle_priority``) is granted
+immediately and background warm/snapshot callers yield until that fetch
+finishes. ``scheduled_10m`` (and other scheduled warm executions) otherwise run
+with a longer per-slot wait and block discretionary callers while active.
+Discretionary callers also yield when the 30-min window is near cap (headroom
+reserved for the next scheduled warm).
 """
 from __future__ import annotations
 
@@ -100,7 +102,7 @@ class SlidingWindowRateLimiter:
             j = bisect.bisect_left(self._events, start)
             return len(self._events) - j
 
-    def acquire(self, max_wait: float = 90.0) -> Tuple[bool, float]:
+    def acquire(self, max_wait: float = 90.0, *, immediate: bool = False) -> Tuple[bool, float]:
         """Try to reserve a slot, waiting up to ``max_wait`` s.
 
         Returns ``(granted, waited_seconds)``. When the budget can't free a slot
@@ -108,9 +110,20 @@ class SlidingWindowRateLimiter:
         slot is consumed — the caller should skip the request entirely rather than
         sending it to Upstox. This sheds excess demand cleanly instead of bursting
         over the limit and triggering 429s.
+
+        ``immediate`` records a grant without waiting. Used for an open chart so
+        its candle request is not queued behind a saturated warm. The grant is
+        still counted, so the next background caller backs off.
         """
         if not self._limits:
             return True, 0.0
+        if immediate:
+            with self._lock:
+                now = time.monotonic()
+                self._prune(now)
+                self._events.append(now)
+                self._last_grant = now
+                return True, 0.0
         start_ts = time.monotonic()
         while True:
             with self._lock:
@@ -138,7 +151,13 @@ _throttled = 0
 _denied = 0
 _denied_yield_scheduled = 0
 _denied_yield_headroom = 0
+_denied_yield_chart = 0
 _scheduled_acquired = 0
+_chart_acquired = 0
+
+# Open-chart fetches in flight. Background candle callers yield while this is > 0.
+_chart_waiters = 0
+_chart_waiters_lock = threading.Lock()
 
 # Thread-local: worker threads inside a scheduled warm pool mark themselves.
 _tls = threading.local()
@@ -262,6 +281,43 @@ def _is_backtest_bulk_prefetch() -> bool:
     return bool(getattr(_bt_local, "backtest_bulk", False))
 
 
+def _is_chart_priority() -> bool:
+    return bool(getattr(_tls, "chart_priority", False))
+
+
+def chart_priority_active() -> bool:
+    """True on the thread currently inside ``chart_candle_priority``."""
+    return _is_chart_priority()
+
+
+def _chart_priority_pending() -> bool:
+    with _chart_waiters_lock:
+        return _chart_waiters > 0
+
+
+@contextmanager
+def chart_candle_priority() -> Iterator[None]:
+    """Run an open-chart candle fetch ahead of background warm and snapshot jobs.
+
+    While this context is active, other candle callers in the process are denied
+    so the chart request is not dropped for the duration of a 10-minute warm.
+    The chart request itself is granted immediately.
+    """
+    global _chart_waiters
+    prev = bool(getattr(_tls, "chart_priority", False))
+    _tls.chart_priority = True
+    if not prev:
+        with _chart_waiters_lock:
+            _chart_waiters += 1
+    try:
+        yield
+    finally:
+        _tls.chart_priority = prev
+        if not prev:
+            with _chart_waiters_lock:
+                _chart_waiters = max(0, _chart_waiters - 1)
+
+
 def acquire_candle_slot() -> bool:
     """Reserve a candle-request slot under the shared budget.
 
@@ -270,7 +326,8 @@ def acquire_candle_slot() -> bool:
     True when disabled via ``UPSTOX_CANDLE_RATE_LIMIT_ENABLED``.
     """
     global _acquired, _total_wait, _throttled, _denied
-    global _denied_yield_scheduled, _denied_yield_headroom, _scheduled_acquired
+    global _denied_yield_scheduled, _denied_yield_headroom, _denied_yield_chart
+    global _scheduled_acquired, _chart_acquired
     try:
         from backend.config import settings
 
@@ -279,16 +336,30 @@ def acquire_candle_slot() -> bool:
     except Exception:
         pass
 
+    chart = _is_chart_priority()
+    if not chart and _chart_priority_pending():
+        _denied += 1
+        _denied_yield_chart += 1
+        return False
+
     scheduled_worker = _is_scheduled_worker()
-    if _scheduled_warm_active() and not scheduled_worker:
+    if _scheduled_warm_active() and not scheduled_worker and not chart:
         _denied += 1
         _denied_yield_scheduled += 1
         return False
 
-    if not scheduled_worker and _headroom_exhausted():
+    if not scheduled_worker and not chart and _headroom_exhausted():
         _denied += 1
         _denied_yield_headroom += 1
         return False
+
+    if chart:
+        granted, waited = _get_limiter().acquire(max_wait=0.0, immediate=True)
+        _total_wait += waited
+        _acquired += 1
+        _chart_acquired += 1
+        _log_candle_rl_stats()
+        return granted
 
     try:
         with _max_wait_override_lock:
@@ -312,20 +383,28 @@ def acquire_candle_slot() -> bool:
             _scheduled_acquired += 1
         if waited > 0.01:
             _throttled += 1
-    # Periodic visibility into pacing + how much demand is being shed.
-    if (_acquired + _denied) % 500 == 0:
-        logger.info(
-            "candle rate limiter: %d granted, %d denied(skipped), %d throttled, "
-            "%.1fs total wait (yield_sched=%d yield_headroom=%d scheduled_grants=%d)",
-            _acquired,
-            _denied,
-            _throttled,
-            _total_wait,
-            _denied_yield_scheduled,
-            _denied_yield_headroom,
-            _scheduled_acquired,
-        )
+    _log_candle_rl_stats()
     return granted
+
+
+def _log_candle_rl_stats() -> None:
+    # Periodic visibility into pacing + how much demand is being shed.
+    if (_acquired + _denied) % 500 != 0:
+        return
+    logger.info(
+        "candle rate limiter: %d granted, %d denied(skipped), %d throttled, "
+        "%.1fs total wait (yield_sched=%d yield_headroom=%d yield_chart=%d "
+        "scheduled_grants=%d chart_grants=%d)",
+        _acquired,
+        _denied,
+        _throttled,
+        _total_wait,
+        _denied_yield_scheduled,
+        _denied_yield_headroom,
+        _denied_yield_chart,
+        _scheduled_acquired,
+        _chart_acquired,
+    )
 
 
 def stats() -> dict:
@@ -336,7 +415,10 @@ def stats() -> dict:
         "total_wait_sec": round(_total_wait, 1),
         "denied_yield_to_scheduled": _denied_yield_scheduled,
         "denied_yield_headroom": _denied_yield_headroom,
+        "denied_yield_chart": _denied_yield_chart,
         "scheduled_acquired": _scheduled_acquired,
+        "chart_acquired": _chart_acquired,
+        "chart_priority_pending": _chart_priority_pending(),
         "scheduled_warm_active": _scheduled_warm_active(),
     }
     try:

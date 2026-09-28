@@ -44,6 +44,61 @@ def test_headroom_blocks_discretionary(monkeypatch):
     assert rl._denied_yield_headroom >= 1
 
 
+def test_chart_priority_granted_during_scheduled_warm(monkeypatch):
+    monkeypatch.setattr(rl, "_LIMITER", rl.SlidingWindowRateLimiter([(1, 60.0)], min_interval=30.0))
+    rl._LIMITER.acquire(max_wait=0.01)
+    rl._acquired = rl._denied = rl._denied_yield_scheduled = rl._denied_yield_chart = 0
+    rl._chart_waiters = 0
+    background = {}
+
+    def warm_worker():
+        with rl.scheduled_candle_worker():
+            background["granted"] = rl.acquire_candle_slot()
+
+    with rl.candle_warm_execution("scheduled_10m"):
+        assert rl.acquire_candle_slot() is False
+
+        with rl.chart_candle_priority():
+            assert rl.chart_priority_active() is True
+            assert rl.acquire_candle_slot() is True
+            worker = threading.Thread(target=warm_worker)
+            worker.start()
+            worker.join()
+            assert background["granted"] is False
+            assert rl._denied_yield_chart >= 1
+
+    assert rl.chart_priority_active() is False
+    assert rl._chart_waiters == 0
+
+
+def test_chart_priority_ignores_headroom(monkeypatch):
+    lim = rl.SlidingWindowRateLimiter([(10, 1800.0)])
+    monkeypatch.setattr(rl, "_LIMITER", lim)
+    rl._acquired = rl._denied = rl._denied_yield_headroom = rl._chart_acquired = 0
+    rl._chart_waiters = 0
+
+    class _Settings:
+        UPSTOX_CANDLE_RATE_LIMIT_ENABLED = True
+        UPSTOX_CANDLE_RL_PER_30MIN = 10
+        SCHEDULED_CANDLE_RL_HEADROOM = 3
+        UPSTOX_CANDLE_RL_MAX_WAIT = 0.05
+        UPSTOX_CANDLE_RL_SCHEDULED_MAX_WAIT = 1.0
+
+    monkeypatch.setattr(rl, "_get_limiter", lambda: lim)
+    import backend.config as cfg
+
+    monkeypatch.setattr(cfg, "settings", _Settings())
+
+    for _ in range(7):
+        lim.acquire(max_wait=0.01)
+    assert rl._headroom_exhausted() is True
+    assert rl.acquire_candle_slot() is False
+
+    with rl.chart_candle_priority():
+        assert rl.acquire_candle_slot() is True
+        assert rl._chart_acquired >= 1
+
+
 def test_scheduled_execution_context_enables_workers(monkeypatch):
     monkeypatch.setattr(rl, "_LIMITER", rl.SlidingWindowRateLimiter([(50, 1.0)]))
     results: list[bool] = []

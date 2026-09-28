@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 import pytz
 
 from backend.config import settings
+from backend.services.upstox_rate_limiter import chart_candle_priority
 from backend.services.upstox_service import UpstoxService
 from backend.services.vajra.timeframes import fetch_config
 
@@ -88,6 +89,12 @@ def candles_to_lightweight(
     return out
 
 
+def normalize_chart_instrument_key(instrument_key: Optional[str]) -> str:
+    """Upstox historical keys use ``NSE_EQ|ISIN``. Callers also pass colon or spaced forms."""
+    raw = str(instrument_key or "").strip().replace(" ", "")
+    return raw.replace(":", "|").upper()
+
+
 def fetch_chart_candles(
     instrument_key: str,
     timeframe: Optional[str] = None,
@@ -96,18 +103,27 @@ def fetch_chart_candles(
     cfg = fetch_config(tf)
     interval = str(cfg["interval"])
     days_back = int(cfg["days_back"])
+    ik = normalize_chart_instrument_key(instrument_key)
+    if "|" not in ik:
+        raise ValueError(f"Invalid instrument_key: {instrument_key}")
 
     ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     ux.reload_token_from_storage()
-    raw = ux.get_historical_candles_by_instrument_key(
-        instrument_key.replace(":", "|"),
-        interval=interval,
-        days_back=days_back,
-    ) or []
+    # Open chart: this interval for this key goes out now, ahead of warm/snapshot jobs.
+    logger.info("chart candles priority fetch %s %s (%s)", ik, tf, interval)
+    with chart_candle_priority():
+        raw = ux.get_historical_candles_by_instrument_key(
+            ik,
+            interval=interval,
+            days_back=days_back,
+        ) or []
     bars = candles_to_lightweight(raw, timeframe=tf)
+    if not bars:
+        logger.warning("chart candles empty after priority fetch %s %s", ik, tf)
     return {
         "timeframe": tf,
         "interval": interval,
+        "instrument_key": ik,
         "bars": bars,
         "count": len(bars),
     }

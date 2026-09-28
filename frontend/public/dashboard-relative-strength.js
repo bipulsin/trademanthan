@@ -341,7 +341,7 @@
         chartEnginePromise = new Promise((resolve, reject) => {
             if (window.SecurityChartEngine) return resolve(window.SecurityChartEngine);
             const s = document.createElement("script");
-            s.src = "security-chart/security-chart-engine.js?v=14";
+            s.src = "security-chart/security-chart-engine.js?v=15";
             s.onload = () => resolve(window.SecurityChartEngine);
             s.onerror = () => reject(new Error("chart engine load failed"));
             document.body.appendChild(s);

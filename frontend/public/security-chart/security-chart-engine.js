@@ -583,6 +583,19 @@
         });
     }
 
+    function fetchCandlesForOpenChart(config, attemptsLeft) {
+        const left = attemptsLeft == null ? 1 : attemptsLeft;
+        return fetchCandles(config).then(function (res) {
+            const emptySuccess = res && res.success && (!res.bars || !res.bars.length);
+            if (!emptySuccess || left <= 0) return res;
+            return new Promise(function (resolve) {
+                global.setTimeout(function () {
+                    resolve(fetchCandlesForOpenChart(config, left - 1));
+                }, 350);
+            });
+        });
+    }
+
     function SecurityChartModal() {
         this.config = null;
         this.timeframe = '5m';
@@ -1929,7 +1942,7 @@
         this._resetLtpDisplay();
         root.querySelector('[data-uscm-skeleton]').style.display = 'flex';
         root.querySelector('[data-uscm-skeleton]').textContent = 'Loading ' + self.timeframe + '…';
-        fetchCandles({
+        fetchCandlesForOpenChart({
             symbol: self.config.symbol,
             instrumentType: self.config.instrumentType,
             instrumentKey: self.instrumentKey,
@@ -2088,9 +2101,10 @@
                 root.classList.add('uscm-open');
             });
             self._open = true;
+            // Candle request starts immediately. Indicator prefs must not queue ahead of it.
+            self._loadHistorical();
             return self._refreshIndicatorPrefs().then(function () {
                 if (!self._open || self._openSeq !== openSeq) return;
-                self._loadHistorical();
             });
         });
     };

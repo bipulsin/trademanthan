@@ -435,7 +435,7 @@
     if (_soChartEngineLoadPromise) return _soChartEngineLoadPromise;
     _soChartEngineLoadPromise = new Promise(function (resolve, reject) {
       const s = document.createElement("script");
-      s.src = "security-chart/security-chart-engine.js?v=14";
+      s.src = "security-chart/security-chart-engine.js?v=15";
       s.async = true;
       s.onload = function () {
         if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
