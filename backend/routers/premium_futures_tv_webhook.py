@@ -9,6 +9,11 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from backend.services.premium_futures_divergence import (
+    HANDLER_DIVERGENCE,
+    ingest_divergence_webhook,
+    select_premium_futures_handler,
+)
 from backend.services.premium_futures_tv_webhook import (
     RECOMMENDED_ALERT_JSON,
     decode_raw_payload,
@@ -72,6 +77,29 @@ async def premium_futures_tv_webhook(request: Request) -> JSONResponse:
         source_ip,
         len(body or b""),
     )
+    if select_premium_futures_handler(parsed, raw_body) == HANDLER_DIVERGENCE:
+        try:
+            div = ingest_divergence_webhook(parsed, raw_body, received_at)
+        except Exception as e:
+            logger.exception("premium_futures divergence webhook failed: %s", e)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "ok": False,
+                    "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "message": "Could not store webhook; retry",
+                },
+            )
+        if div is not None:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": True,
+                    "received_at": received_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "stored": bool(div.get("applied")),
+                    **div,
+                },
+            )
     try:
         result = insert_tv_webhook_row(
             received_at=received_at,

@@ -2054,6 +2054,19 @@ def _pick_is_tv_source(p: Dict[str, Any], tv_map: Optional[Dict[Tuple[str, str],
     return (und, side) in tv_map
 
 
+def _pick_is_commodity_divergence(p: Dict[str, Any]) -> bool:
+    """Divergence rows are overlaid separately so ChartInk/TV enter rules do not apply."""
+    if str(p.get("source") or "") == "commodity_divergence":
+        return True
+    br = p.get("conviction_breakdown_json")
+    if isinstance(br, str):
+        try:
+            br = json.loads(br)
+        except (TypeError, ValueError):
+            br = None
+    return isinstance(br, dict) and str(br.get("source") or "") == "commodity_divergence"
+
+
 def _fmt_hm(dt: Optional[datetime]) -> str:
     return dt.strftime("%H:%M") if dt else "—"
 
@@ -3963,11 +3976,14 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     picks = [
         s
         for s in not_bought
-        if _pick_is_tv_source(s, tv_map)
-        or (
-            s.get("conviction_score") is not None
-            and float(s.get("conviction_score")) >= 50.0
-            and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
+        if not _pick_is_commodity_divergence(s)
+        and (
+            _pick_is_tv_source(s, tv_map)
+            or (
+                s.get("conviction_score") is not None
+                and float(s.get("conviction_score")) >= 50.0
+                and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
+            )
         )
     ]
     picks_before_closed_filter = list(picks)
@@ -4176,6 +4192,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if str(s.get("direction_type") or "LONG").strip().upper() == "LONG"
             and _under_fifty(s)
             and not _pick_is_tv_source(s, tv_map)
+            and not _pick_is_commodity_divergence(s)
             and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
         ],
         key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
@@ -4187,6 +4204,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             if str(s.get("direction_type") or "LONG").strip().upper() == "SHORT"
             and _under_fifty(s)
             and not _pick_is_tv_source(s, tv_map)
+            and not _pick_is_commodity_divergence(s)
             and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
         ],
         key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
@@ -4573,6 +4591,28 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     except Exception as e:
         logger.warning("daily_futures: TradingView picks merge skipped: %s", e)
 
+    div_could: List[Dict[str, Any]] = []
+    try:
+        from backend.services.premium_futures_divergence import load_divergence_sections
+
+        div_bull, div_bear, div_could = load_divergence_sections(td)
+        div_bull = [p for p in div_bull if int(p.get("screening_id") or 0) not in bought_sids]
+        div_bear = [p for p in div_bear if int(p.get("screening_id") or 0) not in bought_sids]
+        div_block = _new_entries_blocked_reason(now_ist)
+        if div_block:
+            for p in list(div_bull) + list(div_bear):
+                if p.get("order_eligible"):
+                    p["order_eligible"] = False
+                    p["order_block_reason"] = div_block
+        picks_bull = _sort_todays_pick_workspace_rows(list(picks_bull) + list(div_bull))
+        picks_bearish = _sort_todays_pick_workspace_rows(list(picks_bearish) + list(div_bear))
+        if div_bull or div_bear:
+            _apply_live_ltps_to_picks_and_running(
+                list(div_bull) + list(div_bear), [], [], persist_screening=False
+            )
+    except Exception as e:
+        logger.warning("daily_futures: divergence picks merge skipped: %s", e)
+
     entry_block = _new_entries_blocked_reason(now_ist)
     return {
         "trade_date": str(td),
@@ -4595,7 +4635,11 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         },
         "running": running,
         "closed": closed,
-        "trade_if_could_have_done": [] if lite_mode else _build_trade_if_could_rows(picks_mixed, closed, td),
+        "trade_if_could_have_done": (
+            []
+            if lite_mode
+            else list(_build_trade_if_could_rows(picks_mixed, closed, td)) + list(div_could)
+        ),
         "summary": {
             "cumulative_pnl_rupees": round(total_pnl, 2),
             "wins": wins,
@@ -4660,6 +4704,13 @@ def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
         td = _workspace_trade_date_ist()
     pm = list(base.get("picks_mixed") or base.get("picks") or [])
     rows = _build_trade_if_could_rows(pm, list(base.get("closed") or []), td)
+    try:
+        from backend.services.premium_futures_divergence import load_divergence_sections
+
+        _b, _r, extra = load_divergence_sections(td)
+        rows = list(rows) + list(extra)
+    except Exception as e:
+        logger.warning("daily_futures: divergence could-have merge skipped: %s", e)
     return {
         "trade_date": base.get("trade_date"),
         "session_before_open": False,
@@ -4709,7 +4760,20 @@ def confirm_buy(
         is_tv_buy = True
     elif isinstance(brj, str) and "tradingview_webhook" in brj:
         is_tv_buy = True
-    if is_tv_buy:
+    screening_source = ""
+    if isinstance(brj, dict):
+        screening_source = str(brj.get("source") or "")
+    elif isinstance(brj, str) and "commodity_divergence" in brj:
+        screening_source = "commodity_divergence"
+    div_enter = False
+    try:
+        from backend.services.premium_futures_divergence import divergence_enter_allowed
+
+        div_enter = divergence_enter_allowed(str(row[1] or ""), str(row[2] or "LONG"), screening_source)
+    except Exception:
+        logger.debug("daily_futures: divergence enter check skipped", exc_info=True)
+        div_enter = False
+    if div_enter or is_tv_buy:
         pass
     elif not _df_v2_mode_enabled():
         if int(row[6] or 0) < 1:
@@ -4733,7 +4797,7 @@ def confirm_buy(
     dtp = str(row[2] or "LONG").strip().upper()
     live_score = float(row[10]) if row[10] is not None else None
     c2 = live_score
-    if not is_tv_buy and dtp == "SHORT":
+    if not div_enter and not is_tv_buy and dtp == "SHORT":
         if _df_v2_mode_enabled():
             raw_conv = float(row[7]) if row[7] is not None else None
             if raw_conv is None or raw_conv < 60.0:
@@ -4746,7 +4810,7 @@ def confirm_buy(
                 raise ValueError(
                     "SHORT is allowed only when NIFTY 5m bearish structure is confirmed (last 2 red + last 3 closes descending)."
                 )
-    elif not is_tv_buy:
+    elif not div_enter and not is_tv_buy:
         if _df_v2_mode_enabled():
             raw_conv = float(row[7]) if row[7] is not None else None
             if raw_conv is None or raw_conv < 60.0:

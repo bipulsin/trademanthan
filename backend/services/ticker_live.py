@@ -611,6 +611,18 @@ def _premium(user_id: int) -> tuple:
             conv = _num(r["conv"])
             label = f"Pick · {int(conv)}" if conv is not None else "Pick"
             signals.append(_row("premium_futures", sym, label=label))
+        try:
+            from backend.services.premium_futures_divergence import load_divergence_ticker_signals
+
+            for item in load_divergence_ticker_signals():
+                sym = str(item.get("symbol") or "").strip()
+                if not _symbol_ok(sym):
+                    continue
+                signals.append(
+                    _row("premium_futures", sym, label=str(item.get("label") or "Bullish"))
+                )
+        except Exception:
+            logger.debug("premium divergence ticker skipped", exc_info=True)
         return trades, signals
     finally:
         db.close()

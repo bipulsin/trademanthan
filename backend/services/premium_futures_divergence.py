@@ -1,0 +1,992 @@
+"""Second Premium Futures TradingView format: commodity divergence alerts.
+
+The existing JSON webhook (ticker / action / side / message) is untouched.
+This module claims a payload only when it matches the divergence sentence or
+the equivalent strategy.order fields. Anything else returns no parse so the
+caller keeps the JSON handler.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import pytz
+from sqlalchemy import text
+
+from backend.services.premium_futures_tv_webhook import normalize_tv_ticker
+
+logger = logging.getLogger(__name__)
+
+IST = pytz.timezone("Asia/Kolkata")
+_MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "add_premium_futures_divergence.sql"
+_ENSURED = False
+
+HANDLER_JSON = "json"
+HANDLER_DIVERGENCE = "divergence"
+
+DIVERGENCE_ACTIONS = frozenset(
+    {"BULL-DIV", "BEAR-DIV", "BULL-GO", "BEAR-GO", "BULL-EXIT", "BEAR-EXIT"}
+)
+SOURCE = "commodity_divergence"
+
+_SENTENCE = re.compile(
+    r"TWCTO\s+Commodity\s+Divergence\s*:\s*order\s+"
+    r"(BULL-DIV|BEAR-DIV|BULL-GO|BEAR-GO|BULL-EXIT|BEAR-EXIT)"
+    r"\s*@\s*(\d+)\s+filled\s+on\s+([A-Za-z0-9&_:-]+)\s*\.?",
+    re.IGNORECASE,
+)
+_MESSAGE_KEYS = ("message", "text", "comment", "alert_message", "description")
+
+LtpFn = Callable[[str], Optional[float]]
+Resolver = Callable[[str], Optional[Dict[str, str]]]
+
+
+def select_premium_futures_handler(parsed: Any, raw_text: str = "") -> str:
+    """``divergence`` only when the new alert matches; otherwise the JSON handler."""
+    if parse_divergence_alert(parsed, raw_text) is None:
+        return HANDLER_JSON
+    return HANDLER_DIVERGENCE
+
+
+def parse_divergence_alert(parsed: Any, raw_text: str = "") -> Optional[Dict[str, Any]]:
+    """Return action, contracts, ticker, symbol — or None when this is not the new format."""
+    for blob in _text_candidates(parsed, raw_text):
+        hit = _parse_sentence(blob)
+        if hit is not None:
+            return hit
+    if isinstance(parsed, dict):
+        return _parse_structured(parsed)
+    return None
+
+
+def _text_candidates(parsed: Any, raw_text: str) -> List[str]:
+    out: List[str] = []
+    if isinstance(parsed, str) and parsed.strip():
+        out.append(parsed)
+    if isinstance(parsed, dict):
+        for key in _MESSAGE_KEYS:
+            val = parsed.get(key)
+            if isinstance(val, str) and val.strip():
+                out.append(val)
+    if raw_text and raw_text.strip():
+        out.append(raw_text)
+    return out
+
+
+def _parse_sentence(blob: str) -> Optional[Dict[str, Any]]:
+    m = _SENTENCE.search(blob or "")
+    if not m:
+        return None
+    action = m.group(1).upper()
+    if action not in DIVERGENCE_ACTIONS:
+        return None
+    symbol = normalize_tv_ticker(m.group(3))
+    if not symbol:
+        return None
+    try:
+        contracts = int(m.group(2))
+    except (TypeError, ValueError):
+        contracts = None
+    return {
+        "action": action,
+        "contracts": contracts,
+        "ticker_raw": m.group(3).strip(),
+        "symbol": symbol,
+    }
+
+
+def _parse_structured(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """strategy.order.action (nested or dotted) plus a ticker. Top-level ``action`` stays JSON."""
+    action = None
+    contracts = None
+    nested = d.get("strategy")
+    if isinstance(nested, dict):
+        order = nested.get("order")
+        if isinstance(order, dict):
+            action = order.get("action")
+            contracts = order.get("contracts")
+    if action is None and "strategy.order.action" in d:
+        action = d.get("strategy.order.action")
+        contracts = d.get("strategy.order.contracts", contracts)
+    action_u = str(action or "").strip().upper()
+    if action_u not in DIVERGENCE_ACTIONS:
+        return None
+    ticker_raw = None
+    for key in ("ticker", "symbol", "tickerid", "sym"):
+        val = d.get(key)
+        if val is not None and str(val).strip():
+            ticker_raw = str(val).strip()
+            break
+    if not ticker_raw:
+        return None
+    symbol = normalize_tv_ticker(ticker_raw)
+    if not symbol:
+        return None
+    return {
+        "action": action_u,
+        "contracts": _as_contracts(contracts),
+        "ticker_raw": ticker_raw,
+        "symbol": symbol,
+    }
+
+
+def _as_contracts(v: Any) -> Optional[int]:
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, str):
+        s = v.strip()
+        if not s or "{{" in s:
+            return None
+        v = s
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        return None
+    if n < 0:
+        return None
+    return n
+
+
+def _side_of(action: str) -> str:
+    return "bearish" if str(action).upper().startswith("BEAR") else "bullish"
+
+
+def _kind_of(action: str) -> str:
+    return str(action).upper().split("-", 1)[-1]
+
+
+def _direction(side: str) -> str:
+    return "SHORT" if side == "bearish" else "LONG"
+
+
+def _aware(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return IST.localize(dt)
+    return dt.astimezone(IST)
+
+
+def _naive(dt: datetime) -> datetime:
+    aware = _aware(dt)
+    assert aware is not None
+    return aware.replace(tzinfo=None, microsecond=0)
+
+
+def _hm(dt: Optional[datetime]) -> Optional[str]:
+    aware = _aware(dt)
+    if aware is None:
+        return None
+    return aware.strftime("%H:%M")
+
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    aware = _aware(dt)
+    if aware is None:
+        return None
+    return aware.isoformat()
+
+
+def _session_date(dt: datetime) -> date:
+    aware = _aware(dt)
+    assert aware is not None
+    return aware.date()
+
+
+def _safe_ltp(ltp_fn: LtpFn, instrument_key: str) -> Tuple[Optional[float], bool]:
+    """Return (price, missing). A missing quote still continues the state change."""
+    try:
+        raw = ltp_fn(instrument_key)
+    except Exception as e:
+        logger.warning("premium_futures divergence LTP failed ik=%s: %s", instrument_key, e)
+        return None, True
+    if raw is None:
+        logger.info("premium_futures divergence LTP missing ik=%s", instrument_key)
+        return None, True
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        logger.info("premium_futures divergence LTP unusable ik=%s value=%s", instrument_key, raw)
+        return None, True
+    if price <= 0:
+        logger.info("premium_futures divergence LTP non-positive ik=%s value=%s", instrument_key, price)
+        return None, True
+    return round(price, 4), False
+
+
+def premium_futures_ltp(instrument_key: str) -> Optional[float]:
+    """Same quote path Today's pick uses, for one current-month future."""
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return None
+    from backend.services.daily_futures_service import _apply_live_ltps_to_picks_and_running
+
+    row: Dict[str, Any] = {"instrument_key": ik}
+    _apply_live_ltps_to_picks_and_running([row], [], [], persist_screening=False)
+    return row.get("ltp")
+
+
+class MemoryDivergenceStore:
+    """In-process state for tests and for one handler call. Not process-wide."""
+
+    def __init__(self) -> None:
+        self.picks: Dict[Tuple[date, str, str], Dict[str, Any]] = {}
+        self.could: List[Dict[str, Any]] = []
+        self._seq = 0
+
+    def get_pick(self, trade_date: date, underlying: str, side: str) -> Optional[Dict[str, Any]]:
+        row = self.picks.get((trade_date, underlying, side))
+        return dict(row) if row else None
+
+    def save_pick(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        key = (row["trade_date"], row["underlying"], row["side"])
+        stored = dict(row)
+        self.picks[key] = stored
+        return dict(stored)
+
+    def active_picks(self, trade_date: date) -> List[Dict[str, Any]]:
+        return [
+            dict(r)
+            for r in self.picks.values()
+            if r.get("trade_date") == trade_date and r.get("active")
+        ]
+
+    def deactivate_symbol(self, trade_date: date, underlying: str) -> None:
+        for side in ("bullish", "bearish"):
+            row = self.picks.get((trade_date, underlying, side))
+            if not row:
+                continue
+            row["active"] = False
+            row["enter_enabled"] = False
+            row["ticker_eligible"] = False
+
+    def open_could(self, trade_date: date, underlying: str, side: str) -> Optional[Dict[str, Any]]:
+        for row in reversed(self.could):
+            if (
+                row.get("trade_date") == trade_date
+                and row.get("underlying") == underlying
+                and row.get("side") == side
+                and row.get("exit_at") is None
+            ):
+                return dict(row)
+        return None
+
+    def add_could(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        existing = self.open_could(row["trade_date"], row["underlying"], row["side"])
+        if existing:
+            return existing
+        self._seq += 1
+        stored = dict(row)
+        stored["id"] = self._seq
+        self.could.append(stored)
+        return dict(stored)
+
+    def stamp_exit(
+        self,
+        could_id: int,
+        exit_ltp: Optional[float],
+        exit_at: datetime,
+        *,
+        ltp_missing: bool,
+    ) -> Optional[Dict[str, Any]]:
+        for row in self.could:
+            if int(row.get("id") or 0) != int(could_id):
+                continue
+            row["exit_ltp"] = exit_ltp
+            row["exit_at"] = _naive(exit_at)
+            row["ltp_missing_exit"] = bool(ltp_missing)
+            return dict(row)
+        return None
+
+    def could_rows(self, trade_date: date) -> List[Dict[str, Any]]:
+        return [dict(r) for r in self.could if r.get("trade_date") == trade_date]
+
+
+class DbDivergenceStore:
+    """Session-date picks and could-have rows. Screening sync is best-effort."""
+
+    def ensure(self) -> None:
+        global _ENSURED
+        if _ENSURED:
+            return
+        from backend.database import engine
+
+        if not _MIGRATION.is_file():
+            raise FileNotFoundError(f"migration missing: {_MIGRATION}")
+        sql = _MIGRATION.read_text(encoding="utf-8")
+        with engine.begin() as conn:
+            conn.execute(text(sql))
+        _ENSURED = True
+        logger.info("premium_futures divergence tables ensured")
+
+    def get_pick(self, trade_date: date, underlying: str, side: str) -> Optional[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                           active, enter_enabled, ticker_eligible, screening_id, action, div_at, updated_at
+                    FROM premium_futures_divergence_pick
+                    WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :s
+                    """
+                ),
+                {"d": trade_date.isoformat(), "u": underlying, "s": side},
+            ).mappings().first()
+            return dict(row) if row else None
+        finally:
+            db.close()
+
+    def save_pick(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO premium_futures_divergence_pick (
+                        trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                        active, enter_enabled, ticker_eligible, screening_id, action, div_at, updated_at
+                    ) VALUES (
+                        CAST(:d AS DATE), :u, :side, :fs, :ik, :contracts,
+                        :active, :enter, :ticker, :sid, :action, :div_at, :updated
+                    )
+                    ON CONFLICT (trade_date, underlying, side) DO UPDATE SET
+                        fut_symbol = EXCLUDED.fut_symbol,
+                        instrument_key = EXCLUDED.instrument_key,
+                        contracts = EXCLUDED.contracts,
+                        active = EXCLUDED.active,
+                        enter_enabled = EXCLUDED.enter_enabled,
+                        ticker_eligible = EXCLUDED.ticker_eligible,
+                        action = EXCLUDED.action,
+                        div_at = COALESCE(premium_futures_divergence_pick.div_at, EXCLUDED.div_at),
+                        updated_at = EXCLUDED.updated_at
+                    """
+                ),
+                {
+                    "d": row["trade_date"].isoformat(),
+                    "u": row["underlying"],
+                    "side": row["side"],
+                    "fs": row.get("fut_symbol"),
+                    "ik": row.get("instrument_key"),
+                    "contracts": row.get("contracts"),
+                    "active": bool(row.get("active")),
+                    "enter": bool(row.get("enter_enabled")),
+                    "ticker": bool(row.get("ticker_eligible")),
+                    "sid": row.get("screening_id"),
+                    "action": row.get("action"),
+                    "div_at": row.get("div_at"),
+                    "updated": row.get("updated_at"),
+                },
+            )
+            if row.get("active"):
+                sid = _sync_screening(db, row)
+                row["screening_id"] = sid
+                db.execute(
+                    text(
+                        """
+                        UPDATE premium_futures_divergence_pick
+                        SET screening_id = :sid
+                        WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :side
+                        """
+                    ),
+                    {
+                        "sid": sid,
+                        "d": row["trade_date"].isoformat(),
+                        "u": row["underlying"],
+                        "side": row["side"],
+                    },
+                )
+            db.commit()
+            return dict(row)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def active_picks(self, trade_date: date) -> List[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                           active, enter_enabled, ticker_eligible, screening_id, action, div_at, updated_at
+                    FROM premium_futures_divergence_pick
+                    WHERE trade_date = CAST(:d AS DATE) AND active = TRUE
+                    ORDER BY updated_at ASC
+                    """
+                ),
+                {"d": trade_date.isoformat()},
+            ).mappings().all()
+            return [dict(r) for r in rows]
+        finally:
+            db.close()
+
+    def deactivate_symbol(self, trade_date: date, underlying: str) -> None:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            db.execute(
+                text(
+                    """
+                    UPDATE premium_futures_divergence_pick
+                    SET active = FALSE, enter_enabled = FALSE, ticker_eligible = FALSE,
+                        updated_at = :ts
+                    WHERE trade_date = CAST(:d AS DATE) AND underlying = :u
+                    """
+                ),
+                {"d": trade_date.isoformat(), "u": underlying, "ts": _naive(datetime.now(IST))},
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def open_could(self, trade_date: date, underlying: str, side: str) -> Optional[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT id, trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                           direction_type, entry_ltp, entry_at, exit_ltp, exit_at, first_scan_at,
+                           ltp_missing_entry, ltp_missing_exit
+                    FROM premium_futures_divergence_could
+                    WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :s
+                      AND exit_at IS NULL
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"d": trade_date.isoformat(), "u": underlying, "s": side},
+            ).mappings().first()
+            return dict(row) if row else None
+        finally:
+            db.close()
+
+    def add_could(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        self.ensure()
+        existing = self.open_could(row["trade_date"], row["underlying"], row["side"])
+        if existing:
+            return existing
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            rid = db.execute(
+                text(
+                    """
+                    INSERT INTO premium_futures_divergence_could (
+                        trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                        direction_type, entry_ltp, entry_at, first_scan_at, ltp_missing_entry
+                    ) VALUES (
+                        CAST(:d AS DATE), :u, :side, :fs, :ik, :contracts,
+                        :dt, :entry_ltp, :entry_at, :first_scan_at, :missing
+                    )
+                    RETURNING id
+                    """
+                ),
+                {
+                    "d": row["trade_date"].isoformat(),
+                    "u": row["underlying"],
+                    "side": row["side"],
+                    "fs": row.get("fut_symbol"),
+                    "ik": row.get("instrument_key"),
+                    "contracts": row.get("contracts"),
+                    "dt": row.get("direction_type"),
+                    "entry_ltp": row.get("entry_ltp"),
+                    "entry_at": row.get("entry_at"),
+                    "first_scan_at": row.get("first_scan_at"),
+                    "missing": bool(row.get("ltp_missing_entry")),
+                },
+            ).scalar()
+            db.commit()
+            stored = dict(row)
+            stored["id"] = int(rid) if rid is not None else None
+            return stored
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def stamp_exit(
+        self,
+        could_id: int,
+        exit_ltp: Optional[float],
+        exit_at: datetime,
+        *,
+        ltp_missing: bool,
+    ) -> Optional[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    UPDATE premium_futures_divergence_could
+                    SET exit_ltp = :px, exit_at = :ts, ltp_missing_exit = :missing
+                    WHERE id = :id AND exit_at IS NULL
+                    RETURNING id, trade_date, underlying, side, entry_ltp, entry_at, exit_ltp, exit_at,
+                              first_scan_at, ltp_missing_entry, ltp_missing_exit, direction_type,
+                              fut_symbol, instrument_key, contracts
+                    """
+                ),
+                {
+                    "px": exit_ltp,
+                    "ts": _naive(exit_at),
+                    "missing": bool(ltp_missing),
+                    "id": int(could_id),
+                },
+            ).mappings().first()
+            db.commit()
+            return dict(row) if row else None
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def could_rows(self, trade_date: date) -> List[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                           direction_type, entry_ltp, entry_at, exit_ltp, exit_at, first_scan_at,
+                           ltp_missing_entry, ltp_missing_exit
+                    FROM premium_futures_divergence_could
+                    WHERE trade_date = CAST(:d AS DATE)
+                    ORDER BY id ASC
+                    """
+                ),
+                {"d": trade_date.isoformat()},
+            ).mappings().all()
+            return [dict(r) for r in rows]
+        finally:
+            db.close()
+
+
+def _sync_screening(db: Any, pick: Dict[str, Any]) -> Optional[int]:
+    """Own a daily_futures_screening row so Enter can confirm. Never rewrite another source."""
+    underlying = str(pick.get("underlying") or "").strip().upper()
+    ik = str(pick.get("instrument_key") or "").strip()
+    if not underlying or not ik:
+        return pick.get("screening_id")
+    direction = _direction(str(pick.get("side") or "bullish"))
+    when = _aware(pick.get("div_at") or pick.get("updated_at") or datetime.now(IST))
+    breakdown = json.dumps(
+        {
+            "source": SOURCE,
+            "action": pick.get("action"),
+            "contracts": pick.get("contracts"),
+        }
+    )
+    existing = db.execute(
+        text(
+            """
+            SELECT id, direction_type, conviction_breakdown_json
+            FROM daily_futures_screening
+            WHERE trade_date = CAST(:d AS DATE) AND UPPER(TRIM(underlying)) = :u
+            LIMIT 1
+            """
+        ),
+        {"d": pick["trade_date"].isoformat(), "u": underlying},
+    ).mappings().first()
+    if existing:
+        src = _breakdown_source(existing.get("conviction_breakdown_json"))
+        if src != SOURCE:
+            logger.info(
+                "premium_futures divergence screening left untouched und=%s existing_source=%s",
+                underlying,
+                src or "other",
+            )
+            return None
+        db.execute(
+            text(
+                """
+                UPDATE daily_futures_screening SET
+                  direction_type = :dt,
+                  future_symbol = :fs,
+                  instrument_key = :ik,
+                  first_hit_at = COALESCE(first_hit_at, :fh),
+                  last_hit_at = :lh,
+                  conviction_breakdown_json = CAST(:cbj AS JSONB),
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                """
+            ),
+            {
+                "dt": direction,
+                "fs": pick.get("fut_symbol") or underlying,
+                "ik": ik,
+                "fh": when,
+                "lh": when,
+                "cbj": breakdown,
+                "id": int(existing["id"]),
+            },
+        )
+        return int(existing["id"])
+    created = db.execute(
+        text(
+            """
+            INSERT INTO daily_futures_screening (
+              trade_date, underlying, direction_type, future_symbol, instrument_key,
+              scan_count, first_hit_at, last_hit_at, conviction_score, conviction_breakdown_json
+            ) VALUES (
+              CAST(:d AS DATE), :u, :dt, :fs, :ik,
+              1, :fh, :lh, 0, CAST(:cbj AS JSONB)
+            )
+            RETURNING id
+            """
+        ),
+        {
+            "d": pick["trade_date"].isoformat(),
+            "u": underlying,
+            "dt": direction,
+            "fs": pick.get("fut_symbol") or underlying,
+            "ik": ik,
+            "fh": when,
+            "lh": when,
+            "cbj": breakdown,
+        },
+    ).scalar()
+    return int(created) if created is not None else None
+
+
+def _breakdown_source(raw: Any) -> str:
+    if isinstance(raw, dict):
+        return str(raw.get("source") or "")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return SOURCE if SOURCE in raw else ""
+        if isinstance(parsed, dict):
+            return str(parsed.get("source") or "")
+    return ""
+
+
+def _base_result(alert: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "format": HANDLER_DIVERGENCE,
+        "action": alert.get("action"),
+        "contracts": alert.get("contracts"),
+        "symbol": alert.get("symbol"),
+        "applied": False,
+        "ignored": False,
+        "dropped": False,
+        "reason": None,
+        "enter_enabled": False,
+        "ticker_eligible": False,
+        "entry_ltp": None,
+        "exit_ltp": None,
+        "ltp_missing": False,
+    }
+
+
+def apply_divergence_event(
+    alert: Dict[str, Any],
+    *,
+    store: Any,
+    resolver: Resolver,
+    ltp_fn: LtpFn,
+    now: datetime,
+) -> Dict[str, Any]:
+    """Apply one parsed divergence alert. Unknown master symbols are dropped."""
+    result = _base_result(alert)
+    symbol = str(alert.get("symbol") or "").strip().upper()
+    action = str(alert.get("action") or "").strip().upper()
+    side = _side_of(action)
+    kind = _kind_of(action)
+    result["side"] = side
+    fut = resolver(symbol) if symbol else None
+    ikey = str((fut or {}).get("fut_instrument_key") or "").strip()
+    if not fut or not ikey:
+        result["dropped"] = True
+        result["reason"] = "no arbitrage_master row or empty currmth FUT"
+        logger.info("premium_futures divergence dropped symbol=%s action=%s", symbol, action)
+        return result
+
+    underlying = str(fut.get("underlying") or symbol).strip().upper()
+    fut_symbol = str(fut.get("fut_symbol") or underlying).strip()
+    result["underlying"] = underlying
+    result["resolved_fut"] = fut_symbol
+    trade_date = _session_date(now)
+    stamp = _naive(now)
+
+    if kind == "DIV":
+        existing = store.get_pick(trade_date, underlying, side)
+        keep_go = bool(existing and existing.get("active") and existing.get("enter_enabled"))
+        saved = store.save_pick(
+            {
+                "trade_date": trade_date,
+                "underlying": underlying,
+                "side": side,
+                "fut_symbol": fut_symbol,
+                "instrument_key": ikey,
+                "contracts": alert.get("contracts") if alert.get("contracts") is not None else (existing or {}).get("contracts"),
+                "active": True,
+                "enter_enabled": keep_go,
+                "ticker_eligible": keep_go,
+                "screening_id": (existing or {}).get("screening_id"),
+                "action": action,
+                "div_at": (existing or {}).get("div_at") or stamp,
+                "updated_at": stamp,
+            }
+        )
+        result["applied"] = True
+        result["enter_enabled"] = bool(saved.get("enter_enabled"))
+        result["ticker_eligible"] = bool(saved.get("ticker_eligible"))
+        logger.info(
+            "premium_futures divergence DIV und=%s side=%s fut=%s enter=%s",
+            underlying,
+            side,
+            fut_symbol,
+            result["enter_enabled"],
+        )
+        return result
+
+    if kind == "GO":
+        existing = store.get_pick(trade_date, underlying, side)
+        if not existing or not existing.get("active"):
+            result["ignored"] = True
+            result["reason"] = "symbol not in matching Today's pick"
+            logger.info(
+                "premium_futures divergence GO ignored und=%s side=%s",
+                underlying,
+                side,
+            )
+            return result
+        saved = store.save_pick(
+            {
+                **existing,
+                "trade_date": trade_date,
+                "underlying": underlying,
+                "side": side,
+                "fut_symbol": fut_symbol,
+                "instrument_key": ikey,
+                "contracts": alert.get("contracts") if alert.get("contracts") is not None else existing.get("contracts"),
+                "active": True,
+                "enter_enabled": True,
+                "ticker_eligible": True,
+                "action": action,
+                "updated_at": stamp,
+            }
+        )
+        price, missing = _safe_ltp(ltp_fn, ikey)
+        store.add_could(
+            {
+                "trade_date": trade_date,
+                "underlying": underlying,
+                "side": side,
+                "fut_symbol": fut_symbol,
+                "instrument_key": ikey,
+                "contracts": saved.get("contracts"),
+                "direction_type": _direction(side),
+                "entry_ltp": price,
+                "entry_at": stamp,
+                "exit_ltp": None,
+                "exit_at": None,
+                "first_scan_at": saved.get("div_at") or stamp,
+                "ltp_missing_entry": missing,
+                "ltp_missing_exit": False,
+            }
+        )
+        result["applied"] = True
+        result["enter_enabled"] = True
+        result["ticker_eligible"] = True
+        result["entry_ltp"] = price
+        result["ltp_missing"] = missing
+        if missing:
+            result["reason"] = "LTP missing; could-have entry stored with null price"
+        logger.info(
+            "premium_futures divergence GO und=%s side=%s entry_ltp=%s missing=%s",
+            underlying,
+            side,
+            price,
+            missing,
+        )
+        return result
+
+    # EXIT: remove from both Today's pick sections. Stamp the matching could-have row when one exists.
+    open_row = store.open_could(trade_date, underlying, side)
+    if open_row:
+        price, missing = _safe_ltp(ltp_fn, ikey)
+        store.stamp_exit(int(open_row["id"]), price, now, ltp_missing=missing)
+        result["exit_ltp"] = price
+        result["ltp_missing"] = missing
+        if missing:
+            result["reason"] = "LTP missing; exit stored with null price"
+    store.deactivate_symbol(trade_date, underlying)
+    result["applied"] = True
+    result["enter_enabled"] = False
+    result["ticker_eligible"] = False
+    logger.info(
+        "premium_futures divergence EXIT und=%s side=%s exit_ltp=%s",
+        underlying,
+        side,
+        result.get("exit_ltp"),
+    )
+    return result
+
+
+def divergence_workspace_picks(
+    store: Any, trade_date: date
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    bull: List[Dict[str, Any]] = []
+    bear: List[Dict[str, Any]] = []
+    for pick in store.active_picks(trade_date):
+        side = str(pick.get("side") or "bullish")
+        enter = bool(pick.get("enter_enabled"))
+        row = {
+            "screening_id": pick.get("screening_id"),
+            "underlying": pick.get("underlying"),
+            "direction_type": _direction(side),
+            "future_symbol": pick.get("fut_symbol") or pick.get("underlying"),
+            "instrument_key": pick.get("instrument_key"),
+            "lot_size": None,
+            "scan_count": 1,
+            "first_hit_at": _iso(pick.get("div_at") or pick.get("updated_at")),
+            "last_hit_at": _iso(pick.get("updated_at")),
+            "order_eligible": enter,
+            "order_block_reason": None if enter else "Waiting for GO alert",
+            "source": SOURCE,
+            "divergence_action": pick.get("action"),
+            "contracts": pick.get("contracts"),
+            "conviction_score": None,
+            "ltp": None,
+        }
+        if side == "bearish":
+            bear.append(row)
+        else:
+            bull.append(row)
+    return bull, bear
+
+
+def divergence_ticker_signals(store: Any, trade_date: date) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for pick in store.active_picks(trade_date):
+        if not pick.get("ticker_eligible"):
+            continue
+        side = str(pick.get("side") or "bullish")
+        out.append(
+            {
+                "algo": "premium_futures",
+                "symbol": pick.get("fut_symbol") or pick.get("underlying"),
+                "label": "Bearish" if side == "bearish" else "Bullish",
+            }
+        )
+    return out
+
+
+def divergence_could_have_rows(store: Any, trade_date: date) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for c in store.could_rows(trade_date):
+        exit_ltp = c.get("exit_ltp")
+        rows.append(
+            {
+                "underlying": c.get("underlying"),
+                "future_symbol": c.get("fut_symbol"),
+                "direction_type": c.get("direction_type") or _direction(str(c.get("side") or "bullish")),
+                "instrument_key": c.get("instrument_key"),
+                "qty": c.get("contracts"),
+                "first_scan_time": _hm(c.get("first_scan_at")),
+                "second_scan_hm": None,
+                "entry_time": _hm(c.get("entry_at")),
+                "entry_ltp": c.get("entry_ltp"),
+                "entry_price": c.get("entry_ltp"),
+                "exit_time": _hm(c.get("exit_at")),
+                "exit_ltp": exit_ltp,
+                "exit_price": exit_ltp,
+                "exit_scan_time": _hm(c.get("exit_at")),
+                "exit_scan_ltp": exit_ltp,
+                "current_ltp": exit_ltp,
+                "source": SOURCE,
+                "ltp_missing_entry": bool(c.get("ltp_missing_entry")),
+                "ltp_missing_exit": bool(c.get("ltp_missing_exit")),
+            }
+        )
+    return rows
+
+
+def load_divergence_sections(
+    trade_date: date,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    try:
+        store = DbDivergenceStore()
+        bull, bear = divergence_workspace_picks(store, trade_date)
+        return bull, bear, divergence_could_have_rows(store, trade_date)
+    except Exception:
+        logger.warning("premium_futures divergence workspace read failed", exc_info=True)
+        return [], [], []
+
+
+def load_divergence_ticker_signals() -> List[Dict[str, Any]]:
+    try:
+        store = DbDivergenceStore()
+        return divergence_ticker_signals(store, datetime.now(IST).date())
+    except Exception:
+        logger.warning("premium_futures divergence ticker read failed", exc_info=True)
+        return []
+
+
+def divergence_enter_allowed(underlying: str, direction_type: str, screening_source: str) -> bool:
+    """Enter confirm bypass only for a divergence-owned screening whose GO is on."""
+    if str(screening_source or "") != SOURCE:
+        return False
+    side = "bearish" if str(direction_type or "").strip().upper() == "SHORT" else "bullish"
+    und = str(underlying or "").strip().upper()
+    if not und:
+        return False
+    try:
+        pick = DbDivergenceStore().get_pick(datetime.now(IST).date(), und, side)
+    except Exception:
+        logger.warning("premium_futures divergence enter check failed", exc_info=True)
+        return False
+    return bool(pick and pick.get("active") and pick.get("enter_enabled"))
+
+
+def ingest_divergence_webhook(parsed: Any, raw_body: str, received_at: datetime) -> Optional[Dict[str, Any]]:
+    """Run the new flow when the body matches. None means the JSON handler should run."""
+    if select_premium_futures_handler(parsed, raw_body) != HANDLER_DIVERGENCE:
+        return None
+    alert = parse_divergence_alert(parsed, raw_body)
+    if alert is None:
+        return None
+    from backend.services.premium_futures_tv_webhook import resolve_currmth_future
+
+    return apply_divergence_event(
+        alert,
+        store=DbDivergenceStore(),
+        resolver=resolve_currmth_future,
+        ltp_fn=premium_futures_ltp,
+        now=received_at,
+    )
