@@ -2,6 +2,8 @@
 import json
 from datetime import datetime
 
+import pytz
+
 from backend.services.premium_futures_divergence import (
     HANDLER_DIVERGENCE,
     HANDLER_JSON,
@@ -12,6 +14,7 @@ from backend.services.premium_futures_divergence import (
     divergence_workspace_picks,
     ingest_divergence_webhook,
     parse_divergence_alert,
+    parse_event_time,
     select_premium_futures_handler,
 )
 from backend.services.premium_futures_tv_webhook import (
@@ -19,6 +22,10 @@ from backend.services.premium_futures_tv_webhook import (
     decode_raw_payload,
     parse_tv_alert,
 )
+
+IST = pytz.timezone("Asia/Kolkata")
+ALERT_MS = 1790654400000  # 2026-09-29 09:30:00 IST
+EXIT_MS = 1790655300000  # 2026-09-29 09:45:00 IST
 
 FUT = {
     "underlying": "RELIANCE",
@@ -344,3 +351,134 @@ def test_existing_json_is_not_consumed_by_divergence_parser():
     assert select_premium_futures_handler(dotted, json.dumps(dotted)) == HANDLER_DIVERGENCE
     top_level = {"ticker": "RELIANCE", "action": "BULL-DIV"}
     assert select_premium_futures_handler(top_level, json.dumps(top_level)) == HANDLER_JSON
+    other_flag = {"flag": "LONG", "symbol": "RELIANCE", "time": ALERT_MS, "action": "buy", "side": "long"}
+    assert parse_divergence_alert(other_flag, json.dumps(other_flag)) is None
+    assert select_premium_futures_handler(other_flag, json.dumps(other_flag)) == HANDLER_JSON
+
+
+def _ist_stamp(dt):
+    if dt.tzinfo is None:
+        dt = IST.localize(dt)
+    else:
+        dt = dt.astimezone(IST)
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _apply_alert(store, alert, now, ltp=_NO_QUOTE):
+    def _ltp(_ik):
+        if ltp is _NO_QUOTE:
+            raise AssertionError("LTP should not be read")
+        return ltp(_ik) if callable(ltp) else ltp
+
+    return apply_divergence_event(
+        alert,
+        store=store,
+        resolver=_resolve,
+        ltp_fn=_ltp,
+        now=now,
+    )
+
+
+def test_flag_json_parses_div_go_exit_and_alert_time():
+    expected = _ist_stamp(datetime(2026, 9, 29, 9, 30))
+    for flag in ("BULL-DIV", "BEAR-DIV", "BULL-GO", "BEAR-GO", "BULL-EXIT", "BEAR-EXIT"):
+        body = {"flag": flag, "symbol": "RELIANCE1!", "time": ALERT_MS}
+        raw = json.dumps(body)
+        assert select_premium_futures_handler(body, raw) == HANDLER_DIVERGENCE
+        hit = parse_divergence_alert(body, raw)
+        assert hit["action"] == flag
+        assert hit["symbol"] == "RELIANCE"
+        assert hit["ticker_raw"] == "RELIANCE1!"
+        assert _ist_stamp(hit["event_at"]) == expected
+    plain = {"flag": "BULL-DIV", "symbol": "RELIANCE", "time": ALERT_MS}
+    assert parse_divergence_alert(plain, json.dumps(plain))["symbol"] == "RELIANCE"
+    assert _ist_stamp(parse_event_time(str(ALERT_MS))) == expected
+    assert _ist_stamp(parse_event_time(ALERT_MS // 1000)) == expected
+    assert _ist_stamp(parse_event_time("2026-09-29T09:30:00+05:30")) == expected
+    assert _ist_stamp(parse_event_time("2026-09-29T04:00:00Z")) == expected
+    assert parse_event_time("not-a-time") is None
+    assert parse_event_time(None) is None
+
+
+def test_flag_json_go_and_exit_stamp_alert_time_and_current_ltp():
+    store = MemoryDivergenceStore()
+    received = datetime(2026, 9, 29, 9, 45, 38)
+    go = parse_divergence_alert(
+        {"flag": "BULL-GO", "symbol": "RELIANCE", "time": ALERT_MS},
+        "",
+    )
+    result = _apply_alert(store, go, received, ltp=2500.5)
+    assert result["applied"] is True
+    assert result["dropped"] is False
+    assert result["enter_enabled"] is True
+    assert result["ticker_eligible"] is True
+    assert result["entry_ltp"] == 2500.5
+    bull, bear = divergence_workspace_picks(store, datetime(2026, 9, 29).date())
+    assert len(bull) == 1 and bear == []
+    assert bull[0]["order_eligible"] is True
+    assert divergence_ticker_signals(store, datetime(2026, 9, 29).date()) == [
+        {
+            "algo": "premium_futures",
+            "symbol": "RELIANCE25SEPFUT",
+            "label": "Bullish",
+        }
+    ]
+    could = divergence_could_have_rows(store, datetime(2026, 9, 29).date())
+    assert could[0]["entry_ltp"] == 2500.5
+    assert could[0]["entry_time"] == "09:30"
+    assert could[0]["exit_ltp"] is None
+
+    exit_body = {"flag": "BULL-EXIT", "symbol": "RELIANCE", "time": EXIT_MS}
+    exit_alert = parse_divergence_alert(exit_body, json.dumps(exit_body))
+    exit_result = _apply_alert(store, exit_alert, received, ltp=2510.25)
+    assert exit_result["applied"] is True
+    assert exit_result["exit_ltp"] == 2510.25
+    assert exit_result["enter_enabled"] is False
+    bull2, bear2 = divergence_workspace_picks(store, datetime(2026, 9, 29).date())
+    assert bull2 == [] and bear2 == []
+    assert divergence_ticker_signals(store, datetime(2026, 9, 29).date()) == []
+    closed = divergence_could_have_rows(store, datetime(2026, 9, 29).date())
+    assert closed[0]["exit_ltp"] == 2510.25
+    assert closed[0]["exit_time"] == "09:45"
+
+
+def test_flag_json_div_keeps_enter_off_and_bad_time_uses_receive_time():
+    store = MemoryDivergenceStore()
+    received = datetime(2026, 9, 29, 9, 45, 38)
+    div = parse_divergence_alert(
+        {"flag": "bear-div", "symbol": "RELIANCE", "time": "nope"},
+        "",
+    )
+    result = _apply_alert(store, div, received)
+    assert result["applied"] is True
+    assert result["enter_enabled"] is False
+    assert result["ticker_eligible"] is False
+    bull, bear = divergence_workspace_picks(store, received.date())
+    assert bull == [] and len(bear) == 1
+    assert bear[0]["order_eligible"] is False
+    assert divergence_ticker_signals(store, received.date()) == []
+    go = parse_divergence_alert({"flag": "BEAR-GO", "symbol": "RELIANCE", "time": ""}, "")
+    _apply_alert(store, go, received, ltp=2400.0)
+    could = divergence_could_have_rows(store, received.date())
+    assert could[0]["entry_time"] == "09:45"
+    assert could[0]["entry_ltp"] == 2400.0
+    assert could[0]["direction_type"] == "SHORT"
+
+
+def test_flag_json_unknown_symbol_is_dropped():
+    store = MemoryDivergenceStore()
+    alert = parse_divergence_alert(
+        {"flag": "BULL-GO", "symbol": "NOTAREAL1!", "time": ALERT_MS},
+        "",
+    )
+    result = apply_divergence_event(
+        alert,
+        store=store,
+        resolver=lambda _s: None,
+        ltp_fn=lambda _ik: (_ for _ in ()).throw(AssertionError("no quote")),
+        now=datetime(2026, 9, 29, 9, 45, 38),
+    )
+    assert result["dropped"] is True
+    assert result["applied"] is False
+    bull, bear = divergence_workspace_picks(store, datetime(2026, 9, 29).date())
+    assert bull == [] and bear == []

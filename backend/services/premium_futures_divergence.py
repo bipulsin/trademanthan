@@ -1,16 +1,17 @@
 """Second Premium Futures TradingView format: commodity divergence alerts.
 
 The existing JSON webhook (ticker / action / side / message) is untouched.
-This module claims a payload only when it matches the divergence sentence or
-the equivalent strategy.order fields. Anything else returns no parse so the
-caller keeps the JSON handler.
+This module claims a payload only when it matches the divergence sentence,
+the equivalent strategy.order fields, or a JSON body whose ``flag`` is one of
+BULL-DIV, BEAR-DIV, BULL-GO, BEAR-GO, BULL-EXIT, BEAR-EXIT. Anything else
+returns no parse so the caller keeps the JSON handler.
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -99,8 +100,92 @@ def _parse_sentence(blob: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def _first_symbol(d: Dict[str, Any]) -> Optional[str]:
+    for key in ("symbol", "ticker", "tickerid", "sym"):
+        val = d.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return None
+
+
+def parse_event_time(value: Any) -> Optional[datetime]:
+    """Epoch milliseconds, epoch seconds, or an ISO string, as aware IST. Invalid → None."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, datetime):
+        return _aware(value)
+    if isinstance(value, (int, float)):
+        return _epoch_to_ist(float(value))
+    if isinstance(value, str):
+        s = value.strip()
+        if not s or "{{" in s:
+            return None
+        if re.fullmatch(r"-?\d+(?:\.\d+)?", s):
+            try:
+                return _epoch_to_ist(float(s))
+            except (TypeError, ValueError, OverflowError):
+                return None
+        return _iso_to_ist(s)
+    return None
+
+
+def _epoch_to_ist(n: float) -> Optional[datetime]:
+    if n != n or n in (float("inf"), float("-inf")):
+        return None
+    # 13-digit TradingView times are unix milliseconds; 10-digit values are seconds.
+    seconds = n / 1000.0 if abs(n) >= 100_000_000_000 else n
+    if seconds < 946684800 or seconds > 4102444800:
+        return None
+    try:
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).astimezone(IST)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _iso_to_ist(s: str) -> Optional[datetime]:
+    text = s.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return IST.localize(dt)
+    return dt.astimezone(IST)
+
+
+def _with_event_time(alert: Dict[str, Any], d: Dict[str, Any]) -> Dict[str, Any]:
+    if "time" not in d:
+        return alert
+    event_at = parse_event_time(d.get("time"))
+    if event_at is not None:
+        alert["event_at"] = event_at
+    return alert
+
+
 def _parse_structured(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """strategy.order.action (nested or dotted) plus a ticker. Top-level ``action`` stays JSON."""
+    """Flag JSON, or strategy.order.action (nested or dotted) plus a symbol.
+
+    Top-level ``action`` stays on the JSON handler. A ``flag`` that is not one
+    of the divergence actions is ignored so older JSON keeps its handler.
+    """
+    flag_u = str(d.get("flag") or "").strip().upper()
+    if flag_u in DIVERGENCE_ACTIONS:
+        ticker_raw = _first_symbol(d)
+        if not ticker_raw:
+            return None
+        symbol = normalize_tv_ticker(ticker_raw)
+        if not symbol:
+            return None
+        return _with_event_time(
+            {
+                "action": flag_u,
+                "contracts": _as_contracts(d.get("contracts")),
+                "ticker_raw": ticker_raw,
+                "symbol": symbol,
+            },
+            d,
+        )
+
     action = None
     contracts = None
     nested = d.get("strategy")
@@ -115,23 +200,21 @@ def _parse_structured(d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     action_u = str(action or "").strip().upper()
     if action_u not in DIVERGENCE_ACTIONS:
         return None
-    ticker_raw = None
-    for key in ("ticker", "symbol", "tickerid", "sym"):
-        val = d.get(key)
-        if val is not None and str(val).strip():
-            ticker_raw = str(val).strip()
-            break
+    ticker_raw = _first_symbol(d)
     if not ticker_raw:
         return None
     symbol = normalize_tv_ticker(ticker_raw)
     if not symbol:
         return None
-    return {
-        "action": action_u,
-        "contracts": _as_contracts(contracts),
-        "ticker_raw": ticker_raw,
-        "symbol": symbol,
-    }
+    return _with_event_time(
+        {
+            "action": action_u,
+            "contracts": _as_contracts(contracts),
+            "ticker_raw": ticker_raw,
+            "symbol": symbol,
+        },
+        d,
+    )
 
 
 def _as_contracts(v: Any) -> Optional[int]:
@@ -712,6 +795,16 @@ def _base_result(alert: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _event_clock(alert: Dict[str, Any], now: datetime) -> datetime:
+    """Alert ``time`` when it parsed; otherwise the webhook receive time."""
+    event_at = alert.get("event_at")
+    if isinstance(event_at, datetime):
+        aware = _aware(event_at)
+        if aware is not None:
+            return aware
+    return now
+
+
 def apply_divergence_event(
     alert: Dict[str, Any],
     *,
@@ -739,8 +832,9 @@ def apply_divergence_event(
     fut_symbol = str(fut.get("fut_symbol") or underlying).strip()
     result["underlying"] = underlying
     result["resolved_fut"] = fut_symbol
-    trade_date = _session_date(now)
-    stamp = _naive(now)
+    clock = _event_clock(alert, now)
+    trade_date = _session_date(clock)
+    stamp = _naive(clock)
 
     if kind == "DIV":
         existing = store.get_pick(trade_date, underlying, side)
@@ -838,7 +932,7 @@ def apply_divergence_event(
     open_row = store.open_could(trade_date, underlying, side)
     if open_row:
         price, missing = _safe_ltp(ltp_fn, ikey)
-        store.stamp_exit(int(open_row["id"]), price, now, ltp_missing=missing)
+        store.stamp_exit(int(open_row["id"]), price, clock, ltp_missing=missing)
         result["exit_ltp"] = price
         result["ltp_missing"] = missing
         if missing:
