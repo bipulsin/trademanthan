@@ -104,8 +104,16 @@ def test_unknown_ticker_is_dropped():
     )
     assert result["dropped"] is True
     assert result["applied"] is False
+    go = _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on NOTAREAL.",
+        GO_AT,
+    )
+    assert go["dropped"] is True
+    assert go["applied"] is False
     bull, bear = divergence_workspace_picks(store, DIV_AT.date())
     assert bull == [] and bear == []
+    assert divergence_could_have_rows(store, GO_AT.date()) == []
 
 
 def test_bull_div_creates_pick_with_enter_disabled_and_not_in_ticker():
@@ -122,19 +130,89 @@ def test_bull_div_creates_pick_with_enter_disabled_and_not_in_ticker():
     assert divergence_ticker_signals(store, DIV_AT.date()) == []
 
 
-def test_bull_go_without_prior_pick_does_nothing():
+def test_bull_go_without_prior_pick_creates_pick_enter_ticker_and_could_have():
     store = MemoryDivergenceStore()
     result = _apply(
         store,
         "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
         GO_AT,
+        ltp=2500.5,
     )
-    assert result["applied"] is False
-    assert result["ignored"] is True
+    assert result["applied"] is True
+    assert result["ignored"] is False
+    assert result["dropped"] is False
+    assert result["enter_enabled"] is True
+    assert result["ticker_eligible"] is True
+    assert result["entry_ltp"] == 2500.5
+    assert result["ltp_missing"] is False
     bull, bear = divergence_workspace_picks(store, GO_AT.date())
-    assert bull == [] and bear == []
-    assert divergence_could_have_rows(store, GO_AT.date()) == []
-    assert divergence_ticker_signals(store, GO_AT.date()) == []
+    assert len(bull) == 1 and bear == []
+    assert bull[0]["underlying"] == "RELIANCE"
+    assert bull[0]["direction_type"] == "LONG"
+    assert bull[0]["future_symbol"] == "RELIANCE25SEPFUT"
+    assert bull[0]["instrument_key"] == "NSE_FO|reliance"
+    assert bull[0]["order_eligible"] is True
+    signals = divergence_ticker_signals(store, GO_AT.date())
+    assert signals == [
+        {
+            "algo": "premium_futures",
+            "symbol": "RELIANCE25SEPFUT",
+            "label": "Bullish",
+        }
+    ]
+    could = divergence_could_have_rows(store, GO_AT.date())
+    assert len(could) == 1
+    assert could[0]["entry_ltp"] == 2500.5
+    assert could[0]["entry_price"] == 2500.5
+    assert could[0]["entry_time"] == "10:22"
+    assert could[0]["direction_type"] == "LONG"
+    assert could[0]["exit_ltp"] is None
+
+    later = datetime(2026, 9, 28, 10, 30, 0)
+    second = _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 2 filled on RELIANCE.",
+        later,
+        ltp=2511.0,
+    )
+    assert second["applied"] is True
+    bull2, bear2 = divergence_workspace_picks(store, GO_AT.date())
+    assert len(bull2) == 1 and bear2 == []
+    assert bull2[0]["future_symbol"] == "RELIANCE25SEPFUT"
+    assert bull2[0]["order_eligible"] is True
+    could2 = divergence_could_have_rows(store, GO_AT.date())
+    assert len(could2) == 1
+    assert could2[0]["entry_ltp"] == 2500.5
+
+
+def test_bear_go_without_prior_pick_creates_bearish_pick():
+    store = MemoryDivergenceStore()
+    result = _apply(
+        store,
+        "TWCTO Commodity Divergence : order BEAR-GO @ 3 filled on RELIANCE.",
+        GO_AT,
+        ltp=2490.0,
+    )
+    assert result["applied"] is True
+    assert result["enter_enabled"] is True
+    assert result["ticker_eligible"] is True
+    assert result["entry_ltp"] == 2490.0
+    bull, bear = divergence_workspace_picks(store, GO_AT.date())
+    assert bull == [] and len(bear) == 1
+    assert bear[0]["direction_type"] == "SHORT"
+    assert bear[0]["order_eligible"] is True
+    assert divergence_ticker_signals(store, GO_AT.date()) == [
+        {
+            "algo": "premium_futures",
+            "symbol": "RELIANCE25SEPFUT",
+            "label": "Bearish",
+        }
+    ]
+    could = divergence_could_have_rows(store, GO_AT.date())
+    assert len(could) == 1
+    assert could[0]["direction_type"] == "SHORT"
+    assert could[0]["entry_ltp"] == 2490.0
+    assert could[0]["qty"] == 3
 
 
 def test_bull_go_after_div_enables_enter_ticker_and_could_have_entry():

@@ -775,29 +775,27 @@ def apply_divergence_event(
         return result
 
     if kind == "GO":
+        # Matching Today's pick (same currmonth contract, same side) is updated in place.
+        # A GO with no active pick creates that pick from arbitrage_master, then follows through.
         existing = store.get_pick(trade_date, underlying, side)
-        if not existing or not existing.get("active"):
-            result["ignored"] = True
-            result["reason"] = "symbol not in matching Today's pick"
-            logger.info(
-                "premium_futures divergence GO ignored und=%s side=%s",
-                underlying,
-                side,
-            )
-            return result
+        in_pick = bool(existing and existing.get("active"))
         saved = store.save_pick(
             {
-                **existing,
+                **(existing if in_pick else {}),
                 "trade_date": trade_date,
                 "underlying": underlying,
                 "side": side,
                 "fut_symbol": fut_symbol,
                 "instrument_key": ikey,
-                "contracts": alert.get("contracts") if alert.get("contracts") is not None else existing.get("contracts"),
+                "contracts": alert.get("contracts")
+                if alert.get("contracts") is not None
+                else (existing.get("contracts") if in_pick and existing else None),
                 "active": True,
                 "enter_enabled": True,
                 "ticker_eligible": True,
+                "screening_id": existing.get("screening_id") if in_pick and existing else None,
                 "action": action,
+                "div_at": (existing.get("div_at") if in_pick and existing else None) or stamp,
                 "updated_at": stamp,
             }
         )
