@@ -9,12 +9,17 @@ from backend.services.premium_futures_divergence import (
     HANDLER_JSON,
     MemoryDivergenceStore,
     apply_divergence_event,
+    apply_mark_refresh,
+    apply_session_flat,
+    could_have_pnl_rupees,
     divergence_could_have_rows,
     divergence_ticker_signals,
     divergence_workspace_picks,
+    entry_at_from_first_scan,
     ingest_divergence_webhook,
     parse_divergence_alert,
     parse_event_time,
+    resolve_entry_ltp,
     select_premium_futures_handler,
 )
 from backend.services.premium_futures_tv_webhook import (
@@ -45,7 +50,7 @@ def _resolve(symbol):
     return None
 
 
-def _apply(store, text, now, ltp=_NO_QUOTE):
+def _apply(store, text, now, ltp=_NO_QUOTE, lot=None):
     alert = parse_divergence_alert(None, text)
     assert alert is not None
 
@@ -59,6 +64,7 @@ def _apply(store, text, now, ltp=_NO_QUOTE):
         store=store,
         resolver=_resolve,
         ltp_fn=_ltp,
+        lot_fn=lambda _ik: lot,
         now=now,
     )
 
@@ -171,7 +177,8 @@ def test_bull_go_without_prior_pick_creates_pick_enter_ticker_and_could_have():
     assert len(could) == 1
     assert could[0]["entry_ltp"] == 2500.5
     assert could[0]["entry_price"] == 2500.5
-    assert could[0]["entry_time"] == "10:22"
+    assert could[0]["first_scan_time"] == "10:22"
+    assert could[0]["entry_time"] == "10:27"
     assert could[0]["direction_type"] == "LONG"
     assert could[0]["exit_ltp"] is None
 
@@ -199,6 +206,7 @@ def test_bear_go_without_prior_pick_creates_bearish_pick():
         "TWCTO Commodity Divergence : order BEAR-GO @ 3 filled on RELIANCE.",
         GO_AT,
         ltp=2490.0,
+        lot=500,
     )
     assert result["applied"] is True
     assert result["enter_enabled"] is True
@@ -219,7 +227,8 @@ def test_bear_go_without_prior_pick_creates_bearish_pick():
     assert len(could) == 1
     assert could[0]["direction_type"] == "SHORT"
     assert could[0]["entry_ltp"] == 2490.0
-    assert could[0]["qty"] == 3
+    assert could[0]["qty"] == 500
+    assert bear[0]["contracts"] == 3
 
 
 def test_bull_go_after_div_enables_enter_ticker_and_could_have_entry():
@@ -230,6 +239,7 @@ def test_bull_go_after_div_enables_enter_ticker_and_could_have_entry():
         "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
         GO_AT,
         ltp=2500.5,
+        lot=250,
     )
     assert result["applied"] is True
     assert result["enter_enabled"] is True
@@ -249,9 +259,10 @@ def test_bull_go_after_div_enables_enter_ticker_and_could_have_entry():
     could = divergence_could_have_rows(store, GO_AT.date())
     assert len(could) == 1
     assert could[0]["entry_ltp"] == 2500.5
-    assert could[0]["entry_time"] == "10:22"
+    assert could[0]["first_scan_time"] == "10:15"
+    assert could[0]["entry_time"] == "10:20"
     assert could[0]["exit_ltp"] is None
-    assert could[0]["qty"] == 1
+    assert could[0]["qty"] == 250
 
 
 def test_bull_go_records_null_entry_when_ltp_missing():
@@ -364,7 +375,7 @@ def _ist_stamp(dt):
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
-def _apply_alert(store, alert, now, ltp=_NO_QUOTE):
+def _apply_alert(store, alert, now, ltp=_NO_QUOTE, lot=None):
     def _ltp(_ik):
         if ltp is _NO_QUOTE:
             raise AssertionError("LTP should not be read")
@@ -375,6 +386,7 @@ def _apply_alert(store, alert, now, ltp=_NO_QUOTE):
         store=store,
         resolver=_resolve,
         ltp_fn=_ltp,
+        lot_fn=lambda _ik: lot,
         now=now,
     )
 
@@ -425,7 +437,7 @@ def test_flag_json_go_and_exit_stamp_alert_time_and_current_ltp():
     ]
     could = divergence_could_have_rows(store, datetime(2026, 9, 29).date())
     assert could[0]["entry_ltp"] == 2500.5
-    assert could[0]["entry_time"] == "09:30"
+    assert could[0]["entry_time"] == "09:35"
     assert could[0]["exit_ltp"] is None
 
     exit_body = {"flag": "BULL-EXIT", "symbol": "RELIANCE", "time": EXIT_MS}
@@ -460,7 +472,7 @@ def test_flag_json_div_keeps_enter_off_and_bad_time_uses_receive_time():
     go = parse_divergence_alert({"flag": "BEAR-GO", "symbol": "RELIANCE", "time": ""}, "")
     _apply_alert(store, go, received, ltp=2400.0)
     could = divergence_could_have_rows(store, received.date())
-    assert could[0]["entry_time"] == "09:45"
+    assert could[0]["entry_time"] == "09:50"
     assert could[0]["entry_ltp"] == 2400.0
     assert could[0]["direction_type"] == "SHORT"
 
@@ -482,3 +494,93 @@ def test_flag_json_unknown_symbol_is_dropped():
     assert result["applied"] is False
     bull, bear = divergence_workspace_picks(store, datetime(2026, 9, 29).date())
     assert bull == [] and bear == []
+
+
+def test_entry_is_first_scan_plus_five_and_scan_ltp_fills_entry_when_later_quote_missing():
+    assert entry_at_from_first_scan(GO_AT).astimezone(IST).strftime("%H:%M") == "10:27"
+    assert resolve_entry_ltp(None, 2500.5) == 2500.5
+    assert resolve_entry_ltp(2511.25, 2500.5) == 2511.25
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=2500.5,
+        lot=250,
+    )
+    could = divergence_could_have_rows(store, GO_AT.date())
+    assert could[0]["first_scan_time"] == "10:22"
+    assert could[0]["entry_time"] == "10:27"
+    assert could[0]["entry_ltp"] == 2500.5
+    assert could[0]["qty"] == 250
+    assert "second_scan_hm" not in could[0]
+    assert "pnl_1515_rupees" not in could[0]
+    assert "exit_1515_time" not in could[0]
+
+
+def test_pnl_sign_is_long_versus_short_times_one_lot_qty():
+    assert could_have_pnl_rupees("LONG", 100, 110, 250) == 2500
+    assert could_have_pnl_rupees("SHORT", 100, 110, 250) == -2500
+    assert could_have_pnl_rupees("LONG", 100, 90, 250) == -2500
+    assert could_have_pnl_rupees("BEARISH", 100, 90, 250) == 2500
+
+
+def test_exit_sets_exit_time_and_stops_ltp_refresh():
+    store = MemoryDivergenceStore()
+    _apply(store, SENTENCE, DIV_AT)
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=2500.5,
+        lot=250,
+    )
+    open_row = store.could[0]
+    moved = apply_mark_refresh(open_row, 2600)
+    assert moved["current_ltp"] == 2600
+    assert moved["pnl_scan_rupees"] == round((2600 - 2500.5) * 250, 2)
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+        EXIT_AT,
+        ltp=2510.25,
+    )
+    could = divergence_could_have_rows(store, EXIT_AT.date())
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["exit_time"] == "11:05"
+    assert could[0]["current_ltp"] == 2510.25
+    assert could[0]["pnl_scan_rupees"] == round((2510.25 - 2500.5) * 250, 2)
+    frozen = apply_mark_refresh(store.could[0], 9999)
+    assert frozen["current_ltp"] == 2510.25
+    assert frozen.get("pnl_scan_rupees") != round((9999 - 2500.5) * 250, 2)
+
+
+def test_past_1515_without_exit_becomes_1515_and_refresh_stops():
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BEAR-GO @ 4 filled on RELIANCE.",
+        GO_AT,
+        ltp=100.0,
+        lot=500,
+    )
+    before = divergence_could_have_rows(store, GO_AT.date(), now=datetime(2026, 9, 28, 14, 0))
+    assert before[0]["exit_scan_time"] is None
+    closed = apply_session_flat(store.could[0], datetime(2026, 9, 28, 15, 20))
+    assert closed["exit_at"].strftime("%H:%M") == "15:15"
+    assert closed["current_ltp"] == 100.0
+    assert could_have_pnl_rupees("SHORT", 100.0, 100.0, 500) == 0
+    store.could[0] = closed
+    rows = divergence_could_have_rows(
+        store,
+        GO_AT.date(),
+        now=datetime(2026, 9, 28, 15, 20),
+        persist_flat=True,
+    )
+    assert rows[0]["exit_scan_time"] == "15:15"
+    assert rows[0]["qty"] == 500
+    assert rows[0]["pnl_scan_rupees"] == 0
+    frozen = apply_mark_refresh(store.could[0], 80)
+    assert frozen["current_ltp"] == 100.0
+    # A later refresh must not book the short PnL of the new quote.
+    assert frozen.get("pnl_scan_rupees") != could_have_pnl_rupees("SHORT", 100.0, 80, 500)

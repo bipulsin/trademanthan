@@ -40,12 +40,22 @@ def run_market_data_refresh_job() -> dict:
     if skipped is not None:
         return skipped
 
-    return refresh_arbitrage_master_market_data(
+    out = refresh_arbitrage_master_market_data(
         execution="scheduled_10m",
         fetch_candles=True,
         candle_legs=("currmth",),
         ltp_legs=("currmth",),
     )
+    try:
+        from backend.services.premium_futures_divergence import refresh_could_have_on_scan
+
+        marks = refresh_could_have_on_scan()
+        if isinstance(out, dict):
+            out = dict(out)
+            out["could_have_marks"] = marks
+    except Exception as e:
+        logger.warning("could-have mark refresh skipped: %s", e)
+    return out
 
 
 def run_stock_next_ws_ltp_job() -> dict:

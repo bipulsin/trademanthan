@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -301,6 +301,171 @@ def _safe_ltp(ltp_fn: LtpFn, instrument_key: str) -> Tuple[Optional[float], bool
     return round(price, 4), False
 
 
+ENTRY_LAG = timedelta(minutes=5)
+SESSION_FLAT = (15, 15)
+
+
+def could_have_pnl_rupees(
+    direction: Any,
+    entry_ltp: Any,
+    mark_ltp: Any,
+    qty: Any,
+) -> Optional[float]:
+    """Long: (mark − entry) × 1-lot qty. Short: (entry − mark) × 1-lot qty."""
+    try:
+        entry = float(entry_ltp)
+        mark = float(mark_ltp)
+        lots = float(qty)
+    except (TypeError, ValueError):
+        return None
+    if lots == 0:
+        return None
+    side = str(direction or "").strip().upper()
+    if side in {"SHORT", "BEAR", "BEARISH"}:
+        return round((entry - mark) * lots, 2)
+    return round((mark - entry) * lots, 2)
+
+
+def resolve_entry_ltp(ltp_at_entry_time: Any, scan_ltp: Any) -> Optional[float]:
+    """Quote at 1st scan + 5 minutes, else the LTP captured at that scan / GO."""
+    for raw in (ltp_at_entry_time, scan_ltp):
+        try:
+            price = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            return round(price, 4)
+    return None
+
+
+def one_lot_qty(instrument_key: str, lot_fn: Optional[Callable[[str], Any]] = None) -> Optional[int]:
+    """Futures lot size for one current-month contract, from the instrument master."""
+    raw = None
+    if lot_fn is not None:
+        try:
+            raw = lot_fn(instrument_key)
+        except Exception:
+            logger.debug("premium_futures lot lookup failed ik=%s", instrument_key, exc_info=True)
+            raw = None
+    else:
+        raw = _instrument_lot_qty(instrument_key)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _instrument_lot_qty(instrument_key: str) -> Optional[int]:
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return None
+    try:
+        from backend.services.daily_futures_service import fut_lot_for_key
+
+        n = fut_lot_for_key(ik)
+        if n:
+            return int(n)
+    except Exception:
+        logger.debug("premium_futures fut_lot_for_key skipped ik=%s", ik, exc_info=True)
+    try:
+        from backend.services.smart_futures_picker.position_sizing import (
+            get_futures_lot_size_by_instrument_key,
+        )
+
+        n = get_futures_lot_size_by_instrument_key(ik)
+        if n:
+            return int(n)
+    except Exception:
+        logger.debug("premium_futures instrument-file lot skipped ik=%s", ik, exc_info=True)
+    return None
+
+
+def entry_at_from_first_scan(first_scan: datetime) -> datetime:
+    base = _aware(first_scan)
+    assert base is not None
+    return base + ENTRY_LAG
+
+
+def display_entry_at(first_scan: Any, stored_entry: Any) -> Optional[datetime]:
+    """Entry display is always the 1st scan + 5 minutes.
+
+    Rows saved before that rule stored the scan clock itself in ``entry_at``.
+    """
+    first = _aware(first_scan) if not isinstance(first_scan, str) else _iso_to_ist(str(first_scan))
+    stored = _aware(stored_entry) if isinstance(stored_entry, datetime) else None
+    if stored is None and isinstance(stored_entry, str) and stored_entry.strip():
+        stored = _iso_to_ist(stored_entry)
+    if first is None:
+        return stored
+    shifted = first + ENTRY_LAG
+    if stored is None:
+        return shifted
+    if abs((stored - first).total_seconds()) < 90:
+        return shifted
+    return stored
+
+
+def session_exit_deadline(trade_date: date) -> datetime:
+    return IST.localize(datetime(trade_date.year, trade_date.month, trade_date.day, 15, 15))
+
+
+def _as_trade_date(value: Any) -> Optional[date]:
+    if isinstance(value, datetime):
+        aware = _aware(value)
+        return aware.date() if aware else None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value.strip()[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def session_exit_due(trade_date: date, now: datetime) -> bool:
+    clock = _aware(now)
+    if clock is None:
+        return False
+    return clock >= session_exit_deadline(trade_date)
+
+
+def apply_session_flat(row: Dict[str, Any], now: datetime) -> Dict[str, Any]:
+    """If no EXIT has arrived by 15:15 IST, exit at 15:15 and freeze the last mark."""
+    out = dict(row)
+    if out.get("exit_at") is not None:
+        return out
+    trade_date = _as_trade_date(out.get("trade_date"))
+    if trade_date is None or not session_exit_due(trade_date, now):
+        return out
+    mark = out.get("current_ltp")
+    if mark is None:
+        mark = out.get("scan_ltp")
+    if mark is None:
+        mark = out.get("entry_ltp")
+    out["exit_at"] = _naive(session_exit_deadline(trade_date))
+    out["exit_ltp"] = mark
+    out["current_ltp"] = mark
+    out["ltp_missing_exit"] = mark is None
+    return out
+
+
+def apply_mark_refresh(row: Dict[str, Any], new_ltp: Any) -> Dict[str, Any]:
+    """Update Current LTP and PnL only while Exit time is still empty."""
+    out = dict(row)
+    if out.get("exit_at") is not None:
+        return out
+    price = resolve_entry_ltp(new_ltp, None)
+    if price is None:
+        return out
+    out["current_ltp"] = price
+    qty = out.get("lot_qty") if out.get("lot_qty") is not None else out.get("qty")
+    direction = out.get("direction_type") or out.get("side")
+    out["pnl_scan_rupees"] = could_have_pnl_rupees(direction, out.get("entry_ltp"), price, qty)
+    return out
+
+
 def premium_futures_ltp(instrument_key: str) -> Optional[float]:
     """Same quote path Today's pick uses, for one current-month future."""
     ik = str(instrument_key or "").strip()
@@ -382,6 +547,31 @@ class MemoryDivergenceStore:
             row["exit_ltp"] = exit_ltp
             row["exit_at"] = _naive(exit_at)
             row["ltp_missing_exit"] = bool(ltp_missing)
+            frozen = exit_ltp
+            if frozen is None:
+                frozen = row.get("current_ltp")
+            if frozen is None:
+                frozen = row.get("scan_ltp")
+            if frozen is None:
+                frozen = row.get("entry_ltp")
+            row["current_ltp"] = frozen
+            return dict(row)
+        return None
+
+    def set_current_ltp(self, could_id: int, price: float) -> Optional[Dict[str, Any]]:
+        for row in self.could:
+            if int(row.get("id") or 0) != int(could_id) or row.get("exit_at") is not None:
+                continue
+            row["current_ltp"] = price
+            return dict(row)
+        return None
+
+    def set_entry_ltp(self, could_id: int, price: float) -> Optional[Dict[str, Any]]:
+        for row in self.could:
+            if int(row.get("id") or 0) != int(could_id) or row.get("exit_at") is not None:
+                continue
+            row["entry_ltp"] = price
+            row["entry_ltp_from_history"] = True
             return dict(row)
         return None
 
@@ -403,6 +593,13 @@ class DbDivergenceStore:
         sql = _MIGRATION.read_text(encoding="utf-8")
         with engine.begin() as conn:
             conn.execute(text(sql))
+            for stmt in (
+                "ALTER TABLE premium_futures_divergence_could ADD COLUMN IF NOT EXISTS scan_ltp DOUBLE PRECISION",
+                "ALTER TABLE premium_futures_divergence_could ADD COLUMN IF NOT EXISTS current_ltp DOUBLE PRECISION",
+                "ALTER TABLE premium_futures_divergence_could ADD COLUMN IF NOT EXISTS lot_qty INTEGER",
+                "ALTER TABLE premium_futures_divergence_could ADD COLUMN IF NOT EXISTS entry_ltp_from_history BOOLEAN NOT NULL DEFAULT FALSE",
+            ):
+                conn.execute(text(stmt))
         _ENSURED = True
         logger.info("premium_futures divergence tables ensured")
 
@@ -554,7 +751,8 @@ class DbDivergenceStore:
                     """
                     SELECT id, trade_date, underlying, side, fut_symbol, instrument_key, contracts,
                            direction_type, entry_ltp, entry_at, exit_ltp, exit_at, first_scan_at,
-                           ltp_missing_entry, ltp_missing_exit
+                           ltp_missing_entry, ltp_missing_exit, scan_ltp, current_ltp, lot_qty,
+                           entry_ltp_from_history
                     FROM premium_futures_divergence_could
                     WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :s
                       AND exit_at IS NULL
@@ -582,10 +780,12 @@ class DbDivergenceStore:
                     """
                     INSERT INTO premium_futures_divergence_could (
                         trade_date, underlying, side, fut_symbol, instrument_key, contracts,
-                        direction_type, entry_ltp, entry_at, first_scan_at, ltp_missing_entry
+                        direction_type, entry_ltp, entry_at, first_scan_at, ltp_missing_entry,
+                        scan_ltp, current_ltp, lot_qty, entry_ltp_from_history
                     ) VALUES (
                         CAST(:d AS DATE), :u, :side, :fs, :ik, :contracts,
-                        :dt, :entry_ltp, :entry_at, :first_scan_at, :missing
+                        :dt, :entry_ltp, :entry_at, :first_scan_at, :missing,
+                        :scan_ltp, :current_ltp, :lot_qty, :from_history
                     )
                     RETURNING id
                     """
@@ -602,6 +802,10 @@ class DbDivergenceStore:
                     "entry_at": row.get("entry_at"),
                     "first_scan_at": row.get("first_scan_at"),
                     "missing": bool(row.get("ltp_missing_entry")),
+                    "scan_ltp": row.get("scan_ltp"),
+                    "current_ltp": row.get("current_ltp"),
+                    "lot_qty": row.get("lot_qty"),
+                    "from_history": bool(row.get("entry_ltp_from_history")),
                 },
             ).scalar()
             db.commit()
@@ -631,11 +835,13 @@ class DbDivergenceStore:
                 text(
                     """
                     UPDATE premium_futures_divergence_could
-                    SET exit_ltp = :px, exit_at = :ts, ltp_missing_exit = :missing
+                    SET exit_ltp = :px, exit_at = :ts, ltp_missing_exit = :missing,
+                        current_ltp = COALESCE(:px, current_ltp, scan_ltp, entry_ltp)
                     WHERE id = :id AND exit_at IS NULL
                     RETURNING id, trade_date, underlying, side, entry_ltp, entry_at, exit_ltp, exit_at,
                               first_scan_at, ltp_missing_entry, ltp_missing_exit, direction_type,
-                              fut_symbol, instrument_key, contracts
+                              fut_symbol, instrument_key, contracts, scan_ltp, current_ltp, lot_qty,
+                              entry_ltp_from_history
                     """
                 ),
                 {
@@ -653,6 +859,80 @@ class DbDivergenceStore:
         finally:
             db.close()
 
+    def set_current_ltp(self, could_id: int, price: float) -> Optional[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    UPDATE premium_futures_divergence_could
+                    SET current_ltp = :px
+                    WHERE id = :id AND exit_at IS NULL
+                    RETURNING id
+                    """
+                ),
+                {"px": price, "id": int(could_id)},
+            ).first()
+            db.commit()
+            return {"id": int(could_id), "current_ltp": price} if row else None
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def set_entry_ltp(self, could_id: int, price: float) -> Optional[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.execute(
+                text(
+                    """
+                    UPDATE premium_futures_divergence_could
+                    SET entry_ltp = :px, entry_ltp_from_history = TRUE
+                    WHERE id = :id AND exit_at IS NULL
+                      AND COALESCE(entry_ltp_from_history, FALSE) = FALSE
+                    RETURNING id
+                    """
+                ),
+                {"px": price, "id": int(could_id)},
+            ).first()
+            db.commit()
+            return {"id": int(could_id), "entry_ltp": price} if row else None
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def open_could_rows(self) -> List[Dict[str, Any]]:
+        self.ensure()
+        from backend.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, trade_date, underlying, side, fut_symbol, instrument_key, contracts,
+                           direction_type, entry_ltp, entry_at, exit_ltp, exit_at, first_scan_at,
+                           ltp_missing_entry, ltp_missing_exit, scan_ltp, current_ltp, lot_qty,
+                           entry_ltp_from_history
+                    FROM premium_futures_divergence_could
+                    WHERE exit_at IS NULL
+                    ORDER BY id ASC
+                    """
+                )
+            ).mappings().all()
+            return [dict(r) for r in rows]
+        finally:
+            db.close()
+
     def could_rows(self, trade_date: date) -> List[Dict[str, Any]]:
         self.ensure()
         from backend.database import SessionLocal
@@ -664,7 +944,8 @@ class DbDivergenceStore:
                     """
                     SELECT id, trade_date, underlying, side, fut_symbol, instrument_key, contracts,
                            direction_type, entry_ltp, entry_at, exit_ltp, exit_at, first_scan_at,
-                           ltp_missing_entry, ltp_missing_exit
+                           ltp_missing_entry, ltp_missing_exit, scan_ltp, current_ltp, lot_qty,
+                           entry_ltp_from_history
                     FROM premium_futures_divergence_could
                     WHERE trade_date = CAST(:d AS DATE)
                     ORDER BY id ASC
@@ -812,6 +1093,7 @@ def apply_divergence_event(
     resolver: Resolver,
     ltp_fn: LtpFn,
     now: datetime,
+    lot_fn: Optional[Callable[[str], Any]] = None,
 ) -> Dict[str, Any]:
     """Apply one parsed divergence alert. Unknown master symbols are dropped."""
     result = _base_result(alert)
@@ -894,6 +1176,12 @@ def apply_divergence_event(
             }
         )
         price, missing = _safe_ltp(ltp_fn, ikey)
+        first_scan = _aware(saved.get("div_at") or stamp) or _aware(stamp)
+        assert first_scan is not None
+        entry_clock = entry_at_from_first_scan(first_scan)
+        # +5 min quote is not available at the GO instant; keep the scan LTP so Entry LTP is not blank.
+        entry_px = resolve_entry_ltp(None, price)
+        lot = one_lot_qty(ikey, lot_fn)
         store.add_could(
             {
                 "trade_date": trade_date,
@@ -903,19 +1191,23 @@ def apply_divergence_event(
                 "instrument_key": ikey,
                 "contracts": saved.get("contracts"),
                 "direction_type": _direction(side),
-                "entry_ltp": price,
-                "entry_at": stamp,
+                "entry_ltp": entry_px,
+                "entry_at": _naive(entry_clock),
                 "exit_ltp": None,
                 "exit_at": None,
-                "first_scan_at": saved.get("div_at") or stamp,
-                "ltp_missing_entry": missing,
+                "first_scan_at": _naive(first_scan),
+                "scan_ltp": price,
+                "current_ltp": price,
+                "lot_qty": lot,
+                "entry_ltp_from_history": False,
+                "ltp_missing_entry": missing or entry_px is None,
                 "ltp_missing_exit": False,
             }
         )
         result["applied"] = True
         result["enter_enabled"] = True
         result["ticker_eligible"] = True
-        result["entry_ltp"] = price
+        result["entry_ltp"] = entry_px
         result["ltp_missing"] = missing
         if missing:
             result["reason"] = "LTP missing; could-have entry stored with null price"
@@ -999,33 +1291,73 @@ def divergence_ticker_signals(store: Any, trade_date: date) -> List[Dict[str, An
     return out
 
 
-def divergence_could_have_rows(store: Any, trade_date: date) -> List[Dict[str, Any]]:
+def _public_could_row(c: Dict[str, Any]) -> Dict[str, Any]:
+    direction = c.get("direction_type") or _direction(str(c.get("side") or "bullish"))
+    exit_at = c.get("exit_at")
+    exit_ltp = c.get("exit_ltp")
+    current = c.get("current_ltp")
+    if exit_at is not None:
+        if exit_ltp is not None:
+            current = exit_ltp
+        elif current is None:
+            current = c.get("scan_ltp") if c.get("scan_ltp") is not None else c.get("entry_ltp")
+    entry_ltp = c.get("entry_ltp")
+    if entry_ltp is None:
+        entry_ltp = resolve_entry_ltp(None, c.get("scan_ltp"))
+    qty = c.get("lot_qty")
+    if qty is None:
+        qty = one_lot_qty(str(c.get("instrument_key") or ""))
+    try:
+        qty_out = int(qty) if qty is not None else None
+    except (TypeError, ValueError):
+        qty_out = None
+    if qty_out is not None and qty_out <= 0:
+        qty_out = None
+    entry_display = display_entry_at(c.get("first_scan_at"), c.get("entry_at"))
+    return {
+        "underlying": c.get("underlying"),
+        "future_symbol": c.get("fut_symbol"),
+        "direction_type": direction,
+        "instrument_key": c.get("instrument_key"),
+        "qty": qty_out,
+        "first_scan_time": _hm(c.get("first_scan_at")),
+        "entry_time": _hm(entry_display),
+        "entry_ltp": entry_ltp,
+        "entry_price": entry_ltp,
+        "exit_time": _hm(exit_at),
+        "exit_ltp": exit_ltp,
+        "exit_price": exit_ltp,
+        "exit_scan_time": _hm(exit_at),
+        "exit_scan_ltp": exit_ltp if exit_at is not None else None,
+        "current_ltp": current,
+        "pnl_scan_rupees": could_have_pnl_rupees(direction, entry_ltp, current, qty_out),
+        "source": SOURCE,
+        "ltp_missing_entry": bool(c.get("ltp_missing_entry")),
+        "ltp_missing_exit": bool(c.get("ltp_missing_exit")),
+    }
+
+
+def divergence_could_have_rows(
+    store: Any,
+    trade_date: date,
+    now: Optional[datetime] = None,
+    persist_flat: bool = False,
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for c in store.could_rows(trade_date):
-        exit_ltp = c.get("exit_ltp")
-        rows.append(
-            {
-                "underlying": c.get("underlying"),
-                "future_symbol": c.get("fut_symbol"),
-                "direction_type": c.get("direction_type") or _direction(str(c.get("side") or "bullish")),
-                "instrument_key": c.get("instrument_key"),
-                "qty": c.get("contracts"),
-                "first_scan_time": _hm(c.get("first_scan_at")),
-                "second_scan_hm": None,
-                "entry_time": _hm(c.get("entry_at")),
-                "entry_ltp": c.get("entry_ltp"),
-                "entry_price": c.get("entry_ltp"),
-                "exit_time": _hm(c.get("exit_at")),
-                "exit_ltp": exit_ltp,
-                "exit_price": exit_ltp,
-                "exit_scan_time": _hm(c.get("exit_at")),
-                "exit_scan_ltp": exit_ltp,
-                "current_ltp": exit_ltp,
-                "source": SOURCE,
-                "ltp_missing_entry": bool(c.get("ltp_missing_entry")),
-                "ltp_missing_exit": bool(c.get("ltp_missing_exit")),
-            }
-        )
+        row = dict(c)
+        if now is not None and row.get("exit_at") is None:
+            flat = apply_session_flat(row, now)
+            if flat.get("exit_at") is not None:
+                if persist_flat and row.get("id") is not None:
+                    store.stamp_exit(
+                        int(row["id"]),
+                        flat.get("exit_ltp"),
+                        flat["exit_at"],
+                        ltp_missing=flat.get("exit_ltp") is None,
+                    )
+                row = flat
+        rows.append(_public_could_row(row))
     return rows
 
 
@@ -1035,7 +1367,10 @@ def load_divergence_sections(
     try:
         store = DbDivergenceStore()
         bull, bear = divergence_workspace_picks(store, trade_date)
-        return bull, bear, divergence_could_have_rows(store, trade_date)
+        # Frozen rows stay on the prior session until 09:00 IST (through 08:59). Not cleared at midnight.
+        return bull, bear, divergence_could_have_rows(
+            store, trade_date, now=datetime.now(IST), persist_flat=True
+        )
     except Exception:
         logger.warning("premium_futures divergence workspace read failed", exc_info=True)
         return [], [], []
@@ -1064,6 +1399,121 @@ def divergence_enter_allowed(underlying: str, direction_type: str, screening_sou
         logger.warning("premium_futures divergence enter check failed", exc_info=True)
         return False
     return bool(pick and pick.get("active") and pick.get("enter_enabled"))
+
+
+def _currmth_ltp_by_underlying() -> Dict[str, float]:
+    """Curr-month future LTP already written by the Kavach 10-minute market-data job."""
+    from backend.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT UPPER(TRIM(stock)) AS stock, currmth_future_ltp
+                FROM arbitrage_master
+                WHERE currmth_future_ltp IS NOT NULL AND currmth_future_ltp > 0
+                """
+            )
+        ).fetchall()
+    finally:
+        db.close()
+    out: Dict[str, float] = {}
+    for stock, ltp in rows:
+        try:
+            price = float(ltp)
+        except (TypeError, ValueError):
+            continue
+        if stock and price > 0:
+            out[str(stock).strip().upper()] = price
+    return out
+
+
+def _cached_5m_ltp_at(instrument_key: str, target: datetime) -> Optional[float]:
+    """LTP at a clock from 5m bars the 10-minute warm already cached. No extra fetch."""
+    try:
+        from backend.services.daily_futures_service import _ltp_asof_ist
+        from backend.services.market_data.candle_cache import get_recent
+    except Exception:
+        logger.debug("premium_futures could-have candle cache unavailable", exc_info=True)
+        return None
+    candles = get_recent(str(instrument_key or "").strip(), "minutes/5", max_age_sec=20 * 60)
+    if not candles:
+        return None
+    target_aware = _aware(target)
+    if target_aware is None:
+        return None
+    return _ltp_asof_ist(candles, target_aware)
+
+
+def refresh_could_have_on_scan(now: Optional[datetime] = None) -> Dict[str, Any]:
+    """
+    Update open Trade-if-could rows from the curr-month LTP the 10-minute scan just stored.
+
+    Rows with an Exit time are left frozen. At/after 15:15 IST with no EXIT, exit becomes 15:15.
+    """
+    clock = _aware(now or datetime.now(IST))
+    assert clock is not None
+    summary = {"updated": 0, "flattened": 0, "entry_upgraded": 0, "skipped_frozen": 0}
+    try:
+        quotes = _currmth_ltp_by_underlying()
+    except Exception:
+        logger.warning("premium_futures could-have quote read failed", exc_info=True)
+        quotes = {}
+    try:
+        store = DbDivergenceStore()
+        open_rows = store.open_could_rows()
+    except Exception:
+        logger.warning("premium_futures could-have open rows failed", exc_info=True)
+        return summary
+    for row in open_rows:
+        if row.get("exit_at") is not None:
+            summary["skipped_frozen"] += 1
+            continue
+        trade_date = _as_trade_date(row.get("trade_date"))
+        if trade_date is not None and session_exit_due(trade_date, clock):
+            flat = apply_session_flat(row, clock)
+            try:
+                store.stamp_exit(
+                    int(row["id"]),
+                    flat.get("exit_ltp"),
+                    flat["exit_at"],
+                    ltp_missing=flat.get("exit_ltp") is None,
+                )
+                summary["flattened"] += 1
+            except Exception:
+                logger.warning(
+                    "premium_futures could-have 15:15 stamp failed id=%s", row.get("id"), exc_info=True
+                )
+            continue
+        if not row.get("entry_ltp_from_history"):
+            entry_clock = display_entry_at(row.get("first_scan_at"), row.get("entry_at"))
+            if entry_clock is not None and clock >= entry_clock:
+                hist = _cached_5m_ltp_at(str(row.get("instrument_key") or ""), entry_clock)
+                upgraded = resolve_entry_ltp(hist, None)
+                if upgraded is not None:
+                    try:
+                        if store.set_entry_ltp(int(row["id"]), upgraded):
+                            summary["entry_upgraded"] += 1
+                    except Exception:
+                        logger.debug(
+                            "premium_futures could-have entry LTP upgrade skipped id=%s",
+                            row.get("id"),
+                            exc_info=True,
+                        )
+        und = str(row.get("underlying") or "").strip().upper()
+        price = quotes.get(und)
+        if price is None:
+            continue
+        try:
+            if store.set_current_ltp(int(row["id"]), price):
+                summary["updated"] += 1
+        except Exception:
+            logger.warning(
+                "premium_futures could-have LTP update failed id=%s", row.get("id"), exc_info=True
+            )
+    logger.info("premium_futures could-have scan refresh %s", summary)
+    return summary
 
 
 def ingest_divergence_webhook(parsed: Any, raw_body: str, received_at: datetime) -> Optional[Dict[str, Any]]:

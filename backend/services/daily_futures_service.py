@@ -2161,6 +2161,41 @@ def _second_scan_consecutive_15m_ist(first_hit: datetime, second_hit: datetime) 
     return 8 * 60 <= delta <= 32 * 60
 
 
+_COULD_MARK_FREEZE: Dict[Tuple[str, str, str], float] = {}
+
+
+def _positive_ltp(raw: Any) -> Optional[float]:
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if price <= 0:
+        return None
+    return round(price, 4)
+
+
+def _divergence_exit_index(trade_date: date) -> Dict[Tuple[str, str], datetime]:
+    """BULL-EXIT / BEAR-EXIT clocks already stored on could-have rows, keyed by symbol and side."""
+    try:
+        from backend.services.premium_futures_divergence import DbDivergenceStore, _aware
+    except Exception:
+        return {}
+    try:
+        out: Dict[Tuple[str, str], datetime] = {}
+        for c in DbDivergenceStore().could_rows(trade_date):
+            if not c.get("exit_at"):
+                continue
+            und = str(c.get("underlying") or "").strip().upper()
+            direction = str(c.get("direction_type") or "").strip().upper()
+            when = _aware(c.get("exit_at"))
+            if und and direction and when is not None:
+                out[(und, direction)] = when
+        return out
+    except Exception:
+        logger.debug("daily_futures: divergence exit index skipped", exc_info=True)
+        return {}
+
+
 def _build_trade_if_could_rows(
     picks: List[Dict[str, Any]],
     closed: List[Dict[str, Any]],
@@ -2178,93 +2213,89 @@ def _build_trade_if_could_rows(
     if not candidates:
         return []
 
+    from backend.services.premium_futures_divergence import (
+        could_have_pnl_rupees,
+        display_entry_at,
+        one_lot_qty,
+        resolve_entry_ltp,
+        session_exit_deadline,
+    )
+
     upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
     out: List[Dict[str, Any]] = []
-    close_1515 = IST.localize(datetime.combine(trade_date, datetime.min.time()).replace(hour=15, minute=15))
+    close_1515 = session_exit_deadline(trade_date)
     now_ist = datetime.now(IST)
+    exit_alerts = _divergence_exit_index(trade_date)
+    try:
+        from backend.services.premium_futures_divergence import _currmth_ltp_by_underlying
+
+        master_ltp = _currmth_ltp_by_underlying()
+    except Exception:
+        logger.debug("daily_futures: could-have master LTP skipped", exc_info=True)
+        master_ltp = {}
 
     for p in candidates:
         first_hit = _parse_iso_ist(p.get("first_hit_at"))
         if not first_hit:
             continue
-        last_hit = _parse_iso_ist(p.get("last_hit_at")) or first_hit
-        last_hit_slot = _floor_to_15m_ist(last_hit)
         second_hit = _parse_iso_ist(p.get("second_scan_time"))
         # Only symbols with a 2nd scan on the immediate next ~15m run (see webhook cadence).
         if not second_hit:
             continue
         if not _second_scan_consecutive_15m_ist(first_hit, second_hit):
             continue
-        entry_dt = second_hit + timedelta(minutes=5)
+        entry_dt = display_entry_at(first_hit, None) or (first_hit + timedelta(minutes=5))
         ikey = (p.get("instrument_key") or "").strip()
         candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
-        entry_ltp = _ltp_asof_ist(candles, entry_dt)
-        scan_ltp = _ltp_asof_ist(candles, last_hit_slot)
+        scan_ltp = _positive_ltp(p.get("ltp"))
         if scan_ltp is None:
+            scan_ltp = _ltp_asof_ist(candles, first_hit)
+        entry_ltp = resolve_entry_ltp(_ltp_asof_ist(candles, entry_dt), scan_ltp)
+        qty_num = one_lot_qty(ikey)
+        if qty_num is None:
             try:
-                pv = p.get("ltp")
-                if pv is not None:
-                    x = float(pv)
-                    if x > 0:
-                        scan_ltp = round(x, 4)
-            except Exception:
-                scan_ltp = None
-        qty = p.get("lot_size")
-        try:
-            qty_num = float(qty) if qty is not None else None
-        except Exception:
-            qty_num = None
+                raw_lot = p.get("lot_size")
+                qty_num = int(raw_lot) if raw_lot is not None and int(raw_lot) > 0 else None
+            except (TypeError, ValueError):
+                qty_num = None
+
+        direction = str(p.get("direction_type") or "LONG").strip().upper()
+        und = str(p.get("underlying") or "").strip().upper()
+        freeze_key = (str(trade_date), und, direction)
+        exit_at = exit_alerts.get((und, direction))
+        if exit_at is None and now_ist >= close_1515:
+            exit_at = close_1515
+        live_ltp = _positive_ltp(p.get("ltp"))
+        if exit_at is None:
+            # Prefer the curr-month LTP the 10-minute Kavach warm already stored.
+            current_ltp = master_ltp.get(und)
+            if current_ltp is None:
+                current_ltp = live_ltp if live_ltp is not None else scan_ltp
+            if current_ltp is not None:
+                _COULD_MARK_FREEZE[freeze_key] = current_ltp
+        else:
+            current_ltp = _ltp_asof_ist(candles, exit_at)
+            if current_ltp is None:
+                current_ltp = _COULD_MARK_FREEZE.get(freeze_key)
+            if current_ltp is None:
+                current_ltp = scan_ltp if scan_ltp is not None else entry_ltp
+            if current_ltp is not None:
+                _COULD_MARK_FREEZE[freeze_key] = current_ltp
 
         row: Dict[str, Any] = {
             "screening_id": p.get("screening_id"),
             "underlying": p.get("underlying"),
-            "direction_type": str(p.get("direction_type") or "LONG").strip().upper(),
+            "direction_type": direction,
             "future_symbol": p.get("future_symbol"),
             "instrument_key": ikey,
-            "qty": int(qty_num) if qty_num is not None else None,
+            "qty": qty_num,
             "first_scan_time": _fmt_hm(first_hit),
-            "second_scan_hm": _fmt_hm(second_hit) if second_hit else None,
             "entry_time": _fmt_hm(entry_dt),
             "entry_ltp": entry_ltp,
-            "exit_scan_time": _fmt_hm(last_hit_slot),
-            "exit_scan_ltp": scan_ltp,
-            "current_ltp": None,
-            "pnl_scan_rupees": None,
-            "exit_1515_time": "15:15",
-            "exit_1515_ltp": None,
-            "pnl_1515_rupees": None,
+            "exit_scan_time": _fmt_hm(exit_at) if exit_at else None,
+            "current_ltp": current_ltp,
+            "pnl_scan_rupees": could_have_pnl_rupees(direction, entry_ltp, current_ltp, qty_num),
         }
-
-        try:
-            pv = p.get("ltp")
-            if pv is not None:
-                cur = float(pv)
-                if cur > 0:
-                    row["current_ltp"] = round(cur, 4)
-        except Exception:
-            row["current_ltp"] = None
-
-        pnl_ref_ltp = row.get("current_ltp")
-        if pnl_ref_ltp is None:
-            pnl_ref_ltp = scan_ltp
-        pdir = row.get("direction_type") or "LONG"
-        if entry_ltp is not None and pnl_ref_ltp is not None and qty_num is not None:
-            if str(pdir).strip().upper() == "SHORT":
-                row["pnl_scan_rupees"] = round((entry_ltp - float(pnl_ref_ltp)) * qty_num, 2)
-            else:
-                row["pnl_scan_rupees"] = round((float(pnl_ref_ltp) - entry_ltp) * qty_num, 2)
-
-        ltp_1515 = _ltp_asof_ist(candles, close_1515)
-        if ltp_1515 is None:
-            # Avoid blank 15:15 projection when historical candle fetch is incomplete.
-            ltp_1515 = row.get("current_ltp") if row.get("current_ltp") is not None else scan_ltp
-        row["exit_1515_ltp"] = ltp_1515
-        if entry_ltp is not None and ltp_1515 is not None and qty_num is not None:
-            if str(pdir).strip().upper() == "SHORT":
-                row["pnl_1515_rupees"] = round((entry_ltp - ltp_1515) * qty_num, 2)
-            else:
-                row["pnl_1515_rupees"] = round((ltp_1515 - entry_ltp) * qty_num, 2)
-
         out.append(row)
 
     out.sort(key=lambda r: (r.get("future_symbol") or r.get("underlying") or ""))

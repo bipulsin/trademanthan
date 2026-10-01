@@ -1455,42 +1455,30 @@
       return;
     }
     const th =
-      '<thead><tr><th>Future</th><th class="num">Qty</th><th>1st scan</th><th>2nd scan</th><th>Entry (2nd+5m)</th><th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">Current LTP</th><th class="num">PnL Currnt</th><th>Exit 15:15</th><th class="num">LTP 15:15</th><th class="num">PnL 15:15</th></tr></thead>';
+      '<thead><tr><th>Future</th><th class="num">Qty (of 1 Lot)</th><th>1st scan</th><th>Entry time</th><th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">Current LTP</th><th class="num">PnL Current</th></tr></thead>';
     const body = rows
       .map(function (r) {
         const pScan = Number(r.pnl_scan_rupees);
-        const p1515 = Number(r.pnl_1515_rupees);
         const cScan = Number.isFinite(pScan) ? (pScan > 0 ? 'df-pnl-pos' : pScan < 0 ? 'df-pnl-neg' : '') : '';
-        const c1515 = Number.isFinite(p1515) ? (p1515 > 0 ? 'df-pnl-pos' : p1515 < 0 ? 'df-pnl-neg' : '') : '';
         return (
           '<tr><td><strong>' +
           symbolWithDirectionHtml(r) +
           '</strong></td><td class="num">' +
-          esc(r.qty) +
+          (r.qty != null && r.qty !== '' ? esc(r.qty) : '—') +
           '</td><td>' +
           esc(r.first_scan_time) +
-          '</td><td>' +
-          (r.second_scan_hm != null && r.second_scan_hm !== '' ? esc(r.second_scan_hm) : '—') +
           '</td><td>' +
           esc(r.entry_time) +
           '</td><td class="num">' +
           fmtNum(r.entry_ltp, 2) +
           '</td><td>' +
-          esc(r.exit_scan_time) +
+          (r.exit_scan_time ? esc(r.exit_scan_time) : '—') +
           '</td><td class="num">' +
           fmtNum(r.current_ltp != null ? r.current_ltp : r.exit_scan_ltp, 2) +
           '</td><td class="num ' +
           cScan +
           '">' +
           fmtMoney(r.pnl_scan_rupees) +
-          '</td><td>' +
-          esc(r.exit_1515_time) +
-          '</td><td class="num">' +
-          fmtNum(r.exit_1515_ltp, 2) +
-          '</td><td class="num ' +
-          c1515 +
-          '">' +
-          fmtMoney(r.pnl_1515_rupees) +
           '</td></tr>'
         );
       })
