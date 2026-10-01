@@ -299,6 +299,17 @@ def _create_divergence(
     return int(rid)
 
 
+def _snapshot_activated_ltp(instrument_key: Optional[str]) -> Optional[float]:
+    """Futures LTP at GO time. None if the quote is missing — never raises."""
+    try:
+        from backend.services.commodities_div.ltp_sidecar import quote_futures_ltp
+
+        return quote_futures_ltp(instrument_key)
+    except Exception as e:
+        logger.warning("commodities_div activated LTP snapshot failed: %s", e)
+        return None
+
+
 def accept_webhook(
     *,
     received_at: datetime,
@@ -695,6 +706,8 @@ def _process_webhook_locked(
                 active_signal_id=int(active["id"]),
                 symbol_mapped=symbol_mapped,
             )
+            quote_key = inst.get("instrument_key") or active.get("instrument_key")
+            activated_ltp = _snapshot_activated_ltp(quote_key)
             db.execute(
                 text(
                     """
@@ -706,6 +719,7 @@ def _process_webhook_locked(
                         instrument_key = COALESCE(:ik, instrument_key),
                         contract = COALESCE(:contract, contract),
                         lot_size = COALESCE(:lot, lot_size),
+                        activated_ltp = :activated_ltp,
                         updated_at = NOW()
                     WHERE id = :id
                     """
@@ -717,8 +731,15 @@ def _process_webhook_locked(
                     "ik": inst.get("instrument_key"),
                     "contract": inst.get("contract"),
                     "lot": inst.get("lot_size"),
+                    "activated_ltp": activated_ltp,
                     "id": int(active["id"]),
                 },
+            )
+            logger.info(
+                "commodities_div activated LTP signal_id=%s key=%s ltp=%s",
+                int(active["id"]),
+                quote_key,
+                activated_ltp,
             )
             db.commit()
             return {

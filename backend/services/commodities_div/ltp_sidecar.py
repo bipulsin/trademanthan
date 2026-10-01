@@ -65,6 +65,62 @@ def _ltp_from_upstox_ltp_api(upstox: Any, instrument_keys: List[str]) -> Dict[st
     return out
 
 
+def _price_for_key(ik: str, ltp_map: Dict[str, float]) -> Optional[float]:
+    if ik in ltp_map:
+        try:
+            price = float(ltp_map[ik])
+        except (TypeError, ValueError):
+            price = None
+        else:
+            if price > 0:
+                return price
+    want = _norm_ik(ik)
+    for k, v in ltp_map.items():
+        if _norm_ik(str(k)) != want:
+            continue
+        try:
+            price = float(v)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+    return None
+
+
+def quote_futures_ltp(instrument_key: Optional[str]) -> Optional[float]:
+    """
+    One-shot futures LTP for the contract already stored on the CommDiv signal.
+
+    Returns None when the key or quote is missing. Callers must not substitute
+    a later poll for a miss.
+    """
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return None
+    try:
+        from backend.config import settings
+        from backend.services.upstox_service import UpstoxService
+
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    except Exception as e:
+        logger.warning("commodities_div activated LTP: Upstox init failed: %s", e)
+        return None
+    if not getattr(upstox, "access_token", None):
+        logger.info("commodities_div activated LTP: upstox not connected")
+        return None
+
+    ltp_map: Dict[str, float] = {}
+    try:
+        ltp_map = upstox.get_market_quotes_batch_by_keys([ik]) or {}
+    except Exception as e:
+        logger.warning("commodities_div activated LTP quotes failed: %s", e)
+        ltp_map = {}
+
+    price = _price_for_key(ik, ltp_map)
+    if price is None:
+        price = _price_for_key(ik, _ltp_from_upstox_ltp_api(upstox, [ik]))
+    return price
+
+
 def refresh_in_trade_ltp() -> Dict[str, Any]:
     """
     Refresh LTP for every In-Trade row that has (or can resolve) instrument_key.

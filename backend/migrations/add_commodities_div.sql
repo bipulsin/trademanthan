@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS commodities_div_signals (
     entry_price DOUBLE PRECISION,
     ltp DOUBLE PRECISION,
     ltp_updated_at TIMESTAMP WITHOUT TIME ZONE,
+    activated_ltp DOUBLE PRECISION,
     instrument_key TEXT,
     contract TEXT,
     lot_size INTEGER,
@@ -77,6 +78,10 @@ CREATE TABLE IF NOT EXISTS commodities_div_signals (
 -- Existing DBs: add trade_mode if missing (CREATE TABLE IF NOT EXISTS skips new cols).
 ALTER TABLE commodities_div_signals
     ADD COLUMN IF NOT EXISTS trade_mode TEXT NOT NULL DEFAULT 'PAPER';
+
+-- Futures LTP captured once at BULL-GO / BEAR-GO. NULL until then; later LTP polls do not fill it.
+ALTER TABLE commodities_div_signals
+    ADD COLUMN IF NOT EXISTS activated_ltp DOUBLE PRECISION;
 
 -- At most one non-History cycle per underlying (different symbols may coexist).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol

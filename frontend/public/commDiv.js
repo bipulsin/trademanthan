@@ -742,6 +742,9 @@
           dtStackHtml(row.go_received_at) +
           "</td>" +
           '<td class="cd-field-val">' +
+          esc(fmt(row.activated_ltp)) +
+          "</td>" +
+          '<td class="cd-field-val">' +
           esc(fmt(row.entry_price)) +
           (row.trade_taken_at
             ? '<div class="cd-dt-with-price">' + dtStackHtml(row.trade_taken_at) + "</div>"
@@ -770,6 +773,7 @@
       "<th>Status</th>" +
       "<th>DIV received</th>" +
       "<th>GO received</th>" +
+      "<th>Activated LTP</th>" +
       "<th>Entry</th>" +
       "<th>LTP</th>" +
       "<th>Action</th>" +
@@ -802,6 +806,7 @@
             fieldHtml("Status", '<span class="' + statusClass + '">' + esc(row.status) + "</span>") +
             fieldHtml("DIV", dtStackHtml(row.div_received_at)) +
             fieldHtml("GO", dtStackHtml(row.go_received_at)) +
+            fieldHtml("Activated LTP", esc(fmt(row.activated_ltp))) +
             fieldHtml(
               "Entry",
               esc(fmt(row.entry_price)) +

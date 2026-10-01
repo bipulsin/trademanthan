@@ -78,5 +78,14 @@ def ensure_commodities_div_tables() -> None:
                 """
             )
         )
+        # Snapshot of futures LTP at GO. Nullable; never backfilled by LTP polls.
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_signals
+                    ADD COLUMN IF NOT EXISTS activated_ltp DOUBLE PRECISION
+                """
+            )
+        )
     _ENSURED = True
     logger.info("commodities_div tables ensured")
