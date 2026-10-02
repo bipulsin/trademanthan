@@ -575,6 +575,9 @@ class MemoryDivergenceStore:
             return dict(row)
         return None
 
+    def open_could_rows(self) -> List[Dict[str, Any]]:
+        return [dict(r) for r in self.could if r.get("exit_at") is None]
+
     def could_rows(self, trade_date: date) -> List[Dict[str, Any]]:
         return [dict(r) for r in self.could if r.get("trade_date") == trade_date]
 
@@ -1429,28 +1432,127 @@ def _currmth_ltp_by_underlying() -> Dict[str, float]:
     return out
 
 
-def _cached_5m_ltp_at(instrument_key: str, target: datetime) -> Optional[float]:
-    """LTP at a clock from 5m bars the 10-minute warm already cached. No extra fetch."""
-    try:
-        from backend.services.daily_futures_service import _ltp_asof_ist
-        from backend.services.market_data.candle_cache import get_recent
-    except Exception:
-        logger.debug("premium_futures could-have candle cache unavailable", exc_info=True)
+def _candle_dt_ist(ts: Any) -> Optional[datetime]:
+    if isinstance(ts, datetime):
+        return _aware(ts)
+    if isinstance(ts, (int, float)):
+        v = float(ts)
+        if v > 1_000_000_000_000:
+            v /= 1000.0
+        try:
+            return datetime.fromtimestamp(v, tz=IST)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if ts is None:
         return None
-    candles = get_recent(str(instrument_key or "").strip(), "minutes/5", max_age_sec=20 * 60)
-    if not candles:
-        return None
+    return _iso_to_ist(str(ts))
+
+
+def _candle_close_near(
+    candles: List[Dict[str, Any]],
+    target: datetime,
+    *,
+    max_before_sec: int = 120,
+    max_after_sec: int = 15 * 60,
+) -> Optional[float]:
+    """1-minute close at the target, else the nearest bar just after. Never a live quote."""
     target_aware = _aware(target)
     if target_aware is None:
         return None
-    return _ltp_asof_ist(candles, target_aware)
+    parsed: List[Tuple[datetime, float]] = []
+    for candle in candles or []:
+        dt = _candle_dt_ist(candle.get("timestamp"))
+        if dt is None:
+            continue
+        try:
+            px = float(candle.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if px <= 0:
+            continue
+        parsed.append((dt, px))
+    before = [
+        item
+        for item in parsed
+        if 0 <= (target_aware - item[0]).total_seconds() <= max_before_sec
+    ]
+    if before:
+        return round(max(before, key=lambda item: item[0])[1], 4)
+    after = [
+        item
+        for item in parsed
+        if 0 < (item[0] - target_aware).total_seconds() <= max_after_sec
+    ]
+    if after:
+        return round(min(after, key=lambda item: item[0])[1], 4)
+    return None
+
+
+def _historical_1m_ltp_at(instrument_key: str, target: datetime) -> Optional[float]:
+    """Upstox 1-minute close at the entry clock. None when that history is missing."""
+    ik = str(instrument_key or "").strip()
+    target_aware = _aware(target)
+    if not ik or target_aware is None:
+        return None
+    candles: List[Dict[str, Any]] = []
+    try:
+        from backend.config import settings
+        from backend.services.daily_futures_service import _fetch_intraday_1m_cached
+        from backend.services.upstox_service import UpstoxService
+
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        candles = _fetch_intraday_1m_cached(upstox, ik, target_aware.date()) or []
+    except Exception:
+        logger.debug("premium_futures 1m entry history failed ik=%s", ik, exc_info=True)
+        candles = []
+    price = _candle_close_near(candles, target_aware)
+    if price is not None:
+        return price
+    try:
+        from backend.services.market_data.candle_cache import get_recent
+
+        cached = get_recent(ik, "minutes/5", max_age_sec=20 * 60) or []
+    except Exception:
+        logger.debug("premium_futures 5m entry history skipped ik=%s", ik, exc_info=True)
+        return None
+    return _candle_close_near(cached, target_aware)
+
+
+def _upgrade_could_entry_from_history(store: Any, row: Dict[str, Any], clock: datetime) -> bool:
+    """Replace the GO scan quote with the +5 min historical close. Does not touch the live mark."""
+    if row.get("entry_ltp_from_history"):
+        return False
+    entry_clock = display_entry_at(row.get("first_scan_at"), row.get("entry_at"))
+    if entry_clock is None or clock < entry_clock:
+        return False
+    upgraded = resolve_entry_ltp(
+        _historical_1m_ltp_at(str(row.get("instrument_key") or ""), entry_clock),
+        None,
+    )
+    if upgraded is None:
+        return False
+    try:
+        saved = store.set_entry_ltp(int(row["id"]), upgraded)
+    except Exception:
+        logger.debug(
+            "premium_futures could-have entry LTP upgrade skipped id=%s",
+            row.get("id"),
+            exc_info=True,
+        )
+        return False
+    if not saved:
+        return False
+    row["entry_ltp_from_history"] = True
+    return True
 
 
 def refresh_could_have_on_scan(now: Optional[datetime] = None) -> Dict[str, Any]:
     """
     Update open Trade-if-could rows from the curr-month LTP the 10-minute scan just stored.
 
-    Rows with an Exit time are left frozen. At/after 15:15 IST with no EXIT, exit becomes 15:15.
+    Entry LTP is replaced with the 1-minute close at 1st scan + 5 minutes once that
+    bar exists. The live mark is written only to Current LTP. Rows with an Exit time
+    stay frozen. At/after 15:15 IST with no EXIT, exit becomes 15:15.
     """
     clock = _aware(now or datetime.now(IST))
     assert clock is not None
@@ -1470,6 +1572,8 @@ def refresh_could_have_on_scan(now: Optional[datetime] = None) -> Dict[str, Any]
         if row.get("exit_at") is not None:
             summary["skipped_frozen"] += 1
             continue
+        if _upgrade_could_entry_from_history(store, row, clock):
+            summary["entry_upgraded"] += 1
         trade_date = _as_trade_date(row.get("trade_date"))
         if trade_date is not None and session_exit_due(trade_date, clock):
             flat = apply_session_flat(row, clock)
@@ -1486,21 +1590,6 @@ def refresh_could_have_on_scan(now: Optional[datetime] = None) -> Dict[str, Any]
                     "premium_futures could-have 15:15 stamp failed id=%s", row.get("id"), exc_info=True
                 )
             continue
-        if not row.get("entry_ltp_from_history"):
-            entry_clock = display_entry_at(row.get("first_scan_at"), row.get("entry_at"))
-            if entry_clock is not None and clock >= entry_clock:
-                hist = _cached_5m_ltp_at(str(row.get("instrument_key") or ""), entry_clock)
-                upgraded = resolve_entry_ltp(hist, None)
-                if upgraded is not None:
-                    try:
-                        if store.set_entry_ltp(int(row["id"]), upgraded):
-                            summary["entry_upgraded"] += 1
-                    except Exception:
-                        logger.debug(
-                            "premium_futures could-have entry LTP upgrade skipped id=%s",
-                            row.get("id"),
-                            exc_info=True,
-                        )
         und = str(row.get("underlying") or "").strip().upper()
         price = quotes.get(und)
         if price is None:

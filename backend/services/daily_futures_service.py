@@ -2214,6 +2214,7 @@ def _build_trade_if_could_rows(
         return []
 
     from backend.services.premium_futures_divergence import (
+        _candle_close_near,
         could_have_pnl_rupees,
         display_entry_at,
         one_lot_qty,
@@ -2247,10 +2248,10 @@ def _build_trade_if_could_rows(
         entry_dt = display_entry_at(first_hit, None) or (first_hit + timedelta(minutes=5))
         ikey = (p.get("instrument_key") or "").strip()
         candles = _fetch_intraday_1m_cached(upstox, ikey, trade_date)
-        scan_ltp = _positive_ltp(p.get("ltp"))
-        if scan_ltp is None:
-            scan_ltp = _ltp_asof_ist(candles, first_hit)
-        entry_ltp = resolve_entry_ltp(_ltp_asof_ist(candles, entry_dt), scan_ltp)
+        # Entry is the +5 min historical close, else the 1st-scan close. Never the live mark.
+        hist_scan = _candle_close_near(candles, first_hit)
+        scan_ltp = hist_scan
+        entry_ltp = resolve_entry_ltp(_candle_close_near(candles, entry_dt), hist_scan)
         qty_num = one_lot_qty(ikey)
         if qty_num is None:
             try:

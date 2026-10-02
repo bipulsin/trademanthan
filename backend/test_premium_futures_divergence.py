@@ -1,6 +1,7 @@
 """Commodity-divergence alerts on the Premium Futures webhook. No database."""
 import json
 from datetime import datetime
+from unittest.mock import patch
 
 import pytz
 
@@ -15,8 +16,10 @@ from backend.services.premium_futures_divergence import (
     divergence_could_have_rows,
     divergence_ticker_signals,
     divergence_workspace_picks,
+    _candle_close_near,
     entry_at_from_first_scan,
     ingest_divergence_webhook,
+    refresh_could_have_on_scan,
     parse_divergence_alert,
     parse_event_time,
     resolve_entry_ltp,
@@ -584,3 +587,110 @@ def test_past_1515_without_exit_becomes_1515_and_refresh_stops():
     assert frozen["current_ltp"] == 100.0
     # A later refresh must not book the short PnL of the new quote.
     assert frozen.get("pnl_scan_rupees") != could_have_pnl_rupees("SHORT", 100.0, 80, 500)
+
+
+def test_candle_close_near_uses_entry_minute_or_the_next_bar():
+    target = IST.localize(datetime(2026, 10, 1, 10, 5, 0))
+    candles = [
+        {"timestamp": "2026-10-01T09:15:00+05:30", "close": 100.0},
+        {"timestamp": "2026-10-01T10:04:00+05:30", "close": 110.0},
+        {"timestamp": "2026-10-01T10:05:00+05:30", "close": 111.5},
+        {"timestamp": "2026-10-01T10:06:00+05:30", "close": 112.0},
+    ]
+    assert _candle_close_near(candles, target) == 111.5
+    missing_minute = [c for c in candles if "10:05" not in c["timestamp"] and "10:04" not in c["timestamp"]]
+    assert _candle_close_near(missing_minute, target) == 112.0
+    assert _candle_close_near([candles[0]], target) is None
+
+
+def test_refresh_stores_historical_entry_and_does_not_copy_the_live_mark():
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        datetime(2026, 10, 1, 10, 0, 0),
+        ltp=685.0,
+        lot=825,
+    )
+    open_row = store.could[0]
+    assert open_row["entry_ltp"] == 685.0
+    assert open_row["current_ltp"] == 685.0
+
+    def _hist(_ik, _target):
+        return 690.25
+
+    with patch(
+        "backend.services.premium_futures_divergence.DbDivergenceStore",
+        return_value=store,
+    ), patch(
+        "backend.services.premium_futures_divergence._historical_1m_ltp_at",
+        side_effect=_hist,
+    ), patch(
+        "backend.services.premium_futures_divergence._currmth_ltp_by_underlying",
+        return_value={"RELIANCE": 700.0},
+    ):
+        summary = refresh_could_have_on_scan(now=datetime(2026, 10, 1, 12, 0, 0))
+
+    assert summary["entry_upgraded"] == 1
+    assert summary["updated"] == 1
+    assert summary["flattened"] == 0
+    row = store.could[0]
+    assert row["entry_ltp"] == 690.25
+    assert row["current_ltp"] == 700.0
+    assert row["exit_at"] is None
+    assert row["entry_ltp_from_history"] is True
+
+    def _missing(_ik, _target):
+        return None
+
+    store2 = MemoryDivergenceStore()
+    _apply(
+        store2,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        datetime(2026, 10, 1, 10, 0, 0),
+        ltp=685.0,
+        lot=825,
+    )
+    with patch(
+        "backend.services.premium_futures_divergence.DbDivergenceStore",
+        return_value=store2,
+    ), patch(
+        "backend.services.premium_futures_divergence._historical_1m_ltp_at",
+        side_effect=_missing,
+    ), patch(
+        "backend.services.premium_futures_divergence._currmth_ltp_by_underlying",
+        return_value={"RELIANCE": 700.0},
+    ):
+        refresh_could_have_on_scan(now=datetime(2026, 10, 1, 12, 0, 0))
+    assert store2.could[0]["entry_ltp"] == 685.0
+    assert store2.could[0]["current_ltp"] == 700.0
+
+
+def test_refresh_upgrades_entry_before_session_flat_and_keeps_frozen_mark():
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        datetime(2026, 10, 1, 10, 0, 0),
+        ltp=685.0,
+        lot=825,
+    )
+    with patch(
+        "backend.services.premium_futures_divergence.DbDivergenceStore",
+        return_value=store,
+    ), patch(
+        "backend.services.premium_futures_divergence._historical_1m_ltp_at",
+        return_value=690.25,
+    ), patch(
+        "backend.services.premium_futures_divergence._currmth_ltp_by_underlying",
+        return_value={"RELIANCE": 999.0},
+    ):
+        summary = refresh_could_have_on_scan(now=datetime(2026, 10, 1, 15, 20, 0))
+    assert summary["entry_upgraded"] == 1
+    assert summary["flattened"] == 1
+    assert summary["updated"] == 0
+    row = store.could[0]
+    assert row["entry_ltp"] == 690.25
+    assert row["current_ltp"] == 685.0
+    assert row["exit_ltp"] == 685.0
+    assert row["exit_at"] is not None
