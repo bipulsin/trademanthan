@@ -682,8 +682,14 @@ def _multi_leg_trades() -> List[Dict[str, Any]]:
         if trade.get("id"):
             row["id"] = str(trade["id"])
         alerts = []
-        if trade.get("adjustment_alert") and trade.get("adjustment_message"):
-            alerts.append({"text": trade["adjustment_message"], "sound": "adjustment"})
+        if trade.get("adjustment_alert"):
+            adj_text = (
+                trade.get("adjustment_ticker_text")
+                or trade.get("adjustment_message")
+                or ""
+            )
+            if adj_text:
+                alerts.append({"text": adj_text, "sound": "adjustment"})
         if trade.get("exit_adjustment_alert") and trade.get("exit_adjustment_message"):
             alerts.append({"text": trade["exit_adjustment_message"], "sound": "adjustment_exit"})
         if alerts:

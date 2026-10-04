@@ -294,3 +294,44 @@ def test_multi_leg_adjustment_lines_keep_pnl(monkeypatch):
         "IronFly - NIFTY Exit Adjustment",
     ]
     assert [a["sound"] for a in rows[0]["alerts"]] == ["adjustment", "adjustment_exit"]
+
+
+def test_multi_leg_straddle_ratio_adjustment_ticker(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.underlying_spot_ltps",
+        lambda names: {},
+    )
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.list_active",
+        lambda: [
+            {
+                "id": "trade-straddle",
+                "status": "ACTIVE",
+                "trade_type": "STRADDLE",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": 120,
+                "legs": [
+                    {
+                        "id": "ce-1",
+                        "qualifier": "MAIN",
+                        "option_type": "CE",
+                        "entry_time": "2026-10-04T09:20:00+05:30",
+                        "ltp": 30.0,
+                    },
+                    {
+                        "id": "pe-1",
+                        "qualifier": "MAIN",
+                        "option_type": "PE",
+                        "entry_time": "2026-10-04T09:20:00+05:30",
+                        "ltp": 10.0,
+                    },
+                ],
+            }
+        ],
+    )
+    rows = tl._multi_leg_trades()
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "Straddle-NIFTY-27Oct26"
+    assert rows[0]["pnl"] == 120.0
+    assert rows[0]["alerts"] == [{"text": "Adjustment", "sound": "adjustment"}]

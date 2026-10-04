@@ -46,6 +46,8 @@ OPTION_TYPES = ("CE", "PE")
 QUALIFIERS = ("MAIN", "WING", "ADJ")
 # Spot must clear the green-zone strike by this many points before an adjustment alert.
 GREEN_ZONE_BUFFER = 50
+# Straddle LTP skew: max(CE, PE) / min(CE, PE) on the latest active Main/Adj pair.
+STRADDLE_LTP_RATIO_THRESHOLD = 3.0
 STATUSES = ("ACTIVE", "CLOSED")
 _COMPACT_TYPES = {
     "STRADDLE": "Straddle",
@@ -155,6 +157,56 @@ def adjustment_alert_text(trade_type: Any, instrument: Any, *, exit: bool = Fals
         return ""
     suffix = "Exit Adjustment" if exit else "Adjustment"
     return f"{compact} - {name} {suffix}"
+
+
+def _leg_entry_sort_key(leg: Dict[str, Any]) -> Tuple[float, str]:
+    """Newest entry_time wins; missing times sort as oldest."""
+    dt = _parse_dt(leg.get("entry_time"))
+    stamp = dt.timestamp() if dt is not None else float("-inf")
+    return (stamp, str(leg.get("id") or ""))
+
+
+def straddle_ratio_leg(
+    legs: Sequence[Dict[str, Any]], option_type: str
+) -> Optional[Dict[str, Any]]:
+    """Most recently entered still-active Main/Adj leg of the given CE/PE side.
+
+    Wings and exited legs are ignored. Adj wins when it is newer than Main.
+    """
+    want = str(option_type or "").strip().upper()
+    candidates: List[Dict[str, Any]] = []
+    for leg in legs or []:
+        if leg_is_exited(leg):
+            continue
+        role = str(leg.get("qualifier") or "").strip().upper()
+        if role not in ("MAIN", "ADJ"):
+            continue
+        if str(leg.get("option_type") or "").strip().upper() != want:
+            continue
+        candidates.append(leg)
+    if not candidates:
+        return None
+    return max(candidates, key=_leg_entry_sort_key)
+
+
+def straddle_ltp_ratio(legs: Sequence[Dict[str, Any]]) -> Optional[float]:
+    """max(CE_LTP, PE_LTP) / min(CE_LTP, PE_LTP) for the active ratio pair."""
+    ce = straddle_ratio_leg(legs, "CE")
+    pe = straddle_ratio_leg(legs, "PE")
+    if ce is None or pe is None:
+        return None
+    ce_ltp = _as_float(ce.get("ltp"))
+    pe_ltp = _as_float(pe.get("ltp"))
+    if ce_ltp is None or pe_ltp is None or ce_ltp <= 0 or pe_ltp <= 0:
+        return None
+    lo = min(ce_ltp, pe_ltp)
+    hi = max(ce_ltp, pe_ltp)
+    return hi / lo
+
+
+def straddle_adjustment_due(legs: Sequence[Dict[str, Any]]) -> bool:
+    ratio = straddle_ltp_ratio(legs)
+    return ratio is not None and ratio >= STRADDLE_LTP_RATIO_THRESHOLD
 
 
 def green_zone_adjustment(spot: Any, green_zone_ce: Any, green_zone_pe: Any) -> bool:
@@ -901,7 +953,7 @@ def annotate_adjustment_alerts(
     trades: List[Dict[str, Any]],
     spots: Optional[Dict[str, Optional[float]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Attach spot LTP and adjustment flags. Fetches spots only when a trade needs them."""
+    """Attach spot LTP, straddle LTP ratio, and adjustment flags."""
     need: List[str] = []
     for trade in trades or []:
         if not _trade_needs_spot(trade):
@@ -922,16 +974,34 @@ def annotate_adjustment_alerts(
         name = str(trade.get("instrument") or "").strip().upper()
         spot = _as_float(fetched.get(name)) if active else None
         legs = trade.get("legs") or []
-        adj = bool(active and green_zone_adjustment(spot, trade.get("green_zone_ce"), trade.get("green_zone_pe")))
+        kind = _normalize_trade_type(trade.get("trade_type"))
+        ratio = straddle_ltp_ratio(legs) if kind == "STRADDLE" else None
+        ce_leg = straddle_ratio_leg(legs, "CE") if kind == "STRADDLE" else None
+        pe_leg = straddle_ratio_leg(legs, "PE") if kind == "STRADDLE" else None
+        trade["ltp_ratio"] = ratio
+        trade["ltp_ratio_ce_leg_id"] = str(ce_leg["id"]) if ce_leg and ce_leg.get("id") else None
+        trade["ltp_ratio_pe_leg_id"] = str(pe_leg["id"]) if pe_leg and pe_leg.get("id") else None
+        if kind == "STRADDLE":
+            adj = bool(active and straddle_adjustment_due(legs))
+            trade["adjustment_message"] = "Adjustment on Straddle" if adj else ""
+            trade["adjustment_ticker_text"] = "Adjustment" if adj else ""
+        else:
+            adj = bool(
+                active
+                and green_zone_adjustment(spot, trade.get("green_zone_ce"), trade.get("green_zone_pe"))
+            )
+            trade["adjustment_message"] = (
+                adjustment_alert_text(trade.get("trade_type"), trade.get("instrument")) if adj else ""
+            )
+            trade["adjustment_ticker_text"] = trade["adjustment_message"]
         exit_adj = bool(active and exit_adjustment_due(spot, legs))
         trade["spot_ltp"] = spot
         trade["adjustment_alert"] = adj
         trade["exit_adjustment_alert"] = exit_adj
-        trade["adjustment_message"] = (
-            adjustment_alert_text(trade.get("trade_type"), trade.get("instrument")) if adj else ""
-        )
         trade["exit_adjustment_message"] = (
-            adjustment_alert_text(trade.get("trade_type"), trade.get("instrument"), exit=True) if exit_adj else ""
+            adjustment_alert_text(trade.get("trade_type"), trade.get("instrument"), exit=True)
+            if exit_adj
+            else ""
         )
     return trades
 

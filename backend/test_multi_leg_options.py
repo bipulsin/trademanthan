@@ -7,6 +7,7 @@ from backend.services.multi_leg_options import (
     MultiLegValidationError,
     _parse_dt,
     adjustment_alert_text,
+    annotate_adjustment_alerts,
     assert_min_legs,
     assert_ready_to_close,
     assign_missing_trade_numbers,
@@ -20,6 +21,9 @@ from backend.services.multi_leg_options import (
     next_trade_number,
     parse_clock_ampm,
     status_after_save,
+    straddle_adjustment_due,
+    straddle_ltp_ratio,
+    straddle_ratio_leg,
     resolve_future_instrument_key,
     suggested_expiry,
     trade_pnl,
@@ -142,6 +146,38 @@ def test_partial_exit_keeps_trade_active():
     # Saving still leaves the trade ACTIVE until the close endpoint.
     assert status_after_save(closing=False, legs=complete) == "ACTIVE"
     assert status_after_save(closing=True, legs=complete) == "CLOSED"
+
+
+def test_leg_exit_via_update_keeps_active_and_counts_realized_pnl(monkeypatch):
+    ce = _leg("CE")
+    pe = _leg("PE")
+    ce["id"] = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    pe["id"] = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    ce["lot_size"] = 75
+    pe["lot_size"] = 75
+    pe["ltp"] = 90
+    stored = _trade_body(legs=[ce, pe])
+    stored["id"] = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    stored["status"] = "ACTIVE"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    body = _trade_body(legs=[
+        {
+            **ce,
+            "exit_price": 80,
+            "exit_time": "2026-09-26T14:00:00+05:30",
+        },
+        pe,
+    ])
+    mlo.update_trade(stored["id"], body)
+    params, sql = _sql_params(db, "UPDATE multi_leg_trades SET")
+    assert params["status"] == "ACTIVE"
+    # CE short exit 80 from 100 → +20 × 75 = 1500; PE open at LTP 90 → +10 × 75 = 750.
+    assert params["pnl"] == 2250.0
+    leg_params = [p for s, p in db.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert leg_params[0]["exit_price"] == 80.0
+    assert leg_params[0]["exit_time"] is not None
+    assert leg_params[1]["exit_price"] is None
 
 
 def test_trade_numbers_are_stable_integers():
@@ -323,6 +359,87 @@ def test_default_qualifier_iron_fly_and_straddle():
     ]
     assert len(straddle) == 2
     assert default_leg_slots("UNCLASSIFIED") == []
+
+
+def _ratio_leg(option_type, qualifier, ltp, entry_time, *, exited=False, leg_id=None, entry=10.0):
+    row = {
+        "id": leg_id or f"{qualifier}-{option_type}-{entry_time}",
+        "qualifier": qualifier,
+        "option_type": option_type,
+        "side": "SELL",
+        "entry_price": entry,
+        "entry_time": entry_time,
+        "ltp": ltp,
+        "lot_size": 50,
+        "exit_price": None,
+        "exit_time": None,
+    }
+    if exited:
+        row["exit_price"] = ltp
+        row["exit_time"] = "2026-10-04T12:00:00+05:30"
+    return row
+
+
+def test_straddle_ltp_ratio_threshold_and_pair_rules():
+    # Exactly 3.0 triggers; 2.9 does not.
+    at_three = [
+        _ratio_leg("CE", "MAIN", 30.0, "2026-10-04T09:20:00+05:30"),
+        _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
+    ]
+    assert straddle_ltp_ratio(at_three) == 3.0
+    assert straddle_adjustment_due(at_three) is True
+    under = [
+        _ratio_leg("CE", "MAIN", 29.0, "2026-10-04T09:20:00+05:30"),
+        _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
+    ]
+    assert straddle_ltp_ratio(under) == 2.9
+    assert straddle_adjustment_due(under) is False
+
+    # Exited legs and Wings are excluded from the ratio pair.
+    mixed = [
+        _ratio_leg("CE", "MAIN", 100.0, "2026-10-04T09:15:00+05:30", exited=True, leg_id="ce-old"),
+        _ratio_leg("CE", "WING", 5.0, "2026-10-04T09:30:00+05:30", leg_id="ce-wing"),
+        _ratio_leg("CE", "MAIN", 40.0, "2026-10-04T09:25:00+05:30", leg_id="ce-main"),
+        _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30", leg_id="pe-main"),
+    ]
+    assert straddle_ratio_leg(mixed, "CE")["id"] == "ce-main"
+    assert straddle_ltp_ratio(mixed) == 4.0
+
+    # Newest Adj CE/PE preferred over older Main on that side.
+    with_adj = [
+        _ratio_leg("CE", "MAIN", 12.0, "2026-10-04T09:15:00+05:30", leg_id="ce-main"),
+        _ratio_leg("PE", "MAIN", 12.0, "2026-10-04T09:15:00+05:30", leg_id="pe-main"),
+        _ratio_leg("CE", "ADJ", 45.0, "2026-10-04T10:00:00+05:30", leg_id="ce-adj"),
+        _ratio_leg("PE", "ADJ", 15.0, "2026-10-04T10:01:00+05:30", leg_id="pe-adj"),
+    ]
+    assert straddle_ratio_leg(with_adj, "CE")["id"] == "ce-adj"
+    assert straddle_ratio_leg(with_adj, "PE")["id"] == "pe-adj"
+    assert straddle_ltp_ratio(with_adj) == 3.0
+    assert straddle_adjustment_due(with_adj) is True
+
+    # Missing or zero LTP skips the ratio.
+    assert straddle_ltp_ratio([
+        _ratio_leg("CE", "MAIN", 0, "2026-10-04T09:20:00+05:30"),
+        _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
+    ]) is None
+    assert straddle_ltp_ratio([
+        _ratio_leg("CE", "MAIN", None, "2026-10-04T09:20:00+05:30"),
+        _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
+    ]) is None
+
+    annotated = annotate_adjustment_alerts(
+        [{
+            "status": "ACTIVE",
+            "trade_type": "STRADDLE",
+            "instrument": "NIFTY",
+            "legs": at_three,
+        }],
+        spots={},
+    )
+    assert annotated[0]["adjustment_alert"] is True
+    assert annotated[0]["ltp_ratio"] == 3.0
+    assert annotated[0]["adjustment_message"] == "Adjustment on Straddle"
+    assert annotated[0]["adjustment_ticker_text"] == "Adjustment"
 
 
 def test_green_zone_spot_and_exit_adjustment():

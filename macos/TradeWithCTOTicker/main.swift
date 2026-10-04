@@ -566,29 +566,49 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func alertViews(_ row: [String: Any]) -> [NSView] {
-        guard let alerts = row["alerts"] as? [[String: Any]] else { return [] }
-        return alerts.compactMap { item in
-            let text = "\(item["text"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return nil }
-            let label = line(text, color: alertRed)
-            startBlink(label)
-            return label
-        }
+    func blinkingAlertLabel(_ text: String) -> NSTextField {
+        let label = line(text, color: alertRed)
+        startBlink(label)
+        return label
     }
 
     func tradeRow(_ row: [String: Any]) -> NSView? {
         let sym = scriptName(row)
         guard usableScript(sym), let pnl = row["pnl"] as? Double else { return nil }
         let pnlLine = pair(sym, formatRupees(pnl), liveYellow)
-        let alerts = alertViews(row)
-        guard !alerts.isEmpty else { return pnlLine }
+        let alerts = (row["alerts"] as? [[String: Any]]) ?? []
+        var inline: [NSView] = []
+        var below: [NSView] = []
+        for item in alerts {
+            let text = "\(item["text"] ?? "")".trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let label = blinkingAlertLabel(text)
+            // Short "Adjustment" sits on the LIVE TRADES PnL line; longer Iron Fly lines stay below.
+            if text == "Adjustment" {
+                inline.append(label)
+            } else {
+                below.append(label)
+            }
+        }
+        let top: NSView
+        if inline.isEmpty {
+            top = pnlLine
+        } else {
+            let rowBox = NSStackView()
+            rowBox.orientation = .horizontal
+            rowBox.alignment = .centerY
+            rowBox.spacing = 8
+            rowBox.addArrangedSubview(pnlLine)
+            inline.forEach { rowBox.addArrangedSubview($0) }
+            top = rowBox
+        }
+        guard !below.isEmpty else { return top }
         let box = NSStackView()
         box.orientation = .vertical
         box.alignment = .leading
         box.spacing = 2
-        box.addArrangedSubview(pnlLine)
-        alerts.forEach { box.addArrangedSubview($0) }
+        box.addArrangedSubview(top)
+        below.forEach { box.addArrangedSubview($0) }
         return box
     }
 

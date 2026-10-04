@@ -194,9 +194,28 @@
 
   function setBanner(msg) {
     var el = $("mloBanner");
-    if (!msg) { el.hidden = true; el.textContent = ""; return; }
+    if (!msg) { el.hidden = true; el.textContent = ""; el.classList.remove("mlo-banner-adj"); return; }
     el.hidden = false;
     el.textContent = msg;
+  }
+
+  function setAdjBanner(show) {
+    var el = $("mloAdjBanner");
+    if (!el) return;
+    el.hidden = !show;
+  }
+
+  function fmtRatio(n) {
+    if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
+    return Number(n).toFixed(2);
+  }
+
+  function isStraddle(t) {
+    return String((t && t.trade_type) || "").toUpperCase().replace(/[\s-]/g, "_") === "STRADDLE";
+  }
+
+  function legIsExited(leg) {
+    return !!(leg && leg.exit_price != null && leg.exit_price !== "" && leg.exit_time);
   }
 
   function setSyncBanner(msg, isError) {
@@ -335,9 +354,13 @@
   }
 
   function legCard(leg, exitMode) {
+    var shell = document.createElement("div");
+    shell.className = "mlo-leg-wrap";
     var wrap = document.createElement("div");
     wrap.className = "mlo-leg";
     if (leg && leg.id) wrap.dataset.id = leg.id;
+    var exited = !exitMode && legIsExited(leg);
+    if (exited) shell.classList.add("is-exited");
     var entryClock = clockParts(leg && leg.entry_time);
     var entryText = entryClock ? formatClock(entryClock.hour, entryClock.minute) : DEFAULT_CLOCK;
     var exit = "";
@@ -348,7 +371,18 @@
       exit = '<input data-f="exit_price" type="number" min="0" step="0.01" placeholder="Exit price" aria-label="Exit price" value="' + esc(leg && leg.exit_price != null ? leg.exit_price : "") + '">' +
         dateField("exit_date", exitDate, "Exit date") +
         '<input data-f="exit_clock" type="text" placeholder="Time" aria-label="Exit time" value="' + esc(exitText) + '" required>';
+    } else if (exited) {
+      var doneClock = clockParts(leg.exit_time);
+      var doneDate = doneClock ? doneClock.date : todayISO();
+      var doneText = doneClock ? formatClock(doneClock.hour, doneClock.minute) : DEFAULT_CLOCK;
+      exit = '<input data-f="exit_price" type="hidden" value="' + esc(leg.exit_price) + '">' +
+        '<input data-f="exit_date" type="hidden" value="' + esc(doneDate) + '">' +
+        '<input data-f="exit_clock" type="hidden" value="' + esc(doneText) + '">' +
+        '<span class="mlo-leg-realized ' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>";
     }
+    var exitBtn = (!exitMode && !exited)
+      ? '<button type="button" class="mlo-icon-btn mlo-leg-exit-btn" aria-label="Exit leg"><i class="fas fa-right-from-bracket" aria-hidden="true"></i></button>'
+      : "";
     wrap.innerHTML =
       '<select data-f="qualifier" aria-label="Qualifier"><option value="" hidden>Role</option><option value="MAIN">Main</option><option value="WING">Wing</option><option value="ADJ">Adj</option></select>' +
       '<select data-f="side" aria-label="Side" required><option value="" hidden>Side</option><option>BUY</option><option>SELL</option></select>' +
@@ -359,6 +393,7 @@
       '<input data-f="lot_size" type="number" min="1" step="1" placeholder="Lot" aria-label="Lot size">' +
       '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
       exit +
+      exitBtn +
       '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
     var role = wrap.querySelector('[data-f="qualifier"]');
     if (leg && leg.qualifier) role.value = String(leg.qualifier).toUpperCase();
@@ -381,14 +416,101 @@
     if (leg && leg.leg_expiry_date) expiryInp.dataset.touched = "1";
     expiryInp.addEventListener("input", function () { expiryInp.dataset.touched = "1"; });
     wrap.querySelector(".mlo-remove").addEventListener("click", function () {
-      wrap.remove();
+      shell.remove();
       refreshSaveGate();
     });
-    wrap.querySelectorAll("input, select").forEach(function (inp) {
-      inp.addEventListener("input", refreshSaveGate);
-      inp.addEventListener("change", refreshSaveGate);
-    });
-    return wrap;
+    if (exited) {
+      wrap.querySelectorAll("input, select").forEach(function (inp) {
+        if (inp.type === "hidden") return;
+        inp.disabled = true;
+      });
+    } else {
+      wrap.querySelectorAll("input, select").forEach(function (inp) {
+        inp.addEventListener("input", refreshSaveGate);
+        inp.addEventListener("change", refreshSaveGate);
+      });
+    }
+    shell.appendChild(wrap);
+    if (!exitMode && !exited) {
+      var panel = document.createElement("div");
+      panel.className = "mlo-leg-exit-panel";
+      panel.hidden = true;
+      panel.innerHTML =
+        '<input data-panel="exit_price" type="number" min="0" step="0.01" placeholder="Exit price" aria-label="Exit price">' +
+        '<input data-panel="exit_clock" type="text" placeholder="Time" aria-label="Exit time" value="' + esc(DEFAULT_CLOCK) + '">' +
+        '<button type="button" class="mlo-btn so-modal-btn primary mlo-leg-exit-submit">Submit</button>';
+      panel.querySelector('[data-panel="exit_clock"]').addEventListener("blur", function () {
+        var shown = normalizeClock(this.value);
+        if (shown) this.value = shown;
+      });
+      wrap.querySelector(".mlo-leg-exit-btn").addEventListener("click", function () {
+        panel.hidden = !panel.hidden;
+      });
+      panel.querySelector(".mlo-leg-exit-submit").addEventListener("click", function () {
+        submitPerLegExit(shell, wrap, panel);
+      });
+      shell.appendChild(panel);
+    }
+    return shell;
+  }
+
+  async function submitPerLegExit(shell, wrap, panel) {
+    if (!editingId || mode !== "edit") {
+      showFormError("Open Edit to exit a single leg");
+      return;
+    }
+    var pxEl = panel.querySelector('[data-panel="exit_price"]');
+    var clockEl = panel.querySelector('[data-panel="exit_clock"]');
+    var px = pxEl ? pxEl.value.trim() : "";
+    var clock = clockEl ? clockEl.value.trim() : "";
+    if (px === "" || Number(px) < 0 || !parseClock(clock)) {
+      showFormError("Exit needs a price and a time like 03:10 PM");
+      return;
+    }
+    var clockErr = legClockError();
+    if (clockErr) {
+      showFormError(clockErr);
+      return;
+    }
+    var roleErr = qualifierError();
+    if (roleErr) {
+      showFormError(roleErr);
+      return;
+    }
+    // Stash exit onto this leg row so readLegs picks it up, then PUT (trade stays ACTIVE).
+    var hiddenPx = wrap.querySelector('[data-f="exit_price"]');
+    var hiddenDay = wrap.querySelector('[data-f="exit_date"]');
+    var hiddenClock = wrap.querySelector('[data-f="exit_clock"]');
+    if (!hiddenPx) {
+      hiddenPx = document.createElement("input");
+      hiddenPx.type = "hidden";
+      hiddenPx.setAttribute("data-f", "exit_price");
+      wrap.appendChild(hiddenPx);
+    }
+    if (!hiddenDay) {
+      hiddenDay = document.createElement("input");
+      hiddenDay.type = "hidden";
+      hiddenDay.setAttribute("data-f", "exit_date");
+      wrap.appendChild(hiddenDay);
+    }
+    if (!hiddenClock) {
+      hiddenClock = document.createElement("input");
+      hiddenClock.type = "hidden";
+      hiddenClock.setAttribute("data-f", "exit_clock");
+      wrap.appendChild(hiddenClock);
+    }
+    hiddenPx.value = px;
+    hiddenDay.value = todayISO();
+    hiddenClock.value = normalizeClock(clock) || clock;
+    showFormError("");
+    try {
+      var body = payload();
+      var data = await api("/trades/" + editingId, { method: "PUT", body: JSON.stringify(body) });
+      openModal("edit", data.trade);
+      await loadActive(true);
+    } catch (e) {
+      showFormError(e.message || "Leg exit failed");
+    }
   }
 
   function toLocal(iso) {
@@ -653,6 +775,15 @@
           "</div>";
       }).join("");
       var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
+      var ratioField = "";
+      if (isStraddle(t)) {
+        var hot = t.ltp_ratio != null && Number(t.ltp_ratio) >= 3;
+        ratioField = rowField(
+          "LTP Ratio",
+          fmtRatio(t.ltp_ratio),
+          hot ? "mlo-ratio-hot" : "mlo-ratio-ok"
+        );
+      }
       return '<article class="mlo-trade so-card" data-id="' + esc(t.id) + '">' +
         '<div class="mlo-row-summary">' +
           rowField("Trade No", t.trade_no == null ? "—" : t.trade_no) +
@@ -661,6 +792,7 @@
           rowField("DTE", t.dte == null ? "—" : t.dte) +
           rowField("Future LTP", futureLtpText(t.future_ltp)) +
           rowField("Green zone", greenZoneText(t), "mlo-row-zone") +
+          ratioField +
           rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl)) +
           '<span class="mlo-row-actions">' +
             iconButton("edit", "Edit", "fa-pen") +
@@ -1041,7 +1173,7 @@
     } catch (e) { /* autoplay can be blocked until a click */ }
   }
 
-  function considerAlert(key, active, message, file) {
+  function considerAlert(key, active, message, file, useBanner) {
     if (!active) {
       alertLatch[key] = false;
       return;
@@ -1049,21 +1181,32 @@
     if (alertLatch[key]) return;
     alertLatch[key] = true;
     playAlert(file);
+    if (useBanner) return;
     if (message) window.alert(message);
   }
 
   function handleAlerts(trades) {
     var seen = {};
+    var straddleAdj = false;
     (trades || []).forEach(function (t) {
       if (!t || (t.status && t.status !== "ACTIVE")) return;
       var id = t.id || ((t.trade_type || "") + ":" + (t.instrument || ""));
-      var adjKey = id + ":adj";
+      var pairKey = (t.ltp_ratio_ce_leg_id || "") + "+" + (t.ltp_ratio_pe_leg_id || "");
+      var adjKey = isStraddle(t) ? (id + ":adj:" + pairKey) : (id + ":adj");
       var exitKey = id + ":exit";
       seen[adjKey] = true;
       seen[exitKey] = true;
-      considerAlert(adjKey, !!t.adjustment_alert, t.adjustment_message || "Adjustment", "adjustment.mp3");
-      considerAlert(exitKey, !!t.exit_adjustment_alert, "Exit Adjustment", "adjustment_exit.mp3");
+      if (isStraddle(t) && t.adjustment_alert) straddleAdj = true;
+      considerAlert(
+        adjKey,
+        !!t.adjustment_alert,
+        t.adjustment_message || "Adjustment",
+        "adjustment.mp3",
+        isStraddle(t)
+      );
+      considerAlert(exitKey, !!t.exit_adjustment_alert, "Exit Adjustment", "adjustment_exit.mp3", false);
     });
+    setAdjBanner(straddleAdj);
     Object.keys(alertLatch).forEach(function (key) {
       if (!seen[key]) alertLatch[key] = false;
     });
