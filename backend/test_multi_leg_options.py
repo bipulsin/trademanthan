@@ -427,6 +427,16 @@ def test_straddle_ltp_ratio_threshold_and_pair_rules():
         _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
     ]) is None
 
+    # Sync / legacy rows with blank qualifier still form a Main CE/PE pair.
+    blank_q = [
+        _ratio_leg("CE", None, 511.0, "2026-10-05T09:43:00+05:30", leg_id="ce-sync"),
+        _ratio_leg("PE", "", 377.6, "2026-10-05T09:43:00+05:30", leg_id="pe-sync"),
+    ]
+    assert straddle_ratio_leg(blank_q, "CE")["id"] == "ce-sync"
+    assert straddle_ratio_leg(blank_q, "PE")["id"] == "pe-sync"
+    assert abs(straddle_ltp_ratio(blank_q) - (511.0 / 377.6)) < 1e-9
+    assert straddle_adjustment_due(blank_q) is False
+
     annotated = annotate_adjustment_alerts(
         [{
             "status": "ACTIVE",

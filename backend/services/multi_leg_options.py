@@ -172,13 +172,15 @@ def straddle_ratio_leg(
     """Most recently entered still-active Main/Adj leg of the given CE/PE side.
 
     Wings and exited legs are ignored. Adj wins when it is newer than Main.
+    Blank/null qualifier (Upstox sync / legacy rows) counts as Main.
     """
     want = str(option_type or "").strip().upper()
     candidates: List[Dict[str, Any]] = []
     for leg in legs or []:
         if leg_is_exited(leg):
             continue
-        role = str(leg.get("qualifier") or "").strip().upper()
+        # Sync-created straddles leave qualifier null; treat as MAIN for ratio.
+        role = str(leg.get("qualifier") or "").strip().upper() or "MAIN"
         if role not in ("MAIN", "ADJ"):
             continue
         if str(leg.get("option_type") or "").strip().upper() != want:

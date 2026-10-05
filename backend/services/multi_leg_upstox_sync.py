@@ -484,18 +484,25 @@ def _fallback_spot(legs: Sequence[Dict[str, Any]]) -> float:
     return float(strikes[len(strikes) // 2])
 
 
-def _insert_synced_leg(db, trade_id: Optional[str], leg: Dict[str, Any], sort_order: int) -> None:
+def _insert_synced_leg(
+    db,
+    trade_id: Optional[str],
+    leg: Dict[str, Any],
+    sort_order: int,
+    *,
+    qualifier: Optional[str] = None,
+) -> None:
     db.execute(
         text(
             """
             INSERT INTO multi_leg_trade_legs (
-                id, trade_id, side, option_type, strike_price, leg_expiry_date,
+                id, trade_id, qualifier, side, option_type, strike_price, leg_expiry_date,
                 entry_price, entry_time, exit_price, exit_time, ltp, delta,
                 lot_size, instrument_key, leg_pnl, upstox_order_id, sort_order
             ) VALUES (
                 CAST(:id AS uuid),
                 CASE WHEN :trade_id IS NULL THEN NULL ELSE CAST(:trade_id AS uuid) END,
-                :side, :option_type, :strike_price, :leg_expiry_date,
+                :qualifier, :side, :option_type, :strike_price, :leg_expiry_date,
                 :entry_price, :entry_time, NULL, NULL, NULL, NULL,
                 :lot_size, :instrument_key, NULL, :upstox_order_id, :sort_order
             )
@@ -504,6 +511,7 @@ def _insert_synced_leg(db, trade_id: Optional[str], leg: Dict[str, Any], sort_or
         {
             "id": str(uuid.uuid4()),
             "trade_id": trade_id,
+            "qualifier": qualifier,
             "side": leg["side"],
             "option_type": leg["option_type"],
             "strike_price": leg["strike_price"],
@@ -554,8 +562,11 @@ def _persist_plan(plan: Dict[str, Any], spots: Dict[str, Optional[float]]) -> No
                     "trade_no": trade_no,
                 },
             )
+            # Straddle sync legs are the Main CE/PE pair; blank qualifier
+            # would otherwise skip LTP ratio until the user edits the trade.
+            leg_qualifier = "MAIN" if created.get("trade_type") == "STRADDLE" else None
             for index, leg in enumerate(created["legs"]):
-                _insert_synced_leg(db, trade_id, leg, index)
+                _insert_synced_leg(db, trade_id, leg, index, qualifier=leg_qualifier)
         for index, leg in enumerate(plan.get("orphan_legs") or []):
             _insert_synced_leg(db, None, leg, index)
         db.commit()
