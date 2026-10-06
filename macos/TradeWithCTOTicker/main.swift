@@ -575,7 +575,7 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func tradeRow(_ row: [String: Any]) -> NSView? {
         let sym = scriptName(row)
         guard usableScript(sym), let pnl = row["pnl"] as? Double else { return nil }
-        let pnlLine = pair(sym, formatRupees(pnl), liveYellow)
+        let pnlLine = pair(sym, formatPnl(pnl, ratio: ltpRatio(row)), liveYellow)
         let alerts = (row["alerts"] as? [[String: Any]]) ?? []
         var inline: [NSView] = []
         var below: [NSView] = []
@@ -610,6 +610,21 @@ final class TickerApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         box.addArrangedSubview(top)
         below.forEach { box.addArrangedSubview($0) }
         return box
+    }
+
+    func ltpRatio(_ row: [String: Any]) -> Double? {
+        if let value = row["ltp_ratio"] as? Double { return value }
+        if let value = row["ltp_ratio"] as? NSNumber { return value.doubleValue }
+        if let value = row["ltp_ratio"] as? String, let parsed = Double(value) { return parsed }
+        return nil
+    }
+
+    func formatPnl(_ amount: Double, ratio: Double? = nil) -> String {
+        var text = formatRupees(amount)
+        if let ratio {
+            text += String(format: " (%.2f)", ratio)
+        }
+        return text
     }
 
     func formatRupees(_ amount: Double) -> String {

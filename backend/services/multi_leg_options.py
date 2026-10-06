@@ -256,6 +256,73 @@ def exit_adjustment_due(spot: Any, legs: Sequence[Dict[str, Any]]) -> bool:
     return False
 
 
+def ist_today(now: Optional[datetime] = None) -> date:
+    """Current calendar day in Asia/Kolkata."""
+    clock = now or datetime.now(IST)
+    if clock.tzinfo is None:
+        clock = IST.localize(clock)
+    else:
+        clock = clock.astimezone(IST)
+    return clock.date()
+
+
+def scope_alert_to_first_ist_day(
+    condition: bool,
+    first_date: Any,
+    *,
+    today: Optional[date] = None,
+) -> Tuple[bool, Optional[date], bool]:
+    """Show an alert only on the IST day it first became true.
+
+    Returns ``(show, new_first_date, dirty)``. When the condition clears,
+    ``new_first_date`` is None so a later re-trigger is a new generation.
+    """
+    day = today or ist_today()
+    stored = _parse_date(first_date)
+    if not condition:
+        if stored is None:
+            return False, None, False
+        return False, None, True
+    if stored is None:
+        return True, day, True
+    return stored == day, stored, False
+
+
+def _persist_alert_first_dates(
+    updates: Sequence[Tuple[str, Optional[date], Optional[date]]],
+) -> None:
+    """Write adj / exit first-trigger IST dates. Best-effort; skips bad ids."""
+    rows: List[Tuple[str, Optional[date], Optional[date]]] = []
+    for trade_id, adj_day, exit_day in updates or []:
+        tid = str(trade_id or "").strip()
+        if not tid:
+            continue
+        try:
+            uuid.UUID(tid)
+        except ValueError:
+            continue
+        rows.append((tid, adj_day, exit_day))
+    if not rows:
+        return
+    try:
+        with engine.begin() as conn:
+            for tid, adj_day, exit_day in rows:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE multi_leg_trades SET
+                            adj_alert_first_date = :adj,
+                            exit_adj_alert_first_date = :exit,
+                            updated_at = NOW()
+                        WHERE id = CAST(:id AS uuid)
+                        """
+                    ),
+                    {"id": tid, "adj": adj_day, "exit": exit_day},
+                )
+    except Exception:
+        logger.info("multi_leg alert first-date persist failed", exc_info=True)
+
+
 def _trade_needs_spot(trade: Dict[str, Any]) -> bool:
     if str(trade.get("status") or "ACTIVE").strip().upper() != "ACTIVE":
         return False
@@ -954,8 +1021,17 @@ def underlying_spot_ltps(instruments: Iterable[str]) -> Dict[str, Optional[float
 def annotate_adjustment_alerts(
     trades: List[Dict[str, Any]],
     spots: Optional[Dict[str, Optional[float]]] = None,
+    *,
+    today: Optional[date] = None,
+    persist: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Attach spot LTP, straddle LTP ratio, and adjustment flags."""
+    """Attach spot LTP, straddle LTP ratio, and adjustment flags.
+
+    Adjustment / exit-adjustment UI flags, banners, sounds, and ticker lines
+    fire only on the IST calendar day the condition first became true. Dates
+    are stored on the trade and cleared when the condition clears so a later
+    re-trigger is a new generation.
+    """
     need: List[str] = []
     for trade in trades or []:
         if not _trade_needs_spot(trade):
@@ -971,6 +1047,8 @@ def annotate_adjustment_alerts(
             logger.info("multi_leg underlying spot quote failed", exc_info=True)
             fetched = {}
     fetched = fetched or {}
+    day = today or ist_today()
+    date_updates: List[Tuple[str, Optional[date], Optional[date]]] = []
     for trade in trades or []:
         active = str(trade.get("status") or "ACTIVE").strip().upper() == "ACTIVE"
         name = str(trade.get("instrument") or "").strip().upper()
@@ -984,27 +1062,45 @@ def annotate_adjustment_alerts(
         trade["ltp_ratio_ce_leg_id"] = str(ce_leg["id"]) if ce_leg and ce_leg.get("id") else None
         trade["ltp_ratio_pe_leg_id"] = str(pe_leg["id"]) if pe_leg and pe_leg.get("id") else None
         if kind == "STRADDLE":
-            adj = bool(active and straddle_adjustment_due(legs))
-            trade["adjustment_message"] = "Adjustment on Straddle" if adj else ""
-            trade["adjustment_ticker_text"] = "Adjustment" if adj else ""
+            raw_adj = bool(active and straddle_adjustment_due(legs))
         else:
-            adj = bool(
+            raw_adj = bool(
                 active
                 and green_zone_adjustment(spot, trade.get("green_zone_ce"), trade.get("green_zone_pe"))
             )
+        raw_exit = bool(active and exit_adjustment_due(spot, legs))
+        show_adj, adj_first, adj_dirty = scope_alert_to_first_ist_day(
+            raw_adj, trade.get("adj_alert_first_date"), today=day
+        )
+        show_exit, exit_first, exit_dirty = scope_alert_to_first_ist_day(
+            raw_exit, trade.get("exit_adj_alert_first_date"), today=day
+        )
+        trade["adj_alert_first_date"] = adj_first.isoformat() if adj_first else None
+        trade["exit_adj_alert_first_date"] = exit_first.isoformat() if exit_first else None
+        if adj_dirty or exit_dirty:
+            tid = str(trade.get("id") or "").strip()
+            if tid:
+                date_updates.append((tid, adj_first, exit_first))
+        if kind == "STRADDLE":
+            trade["adjustment_message"] = "Adjustment on Straddle" if show_adj else ""
+            trade["adjustment_ticker_text"] = "Adjustment" if show_adj else ""
+        else:
             trade["adjustment_message"] = (
-                adjustment_alert_text(trade.get("trade_type"), trade.get("instrument")) if adj else ""
+                adjustment_alert_text(trade.get("trade_type"), trade.get("instrument"))
+                if show_adj
+                else ""
             )
             trade["adjustment_ticker_text"] = trade["adjustment_message"]
-        exit_adj = bool(active and exit_adjustment_due(spot, legs))
         trade["spot_ltp"] = spot
-        trade["adjustment_alert"] = adj
-        trade["exit_adjustment_alert"] = exit_adj
+        trade["adjustment_alert"] = show_adj
+        trade["exit_adjustment_alert"] = show_exit
         trade["exit_adjustment_message"] = (
             adjustment_alert_text(trade.get("trade_type"), trade.get("instrument"), exit=True)
-            if exit_adj
+            if show_exit
             else ""
         )
+    if persist and date_updates:
+        _persist_alert_first_dates(date_updates)
     return trades
 
 
@@ -1191,6 +1287,12 @@ def _ensure_trade_numbers(conn) -> None:
     ))
     conn.execute(text(
         "ALTER TABLE multi_leg_trade_legs ADD COLUMN IF NOT EXISTS qualifier TEXT"
+    ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS adj_alert_first_date DATE"
+    ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS exit_adj_alert_first_date DATE"
     ))
 
 
@@ -1381,7 +1483,9 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
             f"""
             SELECT t.id AS trade_id, t.trade_type, t.instrument, t.spot_price_entry,
                    t.entry_date, t.expiry_date, t.status, t.exit_date, t.total_pnl,
-                   t.trade_no, t.max_profit, t.green_zone_ce, t.green_zone_pe, t.created_at, t.updated_at,
+                   t.trade_no, t.max_profit, t.green_zone_ce, t.green_zone_pe,
+                   t.adj_alert_first_date, t.exit_adj_alert_first_date,
+                   t.created_at, t.updated_at,
                    l.id AS leg_id, l.qualifier, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
                    l.entry_price, l.entry_time, l.exit_price, l.exit_time, l.ltp, l.delta,
                    l.lot_size, l.instrument_key, l.leg_pnl, l.upstox_order_id, l.sort_order
@@ -1450,6 +1554,16 @@ def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dic
         "max_profit": _as_float(header.get("max_profit")),
         "green_zone_ce": _as_float(header.get("green_zone_ce")),
         "green_zone_pe": _as_float(header.get("green_zone_pe")),
+        "adj_alert_first_date": (
+            _parse_date(header.get("adj_alert_first_date")).isoformat()
+            if _parse_date(header.get("adj_alert_first_date"))
+            else None
+        ),
+        "exit_adj_alert_first_date": (
+            _parse_date(header.get("exit_adj_alert_first_date")).isoformat()
+            if _parse_date(header.get("exit_adj_alert_first_date"))
+            else None
+        ),
         "status": header.get("status"),
         "exit_date": _iso_dt(header.get("exit_date")),
         "dte": dte_days(expiry),

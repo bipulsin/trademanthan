@@ -681,6 +681,15 @@ def _multi_leg_trades() -> List[Dict[str, Any]]:
         row = _row("multi_leg_options", sym, pnl=pnl, label="ACTIVE")
         if trade.get("id"):
             row["id"] = str(trade["id"])
+        ratio = trade.get("ltp_ratio")
+        if (
+            str(trade.get("trade_type") or "").strip().upper() == "STRADDLE"
+            and ratio is not None
+        ):
+            try:
+                row["ltp_ratio"] = round(float(ratio), 2)
+            except (TypeError, ValueError):
+                pass
         alerts = []
         if trade.get("adjustment_alert"):
             adj_text = (

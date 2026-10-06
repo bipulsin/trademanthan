@@ -155,6 +155,14 @@
     return { STRADDLE: "Straddle", IRON_FLY: "Iron Fly", IRON_CONDOR: "Iron Condor", UNCLASSIFIED: "Unclassified" }[t] || t;
   }
 
+  function legTypeLabel(qualifier) {
+    var role = String(qualifier || "").trim().toUpperCase();
+    if (role === "MAIN") return "Main";
+    if (role === "WING") return "Wing";
+    if (role === "ADJ") return "Adj";
+    return "—";
+  }
+
   function lastWeekday(year, month, weekday) {
     var last = new Date(Date.UTC(year, month, 0));
     while (last.getUTCDay() !== weekday) last.setUTCDate(last.getUTCDate() - 1);
@@ -765,6 +773,7 @@
         var mark = leg.exited ? leg.exit_price : leg.ltp;
         var markLabel = leg.exited ? "Exit" : "LTP";
         return '<div class="mlo-leg-ro">' +
+          '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
           '<span data-label="Side">' + esc(leg.side) + "</span>" +
           '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
           '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
@@ -774,7 +783,7 @@
           '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
           "</div>";
       }).join("");
-      var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
+      var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
       var ratioField = "";
       if (isStraddle(t)) {
         var hot = t.ltp_ratio != null && Number(t.ltp_ratio) >= 3;

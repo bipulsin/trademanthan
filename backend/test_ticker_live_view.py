@@ -334,4 +334,5 @@ def test_multi_leg_straddle_ratio_adjustment_ticker(monkeypatch):
     assert len(rows) == 1
     assert rows[0]["symbol"] == "Straddle-NIFTY-27Oct26"
     assert rows[0]["pnl"] == 120.0
+    assert rows[0]["ltp_ratio"] == 3.0
     assert rows[0]["alerts"] == [{"text": "Adjustment", "sound": "adjustment"}]

@@ -20,6 +20,7 @@ from backend.services.multi_leg_options import (
     next_monthly_option_expiry,
     next_trade_number,
     parse_clock_ampm,
+    scope_alert_to_first_ist_day,
     status_after_save,
     straddle_adjustment_due,
     straddle_ltp_ratio,
@@ -445,11 +446,104 @@ def test_straddle_ltp_ratio_threshold_and_pair_rules():
             "legs": at_three,
         }],
         spots={},
+        today=date(2026, 10, 6),
+        persist=False,
     )
     assert annotated[0]["adjustment_alert"] is True
     assert annotated[0]["ltp_ratio"] == 3.0
     assert annotated[0]["adjustment_message"] == "Adjustment on Straddle"
     assert annotated[0]["adjustment_ticker_text"] == "Adjustment"
+    assert annotated[0]["adj_alert_first_date"] == "2026-10-06"
+
+
+def test_adjustment_alert_same_ist_day_only():
+    # First trigger stores today and shows; later IST days suppress until clear + re-trigger.
+    show, stored, dirty = scope_alert_to_first_ist_day(
+        True, None, today=date(2026, 10, 6)
+    )
+    assert show is True and stored == date(2026, 10, 6) and dirty is True
+    show, stored, dirty = scope_alert_to_first_ist_day(
+        True, date(2026, 10, 6), today=date(2026, 10, 6)
+    )
+    assert show is True and stored == date(2026, 10, 6) and dirty is False
+    show, stored, dirty = scope_alert_to_first_ist_day(
+        True, date(2026, 10, 6), today=date(2026, 10, 7)
+    )
+    assert show is False and stored == date(2026, 10, 6) and dirty is False
+    show, stored, dirty = scope_alert_to_first_ist_day(
+        False, date(2026, 10, 6), today=date(2026, 10, 7)
+    )
+    assert show is False and stored is None and dirty is True
+    show, stored, dirty = scope_alert_to_first_ist_day(
+        True, None, today=date(2026, 10, 8)
+    )
+    assert show is True and stored == date(2026, 10, 8) and dirty is True
+
+    legs = [
+        _ratio_leg("CE", "MAIN", 30.0, "2026-10-04T09:20:00+05:30"),
+        _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
+    ]
+    stale = annotate_adjustment_alerts(
+        [{
+            "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "status": "ACTIVE",
+            "trade_type": "STRADDLE",
+            "instrument": "NIFTY",
+            "adj_alert_first_date": "2026-10-05",
+            "legs": legs,
+        }],
+        spots={},
+        today=date(2026, 10, 6),
+        persist=False,
+    )
+    assert stale[0]["adjustment_alert"] is False
+    assert stale[0]["adjustment_message"] == ""
+    assert stale[0]["adjustment_ticker_text"] == ""
+    assert stale[0]["adj_alert_first_date"] == "2026-10-05"
+    assert stale[0]["ltp_ratio"] == 3.0
+
+    cleared = annotate_adjustment_alerts(
+        [{
+            "status": "ACTIVE",
+            "trade_type": "STRADDLE",
+            "instrument": "NIFTY",
+            "adj_alert_first_date": "2026-10-05",
+            "legs": [
+                _ratio_leg("CE", "MAIN", 20.0, "2026-10-04T09:20:00+05:30"),
+                _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
+            ],
+        }],
+        spots={},
+        today=date(2026, 10, 6),
+        persist=False,
+    )
+    assert cleared[0]["adjustment_alert"] is False
+    assert cleared[0]["adj_alert_first_date"] is None
+
+    iron = annotate_adjustment_alerts(
+        [{
+            "status": "ACTIVE",
+            "trade_type": "IRON_FLY",
+            "instrument": "NIFTY",
+            "green_zone_ce": 25000,
+            "green_zone_pe": 24000,
+            "exit_adj_alert_first_date": "2026-10-05",
+            "legs": [
+                {"qualifier": "MAIN", "option_type": "PE", "strike_price": 24500},
+                {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+                {"qualifier": "ADJ", "option_type": "CE", "strike_price": 24600},
+            ],
+        }],
+        spots={"NIFTY": 25100.0},
+        today=date(2026, 10, 6),
+        persist=False,
+    )
+    # Green-zone adj is a new generation today; exit adj was first true yesterday.
+    assert iron[0]["adjustment_alert"] is True
+    assert iron[0]["adj_alert_first_date"] == "2026-10-06"
+    assert iron[0]["exit_adjustment_alert"] is False
+    assert iron[0]["exit_adj_alert_first_date"] == "2026-10-05"
+    assert iron[0]["exit_adjustment_message"] == ""
 
 
 def test_green_zone_spot_and_exit_adjustment():
