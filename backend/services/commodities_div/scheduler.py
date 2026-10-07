@@ -1,4 +1,4 @@
-"""APScheduler jobs for Commodities Div In-Trade WS LTP + REST fallback."""
+"""APScheduler jobs for Commodities Div In-Trade WS LTP + REST fallback + stale DIV."""
 from __future__ import annotations
 
 import logging
@@ -27,6 +27,17 @@ def _should_skip_market_jobs() -> bool:
         return bool(should_skip_scheduled_market_jobs_ist())
     except Exception:
         return False
+
+
+def _stale_div_cleanup() -> None:
+    """Morning IST: Reject Divergence rows with no GO after 3 MCX session trading days."""
+    try:
+        from backend.services.commodities_div.stale_cleanup import reject_stale_divergences
+
+        out = reject_stale_divergences()
+        logger.info("commodities_div stale DIV cleanup: %s", out)
+    except Exception:
+        logger.exception("commodities_div stale DIV cleanup failed")
 
 
 def _ws_ltp_sync() -> None:
@@ -70,6 +81,20 @@ def start_commodities_div_ltp_scheduler() -> None:
     if _scheduler is not None:
         return
     sch = BackgroundScheduler(timezone="Asia/Kolkata")
+    # Stale DIV → Rejected before MCX open (weekends/holidays still run: calendar math is IST).
+    sch.add_job(
+        _stale_div_cleanup,
+        CronTrigger(
+            hour=8,
+            minute=15,
+            timezone="Asia/Kolkata",
+        ),
+        id="commodities_div_stale_div_0815",
+        name="Commodities Div stale DIV cleanup 08:15 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     # After Breakfast window: sync WS provider every minute during MCX hours.
     sch.add_job(
         _ws_ltp_sync,
@@ -107,13 +132,14 @@ def start_commodities_div_ltp_scheduler() -> None:
     sch.start()
     _scheduler = sch
     try:
+        _stale_div_cleanup()
         _ws_ltp_sync()
         _rest_ltp_refresh()
     except Exception:
         logger.exception("commodities_div LTP initial sync/refresh failed")
     logger.info(
         "Commodities Div LTP scheduler started "
-        "(WS sync 1m from 09:30 + REST every 5m during MCX session)"
+        "(stale DIV 08:15 IST + WS sync 1m from 09:30 + REST every 5m during MCX session)"
     )
 
 

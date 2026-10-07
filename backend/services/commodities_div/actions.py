@@ -239,7 +239,7 @@ def get_active_signal() -> Optional[Dict[str, Any]]:
 
 
 def list_active_signals() -> List[Dict[str, Any]]:
-    """All non-History cycles (compat — Active + In-Trade + Exit Trade)."""
+    """Open cycles (compat — Active + In-Trade + Exit Trade; excludes History/Rejected)."""
     ensure_commodities_div_tables()
     db = SessionLocal()
     try:
@@ -247,7 +247,7 @@ def list_active_signals() -> List[Dict[str, Any]]:
             text(
                 """
                 SELECT * FROM commodities_div_signals
-                WHERE status <> 'History'
+                WHERE status NOT IN ('History', 'Rejected')
                 ORDER BY id DESC
                 """
             )

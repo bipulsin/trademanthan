@@ -50,16 +50,6 @@ def ensure_commodities_div_tables() -> None:
                 """
             )
         )
-        # Ensure per-symbol unique (idempotent if migration already created it).
-        conn.execute(
-            text(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol
-                    ON commodities_div_signals (symbol_mapped)
-                    WHERE status <> 'History'
-                """
-            )
-        )
         # Discretionary edit: PAPER | LIVE (default PAPER).
         conn.execute(
             text(
@@ -84,6 +74,46 @@ def ensure_commodities_div_tables() -> None:
                 """
                 ALTER TABLE commodities_div_signals
                     ADD COLUMN IF NOT EXISTS activated_ltp DOUBLE PRECISION
+                """
+            )
+        )
+        # Stale DIV cleanup: Rejected + optional remark (hides from Active).
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_signals
+                    ADD COLUMN IF NOT EXISTS status_remark TEXT
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_signals
+                    DROP CONSTRAINT IF EXISTS commodities_div_signals_status_check
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_signals
+                    ADD CONSTRAINT commodities_div_signals_status_check
+                    CHECK (status IN (
+                        'Divergence', 'Activated', 'In-Trade', 'Exit Trade',
+                        'History', 'Rejected'
+                    ))
+                """
+            )
+        )
+        # Open cycle unique: History and Rejected free the underlying slot.
+        conn.execute(text("DROP INDEX IF EXISTS uq_commodities_div_one_active_per_symbol"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX uq_commodities_div_one_active_per_symbol
+                    ON commodities_div_signals (symbol_mapped)
+                    WHERE status NOT IN ('History', 'Rejected')
                 """
             )
         )

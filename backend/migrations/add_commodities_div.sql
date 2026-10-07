@@ -46,8 +46,9 @@ CREATE TABLE IF NOT EXISTS commodities_div_signals (
     symbol_mapped TEXT NOT NULL,
     direction TEXT NOT NULL CHECK (direction IN ('BULL', 'BEAR')),
     status TEXT NOT NULL CHECK (status IN (
-        'Divergence', 'Activated', 'In-Trade', 'Exit Trade', 'History'
+        'Divergence', 'Activated', 'In-Trade', 'Exit Trade', 'History', 'Rejected'
     )),
+    status_remark TEXT,
     div_received_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     div_tv_time_ist TIMESTAMP WITHOUT TIME ZONE,
     div_webhook_log_id BIGINT,
@@ -83,7 +84,12 @@ ALTER TABLE commodities_div_signals
 ALTER TABLE commodities_div_signals
     ADD COLUMN IF NOT EXISTS activated_ltp DOUBLE PRECISION;
 
--- At most one non-History cycle per underlying (different symbols may coexist).
+-- At most one open cycle per underlying (History / Rejected free the slot).
+DROP INDEX IF EXISTS uq_commodities_div_one_active_per_symbol;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol
     ON commodities_div_signals (symbol_mapped)
-    WHERE status <> 'History';
+    WHERE status NOT IN ('History', 'Rejected');
+
+-- Existing DBs: Rejected + remark (CREATE TABLE IF NOT EXISTS skips new cols/checks).
+ALTER TABLE commodities_div_signals
+    ADD COLUMN IF NOT EXISTS status_remark TEXT;

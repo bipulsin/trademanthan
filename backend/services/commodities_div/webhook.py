@@ -39,9 +39,12 @@ STATUS_ACTIVATED = "Activated"
 STATUS_IN_TRADE = "In-Trade"
 STATUS_EXIT_TRADE = "Exit Trade"
 STATUS_HISTORY = "History"
+STATUS_REJECTED = "Rejected"
 
 ACTIVE_PRE_TRADE = {STATUS_DIVERGENCE, STATUS_ACTIVATED}
 BLOCKING_STATUSES = {STATUS_IN_TRADE, STATUS_EXIT_TRADE}
+# Terminal rows free the per-symbol unique slot and are invisible to Active.
+TERMINAL_STATUSES = {STATUS_HISTORY, STATUS_REJECTED}
 
 # Serialize DIV/GO/EXIT for the same underlying so simultaneous TV dual-fires
 # do not race (GO before DIV → unmatched).
@@ -132,12 +135,12 @@ def parse_flag_fields(parsed: Any) -> Tuple[str, Optional[Dict[str, Any]]]:
 def _get_active_for_symbol(
     db, symbol_raw: str, symbol_mapped: str
 ) -> Optional[Dict[str, Any]]:
-    """Non-History cycle for this underlying only (one active cycle per symbol)."""
+    """Open cycle for this underlying only (excludes History / Rejected)."""
     rows = db.execute(
         text(
             """
             SELECT * FROM commodities_div_signals
-            WHERE status <> 'History'
+            WHERE status NOT IN ('History', 'Rejected')
             ORDER BY id DESC
             """
         )
