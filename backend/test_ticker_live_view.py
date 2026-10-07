@@ -296,6 +296,39 @@ def test_multi_leg_adjustment_lines_keep_pnl(monkeypatch):
     assert [a["sound"] for a in rows[0]["alerts"]] == ["adjustment", "adjustment_exit"]
 
 
+def test_multi_leg_adjustment_omitted_after_24h(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.underlying_spot_ltps",
+        lambda names: {"NIFTY": 25100.0},
+    )
+    monkeypatch.setattr(
+        "backend.services.multi_leg_options.list_active",
+        lambda: [
+            {
+                "id": "trade-old-adj",
+                "status": "ACTIVE",
+                "trade_type": "IRON_FLY",
+                "instrument": "NIFTY",
+                "expiry_date": "2026-10-27",
+                "total_pnl": 100,
+                "green_zone_ce": 25000,
+                "green_zone_pe": 24000,
+                "adj_alert_first_triggered_at": "2026-10-05T09:00:00+05:30",
+                "exit_adj_alert_first_triggered_at": "2026-10-05T09:00:00+05:30",
+                "legs": [
+                    {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+                    {"qualifier": "MAIN", "option_type": "PE", "strike_price": 24500},
+                    {"qualifier": "ADJ", "option_type": "CE", "strike_price": 24600},
+                ],
+            }
+        ],
+    )
+    rows = tl._multi_leg_trades()
+    assert len(rows) == 1
+    assert rows[0]["pnl"] == 100.0
+    assert "alerts" not in rows[0]
+
+
 def test_multi_leg_straddle_ratio_adjustment_ticker(monkeypatch):
     monkeypatch.setattr(
         "backend.services.multi_leg_options.underlying_spot_ltps",

@@ -58,6 +58,9 @@ ALTER TABLE multi_leg_trade_legs ADD COLUMN IF NOT EXISTS qualifier TEXT;
 -- First IST calendar day each adjustment alert became true (cleared when condition clears).
 ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS adj_alert_first_date DATE;
 ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS exit_adj_alert_first_date DATE;
+-- Exact first-trigger time for 24h expiry (web + ticker). Cleared when condition clears.
+ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS adj_alert_first_triggered_at TIMESTAMPTZ;
+ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS exit_adj_alert_first_triggered_at TIMESTAMPTZ;
 
 -- upstox_order_id unique index is created in ensure_multi_leg_tables after the
 -- additive column exists on databases created from an older copy of this file.

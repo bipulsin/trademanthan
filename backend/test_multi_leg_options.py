@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from backend.services.multi_leg_options import (
+    IST,
     MultiLegValidationError,
     _parse_dt,
     adjustment_alert_text,
@@ -21,6 +22,7 @@ from backend.services.multi_leg_options import (
     next_trade_number,
     parse_clock_ampm,
     scope_alert_to_first_ist_day,
+    scope_alert_to_first_trigger_window,
     status_after_save,
     straddle_adjustment_due,
     straddle_ltp_ratio,
@@ -456,28 +458,45 @@ def test_straddle_ltp_ratio_threshold_and_pair_rules():
     assert annotated[0]["adj_alert_first_date"] == "2026-10-06"
 
 
-def test_adjustment_alert_same_ist_day_only():
-    # First trigger stores today and shows; later IST days suppress until clear + re-trigger.
-    show, stored, dirty = scope_alert_to_first_ist_day(
-        True, None, today=date(2026, 10, 6)
+def test_adjustment_alert_24h_first_trigger_window():
+    # First fire stores now and shows; age >= 24h suppresses until clear + re-trigger.
+    t0 = IST.localize(datetime(2026, 10, 6, 10, 0, 0))
+    show, stored, dirty = scope_alert_to_first_trigger_window(True, None, now=t0)
+    assert show is True and stored == t0 and dirty is True
+    show, stored, dirty = scope_alert_to_first_trigger_window(True, t0, now=t0)
+    assert show is True and stored == t0 and dirty is False
+    # Still same IST day, but 24h elapsed → suppress (date-only was not enough).
+    same_day_later = IST.localize(datetime(2026, 10, 6, 23, 30, 0))
+    early = IST.localize(datetime(2026, 10, 5, 22, 0, 0))
+    show, stored, dirty = scope_alert_to_first_trigger_window(
+        True, early, now=same_day_later
     )
-    assert show is True and stored == date(2026, 10, 6) and dirty is True
-    show, stored, dirty = scope_alert_to_first_ist_day(
+    assert show is False and stored == early and dirty is False
+    # Next calendar day with age still under 24h stays visible.
+    next_morning = IST.localize(datetime(2026, 10, 7, 9, 0, 0))
+    show, stored, dirty = scope_alert_to_first_trigger_window(True, t0, now=next_morning)
+    assert show is True and stored == t0 and dirty is False
+    # Past 24h from t0.
+    after = IST.localize(datetime(2026, 10, 7, 10, 0, 0))
+    show, stored, dirty = scope_alert_to_first_trigger_window(True, t0, now=after)
+    assert show is False and stored == t0 and dirty is False
+    # Condition clear wipes the stamp so a later breach is a new generation.
+    show, stored, dirty = scope_alert_to_first_trigger_window(False, t0, now=after)
+    assert show is False and stored is None and dirty is True
+    show, stored, dirty = scope_alert_to_first_trigger_window(
+        True, None, now=IST.localize(datetime(2026, 10, 8, 11, 0, 0))
+    )
+    assert show is True and dirty is True
+
+    # Legacy date-only column: IST midnight + 24h (compat wrapper).
+    show, day, dirty = scope_alert_to_first_ist_day(
         True, date(2026, 10, 6), today=date(2026, 10, 6)
     )
-    assert show is True and stored == date(2026, 10, 6) and dirty is False
-    show, stored, dirty = scope_alert_to_first_ist_day(
+    assert show is True and day == date(2026, 10, 6) and dirty is True
+    show, day, dirty = scope_alert_to_first_ist_day(
         True, date(2026, 10, 6), today=date(2026, 10, 7)
     )
-    assert show is False and stored == date(2026, 10, 6) and dirty is False
-    show, stored, dirty = scope_alert_to_first_ist_day(
-        False, date(2026, 10, 6), today=date(2026, 10, 7)
-    )
-    assert show is False and stored is None and dirty is True
-    show, stored, dirty = scope_alert_to_first_ist_day(
-        True, None, today=date(2026, 10, 8)
-    )
-    assert show is True and stored == date(2026, 10, 8) and dirty is True
+    assert show is False and day == date(2026, 10, 6)
 
     legs = [
         _ratio_leg("CE", "MAIN", 30.0, "2026-10-04T09:20:00+05:30"),
@@ -502,12 +521,59 @@ def test_adjustment_alert_same_ist_day_only():
     assert stale[0]["adj_alert_first_date"] == "2026-10-05"
     assert stale[0]["ltp_ratio"] == 3.0
 
+    # Age >= 24h suppresses even though first_date would still be "today" under date-only.
+    expired_24h = annotate_adjustment_alerts(
+        [{
+            "id": "bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "status": "ACTIVE",
+            "trade_type": "IRON_FLY",
+            "instrument": "NIFTY",
+            "green_zone_ce": 25000,
+            "green_zone_pe": 24000,
+            "adj_alert_first_date": "2026-10-06",
+            "adj_alert_first_triggered_at": "2026-10-06T09:00:00+05:30",
+            "legs": [
+                {"qualifier": "MAIN", "option_type": "PE", "strike_price": 24500},
+                {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+            ],
+        }],
+        spots={"NIFTY": 25100.0},
+        now=IST.localize(datetime(2026, 10, 7, 9, 0, 0)),
+        persist=False,
+    )
+    assert expired_24h[0]["adjustment_alert"] is False
+    assert expired_24h[0]["adjustment_message"] == ""
+    assert expired_24h[0]["adj_alert_first_triggered_at"] == "2026-10-06T09:00:00+05:30"
+    assert expired_24h[0]["adj_alert_first_date"] == "2026-10-06"
+
+    # Still inside the 24h window on the same day.
+    live_same_day = annotate_adjustment_alerts(
+        [{
+            "status": "ACTIVE",
+            "trade_type": "IRON_FLY",
+            "instrument": "NIFTY",
+            "green_zone_ce": 25000,
+            "green_zone_pe": 24000,
+            "adj_alert_first_triggered_at": "2026-10-06T09:00:00+05:30",
+            "legs": [
+                {"qualifier": "MAIN", "option_type": "PE", "strike_price": 24500},
+                {"qualifier": "MAIN", "option_type": "CE", "strike_price": 24800},
+            ],
+        }],
+        spots={"NIFTY": 25100.0},
+        now=IST.localize(datetime(2026, 10, 6, 20, 0, 0)),
+        persist=False,
+    )
+    assert live_same_day[0]["adjustment_alert"] is True
+    assert "Adjustment" in live_same_day[0]["adjustment_message"]
+
     cleared = annotate_adjustment_alerts(
         [{
             "status": "ACTIVE",
             "trade_type": "STRADDLE",
             "instrument": "NIFTY",
             "adj_alert_first_date": "2026-10-05",
+            "adj_alert_first_triggered_at": "2026-10-05T09:00:00+05:30",
             "legs": [
                 _ratio_leg("CE", "MAIN", 20.0, "2026-10-04T09:20:00+05:30"),
                 _ratio_leg("PE", "MAIN", 10.0, "2026-10-04T09:20:00+05:30"),
@@ -519,6 +585,7 @@ def test_adjustment_alert_same_ist_day_only():
     )
     assert cleared[0]["adjustment_alert"] is False
     assert cleared[0]["adj_alert_first_date"] is None
+    assert cleared[0]["adj_alert_first_triggered_at"] is None
 
     iron = annotate_adjustment_alerts(
         [{

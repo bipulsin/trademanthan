@@ -48,6 +48,8 @@ QUALIFIERS = ("MAIN", "WING", "ADJ")
 GREEN_ZONE_BUFFER = 50
 # Straddle LTP skew: max(CE, PE) / min(CE, PE) on the latest active Main/Adj pair.
 STRADDLE_LTP_RATIO_THRESHOLD = 3.0
+# Adjustment / exit-adj banner, sound, and ticker line stay live this long after first fire.
+ALERT_ACTIVE_WINDOW = timedelta(hours=24)
 STATUSES = ("ACTIVE", "CLOSED")
 _COMPACT_TYPES = {
     "STRADDLE": "Straddle",
@@ -258,12 +260,59 @@ def exit_adjustment_due(spot: Any, legs: Sequence[Dict[str, Any]]) -> bool:
 
 def ist_today(now: Optional[datetime] = None) -> date:
     """Current calendar day in Asia/Kolkata."""
+    return ist_now(now).date()
+
+
+def ist_now(now: Optional[datetime] = None) -> datetime:
+    """Aware datetime in Asia/Kolkata."""
     clock = now or datetime.now(IST)
     if clock.tzinfo is None:
-        clock = IST.localize(clock)
-    else:
-        clock = clock.astimezone(IST)
-    return clock.date()
+        return IST.localize(clock)
+    return clock.astimezone(IST)
+
+
+def _coerce_first_triggered_at(
+    first_triggered_at: Any,
+    first_date: Any = None,
+) -> Optional[datetime]:
+    """Prefer timestamptz; fall back to IST midnight of a legacy date-only column."""
+    stamped = _parse_dt(first_triggered_at)
+    if stamped is not None:
+        return stamped
+    day = _parse_date(first_date)
+    if day is None:
+        return None
+    return IST.localize(datetime(day.year, day.month, day.day))
+
+
+def scope_alert_to_first_trigger_window(
+    condition: bool,
+    first_triggered_at: Any,
+    *,
+    first_date: Any = None,
+    now: Optional[datetime] = None,
+) -> Tuple[bool, Optional[datetime], bool]:
+    """Show an alert while the condition is true and within 24h of first fire.
+
+    Returns ``(show, new_first_triggered_at, dirty)``. When the condition
+    clears, ``new_first_triggered_at`` is None so a later re-trigger starts a
+    fresh 24h window. Legacy date-only rows use IST midnight of that date.
+    After 24h the stored stamp is kept (show stays false) until the condition
+    clears — that prevents an immediate re-fire while the breach persists.
+    """
+    clock = ist_now(now)
+    had_ts = _parse_dt(first_triggered_at) is not None
+    stored = _coerce_first_triggered_at(first_triggered_at, first_date)
+    if not condition:
+        if stored is None:
+            return False, None, False
+        return False, None, True
+    if stored is None:
+        return True, clock, True
+    show = clock < stored + ALERT_ACTIVE_WINDOW
+    # Backfill timestamptz when we only had a legacy date-only column.
+    dirty = not had_ts
+    return show, stored, dirty
 
 
 def scope_alert_to_first_ist_day(
@@ -271,29 +320,33 @@ def scope_alert_to_first_ist_day(
     first_date: Any,
     *,
     today: Optional[date] = None,
+    now: Optional[datetime] = None,
+    first_triggered_at: Any = None,
 ) -> Tuple[bool, Optional[date], bool]:
-    """Show an alert only on the IST day it first became true.
+    """Backward-compatible wrapper around the 24h first-trigger window.
 
-    Returns ``(show, new_first_date, dirty)``. When the condition clears,
-    ``new_first_date`` is None so a later re-trigger is a new generation.
+    ``today`` is accepted for older tests; when set without ``now``, noon IST
+    on that day is used so same-day vs next-day cases stay deterministic.
     """
-    day = today or ist_today()
-    stored = _parse_date(first_date)
-    if not condition:
-        if stored is None:
-            return False, None, False
-        return False, None, True
-    if stored is None:
-        return True, day, True
-    return stored == day, stored, False
+    clock = now
+    if clock is None and today is not None:
+        clock = IST.localize(datetime(today.year, today.month, today.day, 12, 0, 0))
+    show, stamped, dirty = scope_alert_to_first_trigger_window(
+        condition,
+        first_triggered_at,
+        first_date=first_date,
+        now=clock,
+    )
+    day = stamped.astimezone(IST).date() if stamped is not None else None
+    return show, day, dirty
 
 
-def _persist_alert_first_dates(
-    updates: Sequence[Tuple[str, Optional[date], Optional[date]]],
+def _persist_alert_first_triggers(
+    updates: Sequence[Tuple[str, Optional[datetime], Optional[datetime]]],
 ) -> None:
-    """Write adj / exit first-trigger IST dates. Best-effort; skips bad ids."""
-    rows: List[Tuple[str, Optional[date], Optional[date]]] = []
-    for trade_id, adj_day, exit_day in updates or []:
+    """Write adj / exit first-trigger timestamps (+ IST dates). Best-effort."""
+    rows: List[Tuple[str, Optional[datetime], Optional[datetime]]] = []
+    for trade_id, adj_at, exit_at in updates or []:
         tid = str(trade_id or "").strip()
         if not tid:
             continue
@@ -301,26 +354,56 @@ def _persist_alert_first_dates(
             uuid.UUID(tid)
         except ValueError:
             continue
-        rows.append((tid, adj_day, exit_day))
+        rows.append((tid, adj_at, exit_at))
     if not rows:
         return
     try:
         with engine.begin() as conn:
-            for tid, adj_day, exit_day in rows:
+            for tid, adj_at, exit_at in rows:
+                adj_day = adj_at.astimezone(IST).date() if adj_at is not None else None
+                exit_day = exit_at.astimezone(IST).date() if exit_at is not None else None
                 conn.execute(
                     text(
                         """
                         UPDATE multi_leg_trades SET
-                            adj_alert_first_date = :adj,
-                            exit_adj_alert_first_date = :exit,
+                            adj_alert_first_date = :adj_day,
+                            exit_adj_alert_first_date = :exit_day,
+                            adj_alert_first_triggered_at = :adj_at,
+                            exit_adj_alert_first_triggered_at = :exit_at,
                             updated_at = NOW()
                         WHERE id = CAST(:id AS uuid)
                         """
                     ),
-                    {"id": tid, "adj": adj_day, "exit": exit_day},
+                    {
+                        "id": tid,
+                        "adj_day": adj_day,
+                        "exit_day": exit_day,
+                        "adj_at": adj_at,
+                        "exit_at": exit_at,
+                    },
                 )
     except Exception:
-        logger.info("multi_leg alert first-date persist failed", exc_info=True)
+        logger.info("multi_leg alert first-trigger persist failed", exc_info=True)
+
+
+def _persist_alert_first_dates(
+    updates: Sequence[Tuple[str, Optional[date], Optional[date]]],
+) -> None:
+    """Legacy date-only writer; prefer ``_persist_alert_first_triggers``."""
+    stamped: List[Tuple[str, Optional[datetime], Optional[datetime]]] = []
+    for trade_id, adj_day, exit_day in updates or []:
+        adj_at = (
+            IST.localize(datetime(adj_day.year, adj_day.month, adj_day.day))
+            if adj_day is not None
+            else None
+        )
+        exit_at = (
+            IST.localize(datetime(exit_day.year, exit_day.month, exit_day.day))
+            if exit_day is not None
+            else None
+        )
+        stamped.append((trade_id, adj_at, exit_at))
+    _persist_alert_first_triggers(stamped)
 
 
 def _trade_needs_spot(trade: Dict[str, Any]) -> bool:
@@ -1023,14 +1106,15 @@ def annotate_adjustment_alerts(
     spots: Optional[Dict[str, Optional[float]]] = None,
     *,
     today: Optional[date] = None,
+    now: Optional[datetime] = None,
     persist: bool = True,
 ) -> List[Dict[str, Any]]:
     """Attach spot LTP, straddle LTP ratio, and adjustment flags.
 
     Adjustment / exit-adjustment UI flags, banners, sounds, and ticker lines
-    fire only on the IST calendar day the condition first became true. Dates
-    are stored on the trade and cleared when the condition clears so a later
-    re-trigger is a new generation.
+    fire when the condition first becomes true and stay active for 24 hours
+    from that timestamp (web and ticker share this gate). Timestamps are
+    cleared when the condition clears so a later re-trigger is a new generation.
     """
     need: List[str] = []
     for trade in trades or []:
@@ -1047,8 +1131,11 @@ def annotate_adjustment_alerts(
             logger.info("multi_leg underlying spot quote failed", exc_info=True)
             fetched = {}
     fetched = fetched or {}
-    day = today or ist_today()
-    date_updates: List[Tuple[str, Optional[date], Optional[date]]] = []
+    clock = now
+    if clock is None and today is not None:
+        clock = IST.localize(datetime(today.year, today.month, today.day, 12, 0, 0))
+    clock = ist_now(clock)
+    trigger_updates: List[Tuple[str, Optional[datetime], Optional[datetime]]] = []
     for trade in trades or []:
         active = str(trade.get("status") or "ACTIVE").strip().upper() == "ACTIVE"
         name = str(trade.get("instrument") or "").strip().upper()
@@ -1069,18 +1156,30 @@ def annotate_adjustment_alerts(
                 and green_zone_adjustment(spot, trade.get("green_zone_ce"), trade.get("green_zone_pe"))
             )
         raw_exit = bool(active and exit_adjustment_due(spot, legs))
-        show_adj, adj_first, adj_dirty = scope_alert_to_first_ist_day(
-            raw_adj, trade.get("adj_alert_first_date"), today=day
+        show_adj, adj_at, adj_dirty = scope_alert_to_first_trigger_window(
+            raw_adj,
+            trade.get("adj_alert_first_triggered_at"),
+            first_date=trade.get("adj_alert_first_date"),
+            now=clock,
         )
-        show_exit, exit_first, exit_dirty = scope_alert_to_first_ist_day(
-            raw_exit, trade.get("exit_adj_alert_first_date"), today=day
+        show_exit, exit_at, exit_dirty = scope_alert_to_first_trigger_window(
+            raw_exit,
+            trade.get("exit_adj_alert_first_triggered_at"),
+            first_date=trade.get("exit_adj_alert_first_date"),
+            now=clock,
         )
-        trade["adj_alert_first_date"] = adj_first.isoformat() if adj_first else None
-        trade["exit_adj_alert_first_date"] = exit_first.isoformat() if exit_first else None
+        trade["adj_alert_first_triggered_at"] = _iso_dt(adj_at)
+        trade["exit_adj_alert_first_triggered_at"] = _iso_dt(exit_at)
+        trade["adj_alert_first_date"] = (
+            adj_at.astimezone(IST).date().isoformat() if adj_at is not None else None
+        )
+        trade["exit_adj_alert_first_date"] = (
+            exit_at.astimezone(IST).date().isoformat() if exit_at is not None else None
+        )
         if adj_dirty or exit_dirty:
             tid = str(trade.get("id") or "").strip()
             if tid:
-                date_updates.append((tid, adj_first, exit_first))
+                trigger_updates.append((tid, adj_at, exit_at))
         if kind == "STRADDLE":
             trade["adjustment_message"] = "Adjustment on Straddle" if show_adj else ""
             trade["adjustment_ticker_text"] = "Adjustment" if show_adj else ""
@@ -1099,8 +1198,8 @@ def annotate_adjustment_alerts(
             if show_exit
             else ""
         )
-    if persist and date_updates:
-        _persist_alert_first_dates(date_updates)
+    if persist and trigger_updates:
+        _persist_alert_first_triggers(trigger_updates)
     return trades
 
 
@@ -1294,6 +1393,14 @@ def _ensure_trade_numbers(conn) -> None:
     conn.execute(text(
         "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS exit_adj_alert_first_date DATE"
     ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS "
+        "adj_alert_first_triggered_at TIMESTAMPTZ"
+    ))
+    conn.execute(text(
+        "ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS "
+        "exit_adj_alert_first_triggered_at TIMESTAMPTZ"
+    ))
 
 
 def ensure_multi_leg_tables() -> None:
@@ -1485,6 +1592,7 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
                    t.entry_date, t.expiry_date, t.status, t.exit_date, t.total_pnl,
                    t.trade_no, t.max_profit, t.green_zone_ce, t.green_zone_pe,
                    t.adj_alert_first_date, t.exit_adj_alert_first_date,
+                   t.adj_alert_first_triggered_at, t.exit_adj_alert_first_triggered_at,
                    t.created_at, t.updated_at,
                    l.id AS leg_id, l.qualifier, l.side, l.option_type, l.strike_price, l.leg_expiry_date,
                    l.entry_price, l.entry_time, l.exit_price, l.exit_time, l.ltp, l.delta,
@@ -1563,6 +1671,10 @@ def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dic
             _parse_date(header.get("exit_adj_alert_first_date")).isoformat()
             if _parse_date(header.get("exit_adj_alert_first_date"))
             else None
+        ),
+        "adj_alert_first_triggered_at": _iso_dt(header.get("adj_alert_first_triggered_at")),
+        "exit_adj_alert_first_triggered_at": _iso_dt(
+            header.get("exit_adj_alert_first_triggered_at")
         ),
         "status": header.get("status"),
         "exit_date": _iso_dt(header.get("exit_date")),
