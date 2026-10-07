@@ -180,10 +180,13 @@ def test_bull_go_without_prior_pick_creates_pick_enter_ticker_and_could_have():
     assert len(could) == 1
     assert could[0]["entry_ltp"] == 2500.5
     assert could[0]["entry_price"] == 2500.5
-    assert could[0]["first_scan_time"] == "10:22"
+    assert could[0]["first_scan_time"] == "10:15"  # nearest 15m of receipt 10:22
     assert could[0]["entry_time"] == "10:27"
     assert could[0]["direction_type"] == "LONG"
     assert could[0]["exit_ltp"] is None
+    bull_hits = divergence_workspace_picks(store, GO_AT.date())[0]
+    assert bull_hits[0]["first_hit_at"].endswith("10:15:00+05:30") or "T10:15:00" in bull_hits[0]["first_hit_at"]
+    assert bull_hits[0]["last_hit_at"].endswith("10:15:00+05:30") or "T10:15:00" in bull_hits[0]["last_hit_at"]
 
     later = datetime(2026, 9, 28, 10, 30, 0)
     second = _apply(
@@ -262,7 +265,7 @@ def test_bull_go_after_div_enables_enter_ticker_and_could_have_entry():
     could = divergence_could_have_rows(store, GO_AT.date())
     assert len(could) == 1
     assert could[0]["entry_ltp"] == 2500.5
-    assert could[0]["first_scan_time"] == "10:15"
+    assert could[0]["first_scan_time"] == "10:15"  # DIV receipt 10:15 (already on quarter)
     assert could[0]["entry_time"] == "10:20"
     assert could[0]["exit_ltp"] is None
     assert could[0]["qty"] == 250
@@ -316,7 +319,7 @@ def test_bull_exit_removes_pick_and_stamps_exit_ltp():
     could = divergence_could_have_rows(store, EXIT_AT.date())
     assert could[0]["entry_ltp"] == 2500.5
     assert could[0]["exit_ltp"] == 2510.25
-    assert could[0]["exit_time"] == "11:05"
+    assert could[0]["exit_time"] == "11:00"
 
 
 def test_exit_stamps_null_when_ltp_missing():
@@ -415,7 +418,7 @@ def test_flag_json_parses_div_go_exit_and_alert_time():
     assert parse_event_time(None) is None
 
 
-def test_flag_json_go_and_exit_stamp_alert_time_and_current_ltp():
+def test_flag_json_go_and_exit_use_receipt_time_not_candle_open():
     store = MemoryDivergenceStore()
     received = datetime(2026, 9, 29, 9, 45, 38)
     go = parse_divergence_alert(
@@ -431,6 +434,9 @@ def test_flag_json_go_and_exit_stamp_alert_time_and_current_ltp():
     bull, bear = divergence_workspace_picks(store, datetime(2026, 9, 29).date())
     assert len(bull) == 1 and bear == []
     assert bull[0]["order_eligible"] is True
+    # Receipt 09:45:38 → nearest 15m display 09:45 (not candle open 09:30)
+    assert "T09:45:00" in (bull[0]["first_hit_at"] or "")
+    assert "T09:45:00" in (bull[0]["last_hit_at"] or "")
     assert divergence_ticker_signals(store, datetime(2026, 9, 29).date()) == [
         {
             "algo": "premium_futures",
@@ -440,12 +446,14 @@ def test_flag_json_go_and_exit_stamp_alert_time_and_current_ltp():
     ]
     could = divergence_could_have_rows(store, datetime(2026, 9, 29).date())
     assert could[0]["entry_ltp"] == 2500.5
-    assert could[0]["entry_time"] == "09:35"
+    assert could[0]["first_scan_time"] == "09:45"
+    assert could[0]["entry_time"] == "09:50"
     assert could[0]["exit_ltp"] is None
 
     exit_body = {"flag": "BULL-EXIT", "symbol": "RELIANCE", "time": EXIT_MS}
     exit_alert = parse_divergence_alert(exit_body, json.dumps(exit_body))
-    exit_result = _apply_alert(store, exit_alert, received, ltp=2510.25)
+    exit_received = datetime(2026, 9, 29, 9, 52, 10)
+    exit_result = _apply_alert(store, exit_alert, exit_received, ltp=2510.25)
     assert exit_result["applied"] is True
     assert exit_result["exit_ltp"] == 2510.25
     assert exit_result["enter_enabled"] is False
@@ -454,7 +462,9 @@ def test_flag_json_go_and_exit_stamp_alert_time_and_current_ltp():
     assert divergence_ticker_signals(store, datetime(2026, 9, 29).date()) == []
     closed = divergence_could_have_rows(store, datetime(2026, 9, 29).date())
     assert closed[0]["exit_ltp"] == 2510.25
+    # Receipt 09:52:10 → nearest 15m 09:45? 09:52 is closer to 09:45 (7m) than 10:00 (8m)
     assert closed[0]["exit_time"] == "09:45"
+    assert closed[0]["exit_scan_time"] == "09:45"
 
 
 def test_flag_json_div_keeps_enter_off_and_bad_time_uses_receive_time():
@@ -512,7 +522,7 @@ def test_entry_is_first_scan_plus_five_and_scan_ltp_fills_entry_when_later_quote
         lot=250,
     )
     could = divergence_could_have_rows(store, GO_AT.date())
-    assert could[0]["first_scan_time"] == "10:22"
+    assert could[0]["first_scan_time"] == "10:15"  # nearest 15m of GO receipt 10:22
     assert could[0]["entry_time"] == "10:27"
     assert could[0]["entry_ltp"] == 2500.5
     assert could[0]["qty"] == 250
@@ -549,8 +559,8 @@ def test_exit_sets_exit_time_and_stops_ltp_refresh():
         ltp=2510.25,
     )
     could = divergence_could_have_rows(store, EXIT_AT.date())
-    assert could[0]["exit_scan_time"] == "11:05"
-    assert could[0]["exit_time"] == "11:05"
+    assert could[0]["exit_scan_time"] == "11:00"
+    assert could[0]["exit_time"] == "11:00"
     assert could[0]["current_ltp"] == 2510.25
     assert could[0]["pnl_scan_rupees"] == round((2510.25 - 2500.5) * 250, 2)
     frozen = apply_mark_refresh(store.could[0], 9999)

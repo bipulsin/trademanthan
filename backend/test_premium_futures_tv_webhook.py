@@ -106,6 +106,25 @@ def test_floor_received_to_15m():
     assert slot.hour == 11 and slot.minute == 0
 
 
+def test_round_received_to_nearest_15m():
+    from backend.services.premium_futures_tv_webhook import round_received_to_nearest_15m
+
+    def _r(h, m, s=0):
+        return round_received_to_nearest_15m(IST.localize(datetime(2026, 9, 9, h, m, s)))
+
+    assert _r(10, 7, 29).strftime("%H:%M") == "10:00"
+    assert _r(10, 7, 30).strftime("%H:%M") == "10:15"  # exact half → up
+    assert _r(10, 22, 0).strftime("%H:%M") == "10:15"
+    assert _r(10, 22, 30).strftime("%H:%M") == "10:30"  # exact half → up
+    assert _r(10, 37, 0).strftime("%H:%M") == "10:30"
+    assert _r(10, 52, 0).strftime("%H:%M") == "10:45"
+    assert _r(10, 52, 30).strftime("%H:%M") == "11:00"
+    assert _r(23, 52, 30).strftime("%Y-%m-%d %H:%M") == "2026-09-10 00:00"
+    # Idempotent on a quarter-hour stamp
+    q = _r(11, 15, 0)
+    assert round_received_to_nearest_15m(q) == q
+
+
 def test_merge_tv_featured_first_and_dedupes_scanner(monkeypatch):
     import backend.services.premium_futures_tv_webhook as m
 

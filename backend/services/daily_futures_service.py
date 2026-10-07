@@ -2081,6 +2081,75 @@ def _floor_to_15m_ist(dt: datetime) -> datetime:
     return dt.replace(minute=mm, second=0, microsecond=0)
 
 
+def _round_to_nearest_15m_ist(dt: datetime) -> datetime:
+    """Nearest IST quarter-hour (:00/:15/:30/:45); half-up at exact midpoints."""
+    from backend.services.premium_futures_tv_webhook import round_received_to_nearest_15m
+
+    return round_received_to_nearest_15m(dt)
+
+
+def _fmt_scan_hm(dt: Optional[datetime]) -> str:
+    """1st/Last scan clock: nearest 15m of receipt/processed time."""
+    if dt is None:
+        return "—"
+    return _round_to_nearest_15m_ist(dt).strftime("%H:%M")
+
+
+def _iso_scan_display(ts: Any) -> Optional[str]:
+    """Round a stored hit timestamp to nearest 15m IST for Premium Futures UI."""
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        return _round_to_nearest_15m_ist(ts).isoformat()
+    parsed = _parse_iso_ist(str(ts)) if ts else None
+    if parsed is None:
+        return str(ts) if ts else None
+    return _round_to_nearest_15m_ist(parsed).isoformat()
+
+
+def _apply_scan_display_times(rows: List[Dict[str, Any]]) -> None:
+    """Mutate first_hit_at / last_hit_at to nearest-15m display ISO (receipt-based stamps)."""
+    for r in rows or []:
+        if r.get("first_hit_at") is not None:
+            r["first_hit_at"] = _iso_scan_display(r.get("first_hit_at"))
+        if r.get("last_hit_at") is not None:
+            r["last_hit_at"] = _iso_scan_display(r.get("last_hit_at"))
+
+
+def _last_scan_sort_key(p: Dict[str, Any]) -> float:
+    """Newest last-scan first; fall back to first scan / HH:MM could-have fields."""
+    for key in ("last_hit_at", "first_hit_at", "second_scan_time"):
+        raw = p.get(key)
+        if not raw:
+            continue
+        dt = _parse_iso_ist(raw) if not isinstance(raw, datetime) else (
+            raw.astimezone(IST) if raw.tzinfo else IST.localize(raw)
+        )
+        if dt is not None:
+            return dt.timestamp()
+    for key in ("exit_scan_time", "first_scan_time", "entry_time"):
+        raw = p.get(key)
+        if not raw or raw == "—":
+            continue
+        s = str(raw).strip()
+        dt = _parse_iso_ist(s)
+        if dt is not None:
+            return dt.timestamp()
+        if len(s) >= 5 and s[2] == ":":
+            try:
+                hh, mm = int(s[:2]), int(s[3:5])
+                return float(hh * 3600 + mm * 60)
+            except (TypeError, ValueError):
+                continue
+    return 0.0
+
+
+def _sort_by_last_scan_desc(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if len(rows) < 2:
+        return rows
+    return sorted(rows, key=_last_scan_sort_key, reverse=True)
+
+
 def _fetch_intraday_1m_cached(upstox: UpstoxService, instrument_key: str, trade_date: date) -> List[Dict[str, Any]]:
     if not instrument_key:
         return []
@@ -2290,16 +2359,18 @@ def _build_trade_if_could_rows(
             "future_symbol": p.get("future_symbol"),
             "instrument_key": ikey,
             "qty": qty_num,
-            "first_scan_time": _fmt_hm(first_hit),
+            "first_scan_time": _fmt_scan_hm(first_hit),
             "entry_time": _fmt_hm(entry_dt),
             "entry_ltp": entry_ltp,
-            "exit_scan_time": _fmt_hm(exit_at) if exit_at else None,
+            "exit_scan_time": _fmt_scan_hm(exit_at) if exit_at else None,
             "current_ltp": current_ltp,
             "pnl_scan_rupees": could_have_pnl_rupees(direction, entry_ltp, current_ltp, qty_num),
+            "first_hit_at": _iso_scan_display(first_hit),
+            "last_hit_at": _iso_scan_display(exit_at if exit_at is not None else first_hit),
         }
         out.append(row)
 
-    out.sort(key=lambda r: (r.get("future_symbol") or r.get("underlying") or ""))
+    out.sort(key=_last_scan_sort_key, reverse=True)
     return out
 
 
@@ -3926,24 +3997,8 @@ def _workspace_attach_target_entry_price(
 
 
 def _sort_todays_pick_workspace_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Order for Today's pick tables: rows with Enter enabled first, then by highest live conviction
-    (effective_conviction, else conviction_score descending).
-    """
-    if len(rows) < 2:
-        return rows
-
-    def _conv_live(p: Dict[str, Any]) -> float:
-        cv = _safe_float(p.get("effective_conviction"))
-        if cv is not None:
-            return float(cv)
-        cv2 = _safe_float(p.get("conviction_score"))
-        return float(cv2) if cv2 is not None else 0.0
-
-    return sorted(
-        rows,
-        key=lambda p: (0 if bool(p.get("order_eligible")) else 1, -_conv_live(p)),
-    )
+    """Order for Today's pick tables: newest last scan first."""
+    return _sort_by_last_scan_desc(rows)
 
 
 def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[str, Any]:
@@ -4217,7 +4272,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         cs = s.get("conviction_score")
         return cs is not None and float(cs) < 50.0
 
-    picks_low_conv_bull: List[Dict[str, Any]] = sorted(
+    picks_low_conv_bull: List[Dict[str, Any]] = _sort_by_last_scan_desc(
         [
             s
             for s in not_bought_open
@@ -4226,10 +4281,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             and not _pick_is_tv_source(s, tv_map)
             and not _pick_is_commodity_divergence(s)
             and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
-        ],
-        key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
+        ]
     )
-    picks_low_conv_bear: List[Dict[str, Any]] = sorted(
+    picks_low_conv_bear: List[Dict[str, Any]] = _sort_by_last_scan_desc(
         [
             s
             for s in not_bought_open
@@ -4238,8 +4292,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             and not _pick_is_tv_source(s, tv_map)
             and not _pick_is_commodity_divergence(s)
             and _df_todays_pick_in_recent_two_scans(s, _anchor_lh, chartink_wave_count=_wave_ct)
-        ],
-        key=lambda x: (-float(x.get("conviction_score") or 0.0), str(x.get("underlying") or "")),
+        ]
     )
 
     picks_mixed = list(picks)
@@ -4646,6 +4699,33 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         logger.warning("daily_futures: divergence picks merge skipped: %s", e)
 
     entry_block = _new_entries_blocked_reason(now_ist)
+
+    could_rows: List[Dict[str, Any]] = (
+        []
+        if lite_mode
+        else list(_build_trade_if_could_rows(picks_mixed, closed, td)) + list(div_could)
+    )
+    could_rows = _sort_by_last_scan_desc(could_rows)
+
+    # Round 1st/Last scan display after could-have used raw receipt stamps for LTP timing.
+    for _grp in (
+        picks_bull,
+        picks_bearish,
+        picks_mixed,
+        picks_low_conv_bull,
+        picks_low_conv_bear,
+        running,
+        closed,
+    ):
+        _apply_scan_display_times(_grp)
+
+    picks_bull = _sort_todays_pick_workspace_rows(list(picks_bull))
+    picks_bearish = _sort_todays_pick_workspace_rows(list(picks_bearish))
+    picks_low_conv_bull = _sort_by_last_scan_desc(list(picks_low_conv_bull))
+    picks_low_conv_bear = _sort_by_last_scan_desc(list(picks_low_conv_bear))
+    running = _sort_by_last_scan_desc(list(running))
+    closed = _sort_by_last_scan_desc(list(closed))
+
     return {
         "trade_date": str(td),
         "session_before_open": False,
@@ -4667,11 +4747,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
         },
         "running": running,
         "closed": closed,
-        "trade_if_could_have_done": (
-            []
-            if lite_mode
-            else list(_build_trade_if_could_rows(picks_mixed, closed, td)) + list(div_could)
-        ),
+        "trade_if_could_have_done": could_rows,
         "summary": {
             "cumulative_pnl_rupees": round(total_pnl, 2),
             "wins": wins,
@@ -4715,7 +4791,7 @@ def get_workspace_running_enriched(db: Session, user_id: int) -> Dict[str, Any]:
     return {
         "trade_date": base.get("trade_date"),
         "session_before_open": False,
-        "running": running,
+        "running": _sort_by_last_scan_desc(running),
         "summary": {"strip_debug": strip_debug},
     }
 
@@ -4746,7 +4822,7 @@ def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
     return {
         "trade_date": base.get("trade_date"),
         "session_before_open": False,
-        "trade_if_could_have_done": rows,
+        "trade_if_could_have_done": _sort_by_last_scan_desc(rows),
     }
 
 

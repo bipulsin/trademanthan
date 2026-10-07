@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -227,6 +227,18 @@ def floor_received_to_15m(received_at: datetime) -> datetime:
     dt = _aware_ist(received_at)
     mm = (dt.minute // 15) * 15
     return dt.replace(minute=mm, second=0, microsecond=0)
+
+
+def round_received_to_nearest_15m(received_at: datetime) -> datetime:
+    """Nearest IST quarter-hour (:00/:15/:30/:45). Exact midpoints round up."""
+    dt = _aware_ist(received_at)
+    midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    elapsed = int((dt - midnight).total_seconds())
+    interval = 15 * 60
+    rounded = ((elapsed + interval // 2) // interval) * interval
+    if rounded >= 24 * 3600:
+        return midnight + timedelta(days=1)
+    return midnight + timedelta(seconds=rounded)
 
 
 def _bar_ts_ist(c: Dict[str, Any]) -> Optional[datetime]:
@@ -481,10 +493,11 @@ def promote_tv_webhook_after_ack(
 
 
 def _iso_hit(dt: Any) -> Optional[str]:
+    """ISO of receipt time rounded to nearest 15m IST (1st/Last scan display)."""
     if dt is None:
         return None
     if isinstance(dt, datetime):
-        return _aware_ist(dt).isoformat()
+        return round_received_to_nearest_15m(dt).isoformat()
     return str(dt)
 
 

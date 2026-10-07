@@ -267,6 +267,28 @@ def _hm(dt: Optional[datetime]) -> Optional[str]:
     return aware.strftime("%H:%M")
 
 
+def round_to_nearest_15m_ist(dt: datetime) -> datetime:
+    """Nearest IST quarter-hour; half-up at exact midpoints. Alias for TV receipt rounding."""
+    from backend.services.premium_futures_tv_webhook import round_received_to_nearest_15m
+
+    return round_received_to_nearest_15m(dt)
+
+
+def _scan_hm(dt: Optional[datetime]) -> Optional[str]:
+    """1st/Last scan display: nearest 15-minute clock of receipt/processed time."""
+    aware = _aware(dt)
+    if aware is None:
+        return None
+    return round_to_nearest_15m_ist(aware).strftime("%H:%M")
+
+
+def _scan_iso(dt: Optional[datetime]) -> Optional[str]:
+    aware = _aware(dt)
+    if aware is None:
+        return None
+    return round_to_nearest_15m_ist(aware).isoformat()
+
+
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     aware = _aware(dt)
     if aware is None:
@@ -1079,14 +1101,16 @@ def _base_result(alert: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _event_clock(alert: Dict[str, Any], now: datetime) -> datetime:
-    """Alert ``time`` when it parsed; otherwise the webhook receive time."""
-    event_at = alert.get("event_at")
-    if isinstance(event_at, datetime):
-        aware = _aware(event_at)
-        if aware is not None:
-            return aware
-    return now
+def _event_clock(_alert: Dict[str, Any], now: datetime) -> datetime:
+    """Server receipt / alert-processed time (IST-aware ``now``).
+
+    Do not use TradingView candle open (``event_at`` / payload ``time``) for
+    1st/Last scan stamps — those display fields are derived from receipt time.
+    ``event_at`` remains on the parsed alert for diagnostics only.
+    """
+    aware = _aware(now)
+    assert aware is not None
+    return aware
 
 
 def apply_divergence_event(
@@ -1261,8 +1285,8 @@ def divergence_workspace_picks(
             "instrument_key": pick.get("instrument_key"),
             "lot_size": None,
             "scan_count": 1,
-            "first_hit_at": _iso(pick.get("div_at") or pick.get("updated_at")),
-            "last_hit_at": _iso(pick.get("updated_at")),
+            "first_hit_at": _scan_iso(pick.get("div_at") or pick.get("updated_at")),
+            "last_hit_at": _scan_iso(pick.get("updated_at")),
             "order_eligible": enter,
             "order_block_reason": None if enter else "Waiting for GO alert",
             "source": SOURCE,
@@ -1317,21 +1341,25 @@ def _public_could_row(c: Dict[str, Any]) -> Dict[str, Any]:
     if qty_out is not None and qty_out <= 0:
         qty_out = None
     entry_display = display_entry_at(c.get("first_scan_at"), c.get("entry_at"))
+    first_raw = c.get("first_scan_at")
+    # Prefer stored receipt stamps; div/updated path already stores received_at (not candle open).
     return {
         "underlying": c.get("underlying"),
         "future_symbol": c.get("fut_symbol"),
         "direction_type": direction,
         "instrument_key": c.get("instrument_key"),
         "qty": qty_out,
-        "first_scan_time": _hm(c.get("first_scan_at")),
+        "first_scan_time": _scan_hm(first_raw),
         "entry_time": _hm(entry_display),
         "entry_ltp": entry_ltp,
         "entry_price": entry_ltp,
-        "exit_time": _hm(exit_at),
+        "exit_time": _scan_hm(exit_at),
         "exit_ltp": exit_ltp,
         "exit_price": exit_ltp,
-        "exit_scan_time": _hm(exit_at),
+        "exit_scan_time": _scan_hm(exit_at),
         "exit_scan_ltp": exit_ltp if exit_at is not None else None,
+        "last_hit_at": _scan_iso(exit_at if exit_at is not None else first_raw),
+        "first_hit_at": _scan_iso(first_raw),
         "current_ltp": current,
         "pnl_scan_rupees": could_have_pnl_rupees(direction, entry_ltp, current, qty_out),
         "source": SOURCE,
