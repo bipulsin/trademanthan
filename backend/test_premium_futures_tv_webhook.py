@@ -106,6 +106,26 @@ def test_floor_received_to_15m():
     assert slot.hour == 11 and slot.minute == 0
 
 
+def test_display_scan_instant_never_future():
+    """A candle stamp of 11:00 must not show while the clock is still 09:47."""
+    from backend.services.premium_futures_tv_webhook import display_scan_instant
+
+    now = IST.localize(datetime(2026, 10, 8, 9, 47, 0))
+    candle = IST.localize(datetime(2026, 10, 8, 11, 0, 0))
+    shown = display_scan_instant(candle, now)
+    assert shown.strftime("%H:%M") == "09:45"
+    assert shown <= now
+
+    receipt = IST.localize(datetime(2026, 10, 8, 9, 47, 12))
+    assert display_scan_instant(receipt, now).strftime("%H:%M") == "09:45"
+
+    # 10:53 nearest is 11:00, which has not happened yet → floor to 10:45.
+    late = IST.localize(datetime(2026, 10, 8, 10, 53, 0))
+    assert display_scan_instant(late, late).strftime("%H:%M") == "10:45"
+    after = IST.localize(datetime(2026, 10, 8, 11, 2, 0))
+    assert display_scan_instant(late, after).strftime("%H:%M") == "11:00"
+
+
 def test_round_received_to_nearest_15m():
     from backend.services.premium_futures_tv_webhook import round_received_to_nearest_15m
 

@@ -159,19 +159,36 @@
     return String(iso);
   }
 
-  /** IST time only (HH:MM, 24h) for ISO timestamps — used in Running order 1st/Last scan. */
+  /** IST HH:MM. A stamp still ahead of the clock is floored to the current quarter-hour. */
   function fmtIsoTimeIst(iso) {
     if (!iso) return '—';
     try {
       const d = new Date(iso);
-      if (!Number.isNaN(d.getTime())) {
-        return d.toLocaleTimeString('en-GB', {
+      if (Number.isNaN(d.getTime())) return String(iso);
+      const now = new Date();
+      const show = d.getTime() > now.getTime() ? now : d;
+      if (show === now && d.getTime() > now.getTime()) {
+        const parts = new Intl.DateTimeFormat('en-GB', {
           timeZone: 'Asia/Kolkata',
           hour: '2-digit',
           minute: '2-digit',
-          hour12: false,
+          hourCycle: 'h23',
+        }).formatToParts(now);
+        let hh = 0;
+        let mm = 0;
+        parts.forEach(function (p) {
+          if (p.type === 'hour') hh = parseInt(p.value, 10) || 0;
+          if (p.type === 'minute') mm = parseInt(p.value, 10) || 0;
         });
+        mm = Math.floor(mm / 15) * 15;
+        return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
       }
+      return show.toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
     } catch (e) {}
     return String(iso);
   }

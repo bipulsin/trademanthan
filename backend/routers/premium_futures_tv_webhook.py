@@ -18,6 +18,7 @@ from backend.services.premium_futures_tv_webhook import (
     RECOMMENDED_ALERT_JSON,
     decode_raw_payload,
     insert_tv_webhook_row,
+    log_divergence_receipt,
     now_ist_second,
     promote_tv_webhook_after_ack,
 )
@@ -91,6 +92,19 @@ async def premium_futures_tv_webhook(request: Request) -> JSONResponse:
                 },
             )
         if div is not None:
+            try:
+                log_divergence_receipt(
+                    received_at=received_at,
+                    source_ip=source_ip,
+                    raw_payload=raw_payload if isinstance(raw_payload, dict) else {},
+                    raw_body=raw_body,
+                    symbol=div.get("symbol") or div.get("underlying"),
+                    side=div.get("side"),
+                    underlying=div.get("underlying"),
+                    fut_symbol=div.get("resolved_fut"),
+                )
+            except Exception:
+                logger.warning("premium_futures divergence receipt log failed", exc_info=True)
             return JSONResponse(
                 status_code=200,
                 content={

@@ -2089,22 +2089,26 @@ def _round_to_nearest_15m_ist(dt: datetime) -> datetime:
 
 
 def _fmt_scan_hm(dt: Optional[datetime]) -> str:
-    """1st/Last scan clock: nearest 15m of receipt/processed time."""
+    """1st/Last scan clock: nearest 15m of receipt time, never a future clock."""
     if dt is None:
         return "—"
-    return _round_to_nearest_15m_ist(dt).strftime("%H:%M")
+    from backend.services.premium_futures_tv_webhook import display_scan_instant
+
+    return display_scan_instant(dt).strftime("%H:%M")
 
 
 def _iso_scan_display(ts: Any) -> Optional[str]:
-    """Round a stored hit timestamp to nearest 15m IST for Premium Futures UI."""
+    """Round a stored hit timestamp to nearest 15m IST, clamped so it is not in the future."""
+    from backend.services.premium_futures_tv_webhook import display_scan_instant
+
     if ts is None:
         return None
     if isinstance(ts, datetime):
-        return _round_to_nearest_15m_ist(ts).isoformat()
+        return display_scan_instant(ts).isoformat()
     parsed = _parse_iso_ist(str(ts)) if ts else None
     if parsed is None:
         return str(ts) if ts else None
-    return _round_to_nearest_15m_ist(parsed).isoformat()
+    return display_scan_instant(parsed).isoformat()
 
 
 def _apply_scan_display_times(rows: List[Dict[str, Any]]) -> None:
@@ -4005,6 +4009,12 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     ensure_daily_futures_tables()
     td = _workspace_trade_date_ist()
     now_ist = datetime.now(IST)
+    try:
+        from backend.services.premium_futures_divergence import repair_future_scan_stamps
+
+        repair_future_scan_stamps(td, now_ist)
+    except Exception:
+        logger.debug("daily_futures: future scan stamp repair skipped", exc_info=True)
 
     with engine.connect() as conn:
         screenings = _fetch_screening_dicts(conn, td)

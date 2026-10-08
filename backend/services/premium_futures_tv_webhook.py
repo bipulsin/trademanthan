@@ -241,6 +241,23 @@ def round_received_to_nearest_15m(received_at: datetime) -> datetime:
     return midnight + timedelta(seconds=rounded)
 
 
+def display_scan_instant(received_at: datetime, now: Optional[datetime] = None) -> datetime:
+    """Nearest IST quarter of a receipt stamp, never later than ``now``.
+
+    Nearest-15 of 10:53 is 11:00. If the wall clock is still 10:53 that slot
+    has not happened, so the board shows the quarter that contains the stamp
+    (or now, when the stored stamp itself is still in the future).
+    """
+    rounded = round_received_to_nearest_15m(received_at)
+    clock = _aware_ist(now) if now is not None else _aware_ist(datetime.now(IST))
+    if rounded <= clock:
+        return rounded
+    basis = _aware_ist(received_at)
+    if basis > clock:
+        basis = clock
+    return floor_received_to_15m(basis)
+
+
 def _bar_ts_ist(c: Dict[str, Any]) -> Optional[datetime]:
     ts = c.get("timestamp")
     if isinstance(ts, datetime):
@@ -464,6 +481,65 @@ def insert_tv_webhook_row(
     }
 
 
+def log_divergence_receipt(
+    *,
+    received_at: datetime,
+    source_ip: Optional[str],
+    raw_payload: Dict[str, Any],
+    raw_body: str,
+    symbol: Optional[str],
+    side: Optional[str],
+    underlying: Optional[str],
+    fut_symbol: Optional[str] = None,
+) -> None:
+    """Keep the server receipt next to the TradingView ``time`` field.
+
+    Divergence alerts return before the generic TV insert, so without this row
+    a future candle stamp cannot be rebuilt from the real receipt. ``promoted_at``
+    is set so the ChartInk-style backfill does not ingest the alert a second time.
+    """
+    ensure_premium_futures_tv_webhook_table()
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    side_l = str(side or "").strip().lower()
+    if side_l not in ("bullish", "bearish"):
+        side_l = None
+    stamp = naive_ist(received_at) if received_at.tzinfo else received_at.replace(microsecond=0)
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO premium_futures_tv_webhook_log (
+                    received_at, source_ip, raw_body, raw_payload, parse_status, parse_note,
+                    ticker_raw, symbol, side, resolved_fut_symbol, underlying, promoted_at
+                ) VALUES (
+                    :received_at, :source_ip, :raw_body, CAST(:raw_payload AS jsonb),
+                    'success', 'divergence_receipt',
+                    :ticker_raw, :symbol, :side, :fut, :underlying, :promoted_at
+                )
+                """
+            ),
+            {
+                "received_at": stamp,
+                "source_ip": source_ip,
+                "raw_body": (raw_body or "")[:8000],
+                "raw_payload": json.dumps(payload),
+                "ticker_raw": (payload.get("symbol") or payload.get("ticker") or symbol),
+                "symbol": symbol,
+                "side": side_l,
+                "fut": fut_symbol,
+                "underlying": underlying,
+                "promoted_at": stamp,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def promote_tv_webhook_after_ack(
     *,
     log_id: int,
@@ -493,11 +569,11 @@ def promote_tv_webhook_after_ack(
 
 
 def _iso_hit(dt: Any) -> Optional[str]:
-    """ISO of receipt time rounded to nearest 15m IST (1st/Last scan display)."""
+    """ISO of receipt time rounded to nearest 15m IST, never a future clock."""
     if dt is None:
         return None
     if isinstance(dt, datetime):
-        return round_received_to_nearest_15m(dt).isoformat()
+        return display_scan_instant(dt).isoformat()
     return str(dt)
 
 

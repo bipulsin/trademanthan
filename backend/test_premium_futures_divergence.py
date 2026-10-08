@@ -418,6 +418,14 @@ def test_flag_json_parses_div_go_exit_and_alert_time():
     assert parse_event_time(None) is None
 
 
+def test_scan_display_clamps_future_candle_to_receipt_quarter():
+    from backend.services.premium_futures_divergence import _scan_hm
+
+    now = IST.localize(datetime(2026, 10, 8, 9, 47, 0))
+    assert _scan_hm(datetime(2026, 10, 8, 11, 0, 0), now) == "09:45"
+    assert _scan_hm(datetime(2026, 10, 8, 9, 47, 12), now) == "09:45"
+
+
 def test_flag_json_go_and_exit_use_receipt_time_not_candle_open():
     store = MemoryDivergenceStore()
     received = datetime(2026, 9, 29, 9, 45, 38)
@@ -434,7 +442,8 @@ def test_flag_json_go_and_exit_use_receipt_time_not_candle_open():
     bull, bear = divergence_workspace_picks(store, datetime(2026, 9, 29).date())
     assert len(bull) == 1 and bear == []
     assert bull[0]["order_eligible"] is True
-    # Receipt 09:45:38 → nearest 15m display 09:45 (not candle open 09:30)
+    # Receipt 09:45:38 → nearest 15m display 09:45 (not candle open 09:30).
+    # Sep 29 is in the past relative to the test runner, so the future-clamp does not move it.
     assert "T09:45:00" in (bull[0]["first_hit_at"] or "")
     assert "T09:45:00" in (bull[0]["last_hit_at"] or "")
     assert divergence_ticker_signals(store, datetime(2026, 9, 29).date()) == [

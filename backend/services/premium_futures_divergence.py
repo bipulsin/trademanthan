@@ -274,19 +274,23 @@ def round_to_nearest_15m_ist(dt: datetime) -> datetime:
     return round_received_to_nearest_15m(dt)
 
 
-def _scan_hm(dt: Optional[datetime]) -> Optional[str]:
-    """1st/Last scan display: nearest 15-minute clock of receipt/processed time."""
+def _scan_hm(dt: Optional[datetime], now: Optional[datetime] = None) -> Optional[str]:
+    """1st/Last scan display: nearest 15-minute IST clock of receipt, never future."""
     aware = _aware(dt)
     if aware is None:
         return None
-    return round_to_nearest_15m_ist(aware).strftime("%H:%M")
+    from backend.services.premium_futures_tv_webhook import display_scan_instant
+
+    return display_scan_instant(aware, now).strftime("%H:%M")
 
 
-def _scan_iso(dt: Optional[datetime]) -> Optional[str]:
+def _scan_iso(dt: Optional[datetime], now: Optional[datetime] = None) -> Optional[str]:
     aware = _aware(dt)
     if aware is None:
         return None
-    return round_to_nearest_15m_ist(aware).isoformat()
+    from backend.services.premium_futures_tv_webhook import display_scan_instant
+
+    return display_scan_instant(aware, now).isoformat()
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -1392,9 +1396,160 @@ def divergence_could_have_rows(
     return rows
 
 
+def repair_future_scan_stamps(trade_date: date, now: Optional[datetime] = None) -> int:
+    """Rewrite today's scan stamps that are still ahead of the IST clock.
+
+    Prefer the webhook log's ``received_at`` (naive IST). If the only stored
+    value is a future candle time and no receipt was logged, clamp to now.
+    """
+    from backend.database import SessionLocal
+    from backend.services.ist_datetime import naive_ist
+
+    clock = _aware(now or datetime.now(IST))
+    assert clock is not None
+    now_naive = naive_ist(clock)
+    changed = 0
+    db = SessionLocal()
+    try:
+        receipts: Dict[str, Tuple[Optional[datetime], Optional[datetime]]] = {}
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT UPPER(TRIM(COALESCE(NULLIF(underlying, ''), symbol))) AS u,
+                           MIN(received_at) AS first_recv,
+                           MAX(received_at) AS last_recv
+                    FROM premium_futures_tv_webhook_log
+                    WHERE CAST(received_at AS date) = CAST(:d AS date)
+                      AND received_at <= :now
+                      AND COALESCE(NULLIF(TRIM(underlying), ''), NULLIF(TRIM(symbol), '')) IS NOT NULL
+                    GROUP BY 1
+                    """
+                ),
+                {"d": trade_date.isoformat(), "now": now_naive},
+            ).mappings().all()
+            for r in rows:
+                key = str(r.get("u") or "").strip().upper()
+                if key:
+                    receipts[key] = (r.get("first_recv"), r.get("last_recv"))
+        except Exception:
+            logger.debug("future scan stamp receipt lookup skipped", exc_info=True)
+
+        def _pick_receipt(und: str, which: str) -> datetime:
+            first_recv, last_recv = receipts.get(und, (None, None))
+            chosen = first_recv if which == "first" else last_recv
+            if chosen is not None and chosen <= now_naive:
+                return chosen
+            return now_naive
+
+        picks = db.execute(
+            text(
+                """
+                SELECT underlying, side, div_at, updated_at
+                FROM premium_futures_divergence_pick
+                WHERE trade_date = CAST(:d AS date)
+                  AND (div_at > :now OR updated_at > :now)
+                """
+            ),
+            {"d": trade_date.isoformat(), "now": now_naive},
+        ).mappings().all()
+        for p in picks:
+            und = str(p.get("underlying") or "").strip().upper()
+            div_at = p.get("div_at")
+            updated = p.get("updated_at")
+            new_div = div_at
+            new_upd = updated
+            if div_at is not None and div_at > now_naive:
+                new_div = _pick_receipt(und, "first")
+            if updated is not None and updated > now_naive:
+                new_upd = _pick_receipt(und, "last")
+            if new_div is not None and new_upd is not None and new_upd < new_div:
+                new_upd = new_div
+            db.execute(
+                text(
+                    """
+                    UPDATE premium_futures_divergence_pick
+                    SET div_at = :div_at, updated_at = :updated
+                    WHERE trade_date = CAST(:d AS date) AND underlying = :u AND side = :s
+                    """
+                ),
+                {
+                    "div_at": new_div,
+                    "updated": new_upd,
+                    "d": trade_date.isoformat(),
+                    "u": p.get("underlying"),
+                    "s": p.get("side"),
+                },
+            )
+            changed += 1
+
+        screens = db.execute(
+            text(
+                """
+                SELECT id, UPPER(TRIM(underlying)) AS u, first_hit_at, last_hit_at
+                FROM daily_futures_screening
+                WHERE trade_date = CAST(:d AS date)
+                  AND (first_hit_at > :now OR last_hit_at > :now)
+                """
+            ),
+            {"d": trade_date.isoformat(), "now": clock},
+        ).mappings().all()
+        for s in screens:
+            und = str(s.get("u") or "").strip().upper()
+
+            def _aware_stamp(value: Any, fallback: datetime) -> datetime:
+                if value is None:
+                    return fallback
+                if isinstance(value, datetime):
+                    got = _aware(value)
+                    if got is not None:
+                        return got
+                return fallback
+
+            fh = s.get("first_hit_at")
+            lh = s.get("last_hit_at")
+            new_fh = fh
+            new_lh = lh
+            if fh is not None and _aware_stamp(fh, clock) > clock:
+                new_fh = _aware_stamp(_pick_receipt(und, "first"), clock)
+            if lh is not None and _aware_stamp(lh, clock) > clock:
+                new_lh = _aware_stamp(_pick_receipt(und, "last"), clock)
+            db.execute(
+                text(
+                    """
+                    UPDATE daily_futures_screening
+                    SET first_hit_at = :fh, last_hit_at = :lh
+                    WHERE id = :id
+                    """
+                ),
+                {"fh": new_fh, "lh": new_lh, "id": int(s["id"])},
+            )
+            changed += 1
+        if changed:
+            db.commit()
+            logger.info(
+                "clamped future scan stamps trade_date=%s rows=%s",
+                trade_date,
+                changed,
+            )
+        else:
+            db.rollback()
+    except Exception:
+        db.rollback()
+        logger.warning("future scan stamp repair failed", exc_info=True)
+        return 0
+    finally:
+        db.close()
+    return changed
+
+
 def load_divergence_sections(
     trade_date: date,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    try:
+        repair_future_scan_stamps(trade_date)
+    except Exception:
+        logger.debug("future scan stamp repair skipped", exc_info=True)
     try:
         store = DbDivergenceStore()
         bull, bear = divergence_workspace_picks(store, trade_date)
