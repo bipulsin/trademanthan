@@ -11,10 +11,12 @@ class ReportsManager {
     async init() {
         await this.waitForLeftMenu();
         this.loadUserData();
-        this.loadTrades();
-        this.setupEventListeners();
         this.setupMobileMenu();
-        this.updateSummary();
+        if (document.getElementById("tradesTableBody") && document.getElementById("dateRange")) {
+            this.loadTrades();
+            this.setupEventListeners();
+            this.updateSummary();
+        }
     }
 
     async waitForLeftMenu() {

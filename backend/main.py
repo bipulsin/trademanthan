@@ -41,6 +41,7 @@ import backend.routers.commodities_div_webhook as commodities_div_webhook
 import backend.routers.commodities_div as commodities_div
 import backend.routers.tarang as tarang
 import backend.routers.stock_option as stock_option
+import backend.routers.crypto_options_report as crypto_options_report
 import backend.routers.multi_leg_options as multi_leg_options
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
@@ -115,6 +116,10 @@ from backend.services.commodities_div.scheduler import (
 from backend.services.tarang.scheduler import (
     start_tarang_scheduler,
     stop_tarang_scheduler,
+)
+from backend.services.crypto_options_report.scheduler import (
+    start_crypto_options_scheduler,
+    stop_crypto_options_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -310,6 +315,17 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Kosmic Tarang scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Kosmic Tarang scheduler")
 
+        try:
+            logger.info("Starting Crypto Options Report scheduler (IST straddles)...")
+            start_crypto_options_scheduler()
+            logger.info(
+                "✅ Crypto Options Report scheduler: STARTED "
+                "(18:15, 19:15, 23:15, 02:15, 07:15, 10:15, 17:45 IST)"
+            )
+        except Exception as e:
+            logger.error(f"❌ Crypto Options Report scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Crypto Options Report scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -455,6 +471,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping Kosmic Tarang scheduler: {e}", exc_info=True)
 
+    try:
+        stop_crypto_options_scheduler()
+        logger.info("✅ Crypto Options Report scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Crypto Options Report scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -530,6 +552,8 @@ app.include_router(tarang.router, prefix="/api/tarang")
 app.include_router(tarang.router, prefix="/tarang")
 app.include_router(stock_option.router)
 app.include_router(stock_option.router, prefix="/api")
+app.include_router(crypto_options_report.router)
+app.include_router(crypto_options_report.router, prefix="/api")
 app.include_router(multi_leg_options.router)
 app.include_router(multi_leg_options.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")

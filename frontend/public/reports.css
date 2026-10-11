@@ -1246,3 +1246,19 @@ body.reports-page[data-theme="light"] .tm-web-topbar-brand { color: #14201a; }
 body.reports-page[data-theme="light"] .tm-web-hamburger { background: #e4ebe6; color: #1f7a4d; }
 body.reports-page[data-theme="light"] .mobile-title-bar { background: #eef3f0 !important; }
 body.reports-page[data-theme="light"] .mobile-title { color: #14201a !important; }
+
+.co-mark {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted, #8aa);
+    font-weight: 600;
+}
+.co-status {
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.co-status-open { color: #e2b657; }
+.co-status-closed { color: var(--accent, #3dd68c); }
