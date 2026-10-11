@@ -89,6 +89,7 @@ from backend.services.dashboard_oi_heatmap import (
     invalidate_oi_heatmap_dashboard_cache,
 )
 from backend.services.oi_heatmap import get_live_oi_heatmap_json
+from backend.services.delta_india_live_prices import build_desktop_crypto_prices
 from backend.services.market_holiday import is_nse_holiday_ist, should_skip_scheduled_market_jobs_ist
 from backend.services import live_trading
 from backend.database import get_db
@@ -6555,6 +6556,18 @@ class OiHeatmapHistoricalApplyBody(BaseModel):
     target_time: str = "10:15"
     limit: int = 203
     sleep_s: float = 0.12
+
+
+@router.get("/dashboard/crypto-prices")
+async def dashboard_crypto_prices():
+    """Desktop Live Crypto Prices. Public Delta India tickers; no order calls."""
+    payload = build_desktop_crypto_prices()
+    status_code = 200 if payload.get("ok") else 503
+    return JSONResponse(
+        status_code=status_code,
+        content=payload,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/dashboard/oi-heatmap")

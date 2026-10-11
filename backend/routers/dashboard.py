@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
-import requests
 
 import backend.models.user
 import backend.models.trading
@@ -115,60 +115,16 @@ async def create_strategy(
 
 @router.get("/crypto-prices")
 async def get_crypto_prices():
-    """Get live crypto prices for BTC, ETH, XRP, SOL"""
-    try:
-        # Using CoinGecko API for demo purposes
-        # In production, you'd use your broker's API
-        response = requests.get("https://api.coingecko.com/api/v3/simple/price", params={
-            "ids": "bitcoin,ethereum,ripple,solana",
-            "vs_currencies": "usd"
-        })
-        
-        if response.status_code == 200:
-            data = response.json()
-            return [
-                {
-                    "symbol": "BTCUSD",
-                    "name": "Bitcoin",
-                    "price": data.get("bitcoin", {}).get("usd", 0),
-                    "icon": "₿"
-                },
-                {
-                    "symbol": "ETHUSD",
-                    "name": "Ethereum",
-                    "price": data.get("ethereum", {}).get("usd", 0),
-                    "icon": "Ξ"
-                },
-                {
-                    "symbol": "XRPUSD",
-                    "name": "Ripple",
-                    "price": data.get("ripple", {}).get("usd", 0),
-                    "icon": "XRP"
-                },
-                {
-                    "symbol": "SOLUSD",
-                    "name": "Solana",
-                    "price": data.get("solana", {}).get("usd", 0),
-                    "icon": "◎"
-                }
-            ]
-        else:
-            # Fallback prices if API fails
-            return [
-                {"symbol": "BTCUSD", "name": "Bitcoin", "price": 45000, "icon": "₿"},
-                {"symbol": "ETHUSD", "name": "Ethereum", "price": 3200, "icon": "Ξ"},
-                {"symbol": "XRPUSD", "name": "Ripple", "price": 0.85, "icon": "XRP"},
-                {"symbol": "SOLUSD", "name": "Solana", "price": 95, "icon": "◎"}
-            ]
-            
-    except Exception as e:
-        # Return fallback prices on error
-        return [
-            {"symbol": "BTCUSD", "name": "Bitcoin", "price": 45000, "icon": "₿"},
-            {"symbol": "ETHUSD", "name": "Ethereum", "price": 3200, "icon": "Ξ"},
-            {"symbol": "XRPUSD", "name": "Ripple", "price": 0.85, "icon": "XRP"},
-            {"symbol": "SOLUSD", "name": "Solana", "price": 95, "icon": "◎"}
-        ]
+    """Live desktop crypto cards from Delta Exchange India public tickers."""
+    from backend.services.delta_india_live_prices import build_desktop_crypto_prices
+
+    payload = build_desktop_crypto_prices()
+    status_code = 200 if payload.get("ok") else 503
+    return JSONResponse(
+        status_code=status_code,
+        content=payload,
+        headers={"Cache-Control": "no-store"},
+    )
 
 @router.get("/summary")
 async def get_dashboard_summary(current_user: backend.models.user.User = Depends(get_current_user), db: Session = Depends(get_db)):

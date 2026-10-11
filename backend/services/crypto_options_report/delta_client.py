@@ -137,6 +137,45 @@ def fetch_btc_option_fills(*, lookback_days: int = 40, page_size: int = 100, max
     return {"ok": True, "missing_env": [], "fills": fills, "truncated": truncated, "window_start": start}
 
 
+def fetch_public_tickers(
+    *,
+    contract_types: str,
+    underlying_asset_symbols: str,
+) -> Dict[str, Any]:
+    """Public ticker list. No API key is read or sent.
+
+    ``ok`` is False when Delta is unreachable or the payload is not a ticker list.
+    Callers must not substitute a previous response in that case.
+    """
+    query = urlencode(
+        {
+            "contract_types": contract_types,
+            "underlying_asset_symbols": underlying_asset_symbols,
+        }
+    )
+    url = f"{_host()}/v2/tickers?{query}"
+    try:
+        response = requests.get(
+            url,
+            timeout=20,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "TradeManthan-CryptoPrices/1.0",
+            },
+        )
+        body = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("delta india public tickers failed: %s", exc.__class__.__name__)
+        return {"ok": False, "error": "request_failed", "result": []}
+    if response.status_code != 200 or not isinstance(body, dict) or body.get("success") is not True:
+        logger.warning("delta india public tickers http %s", response.status_code)
+        return {"ok": False, "error": "http_error", "result": [], "http_status": response.status_code}
+    result = body.get("result")
+    if not isinstance(result, list):
+        return {"ok": False, "error": "bad_payload", "result": []}
+    return {"ok": True, "error": None, "result": result}
+
+
 def fetch_option_marks(symbols: List[str]) -> Dict[str, float]:
     """Mark price for the specific open short symbols only."""
     marks: Dict[str, float] = {}
