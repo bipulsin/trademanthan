@@ -2,8 +2,10 @@
 Higher-timeframe (HTF) 4-way OI for dashboard heatmap.
 
 Once per day after the session (16:05 IST, after the 16:00 OI freeze snapshot).
-Compares last completed Upstox ``days/1`` FUT bar vs the bar 10 trading sessions earlier
-(close and OI). Does not run on the 30-min session heatmap path.
+Compares the forming daily FUT bar with the prior completed day (close and OI).
+When the market is closed and today has no bar, that is the last completed
+session versus the day before it. The live heatmap refresh computes the same
+window from the daily candles it already fetched.
 """
 from __future__ import annotations
 
@@ -23,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 
-# Latest completed daily bar vs the daily bar 10 sessions earlier (11 bars inclusive).
-HTF_OI_SESSIONS_BACK = 10
-# Calendar span so 11+ NSE sessions are present (weekends/holidays).
+# Forming day (or last completed day) versus the previous daily bar.
+HTF_OI_SESSIONS_BACK = 1
+# Calendar span so a holiday gap still leaves the prior completed day.
 HTF_DAILY_DAYS_BACK = 25
 
 _lock = threading.Lock()
@@ -52,32 +54,28 @@ def daily_bars_with_oi(candles: Optional[List[Dict[str, Any]]]) -> List[Dict[str
     return out
 
 
-def htf_oi_from_daily_bars(bars: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def htf_oi_from_daily_bars(
+    bars: List[Dict[str, Any]],
+    *,
+    now: Optional[datetime] = None,
+    market_closed: Optional[bool] = None,
+) -> Optional[Dict[str, Any]]:
     """
-    Window: ``bars[-1]`` = last completed daily bar; ``bars[-(10+1)]`` = 10 sessions earlier.
-    Same 4-way rules as session OI (price Δ vs OI Δ).
+    Forming daily bar vs the prior day. Closed market with no bar for today
+    uses the last completed day vs the day before it. Same 4-way price/OI signs.
     """
-    need = HTF_OI_SESSIONS_BACK + 1
-    if len(bars) < need:
-        return None
-    latest = bars[-1]
-    prior = bars[-need]
-    dp = float(latest["close"]) - float(prior["close"])
-    doi = float(latest["oi"]) - float(prior["oi"])
-    from backend.services.oi_heatmap import _normalize_signal
-    from backend.services.oi_integration import interpret_oi_signal
+    from backend.services.oi_heatmap_bars import htf_record_from_daily
 
-    sig = _normalize_signal(interpret_oi_signal(dp, doi))
-    return {
-        "htf_oi_signal": sig,
-        "price_from": float(prior["close"]),
-        "price_to": float(latest["close"]),
-        "oi_from": int(prior["oi"]),
-        "oi_to": int(latest["oi"]),
-        "bar_latest": latest["timestamp"],
-        "bar_prior": prior["timestamp"],
-        "sessions_back": HTF_OI_SESSIONS_BACK,
-    }
+    as_of = now or datetime.now(IST)
+    if as_of.tzinfo is None:
+        as_of = IST.localize(as_of)
+    else:
+        as_of = as_of.astimezone(IST)
+    if market_closed is None:
+        from backend.services.oi_heatmap import is_oi_heatmap_overnight_freeze
+
+        market_closed = is_oi_heatmap_overnight_freeze(as_of)
+    return htf_record_from_daily(bars, now=as_of, market_closed=bool(market_closed))
 
 
 def _persist(rows: List[Dict[str, Any]], computed_at: datetime) -> None:
@@ -171,9 +169,11 @@ def attach_htf_oi(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         d = dict(r)
         ik = str(d.get("instrument_key") or "").strip()
         rec = by_ik.get(ik) or {}
-        d["htf_oi_signal"] = rec.get("htf_oi_signal")
-        d["htf_bar_latest"] = rec.get("bar_latest")
-        d["htf_bar_prior"] = rec.get("bar_prior")
+        # Live refresh already stored the forming-day grade on the row.
+        if not str(d.get("htf_oi_signal") or "").strip():
+            d["htf_oi_signal"] = rec.get("htf_oi_signal")
+        d["htf_bar_latest"] = rec.get("bar_latest") or d.get("htf_bar_latest")
+        d["htf_bar_prior"] = rec.get("bar_prior") or d.get("htf_bar_prior")
         out.append(d)
     return out
 
@@ -182,8 +182,11 @@ def htf_window_payload() -> Dict[str, Any]:
     _, ts = get_htf_cache()
     return {
         "sessions_back": HTF_OI_SESSIONS_BACK,
-        "latest_bar": "last completed daily FUT bar from Upstox days/1 (close + oi)",
-        "prior_bar": "daily FUT bar 10 trading sessions earlier in the same series",
+        "latest_bar": (
+            "forming daily FUT bar (today vs prior close and OI); "
+            "when the market is closed and today has no bar, the last completed session"
+        ),
+        "prior_bar": "previous completed daily FUT bar in the same current-month series",
         "computed_at": ts,
     }
 

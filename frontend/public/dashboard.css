@@ -2358,6 +2358,23 @@ body[data-theme="dark"] .oi-heatmap-tab.is-active {
     font-weight: 600;
     white-space: nowrap;
 }
+.oi-heatmap-hint {
+    margin: 0 0 8px;
+    color: #64748b;
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+.oi-heatmap-vol {
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.oi-heatmap-vol--up { color: #15803d; }
+.oi-heatmap-vol--down { color: #b91c1c; }
+.oi-heatmap-vol--flat { color: #64748b; }
+body[data-theme="dark"] .oi-heatmap-vol--up { color: #4ade80; }
+body[data-theme="dark"] .oi-heatmap-vol--down { color: #f87171; }
+body[data-theme="dark"] .oi-heatmap-vol--flat { color: #94a3b8; }
 .oi-heatmap-oi-pct {
     font-weight: 600;
     border-radius: 4px;

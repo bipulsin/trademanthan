@@ -10,7 +10,7 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
     <script src="auth-check.js?v=1"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="stylesheet" href="dashboard.css?v=2.17">
+    <link rel="stylesheet" href="dashboard.css?v=2.18">
     <link rel="stylesheet" href="left-menu.css?v=3.24">
     <link rel="stylesheet" href="theme.css?v=1.3">
     <style>
@@ -261,6 +261,7 @@
                         </div>
                     </div>
                     <div class="card-content">
+                        <p class="oi-heatmap-hint">OI Signal is the last completed 15-minute bar. Prev-OI is the 15-minute bar before that. MTF-OI is the last completed hour. HTF-OI is the forming day versus the prior day (or the last completed day versus the day before, when the session is closed).</p>
                         <p class="oi-heatmap-msg" id="oiHeatmapMsg">Loading…</p>
                         <div class="oi-heatmap-tabs" role="tablist" aria-label="OI signal buckets">
                             <button type="button" class="oi-heatmap-tab is-active" data-oi-tab="LONG_BUILDUP" role="tab" aria-selected="true">Long Buildup</button>
@@ -497,7 +498,8 @@
                     <option value="symbol">Symbol</option>
                     <option value="score">Score</option>
                     <option value="oi_signal">OI Signal</option>
-                    <option value="prev_oi_signal">Previous OI</option>
+                    <option value="prev_oi_signal">Prev-OI</option>
+                    <option value="mtf_oi_signal">MTF-OI</option>
                     <option value="htf_oi_signal">HTF-OI</option>
                 </select>
                 <button type="button" class="btn-icon oi-heatmap-sort-dir" id="oiHeatmapSortDir" title="Toggle sort direction" aria-label="Toggle sort direction">↑</button>
@@ -515,7 +517,7 @@
     <script src="dashboard-sector-movers.js?v=1.5"></script>
     <script src="dashboard-relative-strength.js?v=14"></script>
     <script src="dashboard-sf-watchlist.js?v=1.3"></script>
-    <script src="dashboard-oi-heatmap.js?v=3.8"></script>
+    <script src="dashboard-oi-heatmap.js?v=3.9"></script>
     <script src="crypto-prices.js?v=1.5"></script>
     <script src="version.js?v=1.0"></script>
     <script src="cache-manager.js?v=1.1"></script>

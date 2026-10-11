@@ -32,7 +32,7 @@ def test_interpret_oi_signal_four_states():
     assert interpret_oi_signal(1.0, 0.0) == "NEUTRAL"
 
 
-def test_htf_oi_window_last_bar_vs_ten_sessions_back():
+def test_htf_oi_window_is_prior_day_not_ten_sessions():
     from backend.services.oi_heatmap_htf import daily_bars_with_oi, htf_oi_from_daily_bars
 
     candles = []
@@ -45,13 +45,13 @@ def test_htf_oi_window_last_bar_vs_ten_sessions_back():
             }
         )
     bars = daily_bars_with_oi(candles)
-    rec = htf_oi_from_daily_bars(bars)
+    rec = htf_oi_from_daily_bars(bars, market_closed=True)
     assert rec is not None
     assert rec["bar_latest"].startswith("2026-08-28")
-    assert rec["bar_prior"].startswith("2026-08-18")
-    assert rec["sessions_back"] == 10
+    assert rec["bar_prior"].startswith("2026-08-27")
+    assert rec["sessions_back"] == 1
     assert rec["htf_oi_signal"] == "LONG_BUILDUP"
-    assert htf_oi_from_daily_bars(bars[:10]) is None
+    assert htf_oi_from_daily_bars(bars[:1], market_closed=True) is None
 
 
 def test_htf_oi_four_way_matches_session_rules():
@@ -65,7 +65,7 @@ def test_htf_oi_four_way_matches_session_rules():
             for i in range(9)
         ]
         bars.append({"timestamp": "2026-08-28T00:00:00+05:30", "close": c1, "oi": oi1})
-        return htf_oi_from_daily_bars(bars)["htf_oi_signal"]
+        return htf_oi_from_daily_bars(bars, market_closed=True)["htf_oi_signal"]
 
     assert pair(100, 1000, 110, 1100) == "LONG_BUILDUP"
     assert pair(100, 1000, 90, 1100) == "SHORT_BUILDUP"
@@ -353,3 +353,183 @@ def test_heatmap_futures_oi_is_not_an_nse_mcp_tool():
         lowered = name.lower()
         assert "open_interest" not in lowered
         assert "future" not in lowered
+
+
+def _bar(day, hh, mm, close, oi, volume):
+    return {
+        "timestamp": f"{day}T{hh:02d}:{mm:02d}:00+05:30",
+        "close": close,
+        "oi": oi,
+        "volume": volume,
+    }
+
+
+def test_heatmap_columns_follow_script_bars_not_quote_or_ten_sessions():
+    """PNBHOUSING-style: a tiny last-15-minute OI uptick must not set HTF.
+
+    HTF is Friday versus Thursday. A 10-session rise is ignored. The quote
+    delta is not an input to this classifier.
+    """
+    from backend.services.oi_heatmap_bars import classify_heatmap_timeframes
+
+    friday = "2026-10-09"
+    # 15-minute bars. OI Signal is 15:15 vs 15:00. Prev-OI is 15:00 vs 14:45.
+    bars_15 = [
+        _bar(friday, 13, 30, 780, 4_800_000, 1000),
+        _bar(friday, 13, 45, 780, 4_800_000, 1000),
+        _bar(friday, 14, 0, 780, 4_800_000, 1000),
+        _bar(friday, 14, 15, 780, 4_800_000, 1000),
+        _bar(friday, 14, 30, 781, 4_810_000, 500),
+        _bar(friday, 14, 45, 783, 4_810_000, 500),
+        _bar(friday, 15, 0, 782, 4_800_000, 500),
+        _bar(friday, 15, 15, 783, 4_801_950, 2000),
+    ]
+    bars_60 = [
+        _bar(friday, 13, 15, 790, 4_700_000, 4000),
+        _bar(friday, 14, 15, 790, 4_700_000, 4000),
+        _bar(friday, 15, 15, 783, 4_801_950, 2000),
+    ]
+    # Ten sessions of OI/price rise, then Friday's drop. HTF must be the drop.
+    daily = []
+    for i, day in enumerate(range(1, 8)):
+        daily.append(
+            {
+                "timestamp": f"2026-10-{day:02d}T00:00:00+05:30",
+                "close": 700.0 + i * 20,
+                "oi": 3_000_000.0 + i * 200_000,
+            }
+        )
+    daily.append({"timestamp": "2026-10-08T00:00:00+05:30", "close": 900.0, "oi": 5_200_000.0})
+    daily.append({"timestamp": "2026-10-09T00:00:00+05:30", "close": 783.0, "oi": 4_801_950.0})
+
+    sunday = _ist(2026, 10, 11, 12, 0)
+    got = classify_heatmap_timeframes(
+        bars_15=bars_15,
+        bars_60=bars_60,
+        daily_bars=daily,
+        now=sunday,
+        market_closed=True,
+    )
+    assert got["oi_signal"] == "LONG_BUILDUP"
+    assert got["prev_oi_signal"] == "LONG_UNWIND"
+    assert got["mtf_oi_signal"] == "SHORT_BUILDUP"
+    assert got["htf_oi_signal"] == "LONG_UNWIND"
+    assert got["oi_chg_pct"] == (4_801_950 / 4_800_000 - 1) * 100
+    assert got["volume_arrow"] == "up"
+
+
+def test_forming_15m_bar_does_not_override_completed_signal():
+    from backend.services.oi_heatmap_bars import classify_heatmap_timeframes
+
+    friday = "2026-10-09"
+    bars_15 = [
+        _bar(friday, 14, 0, 100, 10000, 100),
+        _bar(friday, 14, 15, 100, 10000, 100),
+        _bar(friday, 14, 30, 100, 10000, 100),
+        _bar(friday, 14, 45, 101, 10100, 100),
+        _bar(friday, 15, 0, 102, 10200, 100),
+        _bar(friday, 15, 15, 90, 5000, 50),
+    ]
+    # 15:20 is still inside the 15:15 bar (session ends 15:30).
+    now = _ist(2026, 10, 9, 15, 20)
+    got = classify_heatmap_timeframes(
+        bars_15=bars_15,
+        bars_60=[
+            _bar(friday, 13, 15, 100, 9000, 100),
+            _bar(friday, 14, 15, 102, 10200, 100),
+            _bar(friday, 15, 15, 90, 5000, 50),
+        ],
+        daily_bars=[
+            {"timestamp": "2026-10-08T00:00:00+05:30", "close": 100, "oi": 10000},
+            {"timestamp": "2026-10-09T00:00:00+05:30", "close": 102, "oi": 11000},
+        ],
+        now=now,
+        market_closed=False,
+    )
+    # Completed 15:00 vs 14:45 is long buildup. The forming crash is ignored.
+    assert got["oi_signal"] == "LONG_BUILDUP"
+    assert got["prev_oi_signal"] == "LONG_BUILDUP"
+    # Forming 15:15 hour is open; MTF is 14:15 vs 13:15.
+    assert got["mtf_oi_signal"] == "LONG_BUILDUP"
+    # Forming day versus Thursday, not the 15-minute crash.
+    assert got["htf_oi_signal"] == "LONG_BUILDUP"
+    # Volume uses the forming candle (50) against the previous five 100s.
+    assert got["volume_arrow"] == "down"
+
+
+def test_volume_arrow_flat_and_missing_stay_blank():
+    from backend.services.oi_heatmap_bars import classify_heatmap_timeframes, volume_arrow
+
+    assert volume_arrow(100.4, [100, 100, 100, 100, 100]) == "flat"
+    assert volume_arrow(100.6, [100, 100, 100, 100, 100]) == "up"
+    assert volume_arrow(99.4, [100, 100, 100, 100, 100]) == "down"
+    assert volume_arrow(None, [100, 100, 100, 100, 100]) is None
+    assert volume_arrow(100, [100, 100, None, 100, 100]) is None
+    assert volume_arrow(100, [100, 100, 100, 100]) is None
+
+    friday = "2026-10-09"
+    bars = [
+        _bar(friday, 14, 0, 10, 100, 100),
+        _bar(friday, 14, 15, 10, 100, 100),
+        _bar(friday, 14, 30, 10, 100, 100),
+        _bar(friday, 14, 45, 10, 100, 100),
+        _bar(friday, 15, 0, 10, 100, 100),
+        _bar(friday, 15, 15, 10, 100, None),
+    ]
+    got = classify_heatmap_timeframes(
+        bars_15=bars,
+        bars_60=[],
+        daily_bars=[],
+        now=_ist(2026, 10, 11, 12, 0),
+        market_closed=True,
+    )
+    assert got["volume_arrow"] is None
+    assert got["oi_signal"] == "NEUTRAL"
+
+
+def test_missing_oi_is_blank_not_zero():
+    from backend.services.oi_heatmap_bars import classify_heatmap_timeframes
+
+    friday = "2026-10-09"
+    bars = [
+        _bar(friday, 14, 45, 100, 1000, 10),
+        _bar(friday, 15, 0, 110, 1100, 10),
+        _bar(friday, 15, 15, 120, None, 10),
+    ]
+    got = classify_heatmap_timeframes(
+        bars_15=bars,
+        daily_bars=[
+            {"timestamp": "2026-10-08T00:00:00+05:30", "close": 100, "oi": 1000},
+            {"timestamp": "2026-10-09T00:00:00+05:30", "close": 90, "oi": None},
+        ],
+        now=_ist(2026, 10, 11, 12, 0),
+        market_closed=True,
+    )
+    assert got["oi_signal"] is None
+    assert got["oi_chg_pct"] is None
+    assert got["htf_oi_signal"] is None
+
+
+def test_open_session_without_today_does_not_reuse_prior_day_as_htf():
+    from backend.services.oi_heatmap_htf import htf_oi_from_daily_bars
+
+    bars = [
+        {"timestamp": "2026-10-08T00:00:00+05:30", "close": 100, "oi": 1000},
+        {"timestamp": "2026-10-09T00:00:00+05:30", "close": 110, "oi": 1100},
+    ]
+    assert (
+        htf_oi_from_daily_bars(
+            bars,
+            now=_ist(2026, 10, 12, 11, 0),
+            market_closed=False,
+        )
+        is None
+    )
+    forming = bars + [
+        {"timestamp": "2026-10-12T00:00:00+05:30", "close": 108, "oi": 1200}
+    ]
+    rec = htf_oi_from_daily_bars(forming, now=_ist(2026, 10, 12, 11, 0), market_closed=False)
+    assert rec["bar_latest"].startswith("2026-10-12")
+    assert rec["bar_prior"].startswith("2026-10-09")
+    assert rec["htf_oi_signal"] == "SHORT_BUILDUP"
+    assert rec["sessions_back"] == 1

@@ -3,9 +3,11 @@ Live OI heatmap — current-month stock futures from ``arbitrage_master`` only.
 
 Refresh: Upstox REST batch quotes every 30 minutes 09:00–16:00 IST on NSE sessions.
 The 16:00 snapshot stays frozen until the next trading day 09:00.
-OI change: quote ``change_in_oi`` if non-zero, else delta vs previous heatmap snapshot
-in the same IST session, else vs prior completed daily candle OI.
-Signal: ``interpret_oi_signal`` (price change vs OI change). Does not start a WebSocket.
+LTP and session Chg% still come from the current-month futures quote.
+OI Signal, Prev-OI, MTF-OI, HTF-OI, OI chg %, and the volume arrow come from
+that same contract's Upstox candles (15-minute, 60-minute, and daily), using
+the OI-Buildup script windows. Quote ``change_in_oi`` is kept for the futures
+gate magnitude and the 1-day/5-day significant labels; it is not the OI Signal.
 Significant Long/Short Buildup is an extra label on that same Upstox current-month
 FUT quote (price, OI, session volume) and ``days/1`` history (previous-day and
 5-session volume). NSE MCP is not on this path: verified tools are cash quotes
@@ -72,6 +74,9 @@ _sess_prev_close_by_instrument: Dict[str, float] = {}
 _prior_day_oi_ref_by_instrument: Dict[str, int] = {}
 _completed_bars_day: Optional[date] = None
 _completed_bars_by_instrument: Dict[str, List[Dict[str, Any]]] = {}
+_raw_daily_by_instrument: Dict[str, List[Dict[str, Any]]] = {}
+_bars_15_by_instrument: Dict[str, List[Dict[str, Any]]] = {}
+_bars_60_by_instrument: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def _reset_oi_delta_caches_if_new_ist_day() -> None:
@@ -83,6 +88,9 @@ def _reset_oi_delta_caches_if_new_ist_day() -> None:
     _sess_prev_close_by_instrument.clear()
     _prior_day_oi_ref_by_instrument.clear()
     _completed_bars_by_instrument.clear()
+    _raw_daily_by_instrument.clear()
+    _bars_15_by_instrument.clear()
+    _bars_60_by_instrument.clear()
     _completed_bars_day = None
     _heatmap_oi_cache_ist_day = d
 
@@ -123,6 +131,7 @@ def _prefetch_completed_daily_bars(ux: Any, keys: List[str], session_day: date) 
     global _completed_bars_day
     if _completed_bars_day != session_day:
         _completed_bars_by_instrument.clear()
+        _raw_daily_by_instrument.clear()
         _completed_bars_day = session_day
     pending = [ik for ik in keys if ik not in _completed_bars_by_instrument]
     if not pending:
@@ -153,6 +162,7 @@ def _prefetch_completed_daily_bars(ux: Any, keys: List[str], session_day: date) 
             continue
         if cached is None:
             cold_fetches += 1
+        _raw_daily_by_instrument[ik] = list(candles)
         _completed_bars_by_instrument[ik] = completed_daily_bars(candles, session_day)
     if cold_fetches:
         logger.info(
@@ -160,6 +170,84 @@ def _prefetch_completed_daily_bars(ux: Any, keys: List[str], session_day: date) 
             cold_fetches,
             session_day.isoformat(),
         )
+
+
+def _fetch_futures_candles(ux: Any, instrument_key: str, interval: str, days_back: int) -> List[Dict[str, Any]]:
+    """Native Upstox V3 candles for this futures key, plus today's intraday merge.
+
+    minutes/15 goes through V3 directly so the heatmap does not expand every
+    contract into 1-minute history. hours/1 is already a V3 interval. Results
+    land in the shared candle cache. Empty on failure — callers leave the
+    column blank instead of substituting quote OI.
+    """
+    from backend.services.market_data import candle_cache
+    from backend.services.upstox_service import _merge_historical_with_intraday
+
+    iv = (interval or "").strip().lower()
+    end_d = datetime.now(IST).date()
+    req_from = (end_d - timedelta(days=int(days_back))).isoformat()
+    to_date = end_d.isoformat()
+    ttl = float(getattr(settings, "UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC", 150))
+    try:
+        cached = candle_cache.get(instrument_key, iv, req_from, ttl)
+    except Exception:
+        cached = None
+    if cached is not None:
+        return list(cached)
+    try:
+        candles = ux._fetch_historical_v3_candles(instrument_key, iv, to_date, req_from)
+    except Exception as e:
+        logger.debug("oi_heatmap: %s candles %s: %s", iv, instrument_key, e)
+        candles = None
+    # Today's intraday feed is empty once the session is frozen. Skip it so a
+    # weekend recompute does not double the historical calls.
+    if iv in ("minutes/15", "hours/1", "minutes/30", "minutes/5") and not is_oi_heatmap_overnight_freeze():
+        try:
+            intra = ux._fetch_intraday_candles_v3(instrument_key, iv)
+        except Exception as e:
+            logger.debug("oi_heatmap: %s intraday %s: %s", iv, instrument_key, e)
+            intra = None
+        if intra:
+            candles = _merge_historical_with_intraday(candles, intra, session_date=end_d)
+    if not candles:
+        return []
+    try:
+        candle_cache.put(instrument_key, iv, req_from, to_date, candles)
+    except Exception:
+        pass
+    return list(candles)
+
+
+def _prefetch_intraday_oi_bars(ux: Any, keys: List[str]) -> None:
+    """15-minute and 60-minute futures candles for the script's STF and MTF rows."""
+    from backend.services.market_data import candle_cache
+
+    pause_s = float(getattr(settings, "OI_BATCH_PAUSE_SEC", 0.35))
+    ttl = float(getattr(settings, "UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC", 150))
+    end_d = datetime.now(IST).date()
+    req_from = (end_d - timedelta(days=6)).isoformat()
+    cold = 0
+    for ik in keys:
+        hit_15 = hit_60 = None
+        try:
+            hit_15 = candle_cache.get(ik, "minutes/15", req_from, ttl)
+            hit_60 = candle_cache.get(ik, "hours/1", req_from, ttl)
+        except Exception:
+            hit_15 = hit_60 = None
+        if (hit_15 is None or hit_60 is None) and cold > 0 and pause_s > 0:
+            time.sleep(pause_s)
+        if hit_15 is None or hit_60 is None:
+            cold += 1
+        if hit_15 is None:
+            _bars_15_by_instrument[ik] = _fetch_futures_candles(ux, ik, "minutes/15", 6)
+        else:
+            _bars_15_by_instrument[ik] = list(hit_15)
+        if hit_60 is None:
+            _bars_60_by_instrument[ik] = _fetch_futures_candles(ux, ik, "hours/1", 6)
+        else:
+            _bars_60_by_instrument[ik] = list(hit_60)
+    if cold:
+        logger.info("oi_heatmap: intraday 15m/60m candle fetches=%s", cold)
 
 
 def _effective_oi_change(
@@ -984,6 +1072,10 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
     ws_session_volumes = _load_ws_session_volumes(keys)
     session_day = datetime.now(IST).date()
     _prefetch_completed_daily_bars(ux, keys, session_day)
+    _prefetch_intraday_oi_bars(ux, keys)
+    as_of = datetime.now(IST)
+    market_closed = is_oi_heatmap_overnight_freeze(as_of)
+    from backend.services.oi_heatmap_bars import classify_heatmap_timeframes
     from backend.services.oi_buildup_significant import (
         five_day_significant,
         one_day_oi_chg_pct,
@@ -1023,11 +1115,20 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
                     raw_oi_chg = 0
         oi_chg = _effective_oi_change(ux, ik, raw_oi_chg, oi)
         cached_pc = _sess_prev_close_by_instrument.get(ik)
-        price_dp, chg_pct, prev_close = price_dp_and_chg_pct(lp, s, cached_prev=cached_pc)
+        _price_dp, chg_pct, prev_close = price_dp_and_chg_pct(lp, s, cached_prev=cached_pc)
         if prev_close is not None:
             _sess_prev_close_by_instrument[ik] = prev_close
-        oi_chg_pct = (oi_chg / max(1, oi - oi_chg) * 100.0) if oi else 0.0
-        sig = _interpret_signal(price_dp, float(oi_chg))
+        tf = classify_heatmap_timeframes(
+            bars_15=_bars_15_by_instrument.get(ik) or [],
+            bars_60=_bars_60_by_instrument.get(ik) or None,
+            daily_bars=_raw_daily_by_instrument.get(ik) or [],
+            now=as_of,
+            market_closed=market_closed,
+        )
+        oi_chg_pct = tf.get("oi_chg_pct")
+        if oi_chg_pct is not None:
+            oi_chg_pct = round(float(oi_chg_pct), 3)
+        sig = tf.get("oi_signal")
         daily_bars = _completed_bars_by_instrument.get(ik)
         vol_today = session_volume(s.get("volume"), ws_session_volumes.get(ik))
         sig_1d = one_day_significant(
@@ -1056,16 +1157,21 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
                 "chg_pct": round(chg_pct, 3),
                 "oi": oi,
                 "oi_chg": oi_chg,
-                "oi_chg_pct": round(oi_chg_pct, 3),
+                "oi_chg_pct": oi_chg_pct,
                 "oi_signal": sig,
+                "prev_oi_signal": tf.get("prev_oi_signal"),
+                "mtf_oi_signal": tf.get("mtf_oi_signal"),
+                "htf_oi_signal": tf.get("htf_oi_signal"),
                 "significant_oi_signal": sig_1d,
                 "significant_htf_oi": sig_5d,
                 "volume": int(vol),
+                "volume_arrow": tf.get("volume_arrow"),
                 "score": round(_score_row(oi_chg, chg_pct), 4),
             }
         )
 
-    rows = apply_previous_oi_signal_when_closed(rows)
+    # Candle grades stand on their own. Do not copy the previous scan label
+    # onto OI Signal or Prev-OI when the session is closed.
 
     for _ik in keys:
         _s = merged.get(_ik) or {}
@@ -1115,13 +1221,15 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     INSERT INTO oi_heatmap_latest (
                         rank, instrument_key, underlying_symbol, trading_symbol, expiry,
                         ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal,
+                        prev_oi_signal, mtf_oi_signal, htf_oi_signal,
                         significant_oi_signal, significant_htf_oi,
-                        volume, score, updated_at
+                        volume, volume_arrow, score, updated_at
                     ) VALUES (
                         :rank, :instrument_key, :underlying_symbol, :trading_symbol, :expiry,
                         :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal,
+                        :prev_oi_signal, :mtf_oi_signal, :htf_oi_signal,
                         :significant_oi_signal, :significant_htf_oi,
-                        :volume, :score, :updated_at
+                        :volume, :volume_arrow, :score, :updated_at
                     )
                     """
                 ),
@@ -1135,11 +1243,15 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     "chg_pct": float(r["chg_pct"]),
                     "oi": int(r["oi"]),
                     "oi_chg": int(r["oi_chg"]),
-                    "oi_chg_pct": float(r["oi_chg_pct"]),
+                    "oi_chg_pct": None if r.get("oi_chg_pct") is None else float(r["oi_chg_pct"]),
                     "oi_signal": r.get("oi_signal"),
+                    "prev_oi_signal": r.get("prev_oi_signal"),
+                    "mtf_oi_signal": r.get("mtf_oi_signal"),
+                    "htf_oi_signal": r.get("htf_oi_signal"),
                     "significant_oi_signal": r.get("significant_oi_signal"),
                     "significant_htf_oi": r.get("significant_htf_oi"),
                     "volume": int(r.get("volume") or 0),
+                    "volume_arrow": r.get("volume_arrow"),
                     "score": float(r.get("score") or 0),
                     "updated_at": updated_at,
                 },
@@ -1173,8 +1285,9 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
                     """
                     SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
                            ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal,
+                           prev_oi_signal, mtf_oi_signal, htf_oi_signal,
                            significant_oi_signal, significant_htf_oi,
-                           volume, score, updated_at
+                           volume, volume_arrow, score, updated_at
                     FROM oi_heatmap_latest
                     WHERE updated_at >= :day_start AND updated_at < :day_end
                       AND updated_at = (
@@ -1192,8 +1305,9 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
                     """
                     SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
                            ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal,
+                           prev_oi_signal, mtf_oi_signal, htf_oi_signal,
                            significant_oi_signal, significant_htf_oi,
-                           volume, score, updated_at
+                           volume, volume_arrow, score, updated_at
                     FROM oi_heatmap_latest
                     WHERE updated_at = (
                         SELECT MAX(updated_at) FROM oi_heatmap_latest
@@ -1355,9 +1469,8 @@ def get_live_oi_heatmap_json(force_reload_from_db: bool = False) -> Dict[str, An
             "(scheduler: every 30 min, 09:00–16:00 IST on trading days; overnight freeze after 16:00)."
         )
     frozen = is_oi_heatmap_overnight_freeze()
-    if frozen:
-        rows = apply_previous_oi_signal_when_closed(rows)
-    attached = _attach_prev_signal_for_api(rows, ts or None)
+    # Prev-OI is the prior 15-minute bar stored on the row, not the previous scan.
+    attached = [dict(r) for r in rows]
     try:
         from backend.services.oi_heatmap_htf import attach_htf_oi, htf_window_payload
 

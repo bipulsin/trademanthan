@@ -193,66 +193,27 @@
         });
     }
 
-    function significantLabel(code) {
-        const s = String(code || "").toUpperCase();
-        if (s === "SIGNIFICANT_LONG_BUILDUP") return "Significant Long Buildup";
-        if (s === "SIGNIFICANT_SHORT_BUILDUP") return "Significant Short Buildup";
-        return "";
-    }
-
-    function significantTone(code) {
-        const s = String(code || "").toUpperCase();
-        if (s === "SIGNIFICANT_LONG_BUILDUP") return "LONG_BUILDUP";
-        if (s === "SIGNIFICANT_SHORT_BUILDUP") return "SHORT_BUILDUP";
-        return "";
-    }
-
-    function significantTip(code, horizon) {
-        const s = String(code || "").toUpperCase();
-        const day =
-            horizon === "5d"
-                ? "5 sessions: price at least 2%, OI at least +5%, volume above the previous 5-session average"
-                : "1 day: price at least 1%, OI at least +2%, volume above the previous day";
-        if (s === "SIGNIFICANT_LONG_BUILDUP") return "Significant long buildup — " + day;
-        if (s === "SIGNIFICANT_SHORT_BUILDUP") return "Significant short buildup — " + day;
-        return "";
+    function signalCssClass(sig) {
+        const s = String(sig || "").toUpperCase();
+        if (s === "LONG_UNWIND") return "LONG_UNWINDING";
+        if (s === "SHORT_COVER") return "SHORT_COVERING";
+        if (!s) return "NEUTRAL";
+        return /^[A-Z_]+$/.test(s) ? s : "NEUTRAL";
     }
 
     function signalMarkup(sig, tip, emptyText) {
         const raw = sig || "";
-        const sigClass = /^[A-Z_]+$/.test(raw) ? raw.replace(/[^A-Z_]/g, "_") : "NEUTRAL";
         const text = raw ? signalLabel(raw) : emptyText;
+        if (!text) return "";
         return (
             '<span class="oi-heatmap-signal oi-heatmap-signal--' +
-            sigClass +
+            signalCssClass(raw) +
             '" title="' +
             escapeHtml(tip || "") +
             '">' +
             escapeHtml(text) +
             "</span>"
         );
-    }
-
-    function significantMarkup(code, horizon) {
-        const label = significantLabel(code);
-        if (!label) return "";
-        const tone = significantTone(code);
-        return (
-            '<span class="oi-heatmap-signal oi-heatmap-signal--' +
-            tone +
-            ' oi-heatmap-signal--significant" title="' +
-            escapeHtml(significantTip(code, horizon)) +
-            '">' +
-            escapeHtml(label) +
-            "</span>"
-        );
-    }
-
-    function signalStack(sig, tip, significantCode, horizon, emptyText) {
-        const base = signalMarkup(sig, tip, emptyText);
-        const extra = significantMarkup(significantCode, horizon);
-        if (!extra) return base;
-        return '<div class="oi-heatmap-signal-stack">' + base + extra + "</div>";
     }
 
     function signalLabel(sig) {
@@ -269,6 +230,15 @@
         return map[s] || sig || "—";
     }
 
+    var TF_TIPS = {
+        oi: "Last completed 15-minute bar versus the previous 15-minute bar",
+        prev: "Previous 15-minute bar versus the 15-minute bar before it",
+        mtf: "Last completed 60-minute bar versus the prior 60-minute bar",
+        htf: "Forming day versus the prior completed day. When the market is closed, the last completed session versus the day before it",
+        oiPct: "15-minute open-interest change versus the previous 15-minute bar",
+        vol: "Current 15-minute volume versus the average of the previous 5 completed 15-minute bars",
+    };
+
     function signalTooltip(sig) {
         const s = String(sig || "").toUpperCase();
         if (s === "LONG_BUILDUP") return "FII/DII Buying";
@@ -278,6 +248,35 @@
         if (s === "LONG_UNWIND" || s === "LONG_UNWINDING")
             return "No new Selling. Decline temporary";
         if (s === "NEUTRAL") return "No clear direction";
+        return "";
+    }
+
+    function columnTip(tfTip, sig) {
+        var dir = signalTooltip(sig);
+        if (!tfTip) return dir;
+        return dir ? tfTip + " — " + dir : tfTip;
+    }
+
+    function fmtSignedPct(n) {
+        if (n == null || n === "" || Number.isNaN(Number(n))) return "";
+        var v = Number(n);
+        var body = Math.abs(v).toFixed(2);
+        if (v > 0) return "+" + body + "%";
+        if (v < 0) return "-" + body + "%";
+        return "0.00%";
+    }
+
+    function volumeArrowCell(arrow) {
+        var a = String(arrow || "").toLowerCase();
+        if (a === "up") {
+            return '<span class="oi-heatmap-vol oi-heatmap-vol--up" title="' + escapeHtml(TF_TIPS.vol) + '">↑</span>';
+        }
+        if (a === "down") {
+            return '<span class="oi-heatmap-vol oi-heatmap-vol--down" title="' + escapeHtml(TF_TIPS.vol) + '">↓</span>';
+        }
+        if (a === "flat") {
+            return '<span class="oi-heatmap-vol oi-heatmap-vol--flat" title="' + escapeHtml(TF_TIPS.vol) + '">↔</span>';
+        }
         return "";
     }
 
@@ -312,22 +311,21 @@
         }
         const head =
             "<thead><tr>" +
-            "<th>#</th><th>Symbol</th><th>LTP</th><th>Chg%</th><th>OI</th><th>OI Chg</th>" +
-            "<th>OI Signal</th><th>Previous OI</th><th>HTF-OI</th><th>Volume</th><th>Score</th>" +
+            "<th>#</th><th>Symbol</th><th>LTP</th><th>Chg%</th>" +
+            '<th title="' + escapeHtml(TF_TIPS.oiPct) + '">OI chg %</th>' +
+            '<th title="' + escapeHtml(TF_TIPS.oi) + '">OI Signal</th>' +
+            '<th title="' + escapeHtml(TF_TIPS.prev) + '">Prev-OI</th>' +
+            '<th title="' + escapeHtml(TF_TIPS.mtf) + '">MTF-OI</th>' +
+            '<th title="' + escapeHtml(TF_TIPS.htf) + '">HTF-OI</th>' +
+            '<th title="' + escapeHtml(TF_TIPS.vol) + '">Volume</th>' +
+            "<th>Score</th>" +
             "</tr></thead>";
         const body = rows
             .map(function (r) {
                 const sig = r.oi_signal || "";
-                const sigTip = signalTooltip(sig);
-                const hs = heatStyle(sig);
                 const prevSig = r.prev_oi_signal || "";
-                const prevSigTip = signalTooltip(prevSig);
-                const prevSigClass = /^[A-Z_]+$/.test(prevSig)
-                    ? prevSig.replace(/[^A-Z_]/g, "_")
-                    : "NEUTRAL";
+                const mtfSig = r.mtf_oi_signal || "";
                 const htfSig = r.htf_oi_signal || "";
-                const htfTip = signalTooltip(htfSig);
-                const htfHs = heatStyle(htfSig);
                 const sym = r.trading_symbol || r.underlying_symbol || "";
                 return (
                     "<tr>" +
@@ -344,36 +342,30 @@
                     fmtNum(r.chg_pct, 2) +
                     "</td>" +
                     "<td>" +
-                    fmtInt(r.oi) +
-                    "</td>" +
-                    "<td>" +
-                    fmtInt(r.oi_chg) +
+                    escapeHtml(fmtSignedPct(r.oi_chg_pct)) +
                     "</td>" +
                     '<td style="' +
-                    hs +
+                    heatStyle(sig) +
                     '">' +
-                    signalStack(sig, sigTip, r.significant_oi_signal, "1d", "—") +
+                    signalMarkup(sig, columnTip(TF_TIPS.oi, sig), "") +
                     "</td>" +
-                    "<td><span class=\"oi-heatmap-signal oi-heatmap-signal--" +
-                    prevSigClass +
-                    "\" title=\"" +
-                    escapeHtml(prevSigTip) +
-                    "\">" +
-                    escapeHtml(signalLabel(prevSig || "—")) +
-                    "</span></td>" +
                     '<td style="' +
-                    htfHs +
+                    heatStyle(prevSig) +
                     '">' +
-                    signalStack(
-                        htfSig,
-                        htfTip || "10-session daily FUT OI vs last completed bar",
-                        r.significant_htf_oi,
-                        "5d",
-                        "—"
-                    ) +
+                    signalMarkup(prevSig, columnTip(TF_TIPS.prev, prevSig), "") +
+                    "</td>" +
+                    '<td style="' +
+                    heatStyle(mtfSig) +
+                    '">' +
+                    signalMarkup(mtfSig, columnTip(TF_TIPS.mtf, mtfSig), "") +
+                    "</td>" +
+                    '<td style="' +
+                    heatStyle(htfSig) +
+                    '">' +
+                    signalMarkup(htfSig, columnTip(TF_TIPS.htf, htfSig), "") +
                     "</td>" +
                     "<td>" +
-                    fmtInt(r.volume) +
+                    volumeArrowCell(r.volume_arrow) +
                     "</td>" +
                     "<td>" +
                     fmtNum(r.score, 2) +
@@ -417,6 +409,13 @@
                 var psb = String(signalLabel(b && b.prev_oi_signal) || "").toUpperCase();
                 if (ps < psb) return -1 * dir;
                 if (ps > psb) return 1 * dir;
+                return 0;
+            }
+            if (modalSortKey === "mtf_oi_signal") {
+                var ms = String(signalLabel(a && a.mtf_oi_signal) || "").toUpperCase();
+                var msb = String(signalLabel(b && b.mtf_oi_signal) || "").toUpperCase();
+                if (ms < msb) return -1 * dir;
+                if (ms > msb) return 1 * dir;
                 return 0;
             }
             if (modalSortKey === "htf_oi_signal") {
