@@ -176,9 +176,17 @@ def _candles_for_symbol(
     if cache_only:
         return None, False
     # Off-hours / manual run: a direct fetch auto-populates the shared cache.
-    fetched = upstox.get_historical_candles_by_instrument_key(
-        instrument_key, interval=CANDLE_INTERVAL, days_back=CANDLE_DAYS_BACK
+    # Futures 5m is outside NSE MCP (cash daily only) and goes to Upstox at once.
+    from backend.services.market_data.gateway import fetch_candles
+
+    fetched_res = fetch_candles(
+        instrument_key,
+        interval=CANDLE_INTERVAL,
+        days_back=CANDLE_DAYS_BACK,
+        upstox=upstox,
+        purpose="trading",
     )
+    fetched = fetched_res.candles if fetched_res.status == "ok" else None
     return fetched, False
 
 
@@ -446,9 +454,16 @@ def _nifty_daily_closes(upstox: UpstoxService) -> List[Tuple[str, float]]:
     ist_today = datetime.now(IST).strftime("%Y-%m-%d")
     if _NIFTY_DAILY_CACHE and _NIFTY_DAILY_CACHE[0] == ist_today and len(_NIFTY_DAILY_CACHE[1]) >= 2:
         return _NIFTY_DAILY_CACHE[1]
-    daily = upstox.get_historical_candles_by_instrument_key(
-        NIFTY_KEY, interval="days/1", days_back=12
+    from backend.services.market_data.gateway import fetch_candles
+
+    daily_res = fetch_candles(
+        NIFTY_KEY,
+        interval="days/1",
+        days_back=12,
+        upstox=upstox,
+        purpose="historical",
     )
+    daily = daily_res.candles if daily_res.status == "ok" else None
     closes_dated: List[Tuple[str, float]] = []
     if daily:
         for c in _sorted_candles(daily):
@@ -484,7 +499,10 @@ def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
         last_date, last_close = closes_dated[-1]
         prev_close = closes_dated[-2][1]
         ist_today = datetime.now(IST).strftime("%Y-%m-%d")
-        quote = upstox.get_market_quote_by_key(NIFTY_KEY)
+        from backend.services.market_data.gateway import fetch_quote
+
+        quote_res = fetch_quote(NIFTY_KEY, upstox=upstox, purpose="trading")
+        quote = quote_res.quote if quote_res.status == "ok" else None
         ltp = _f(quote.get("last_price")) if quote else 0.0
 
         pct: Optional[float] = None
@@ -504,7 +522,10 @@ def _nifty_change_pct(upstox: UpstoxService) -> Optional[float]:
             return _LAST_GOOD_NIFTY_PCT
 
     # Last resort: live quote (close_price = prior session close).
-    quote = upstox.get_market_quote_by_key(NIFTY_KEY)
+    from backend.services.market_data.gateway import fetch_quote
+
+    quote_res = fetch_quote(NIFTY_KEY, upstox=upstox, purpose="trading")
+    quote = quote_res.quote if quote_res.status == "ok" else None
     if quote:
         last = _f(quote.get("last_price"))
         prev = _f(quote.get("close_price")) or _f((quote.get("ohlc") or {}).get("close"))

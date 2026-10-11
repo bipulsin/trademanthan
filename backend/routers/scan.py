@@ -6118,10 +6118,14 @@ async def get_index_prices():
                 }
             )
         
-        # During market hours - fetch real-time data
-        # Get real-time market quotes for indices using correct instrument keys
-        nifty_quote = vwap_service.get_market_quote_by_key(vwap_service.NIFTY50_KEY)
-        banknifty_quote = vwap_service.get_market_quote_by_key(vwap_service.BANKNIFTY_KEY)
+        # During market hours - index quotes via the market-data gateway.
+        # Flags default off, so this stays the Upstox quote the widget already uses.
+        from backend.services.market_data.gateway import fetch_quote
+
+        nifty_res = fetch_quote(vwap_service.NIFTY50_KEY, upstox=vwap_service, purpose="trading")
+        bank_res = fetch_quote(vwap_service.BANKNIFTY_KEY, upstox=vwap_service, purpose="trading")
+        nifty_quote = nifty_res.quote if nifty_res.status == "ok" else None
+        banknifty_quote = bank_res.quote if bank_res.status == "ok" else None
         
         # Process NIFTY data
         nifty_data = {}
@@ -6203,7 +6207,13 @@ async def get_index_prices():
                             "market_status": "Live Data"
                         },
                         "timestamp": datetime.now().isoformat(),
-                        "data_source": "realtime",
+                        "data_source": "realtime"
+                        if {nifty_res.source, bank_res.source} <= {"upstox"}
+                        else "nse_mcp",
+                        "quote_provenance": {
+                            "nifty": nifty_res.as_dict(),
+                            "banknifty": bank_res.as_dict(),
+                        },
                         "market_status": "open"
                     }
                 }

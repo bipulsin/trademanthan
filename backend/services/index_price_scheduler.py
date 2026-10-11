@@ -167,9 +167,17 @@ class IndexPriceScheduler:
             
             logger.info(f"📊 Fetching index prices at {now.strftime('%H:%M:%S IST')} (special_time={is_special_time})")
             
-            # Fetch index prices from Upstox API
-            nifty_quote = upstox_service.get_market_quote_by_key(upstox_service.NIFTY50_KEY)
-            banknifty_quote = upstox_service.get_market_quote_by_key(upstox_service.BANKNIFTY_KEY)
+            # Index quotes: NSE MCP only when both flags are on; otherwise Upstox.
+            from backend.services.market_data.gateway import fetch_quote
+
+            nifty_res = fetch_quote(
+                upstox_service.NIFTY50_KEY, upstox=upstox_service, purpose="trading"
+            )
+            bank_res = fetch_quote(
+                upstox_service.BANKNIFTY_KEY, upstox=upstox_service, purpose="trading"
+            )
+            nifty_quote = nifty_res.quote if nifty_res.status == "ok" else None
+            banknifty_quote = bank_res.quote if bank_res.status == "ok" else None
             
             db = SessionLocal()
             try:

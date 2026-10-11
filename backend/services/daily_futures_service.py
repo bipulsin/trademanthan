@@ -572,6 +572,30 @@ def _session_vwap_for_conviction(quote: Dict[str, Any]) -> Optional[float]:
     return v
 
 
+def _candles_via_gateway(
+    upstox: UpstoxService,
+    instrument_key: str,
+    *,
+    interval: str,
+    days_back: int,
+    range_end_date: Optional[date] = None,
+) -> List[Dict[str, Any]]:
+    """Futures candles stay on Upstox. NSE MCP is cash-only, so the gateway does not wait on it."""
+    from backend.services.market_data.gateway import fetch_candles
+
+    result = fetch_candles(
+        instrument_key,
+        interval=interval,
+        days_back=days_back,
+        range_end_date=range_end_date,
+        upstox=upstox,
+        purpose="trading",
+    )
+    if result.status != "ok" or not result.candles:
+        return []
+    return list(result.candles)
+
+
 def _floor_ist_to_15m(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         dt = IST.localize(dt)
@@ -593,12 +617,13 @@ def _prev_15m_close_for_instrument(
     if ik in cache:
         return cache[ik]
     try:
-        raw = upstox.get_historical_candles_by_instrument_key(
+        raw = _candles_via_gateway(
+            upstox,
             ik,
             interval="minutes/15",
             days_back=2,
             range_end_date=ref_dt_ist.date(),
-        ) or []
+        )
     except Exception as e:
         logger.debug("daily_futures: prev15 fetch failed for %s: %s", ik, e)
         cache[ik] = None
@@ -635,9 +660,9 @@ def _last_completed_15m_candles_for_instrument(
     if not ik:
         return []
     try:
-        raw = upstox.get_historical_candles_by_instrument_key(
-            ik, interval="minutes/15", days_back=3, range_end_date=session_date
-        ) or []
+        raw = _candles_via_gateway(
+            upstox, ik, interval="minutes/15", days_back=3, range_end_date=session_date
+        )
     except Exception as e:
         logger.debug("daily_futures: 15m candle fetch failed for %s: %s", ik, e)
         raw = []
@@ -699,9 +724,9 @@ def _last_completed_15m_candles_for_indicator(
 
     rows_all: List[Dict[str, Any]] = []
     try:
-        raw = upstox.get_historical_candles_by_instrument_key(
-            ik, interval="minutes/15", days_back=15, range_end_date=session_date
-        ) or []
+        raw = _candles_via_gateway(
+            upstox, ik, interval="minutes/15", days_back=15, range_end_date=session_date
+        )
         rows_all.extend(raw)
     except Exception as e:
         logger.debug("daily_futures: indicator 15m historical failed for %s: %s", ik, e)
@@ -1063,9 +1088,9 @@ def _compute_position_atr_15m_5d(
     if not ik:
         return None
     try:
-        raw = upstox.get_historical_candles_by_instrument_key(
-            ik, interval="minutes/15", days_back=20, range_end_date=as_of
-        ) or []
+        raw = _candles_via_gateway(
+            upstox, ik, interval="minutes/15", days_back=20, range_end_date=as_of
+        )
     except Exception as e:
         logger.debug("daily_futures: ATR 15m fetch failed for %s: %s", ik, e)
         return None
@@ -2163,12 +2188,13 @@ def _fetch_intraday_1m_cached(upstox: UpstoxService, instrument_key: str, trade_
     if hit and (now - float(hit.get("ts") or 0)) < 180.0:
         return list(hit.get("candles") or [])
     try:
-        candles = upstox.get_historical_candles_by_instrument_key(
+        candles = _candles_via_gateway(
+            upstox,
             instrument_key,
             interval="minutes/1",
             days_back=2,
             range_end_date=trade_date,
-        ) or []
+        )
     except Exception:
         candles = []
     # Fallback for current-day snapshots: historical endpoint can be empty intraday.
@@ -3779,9 +3805,9 @@ def _upstox_fetch_5m_structured_rows(
 
     if not rows:
         try:
-            rows = ux.get_historical_candles_by_instrument_key(
-                ik, interval="minutes/5", days_back=3, range_end_date=td
-            ) or []
+            rows = _candles_via_gateway(
+                ux, ik, interval="minutes/5", days_back=3, range_end_date=td
+            )
         except Exception as e:
             logger.debug("%sdaily_futures: historical 5m fetch failed ik=%s: %s", prefix, ik, e)
             rows = []

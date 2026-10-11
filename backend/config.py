@@ -94,6 +94,31 @@ class Settings(BaseSettings):
     UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC: float = float(os.getenv("UPSTOX_CANDLE_CACHE_TTL_INTRADAY_SEC", "150"))
     UPSTOX_CANDLE_CACHE_TTL_DAILY_SEC: float = float(os.getenv("UPSTOX_CANDLE_CACHE_TTL_DAILY_SEC", "900"))
 
+    # NSE official MCP market-data gateway. Both flags must be true before any
+    # MCP call. Defaults are off: a later image pull must not activate NSE data.
+    # Setting a flag is not NSE commercial permission. See docs/NSE_MCP_COMMERCIAL_APPROVAL.md.
+    NSE_MCP_ENABLED: bool = os.getenv("NSE_MCP_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    NSE_MCP_PRODUCTION_APPROVED: bool = os.getenv("NSE_MCP_PRODUCTION_APPROVED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    NSE_BHAVCOPY_MCP_URL: str = os.getenv(
+        "NSE_BHAVCOPY_MCP_URL", "https://mcp.nseindia.in/bhavcopy/cm/mcp"
+    )
+    NSE_CM_MARKET_MCP_URL: str = os.getenv(
+        "NSE_CM_MARKET_MCP_URL", "https://mcp.nseindia.in/cmmkt/mcp"
+    )
+    # One attempt. Trading quotes use the short deadline; daily history may wait longer.
+    NSE_MCP_TRADING_TIMEOUT_SEC: float = float(os.getenv("NSE_MCP_TRADING_TIMEOUT_SEC", "1.5"))
+    NSE_MCP_HISTORICAL_TIMEOUT_SEC: float = float(os.getenv("NSE_MCP_HISTORICAL_TIMEOUT_SEC", "8"))
+    # Exchange timestamp age (not crawl time) above which an MCP quote is stale.
+    NSE_MCP_QUOTE_MAX_AGE_SEC: float = float(os.getenv("NSE_MCP_QUOTE_MAX_AGE_SEC", "180"))
+
     # Iron Condor advisory sizing (workspace UI no longer edits these; override via env on EC2)
     IRON_CONDOR_TRADING_CAPITAL_DEFAULT: float = float(os.getenv("IRON_CONDOR_TRADING_CAPITAL_DEFAULT", "500000"))
     IRON_CONDOR_TARGET_POSITION_SLOTS: int = int(os.getenv("IRON_CONDOR_TARGET_POSITION_SLOTS", "5"))

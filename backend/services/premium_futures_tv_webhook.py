@@ -300,12 +300,18 @@ def fetch_15m_bar_containing(
         from backend.services.upstox_service import UpstoxService
 
         ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
-        raw = (
-            ux.get_historical_candles_by_instrument_key(
-                ik, interval=TV_ALERT_CANDLE_INTERVAL, days_back=3, range_end_date=session_date
-            )
-            or []
+        from backend.services.market_data.gateway import fetch_candles
+
+        # Current-month future 15m bars are not on NSE cash MCP; Upstox is immediate.
+        candle_res = fetch_candles(
+            ik,
+            interval=TV_ALERT_CANDLE_INTERVAL,
+            days_back=3,
+            range_end_date=session_date,
+            upstox=ux,
+            purpose="trading",
         )
+        raw = candle_res.candles or []
         match = _match_15m_slot(raw, slot)
         if match:
             return match
