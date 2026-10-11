@@ -6,6 +6,10 @@ The 16:00 snapshot stays frozen until the next trading day 09:00.
 OI change: quote ``change_in_oi`` if non-zero, else delta vs previous heatmap snapshot
 in the same IST session, else vs prior completed daily candle OI.
 Signal: ``interpret_oi_signal`` (price change vs OI change). Does not start a WebSocket.
+Significant Long/Short Buildup is an extra label on that same Upstox current-month
+FUT quote (price, OI, session volume) and ``days/1`` history (previous-day and
+5-session volume). NSE MCP is not on this path: verified tools are cash quotes
+and daily cash history, and futures / open interest are unsupported.
 When the market is closed (overnight freeze / weekend / holiday / before 09:00) and a
 row is NEUTRAL from stale zero OI/price change, the last non-neutral session signal is
 copied for dashboard display and persist. Live-session NEUTRAL is left unchanged.
@@ -66,16 +70,20 @@ _heatmap_oi_cache_ist_day: Optional[date] = None
 _sess_oi_prev_by_instrument: Dict[str, int] = {}
 _sess_prev_close_by_instrument: Dict[str, float] = {}
 _prior_day_oi_ref_by_instrument: Dict[str, int] = {}
+_completed_bars_day: Optional[date] = None
+_completed_bars_by_instrument: Dict[str, List[Dict[str, Any]]] = {}
 
 
 def _reset_oi_delta_caches_if_new_ist_day() -> None:
-    global _heatmap_oi_cache_ist_day
+    global _heatmap_oi_cache_ist_day, _completed_bars_day
     d = datetime.now(IST).date()
     if _heatmap_oi_cache_ist_day == d:
         return
     _sess_oi_prev_by_instrument.clear()
     _sess_prev_close_by_instrument.clear()
     _prior_day_oi_ref_by_instrument.clear()
+    _completed_bars_by_instrument.clear()
+    _completed_bars_day = None
     _heatmap_oi_cache_ist_day = d
 
 
@@ -103,6 +111,55 @@ def _prior_completed_day_oi_from_daily(ux: Any, instrument_key: str) -> Optional
         return None
     _prior_day_oi_ref_by_instrument[instrument_key] = p_int
     return p_int
+
+
+def _prefetch_completed_daily_bars(ux: Any, keys: List[str], session_day: date) -> None:
+    """Cache completed ``days/1`` FUT bars once per IST day for volume confirmation.
+
+    Uses the same Upstox series as the prior-day OI reference. A shared candle
+    cache hit does not pause; a cold fetch keeps the existing batch pause so a
+    restart does not burst the historical endpoint. Failures are not cached.
+    """
+    global _completed_bars_day
+    if _completed_bars_day != session_day:
+        _completed_bars_by_instrument.clear()
+        _completed_bars_day = session_day
+    pending = [ik for ik in keys if ik not in _completed_bars_by_instrument]
+    if not pending:
+        return
+    from backend.services.oi_buildup_significant import completed_daily_bars
+    from backend.services.market_data import candle_cache
+
+    pause_s = float(getattr(settings, "OI_BATCH_PAUSE_SEC", 0.35))
+    ttl = float(getattr(settings, "UPSTOX_CANDLE_CACHE_TTL_DAILY_SEC", 900))
+    req_from = (session_day - timedelta(days=20)).isoformat()
+    cold_fetches = 0
+    for ik in pending:
+        cached = None
+        try:
+            cached = candle_cache.get(ik, "days/1", req_from, ttl)
+        except Exception:
+            cached = None
+        if cached is None and cold_fetches > 0 and pause_s > 0:
+            time.sleep(pause_s)
+        try:
+            candles = ux.get_historical_candles_by_instrument_key(
+                ik, interval="days/1", days_back=20
+            )
+        except Exception as e:
+            logger.debug("oi_heatmap: daily bars for significant %s: %s", ik, e)
+            continue
+        if candles is None:
+            continue
+        if cached is None:
+            cold_fetches += 1
+        _completed_bars_by_instrument[ik] = completed_daily_bars(candles, session_day)
+    if cold_fetches:
+        logger.info(
+            "oi_heatmap: completed daily bars fetched=%s cached_day=%s",
+            cold_fetches,
+            session_day.isoformat(),
+        )
 
 
 def _effective_oi_change(
@@ -925,6 +982,17 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
     ik_meta = {((r.get("instrument_key") or "").strip()): r for r in raw if isinstance(r, dict)}
 
     ws_session_volumes = _load_ws_session_volumes(keys)
+    session_day = datetime.now(IST).date()
+    _prefetch_completed_daily_bars(ux, keys, session_day)
+    from backend.services.oi_buildup_significant import (
+        five_day_significant,
+        one_day_oi_chg_pct,
+        one_day_price_chg_pct,
+        one_day_significant,
+        previous_session_volume,
+        session_volume,
+    )
+
     rows: List[Dict[str, Any]] = []
     for ik in keys:
         s = merged.get(ik) or {}
@@ -960,6 +1028,20 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
             _sess_prev_close_by_instrument[ik] = prev_close
         oi_chg_pct = (oi_chg / max(1, oi - oi_chg) * 100.0) if oi else 0.0
         sig = _interpret_signal(price_dp, float(oi_chg))
+        daily_bars = _completed_bars_by_instrument.get(ik)
+        vol_today = session_volume(s.get("volume"), ws_session_volumes.get(ik))
+        sig_1d = one_day_significant(
+            one_day_price_chg_pct(lp, chg_pct, prev_close),
+            one_day_oi_chg_pct(oi, oi_chg),
+            vol_today,
+            previous_session_volume(daily_bars),
+        )
+        sig_5d = five_day_significant(
+            daily_bars,
+            price_now=lp,
+            oi_now=oi,
+            volume_today=vol_today,
+        )
         meta = ik_meta.get(ik) or {}
         und = (meta.get("underlying_symbol") or "").strip().upper()
         tsym = (meta.get("trading_symbol") or meta.get("tradingsymbol") or "").strip()
@@ -976,6 +1058,8 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
                 "oi_chg": oi_chg,
                 "oi_chg_pct": round(oi_chg_pct, 3),
                 "oi_signal": sig,
+                "significant_oi_signal": sig_1d,
+                "significant_htf_oi": sig_5d,
                 "volume": int(vol),
                 "score": round(_score_row(oi_chg, chg_pct), 4),
             }
@@ -1030,10 +1114,14 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     """
                     INSERT INTO oi_heatmap_latest (
                         rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                        ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal,
+                        significant_oi_signal, significant_htf_oi,
+                        volume, score, updated_at
                     ) VALUES (
                         :rank, :instrument_key, :underlying_symbol, :trading_symbol, :expiry,
-                        :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal, :volume, :score, :updated_at
+                        :ltp, :chg_pct, :oi, :oi_chg, :oi_chg_pct, :oi_signal,
+                        :significant_oi_signal, :significant_htf_oi,
+                        :volume, :score, :updated_at
                     )
                     """
                 ),
@@ -1049,6 +1137,8 @@ def _persist_snapshot(rows: List[Dict[str, Any]], updated_at: datetime) -> None:
                     "oi_chg": int(r["oi_chg"]),
                     "oi_chg_pct": float(r["oi_chg_pct"]),
                     "oi_signal": r.get("oi_signal"),
+                    "significant_oi_signal": r.get("significant_oi_signal"),
+                    "significant_htf_oi": r.get("significant_htf_oi"),
                     "volume": int(r.get("volume") or 0),
                     "score": float(r.get("score") or 0),
                     "updated_at": updated_at,
@@ -1082,7 +1172,9 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
                 text(
                     """
                     SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                           ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                           ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal,
+                           significant_oi_signal, significant_htf_oi,
+                           volume, score, updated_at
                     FROM oi_heatmap_latest
                     WHERE updated_at >= :day_start AND updated_at < :day_end
                       AND updated_at = (
@@ -1099,7 +1191,9 @@ def load_oi_heatmap_snapshot_from_db() -> Tuple[List[Dict[str, Any]], Optional[s
                 text(
                     """
                     SELECT rank, instrument_key, underlying_symbol, trading_symbol, expiry,
-                           ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal, volume, score, updated_at
+                           ltp, chg_pct, oi, oi_chg, oi_chg_pct, oi_signal,
+                           significant_oi_signal, significant_htf_oi,
+                           volume, score, updated_at
                     FROM oi_heatmap_latest
                     WHERE updated_at = (
                         SELECT MAX(updated_at) FROM oi_heatmap_latest

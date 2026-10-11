@@ -260,3 +260,96 @@ def test_live_session_neutral_does_not_use_previous(monkeypatch):
             rows, now=now, by_instrument=prev_i, by_underlying={}
         )
         assert out[0]["oi_signal"] == "NEUTRAL"
+
+
+def test_significant_buildup_keeps_existing_signal_and_thresholds():
+    from datetime import date
+
+    from backend.services.oi_buildup_significant import (
+        SIGNIFICANT_LONG_BUILDUP,
+        SIGNIFICANT_SHORT_BUILDUP,
+        completed_daily_bars,
+        five_day_significant,
+        one_day_oi_chg_pct,
+        one_day_price_chg_pct,
+        one_day_significant,
+        session_volume,
+    )
+
+    assert interpret_oi_signal(1.0, 10.0) == "LONG_BUILDUP"
+    assert one_day_significant(1.0, 2.0, 110, 100) == SIGNIFICANT_LONG_BUILDUP
+    assert one_day_significant(-1.0, 2.0, 110, 100) == SIGNIFICANT_SHORT_BUILDUP
+    assert one_day_significant(0.99, 2.0, 110, 100) is None
+    assert one_day_significant(-0.99, 2.0, 110, 100) is None
+    assert one_day_significant(1.0, 1.99, 110, 100) is None
+    assert one_day_significant(1.0, 2.0, 100, 100) is None
+    assert one_day_significant(1.0, 2.0, 99, 100) is None
+    assert one_day_significant(None, 2.0, 110, 100) is None
+    assert one_day_significant(1.0, None, 110, 100) is None
+    assert one_day_significant(1.0, 2.0, None, 100) is None
+    assert one_day_significant(1.0, 2.0, 110, None) is None
+    assert one_day_price_chg_pct(0, -100.0, 100.0) is None
+    assert one_day_oi_chg_pct(None, 50) is None
+    assert one_day_oi_chg_pct(1000, None) is None
+    assert session_volume(None, None) is None
+    assert session_volume(0, 0) is None
+    assert session_volume(0, 40) == 40
+    assert bucket_key_for_oi_signal(SIGNIFICANT_LONG_BUILDUP) is None
+
+    session = date(2026, 8, 23)
+    candles = []
+    for i, day in enumerate(range(17, 24)):
+        candles.append(
+            {
+                "timestamp": f"2026-08-{day:02d}T00:00:00+05:30",
+                "close": 100.0,
+                "oi": 1000.0,
+                "volume": 100.0 + i,
+            }
+        )
+    bars = completed_daily_bars(candles, session)
+    assert [b["date"] for b in bars] == [
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-22",
+    ]
+    assert five_day_significant(bars, price_now=102.0, oi_now=1050.0, volume_today=121) == (
+        SIGNIFICANT_LONG_BUILDUP
+    )
+    assert five_day_significant(bars, price_now=98.0, oi_now=1050.0, volume_today=121) == (
+        SIGNIFICANT_SHORT_BUILDUP
+    )
+    assert five_day_significant(bars, price_now=101.9, oi_now=1050.0, volume_today=121) is None
+    assert five_day_significant(bars, price_now=102.0, oi_now=1049.0, volume_today=121) is None
+    assert five_day_significant(bars, price_now=102.0, oi_now=1050.0, volume_today=103) is None
+    assert five_day_significant(bars, price_now=None, oi_now=1050.0, volume_today=121) is None
+    assert five_day_significant(bars, price_now=0, oi_now=1050.0, volume_today=121) is None
+    hole = [dict(b) for b in bars]
+    hole[-3]["volume"] = None
+    assert five_day_significant(hole, price_now=102.0, oi_now=1050.0, volume_today=999) is None
+    assert five_day_significant(bars[:4], price_now=102.0, oi_now=1050.0, volume_today=999) is None
+
+
+def test_heatmap_futures_oi_is_not_an_nse_mcp_tool():
+    from backend.services.market_data.gateway import resolve_capability
+    from backend.services.market_data.nse_mcp_client import VERIFIED_TOOLS
+
+    fut = "NSE_FO|12345"
+    oi_cap = resolve_capability(fut, data_type="oi")
+    daily_cap = resolve_capability(fut, data_type="candles", interval="days/1")
+    assert oi_cap.supported is False
+    assert oi_cap.reason == "open_interest"
+    assert daily_cap.supported is False
+    assert daily_cap.reason == "futures_or_options"
+    names = set()
+    for group in VERIFIED_TOOLS.values():
+        names |= set(group)
+    assert "cm_get_stock_quote" in names
+    assert "get_stock_history" in names
+    for name in names:
+        lowered = name.lower()
+        assert "open_interest" not in lowered
+        assert "future" not in lowered

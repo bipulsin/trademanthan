@@ -1951,6 +1951,8 @@ def _run_startup_schema_migrations(db_engine):
                                 oi_chg_pct DOUBLE PRECISION,
                                 oi_signal TEXT,
                                 prev_oi_signal TEXT,
+                                significant_oi_signal TEXT,
+                                significant_htf_oi TEXT,
                                 volume BIGINT,
                                 score DOUBLE PRECISION,
                                 updated_at TIMESTAMPTZ NOT NULL
@@ -1970,6 +1972,12 @@ def _run_startup_schema_migrations(db_engine):
                 if "prev_oi_signal" not in _oi_cols and db_engine.dialect.name == "postgresql":
                     conn.execute(text("ALTER TABLE oi_heatmap_latest ADD COLUMN prev_oi_signal TEXT"))
                     print("Applied migration: added oi_heatmap_latest.prev_oi_signal")
+                if "significant_oi_signal" not in _oi_cols and db_engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE oi_heatmap_latest ADD COLUMN significant_oi_signal TEXT"))
+                    print("Applied migration: added oi_heatmap_latest.significant_oi_signal")
+                if "significant_htf_oi" not in _oi_cols and db_engine.dialect.name == "postgresql":
+                    conn.execute(text("ALTER TABLE oi_heatmap_latest ADD COLUMN significant_htf_oi TEXT"))
+                    print("Applied migration: added oi_heatmap_latest.significant_htf_oi")
 
             if "oi_heatmap_htf_latest" not in inspect(db_engine).get_table_names():
                 if db_engine.dialect.name == "postgresql":

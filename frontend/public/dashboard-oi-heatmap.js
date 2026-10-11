@@ -193,6 +193,68 @@
         });
     }
 
+    function significantLabel(code) {
+        const s = String(code || "").toUpperCase();
+        if (s === "SIGNIFICANT_LONG_BUILDUP") return "Significant Long Buildup";
+        if (s === "SIGNIFICANT_SHORT_BUILDUP") return "Significant Short Buildup";
+        return "";
+    }
+
+    function significantTone(code) {
+        const s = String(code || "").toUpperCase();
+        if (s === "SIGNIFICANT_LONG_BUILDUP") return "LONG_BUILDUP";
+        if (s === "SIGNIFICANT_SHORT_BUILDUP") return "SHORT_BUILDUP";
+        return "";
+    }
+
+    function significantTip(code, horizon) {
+        const s = String(code || "").toUpperCase();
+        const day =
+            horizon === "5d"
+                ? "5 sessions: price at least 2%, OI at least +5%, volume above the previous 5-session average"
+                : "1 day: price at least 1%, OI at least +2%, volume above the previous day";
+        if (s === "SIGNIFICANT_LONG_BUILDUP") return "Significant long buildup — " + day;
+        if (s === "SIGNIFICANT_SHORT_BUILDUP") return "Significant short buildup — " + day;
+        return "";
+    }
+
+    function signalMarkup(sig, tip, emptyText) {
+        const raw = sig || "";
+        const sigClass = /^[A-Z_]+$/.test(raw) ? raw.replace(/[^A-Z_]/g, "_") : "NEUTRAL";
+        const text = raw ? signalLabel(raw) : emptyText;
+        return (
+            '<span class="oi-heatmap-signal oi-heatmap-signal--' +
+            sigClass +
+            '" title="' +
+            escapeHtml(tip || "") +
+            '">' +
+            escapeHtml(text) +
+            "</span>"
+        );
+    }
+
+    function significantMarkup(code, horizon) {
+        const label = significantLabel(code);
+        if (!label) return "";
+        const tone = significantTone(code);
+        return (
+            '<span class="oi-heatmap-signal oi-heatmap-signal--' +
+            tone +
+            ' oi-heatmap-signal--significant" title="' +
+            escapeHtml(significantTip(code, horizon)) +
+            '">' +
+            escapeHtml(label) +
+            "</span>"
+        );
+    }
+
+    function signalStack(sig, tip, significantCode, horizon, emptyText) {
+        const base = signalMarkup(sig, tip, emptyText);
+        const extra = significantMarkup(significantCode, horizon);
+        if (!extra) return base;
+        return '<div class="oi-heatmap-signal-stack">' + base + extra + "</div>";
+    }
+
     function signalLabel(sig) {
         const s = String(sig || "").toUpperCase();
         const map = {
@@ -258,7 +320,6 @@
                 const sig = r.oi_signal || "";
                 const sigTip = signalTooltip(sig);
                 const hs = heatStyle(sig);
-                const sigClass = /^[A-Z_]+$/.test(sig) ? sig.replace(/[^A-Z_]/g, "_") : "NEUTRAL";
                 const prevSig = r.prev_oi_signal || "";
                 const prevSigTip = signalTooltip(prevSig);
                 const prevSigClass = /^[A-Z_]+$/.test(prevSig)
@@ -266,9 +327,6 @@
                     : "NEUTRAL";
                 const htfSig = r.htf_oi_signal || "";
                 const htfTip = signalTooltip(htfSig);
-                const htfClass = /^[A-Z_]+$/.test(htfSig)
-                    ? htfSig.replace(/[^A-Z_]/g, "_")
-                    : "NEUTRAL";
                 const htfHs = heatStyle(htfSig);
                 const sym = r.trading_symbol || r.underlying_symbol || "";
                 return (
@@ -293,13 +351,9 @@
                     "</td>" +
                     '<td style="' +
                     hs +
-                    '"><span class="oi-heatmap-signal oi-heatmap-signal--' +
-                    sigClass +
-                    '" title="' +
-                    escapeHtml(sigTip) +
                     '">' +
-                    escapeHtml(signalLabel(sig)) +
-                    "</span></td>" +
+                    signalStack(sig, sigTip, r.significant_oi_signal, "1d", "—") +
+                    "</td>" +
                     "<td><span class=\"oi-heatmap-signal oi-heatmap-signal--" +
                     prevSigClass +
                     "\" title=\"" +
@@ -309,13 +363,15 @@
                     "</span></td>" +
                     '<td style="' +
                     htfHs +
-                    '"><span class="oi-heatmap-signal oi-heatmap-signal--' +
-                    htfClass +
-                    '" title="' +
-                    escapeHtml(htfTip || "10-session daily FUT OI vs last completed bar") +
                     '">' +
-                    escapeHtml(htfSig ? signalLabel(htfSig) : "—") +
-                    "</span></td>" +
+                    signalStack(
+                        htfSig,
+                        htfTip || "10-session daily FUT OI vs last completed bar",
+                        r.significant_htf_oi,
+                        "5d",
+                        "—"
+                    ) +
+                    "</td>" +
                     "<td>" +
                     fmtInt(r.volume) +
                     "</td>" +
