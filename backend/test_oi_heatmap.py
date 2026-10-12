@@ -533,3 +533,37 @@ def test_open_session_without_today_does_not_reuse_prior_day_as_htf():
     assert rec["bar_prior"].startswith("2026-10-09")
     assert rec["htf_oi_signal"] == "SHORT_BUILDUP"
     assert rec["sessions_back"] == 1
+
+
+def test_open_refresh_returns_before_upstox_batch(monkeypatch):
+    """The post-09:00 heatmap fill must not block the single API worker."""
+    import threading
+    import time
+
+    from backend.services import oi_heatmap as hm
+    from backend.services import breakfast_upstox_gate as gate
+
+    started = threading.Event()
+    release = threading.Event()
+    caller = threading.get_ident()
+    seen = {}
+
+    def slow_refresh():
+        seen["thread"] = threading.get_ident()
+        started.set()
+        assert release.wait(2)
+
+    monkeypatch.setattr(hm, "ist_use_today_only_db_snapshot", lambda now=None: True)
+    monkeypatch.setattr(hm, "should_skip_scheduled_market_jobs_ist", lambda now=None: False)
+    monkeypatch.setattr(hm, "is_oi_heatmap_overnight_freeze", lambda now=None: False)
+    monkeypatch.setattr(hm.settings, "OI_HEATMAP_LIVE_ENABLED", True)
+    monkeypatch.setattr(hm, "refresh_oi_heatmap_live", slow_refresh)
+    monkeypatch.setattr(hm, "_last_api_refresh_attempt_mono", 0.0)
+    monkeypatch.setattr(gate, "breakfast_exclusivity_active", lambda now=None: False)
+
+    t0 = time.monotonic()
+    hm.maybe_sync_refresh_heatmap_after_open("test")
+    assert time.monotonic() - t0 < 0.5
+    assert started.wait(1)
+    assert seen["thread"] != caller
+    release.set()

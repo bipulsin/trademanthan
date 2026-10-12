@@ -551,8 +551,11 @@ def _clear_snapshot_cache_if_from_prior_ist_day() -> None:
 
 def maybe_sync_refresh_heatmap_after_open(reason: str = "get_live") -> None:
     """
-    After 09:00 IST on a trading day, pull fresh Upstox batch quotes synchronously (debounced)
+    After 09:00 IST on a trading day, start a live Upstox refresh off the request thread
     when the API would otherwise stay empty or stale.
+
+    The batch quote pull used to run inline. Production is a single uvicorn worker, so
+    that blocked health, index prices, crypto, and the checklist until Upstox returned.
     """
     now = datetime.now(IST)
     if not ist_use_today_only_db_snapshot(now):
@@ -576,11 +579,19 @@ def maybe_sync_refresh_heatmap_after_open(reason: str = "get_live") -> None:
         if tmono - _last_api_refresh_attempt_mono < _sync_refresh_cooldown_sec:
             return
         _last_api_refresh_attempt_mono = tmono
-    logger.info("oi_heatmap: running synchronous live refresh (%s)", reason)
-    try:
-        refresh_oi_heatmap_live()
-    except Exception as e:
-        logger.warning("oi_heatmap: synchronous live refresh failed: %s", e, exc_info=True)
+
+    def _run() -> None:
+        logger.info("oi_heatmap: running background live refresh (%s)", reason)
+        try:
+            refresh_oi_heatmap_live()
+        except Exception as e:
+            logger.warning("oi_heatmap: background live refresh failed: %s", e, exc_info=True)
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name="oi-heatmap-open-refresh",
+    ).start()
 
 
 def _instruments_path():
