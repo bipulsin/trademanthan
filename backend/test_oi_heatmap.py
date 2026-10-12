@@ -85,6 +85,37 @@ def test_htf_skips_bars_missing_oi():
     assert len(bars) == 1
 
 
+def test_writer_grades_bucket_into_ui_tabs():
+    """Dashboard tabs are LONG_BUILDUP, SHORT_BUILDUP, LONG_UNWINDING, SHORT_COVERING.
+
+    ``dashboard-oi-heatmap.js`` bucketKey() accepts those four plus the writer
+    spellings LONG_UNWIND and SHORT_COVER. A grade the classifier emits must
+    land in one of those tabs, and an all-null snapshot must not.
+    """
+    from backend.services.oi_heatmap import heatmap_rows_have_ui_buckets
+    from backend.services.oi_heatmap_bars import classify_buildup
+
+    ui_tabs = {"LONG_BUILDUP", "SHORT_BUILDUP", "LONG_UNWINDING", "SHORT_COVERING"}
+    cases = [
+        (110, 100, 1100, 1000, "LONG_BUILDUP"),
+        (90, 100, 1100, 1000, "SHORT_BUILDUP"),
+        (90, 100, 900, 1000, "LONG_UNWIND"),
+        (110, 100, 900, 1000, "SHORT_COVER"),
+    ]
+    for price_now, price_prior, oi_now, oi_prior, expected in cases:
+        sig, _price_pct, _oi_pct = classify_buildup(price_now, price_prior, oi_now, oi_prior)
+        assert sig == expected
+        assert bucket_key_for_oi_signal(sig) in ui_tabs
+    assert bucket_key_for_oi_signal("LONG_UNWINDING") == "LONG_UNWINDING"
+    assert bucket_key_for_oi_signal("SHORT_COVERING") == "SHORT_COVERING"
+    assert bucket_key_for_oi_signal("NEUTRAL") is None
+    assert bucket_key_for_oi_signal(None) is None
+    blank = [{"underlying_symbol": "AAA", "oi_signal": None} for _ in range(4)]
+    assert heatmap_rows_have_ui_buckets(blank) is False
+    blank[0]["oi_signal"] = "SHORT_COVER"
+    assert heatmap_rows_have_ui_buckets(blank) is True
+
+
 def test_bucket_aliases_and_group():
     assert bucket_key_for_oi_signal("LONG_UNWIND") == "LONG_UNWINDING"
     assert bucket_key_for_oi_signal("SHORT_COVER") == "SHORT_COVERING"

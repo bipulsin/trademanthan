@@ -414,6 +414,11 @@ def _signal_is_neutral(sig: Any) -> bool:
 
 
 def bucket_key_for_oi_signal(sig: str) -> Optional[str]:
+    """Map a stored grade onto the four dashboard tabs.
+
+    The heatmap writer stores ``LONG_UNWIND`` / ``SHORT_COVER``. The UI tabs are
+    ``LONG_UNWINDING`` / ``SHORT_COVERING``. Both spellings belong in those tabs.
+    """
     s = str(sig or "").strip().upper()
     if s in ("LONG_UNWIND", "LONG_UNWINDING"):
         return "LONG_UNWINDING"
@@ -422,6 +427,18 @@ def bucket_key_for_oi_signal(sig: str) -> Optional[str]:
     if s in ("LONG_BUILDUP", "SHORT_BUILDUP"):
         return s
     return None
+
+
+def heatmap_rows_have_ui_buckets(rows: List[Dict[str, Any]]) -> bool:
+    """True when at least one row lands in a dashboard OI tab.
+
+    A candle fetch that was skipped leaves every ``oi_signal`` null. Publishing
+    that snapshot blanks Long Buildup, Short Buildup, Long Unwinding, and Short Covering.
+    """
+    for r in rows or []:
+        if bucket_key_for_oi_signal(r.get("oi_signal")):
+            return True
+    return False
 
 
 def tab_rank_sort_key(row: Dict[str, Any]) -> Tuple[int, float, int, float, float]:
@@ -1082,8 +1099,14 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
 
     ws_session_volumes = _load_ws_session_volumes(keys)
     session_day = datetime.now(IST).date()
-    _prefetch_completed_daily_bars(ux, keys, session_day)
-    _prefetch_intraday_oi_bars(ux, keys)
+    # The heatmap is not a chart warm. Without this mark, a full candle budget
+    # or an active warm denies every historical call immediately, grades stay
+    # null, and the snapshot below would blank the four tabs.
+    from backend.services.upstox_rate_limiter import scheduled_candle_worker
+
+    with scheduled_candle_worker():
+        _prefetch_completed_daily_bars(ux, keys, session_day)
+        _prefetch_intraday_oi_bars(ux, keys)
     as_of = datetime.now(IST)
     market_closed = is_oi_heatmap_overnight_freeze(as_of)
     from backend.services.oi_heatmap_bars import classify_heatmap_timeframes
@@ -1197,6 +1220,18 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
         _sess_oi_prev_by_instrument[_ik] = _eff
 
     rows = finalize_heatmap_rows_for_store(rows)
+    if not heatmap_rows_have_ui_buckets(rows):
+        logger.error(
+            "oi_heatmap: not publishing %s rows; no oi_signal fell into a UI bucket "
+            "(candle grades missing). Previous snapshot kept.",
+            len(rows),
+        )
+        return {
+            "success": False,
+            "error": "no_bucketable_oi_signal",
+            "count": len(rows),
+            "published": False,
+        }
     try:
         from backend.services.market_data_volume_audit import log_volume_audit
 
