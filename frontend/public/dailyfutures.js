@@ -376,6 +376,10 @@
     /** @type {Record<string, boolean>} dedupe key: trade|candle|decision */
     prevIndicatorAlertKeys: {},
     refreshSeq: 0,
+    /** Last "Trade if could have done" rows (unsorted). Re-applied after the 120s poll. */
+    couldHaveRows: [],
+    /** null = server order; 'desc' = newest entry first; 'asc' = oldest first. */
+    couldEntrySort: null,
     /** Reused for repeated 15m strip beeps (avoids dozens of AudioContext instances). */
     sharedStripAudioCtx: null,
     stripAlarmTimeoutId: null,
@@ -1464,16 +1468,60 @@
     el.innerHTML = '<table class="df-table">' + th + '<tbody>' + body + '</tbody></table>';
   }
 
+  function couldHaveEntrySortKey(raw) {
+    if (raw == null) return null;
+    const s = String(raw).trim();
+    if (!s || s === '—' || s === '–' || s === '-' || s === '−') return null;
+    const hm = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+    if (hm) {
+      const h = parseInt(hm[1], 10);
+      const m = parseInt(hm[2], 10);
+      const sec = hm[3] ? parseInt(hm[3], 10) : 0;
+      if (h >= 0 && h <= 23 && m >= 0 && m <= 59 && sec >= 0 && sec <= 59) {
+        return h * 3600 + m * 60 + sec;
+      }
+      return null;
+    }
+    const t = Date.parse(s);
+    if (Number.isNaN(t)) return null;
+    const ist = new Date(t + 330 * 60 * 1000);
+    return ist.getUTCHours() * 3600 + ist.getUTCMinutes() * 60 + ist.getUTCSeconds();
+  }
+
+  function sortCouldHaveByEntryTime(rows, dir) {
+    const copy = (rows || []).slice();
+    if (dir !== 'asc' && dir !== 'desc') return copy;
+    copy.sort(function (a, b) {
+      const ak = couldHaveEntrySortKey(a && a.entry_time);
+      const bk = couldHaveEntrySortKey(b && b.entry_time);
+      if (ak == null && bk == null) return 0;
+      if (ak == null) return 1;
+      if (bk == null) return -1;
+      if (ak === bk) return 0;
+      return dir === 'asc' ? ak - bk : bk - ak;
+    });
+    return copy;
+  }
+
   function renderTradeIfCouldHaveDone(rows) {
     const el = document.getElementById('dfTradeIfCouldTable');
     if (!el) return;
-    if (!rows || !rows.length) {
+    const source = Array.isArray(rows) ? rows : [];
+    state.couldHaveRows = source;
+    if (!source.length) {
       el.innerHTML = '<p style="color:var(--theme-muted);">No eligible picks.</p>';
       return;
     }
+    const display = sortCouldHaveByEntryTime(source, state.couldEntrySort);
+    const sortDir = state.couldEntrySort;
+    const sortCls = sortDir === 'desc' ? ' sort-desc' : sortDir === 'asc' ? ' sort-asc' : '';
+    const ariaSort = sortDir === 'desc' ? 'descending' : sortDir === 'asc' ? 'ascending' : 'none';
     const th =
-      '<thead><tr><th>Future</th><th class="num">Qty (of 1 Lot)</th><th>1st scan</th><th>Entry time</th><th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">Current LTP</th><th class="num">PnL Current</th></tr></thead>';
-    const body = rows
+      '<thead><tr><th>Future</th><th class="num">Qty (of 1 Lot)</th><th>1st scan</th>' +
+      '<th class="df-th-sort' + sortCls + '" id="dfCouldEntrySort" role="button" tabindex="0" aria-sort="' + ariaSort + '" title="Sort by entry time">' +
+      'Entry time</th>' +
+      '<th class="num">Entry LTP</th><th>Exit (time of scan)</th><th class="num">Current LTP</th><th class="num">PnL Current</th></tr></thead>';
+    const body = display
       .map(function (r) {
         const pScan = Number(r.pnl_scan_rupees);
         const cScan = Number.isFinite(pScan) ? (pScan > 0 ? 'df-pnl-pos' : pScan < 0 ? 'df-pnl-neg' : '') : '';
@@ -1501,6 +1549,20 @@
       })
       .join('');
     el.innerHTML = '<div class="df-table-wrap"><table class="df-table">' + th + '<tbody>' + body + '</tbody></table></div>';
+    const sortTh = el.querySelector('#dfCouldEntrySort');
+    if (sortTh) {
+      const toggleCouldEntrySort = function () {
+        state.couldEntrySort = state.couldEntrySort === 'desc' ? 'asc' : 'desc';
+        renderTradeIfCouldHaveDone(state.couldHaveRows);
+      };
+      sortTh.addEventListener('click', toggleCouldEntrySort);
+      sortTh.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          toggleCouldEntrySort();
+        }
+      });
+    }
   }
 
   function esc(s) {

@@ -281,6 +281,20 @@ table.df-table th {
     background: var(--bg2);
 }
 
+table.df-table th.df-th-sort {
+    cursor: pointer;
+    user-select: none;
+}
+
+table.df-table th.df-th-sort:hover,
+table.df-table th.df-th-sort:focus {
+    color: var(--text);
+    outline: none;
+}
+
+table.df-table th.df-th-sort.sort-asc::after { content: " ▲"; color: var(--accent); }
+table.df-table th.df-th-sort.sort-desc::after { content: " ▼"; color: var(--accent); }
+
 table.df-table tbody tr:hover {
     background: rgba(61, 186, 122, 0.06);
 }
