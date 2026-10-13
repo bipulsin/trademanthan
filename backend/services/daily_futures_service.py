@@ -51,6 +51,96 @@ def normalize_trade_mode(value: Any) -> str:
         return TRADE_MODE_LIVE
     return TRADE_MODE_PAPER
 
+
+def _positive_lot(value: Any) -> Optional[int]:
+    try:
+        if value is None or value == "":
+            return None
+        n = int(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def resolve_closed_trade_qty(
+    stored_lot: Any,
+    instrument_key: Any = None,
+    *,
+    lot_fn: Any = None,
+) -> Optional[int]:
+    """One futures lot for Today's trade.
+
+    A stored positive lot wins. Otherwise use the same instrument-master lookup as
+    Trade if could have done (``one_lot_qty``). None when the size cannot be resolved.
+    """
+    stored = _positive_lot(stored_lot)
+    if stored is not None:
+        return stored
+    ik = str(instrument_key or "").strip()
+    if not ik:
+        return None
+    from backend.services.premium_futures_divergence import one_lot_qty
+
+    return one_lot_qty(ik, lot_fn=lot_fn)
+
+
+def closed_trade_pnl_rupees(
+    direction: Any,
+    entry_price: Any,
+    exit_price: Any,
+    qty: Any,
+) -> Optional[float]:
+    """LONG: (exit − entry) × qty. SHORT: (entry − exit) × qty.
+
+    Missing entry, exit, or qty stays None. Missing prices are not treated as zero.
+    """
+    if entry_price is None or exit_price is None or qty is None:
+        return None
+    if isinstance(entry_price, str) and not str(entry_price).strip():
+        return None
+    if isinstance(exit_price, str) and not str(exit_price).strip():
+        return None
+    if _positive_lot(qty) is None:
+        return None
+    from backend.services.premium_futures_divergence import could_have_pnl_rupees
+
+    return could_have_pnl_rupees(direction, entry_price, exit_price, qty)
+
+
+def closed_trade_pnl_points(direction: Any, entry_price: Any, exit_price: Any) -> Optional[float]:
+    if entry_price is None or exit_price is None:
+        return None
+    if isinstance(entry_price, str) and not str(entry_price).strip():
+        return None
+    if isinstance(exit_price, str) and not str(exit_price).strip():
+        return None
+    try:
+        entry = float(entry_price)
+        exit_px = float(exit_price)
+    except (TypeError, ValueError):
+        return None
+    side = str(direction or "").strip().upper()
+    if side in {"SHORT", "BEAR", "BEARISH"}:
+        return round(entry - exit_px, 4)
+    return round(exit_px - entry, 4)
+
+
+def closed_trade_win_loss(pnl_rupees: Any, exit_price: Any) -> Optional[str]:
+    """Win if PnL > 0, loss if < 0, flat if 0. Blank when exit or PnL is missing."""
+    if exit_price is None or (isinstance(exit_price, str) and not str(exit_price).strip()):
+        return None
+    if pnl_rupees is None:
+        return None
+    try:
+        pnl = float(pnl_rupees)
+    except (TypeError, ValueError):
+        return None
+    if pnl > 0:
+        return "Win"
+    if pnl < 0:
+        return "Loss"
+    return "Flat"
+
 _INSTRUMENT_CACHE: Optional[Tuple[Any, Any]] = None
 _DF_INTRADAY_1M_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _DF_PREV_CLOSE_CACHE: Dict[str, Any] = {"trade_date": None, "stock": {}, "nifty": None}
@@ -1681,9 +1771,14 @@ def _apply_exit_alerts_to_running(
                 logger.debug("daily_futures: v2 state persist skipped trade_id=%s: %s", tid, e)
 
             if reason is not None and entry_px is not None:
+                if lot_v <= 0:
+                    resolved_lot = resolve_closed_trade_qty(None, r.get("instrument_key"))
+                    if resolved_lot:
+                        lot_v = float(resolved_lot)
                 pts = (float(entry_px) - float(current_ltp)) if dirt == "SHORT" else (float(current_ltp) - float(entry_px))
-                pnl_rs = round(float(pts) * float(lot_v), 2) if lot_v > 0 else None
+                pnl_rs = closed_trade_pnl_rupees(dirt, entry_px, current_ltp, int(lot_v) if lot_v > 0 else None)
                 now_hm = now_ist.strftime("%H:%M")
+                lot_persist = int(lot_v) if lot_v > 0 else None
                 try:
                     if dirt == "SHORT":
                         db.execute(
@@ -1697,13 +1792,14 @@ def _apply_exit_alerts_to_running(
                                     exit_price = :px,
                                     pnl_points = :pts,
                                     pnl_rupees = :pnl,
+                                    lot_size = COALESCE(lot_size, :lot),
                                     exit_reason = :er,
                                     indicator_exit_combo = COALESCE(:combo, indicator_exit_combo),
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE id = :id
                                 """
                             ),
-                            {"tm": now_hm, "px": float(current_ltp), "pts": round(float(pts), 4), "pnl": pnl_rs, "er": reason, "combo": combo, "id": tid},
+                            {"tm": now_hm, "px": float(current_ltp), "pts": round(float(pts), 4), "pnl": pnl_rs, "lot": lot_persist, "er": reason, "combo": combo, "id": tid},
                         )
                     else:
                         db.execute(
@@ -1715,13 +1811,14 @@ def _apply_exit_alerts_to_running(
                                     exit_price = :px,
                                     pnl_points = :pts,
                                     pnl_rupees = :pnl,
+                                    lot_size = COALESCE(lot_size, :lot),
                                     exit_reason = :er,
                                     indicator_exit_combo = COALESCE(:combo, indicator_exit_combo),
                                     updated_at = CURRENT_TIMESTAMP
                                 WHERE id = :id
                                 """
                             ),
-                            {"tm": now_hm, "px": float(current_ltp), "pts": round(float(pts), 4), "pnl": pnl_rs, "er": reason, "combo": combo, "id": tid},
+                            {"tm": now_hm, "px": float(current_ltp), "pts": round(float(pts), 4), "pnl": pnl_rs, "lot": lot_persist, "er": reason, "combo": combo, "id": tid},
                         )
                     dlog_map = {
                         "SL_HIT": "EXIT_SL_HIT",
@@ -4216,10 +4313,9 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     total_pnl = 0.0
     wins = 0
     losses = 0
+    qty_pnl_backfill: List[Dict[str, Any]] = []
     for row in closed_rows:
         dtx = str(row[3] or "LONG").strip().upper()
-        pnl_pts = float(row[15]) if row[15] is not None else None
-        pnl_rs = float(row[16]) if row[16] is not None else None
         mode = normalize_trade_mode(row[22] if len(row) > 22 else None)
         if dtx == "SHORT":
             et_disp = str(row[9]).strip() if row[9] is not None else None
@@ -4231,25 +4327,37 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
             ep_disp = float(row[8]) if row[8] is not None else None
             xt = str(row[11]).strip() if row[11] is not None else None
             xp = float(row[12]) if row[12] is not None else None
-        wl = None
-        if pnl_rs is not None:
-            if mode == TRADE_MODE_LIVE:
-                total_pnl += pnl_rs
-                if pnl_rs > 0:
-                    wins += 1
-                    wl = "Win"
-                elif pnl_rs < 0:
-                    losses += 1
-                    wl = "Loss"
-                else:
-                    wl = "Flat"
-            else:
-                if pnl_rs > 0:
-                    wl = "Win"
-                elif pnl_rs < 0:
-                    wl = "Loss"
-                else:
-                    wl = "Flat"
+        stored_lot = _positive_lot(row[6])
+        qty = resolve_closed_trade_qty(stored_lot, row[5])
+        stored_pnl = float(row[16]) if row[16] is not None else None
+        stored_pts = float(row[15]) if row[15] is not None else None
+        if xp is None:
+            pnl_rs = None
+            pnl_pts = None
+        elif stored_pnl is not None and stored_lot is not None:
+            pnl_rs = stored_pnl
+            pnl_pts = stored_pts
+        else:
+            pnl_rs = closed_trade_pnl_rupees(dtx, ep_disp, xp, qty)
+            pnl_pts = closed_trade_pnl_points(dtx, ep_disp, xp) if pnl_rs is not None else None
+        need_lot = stored_lot is None and qty is not None
+        need_pnl = stored_pnl is None and pnl_rs is not None
+        if need_lot or need_pnl:
+            qty_pnl_backfill.append(
+                {
+                    "id": int(row[0]),
+                    "lot": qty if need_lot else None,
+                    "pnl": pnl_rs if need_pnl else None,
+                    "pts": pnl_pts if need_pnl else None,
+                }
+            )
+        wl = closed_trade_win_loss(pnl_rs, xp)
+        if pnl_rs is not None and mode == TRADE_MODE_LIVE and xp is not None:
+            total_pnl += float(pnl_rs)
+            if wl == "Win":
+                wins += 1
+            elif wl == "Loss":
+                losses += 1
         closed.append(
             {
                 "trade_id": row[0],
@@ -4258,7 +4366,7 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "direction_type": dtx,
                 "future_symbol": row[4],
                 "instrument_key": row[5],
-                "lot_size": int(row[6]) if row[6] is not None else None,
+                "lot_size": qty,
                 "entry_time": et_disp,
                 "entry_price": ep_disp,
                 "exit_time": xt,
@@ -4274,6 +4382,30 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
                 "win_loss": wl,
             }
         )
+
+    if qty_pnl_backfill:
+        try:
+            for item in qty_pnl_backfill:
+                db.execute(
+                    text(
+                        """
+                        UPDATE daily_futures_user_trade SET
+                          lot_size = COALESCE(lot_size, :lot),
+                          pnl_rupees = COALESCE(pnl_rupees, :pnl),
+                          pnl_points = COALESCE(pnl_points, :pts)
+                        WHERE id = :id
+                          AND (lot_size IS NULL OR pnl_rupees IS NULL)
+                        """
+                    ),
+                    item,
+                )
+            db.commit()
+        except Exception as e:
+            logger.warning("daily_futures: closed qty/pnl backfill skipped: %s", e)
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     # Re-entry cooldown: after a same-day sell for an underlying, keep Enter disabled until
     # at least one fresh scan arrives after the latest sold timestamp.
@@ -5077,22 +5209,15 @@ def confirm_sell(
         raise ValueError("Open trade not found")
 
     dtx = str(row[7] or "LONG").strip().upper()
-    lot = int(row[5]) if row[5] is not None else None
+    lot = resolve_closed_trade_qty(row[5], row[6])
     ref_px: Optional[float] = None
     if dtx == "SHORT":
         ref_px = float(row[4]) if row[4] is not None else None  # sell_price
     else:
         ref_px = float(row[3]) if row[3] is not None else None
     cover_px = float(exit_price)
-    pts: Optional[float] = None
-    pnl_rs: Optional[float] = None
-    if ref_px is not None:
-        if dtx == "SHORT":
-            pts = round(float(ref_px) - cover_px, 4)
-        else:
-            pts = round(cover_px - float(ref_px), 4)
-        if lot:
-            pnl_rs = round(float(pts) * int(lot), 2)
+    pts = closed_trade_pnl_points(dtx, ref_px, cover_px)
+    pnl_rs = closed_trade_pnl_rupees(dtx, ref_px, cover_px, lot)
 
     mode = normalize_trade_mode(trade_mode) if trade_mode is not None else None
 
@@ -5108,6 +5233,7 @@ def confirm_sell(
                   exit_price = :bp,
                   pnl_points = :pts,
                   pnl_rupees = :pnl,
+                  lot_size = COALESCE(lot_size, :lot),
                   trade_mode = COALESCE(:mode, trade_mode),
                   updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND user_id = :u
@@ -5118,6 +5244,7 @@ def confirm_sell(
                 "bp": cover_px,
                 "pts": pts,
                 "pnl": pnl_rs,
+                "lot": lot,
                 "mode": mode,
                 "id": trade_id,
                 "u": user_id,
@@ -5133,6 +5260,7 @@ def confirm_sell(
                   exit_price = :xp,
                   pnl_points = :pts,
                   pnl_rupees = :pnl,
+                  lot_size = COALESCE(lot_size, :lot),
                   trade_mode = COALESCE(:mode, trade_mode),
                   updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND user_id = :u
@@ -5143,6 +5271,7 @@ def confirm_sell(
                 "xp": cover_px,
                 "pts": pts,
                 "pnl": pnl_rs,
+                "lot": lot,
                 "mode": mode,
                 "id": trade_id,
                 "u": user_id,
