@@ -1,6 +1,6 @@
 """Commodity-divergence alerts on the Premium Futures webhook. No database."""
 import json
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import patch
 
 import pytz
@@ -16,6 +16,9 @@ from backend.services.premium_futures_divergence import (
     divergence_could_have_rows,
     divergence_ticker_signals,
     divergence_workspace_picks,
+    hide_could_have_in_todays_trade,
+    hide_picks_already_in_trade_or_running,
+    _candle_close_at_or_before,
     _candle_close_near,
     entry_at_from_first_scan,
     ingest_divergence_webhook,
@@ -319,7 +322,9 @@ def test_bull_exit_removes_pick_and_stamps_exit_ltp():
     could = divergence_could_have_rows(store, EXIT_AT.date())
     assert could[0]["entry_ltp"] == 2500.5
     assert could[0]["exit_ltp"] == 2510.25
-    assert could[0]["exit_time"] == "11:00"
+    assert could[0]["exit_time"] == "11:05"
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["current_ltp"] == 2510.25
 
 
 def test_exit_stamps_null_when_ltp_missing():
@@ -331,12 +336,16 @@ def test_exit_stamps_null_when_ltp_missing():
         GO_AT,
         ltp=100.0,
     )
-    result = _apply(
-        store,
-        "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
-        EXIT_AT,
-        ltp=lambda _ik: None,
-    )
+    with patch(
+        "backend.services.premium_futures_divergence._exit_candle_close",
+        return_value=None,
+    ):
+        result = _apply(
+            store,
+            "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+            EXIT_AT,
+            ltp=lambda _ik: None,
+        )
     assert result["applied"] is True
     assert result["ltp_missing"] is True
     bull, bear = divergence_workspace_picks(store, EXIT_AT.date())
@@ -344,6 +353,8 @@ def test_exit_stamps_null_when_ltp_missing():
     could = divergence_could_have_rows(store, EXIT_AT.date())
     assert could[0]["exit_ltp"] is None
     assert could[0]["ltp_missing_exit"] is True
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["current_ltp"] == 100.0
 
 
 def test_existing_json_is_not_consumed_by_divergence_parser():
@@ -471,9 +482,9 @@ def test_flag_json_go_and_exit_use_receipt_time_not_candle_open():
     assert divergence_ticker_signals(store, datetime(2026, 9, 29).date()) == []
     closed = divergence_could_have_rows(store, datetime(2026, 9, 29).date())
     assert closed[0]["exit_ltp"] == 2510.25
-    # Receipt 09:52:10 → nearest 15m 09:45? 09:52 is closer to 09:45 (7m) than 10:00 (8m)
-    assert closed[0]["exit_time"] == "09:45"
-    assert closed[0]["exit_scan_time"] == "09:45"
+    # Exit column is the receipt clock (09:52), not the candle open and not a 15m round.
+    assert closed[0]["exit_time"] == "09:52"
+    assert closed[0]["exit_scan_time"] == "09:52"
 
 
 def test_flag_json_div_keeps_enter_off_and_bad_time_uses_receive_time():
@@ -568,8 +579,8 @@ def test_exit_sets_exit_time_and_stops_ltp_refresh():
         ltp=2510.25,
     )
     could = divergence_could_have_rows(store, EXIT_AT.date())
-    assert could[0]["exit_scan_time"] == "11:00"
-    assert could[0]["exit_time"] == "11:00"
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["exit_time"] == "11:05"
     assert could[0]["current_ltp"] == 2510.25
     assert could[0]["pnl_scan_rupees"] == round((2510.25 - 2500.5) * 250, 2)
     frozen = apply_mark_refresh(store.could[0], 9999)
@@ -713,3 +724,261 @@ def test_refresh_upgrades_entry_before_session_flat_and_keeps_frozen_mark():
     assert row["current_ltp"] == 685.0
     assert row["exit_ltp"] == 685.0
     assert row["exit_at"] is not None
+
+
+def test_exit_stamps_receipt_clock_and_later_refresh_does_not_overwrite_ltp():
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=2500.5,
+        lot=250,
+    )
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+        EXIT_AT,
+        ltp=2510.25,
+    )
+    could = divergence_could_have_rows(store, EXIT_AT.date())
+    assert could[0]["exit_time"] == "11:05"
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["current_ltp"] == 2510.25
+    frozen_pnl = round((2510.25 - 2500.5) * 250, 2)
+    assert could[0]["pnl_scan_rupees"] == frozen_pnl
+    with patch(
+        "backend.services.premium_futures_divergence.DbDivergenceStore",
+        return_value=store,
+    ), patch(
+        "backend.services.premium_futures_divergence._currmth_ltp_by_underlying",
+        return_value={"RELIANCE": 9999.0},
+    ), patch(
+        "backend.services.premium_futures_divergence._historical_1m_ltp_at",
+        return_value=111.0,
+    ):
+        summary = refresh_could_have_on_scan(now=datetime(2026, 9, 28, 12, 0, 0))
+    assert summary["updated"] == 0
+    assert store.set_current_ltp(store.could[0]["id"], 9999.0) is None
+    again = divergence_could_have_rows(store, EXIT_AT.date())
+    assert again[0]["current_ltp"] == 2510.25
+    assert again[0]["pnl_scan_rupees"] == frozen_pnl
+    assert store.could[0]["current_ltp"] == 2510.25
+
+
+def test_exit_uses_candle_at_or_before_receipt_when_ltp_missing():
+    target = IST.localize(datetime(2026, 10, 14, 11, 5, 0))
+    candles = [
+        {"timestamp": "2026-10-14T10:00:00+05:30", "close": 100.0},
+        {"timestamp": "2026-10-14T11:04:00+05:30", "close": 111.25},
+        {"timestamp": "2026-10-14T11:06:00+05:30", "close": 999.0},
+    ]
+    assert _candle_close_at_or_before(candles, target) == 111.25
+    assert _candle_close_at_or_before([candles[-1]], target) is None
+
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=2500.5,
+        lot=250,
+    )
+    with patch(
+        "backend.services.premium_futures_divergence._exit_candle_close",
+        return_value=2400.5,
+    ):
+        result = _apply(
+            store,
+            "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+            EXIT_AT,
+            ltp=lambda _ik: None,
+        )
+    assert result["exit_ltp"] == 2400.5
+    assert result["ltp_missing"] is False
+    could = divergence_could_have_rows(store, EXIT_AT.date())
+    assert could[0]["current_ltp"] == 2400.5
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["pnl_scan_rupees"] == round((2400.5 - 2500.5) * 250, 2)
+
+
+def test_exit_without_quote_or_candle_keeps_last_mark_and_still_stamps_time():
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=100.0,
+        lot=250,
+    )
+    store.could[0]["current_ltp"] = 110.0
+    with patch(
+        "backend.services.premium_futures_divergence._exit_candle_close",
+        return_value=None,
+    ):
+        result = _apply(
+            store,
+            "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+            EXIT_AT,
+            ltp=lambda _ik: None,
+        )
+    assert result["ltp_missing"] is True
+    assert result["exit_ltp"] is None
+    assert store.could[0]["exit_at"] is not None
+    assert store.could[0]["current_ltp"] == 110.0
+    could = divergence_could_have_rows(store, EXIT_AT.date())
+    assert could[0]["exit_scan_time"] == "11:05"
+    assert could[0]["current_ltp"] == 110.0
+    assert could[0]["pnl_scan_rupees"] == round((110.0 - 100.0) * 250, 2)
+
+
+def test_bull_exit_closes_only_bullish_could_have_and_exit_alone_creates_none():
+    store = MemoryDivergenceStore()
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=2500.5,
+        lot=250,
+    )
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BEAR-GO @ 1 filled on RELIANCE.",
+        GO_AT,
+        ltp=2400.0,
+        lot=250,
+    )
+    _apply(
+        store,
+        "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+        EXIT_AT,
+        ltp=2510.25,
+    )
+    bull = next(r for r in store.could if r["side"] == "bullish")
+    bear = next(r for r in store.could if r["side"] == "bearish")
+    assert bull["exit_at"] is not None
+    assert bull["current_ltp"] == 2510.25
+    assert bear["exit_at"] is None
+    assert bear["current_ltp"] == 2400.0
+    public = divergence_could_have_rows(store, EXIT_AT.date())
+    by_side = {r["direction_type"]: r for r in public}
+    assert by_side["LONG"]["exit_scan_time"] == "11:05"
+    assert by_side["SHORT"]["exit_scan_time"] is None
+
+    empty = MemoryDivergenceStore()
+    result = _apply(
+        empty,
+        "TWCTO Commodity Divergence : order BULL-EXIT @ 1 filled on RELIANCE.",
+        EXIT_AT,
+    )
+    assert result["applied"] is True
+    assert empty.could == []
+    assert divergence_could_have_rows(empty, EXIT_AT.date()) == []
+
+
+def test_symbol_in_todays_trade_or_running_is_absent_from_todays_pick():
+    bull = [
+        {"underlying": "RELIANCE", "direction_type": "LONG"},
+        {"underlying": "TCS", "direction_type": "LONG"},
+    ]
+    bear = [{"underlying": "RELIANCE", "direction_type": "SHORT"}]
+    low_bull = [
+        {"underlying": "INFY", "direction_type": "LONG"},
+        {"underlying": "HDFC", "direction_type": "LONG"},
+    ]
+    low_bear = [{"underlying": "TCS", "direction_type": "SHORT"}]
+    running = [{"underlying": "RELIANCE", "direction_type": "LONG"}]
+    closed = [{"underlying": "INFY", "direction_type": "SHORT"}]
+    out_bull, out_bear, out_low_bull, out_low_bear = hide_picks_already_in_trade_or_running(
+        bull, bear, low_bull, low_bear, running, closed
+    )
+    assert [r["underlying"] for r in out_bull] == ["TCS"]
+    assert out_bear == []
+    assert [r["underlying"] for r in out_low_bull] == ["HDFC"]
+    assert [r["underlying"] for r in out_low_bear] == ["TCS"]
+    assert bull[0]["underlying"] == "RELIANCE"
+
+
+def test_symbol_in_todays_trade_is_absent_from_could_have():
+    historical = {
+        "underlying": "RELIANCE",
+        "direction_type": "LONG",
+        "exit_scan_time": "15:15",
+        "current_ltp": 100.0,
+    }
+    opposite = {"underlying": "RELIANCE", "direction_type": "SHORT", "current_ltp": 90.0}
+    other = {"underlying": "TCS", "direction_type": "LONG", "current_ltp": 80.0}
+    source = [historical, opposite, other]
+    closed = [{"underlying": "Reliance", "direction_type": "LONG"}]
+    shown = hide_could_have_in_todays_trade(source, closed)
+    assert shown == [opposite, other]
+    assert historical["current_ltp"] == 100.0
+    assert source[0] is historical
+
+
+def test_waiting_for_go_survives_0900_cleanup_and_go_pick_does_not():
+    store = MemoryDivergenceStore()
+    day1 = date(2026, 9, 28)
+    day2 = date(2026, 9, 29)
+    store.save_pick(
+        {
+            "trade_date": day1,
+            "underlying": "RELIANCE",
+            "side": "bullish",
+            "fut_symbol": "RELIANCE25SEPFUT",
+            "instrument_key": "NSE_FO|reliance",
+            "contracts": 1,
+            "active": True,
+            "enter_enabled": False,
+            "ticker_eligible": False,
+            "screening_id": None,
+            "action": "BULL-DIV",
+            "div_at": DIV_AT,
+            "updated_at": DIV_AT,
+        }
+    )
+    store.save_pick(
+        {
+            "trade_date": day1,
+            "underlying": "TCS",
+            "side": "bullish",
+            "fut_symbol": "TCS25SEPFUT",
+            "instrument_key": "NSE_FO|tcs",
+            "contracts": 1,
+            "active": True,
+            "enter_enabled": True,
+            "ticker_eligible": True,
+            "screening_id": 9,
+            "action": "BULL-GO",
+            "div_at": DIV_AT,
+            "updated_at": GO_AT,
+        }
+    )
+    store.save_pick(
+        {
+            "trade_date": day1,
+            "underlying": "INFY",
+            "side": "bearish",
+            "fut_symbol": "INFY25SEPFUT",
+            "instrument_key": "NSE_FO|infy",
+            "contracts": 1,
+            "active": False,
+            "enter_enabled": False,
+            "ticker_eligible": False,
+            "screening_id": None,
+            "action": "BEAR-EXIT",
+            "div_at": DIV_AT,
+            "updated_at": EXIT_AT,
+        }
+    )
+    bull, bear = divergence_workspace_picks(store, day2)
+    assert [r["underlying"] for r in bull] == ["RELIANCE"]
+    assert bear == []
+    assert bull[0]["order_eligible"] is False
+    assert bull[0]["order_block_reason"] == "Waiting for GO alert"
+    assert store.get_pick(day1, "TCS", "bullish")["active"] is True
+    assert store.get_pick(day1, "TCS", "bullish")["enter_enabled"] is True
+    day1_bull, day1_bear = divergence_workspace_picks(store, day1)
+    assert [r["underlying"] for r in day1_bull] == ["TCS"]
+    assert day1_bear == []
+    assert store.get_pick(day2, "INFY", "bearish") is None

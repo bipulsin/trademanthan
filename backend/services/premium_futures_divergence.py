@@ -538,6 +538,54 @@ class MemoryDivergenceStore:
             row["enter_enabled"] = False
             row["ticker_eligible"] = False
 
+    def carry_waiting_go_picks(self, session_date: date) -> int:
+        """Keep DIV-only picks (Enter still off) on the new session date.
+
+        GO-enabled and inactive picks stay on their original date, so the
+        09:00 session roll drops them from Today's pick as before.
+        """
+        session = _as_trade_date(session_date)
+        if session is None:
+            return 0
+        waiting: List[Dict[str, Any]] = []
+        for row in self.picks.values():
+            td = _as_trade_date(row.get("trade_date"))
+            if not row.get("active") or row.get("enter_enabled"):
+                continue
+            if td is None or td >= session:
+                continue
+            waiting.append(row)
+        waiting.sort(
+            key=lambda r: (
+                _as_trade_date(r.get("trade_date")) or date.min,
+                str(r.get("updated_at") or ""),
+            ),
+            reverse=True,
+        )
+        moved = 0
+        seen: set = set()
+        for row in waiting:
+            und = row.get("underlying")
+            side = row.get("side")
+            key = (und, side)
+            old_key = (row.get("trade_date"), und, side)
+            if key in seen:
+                row["active"] = False
+                row["ticker_eligible"] = False
+                continue
+            seen.add(key)
+            dest = (session, und, side)
+            if dest in self.picks and dest != old_key:
+                row["active"] = False
+                row["ticker_eligible"] = False
+                continue
+            if old_key != dest and old_key in self.picks:
+                stored = self.picks.pop(old_key)
+                stored["trade_date"] = session
+                self.picks[dest] = stored
+                moved += 1
+        return moved
+
     def open_could(self, trade_date: date, underlying: str, side: str) -> Optional[Dict[str, Any]]:
         for row in reversed(self.could):
             if (
@@ -763,6 +811,92 @@ class DbDivergenceStore:
                 {"d": trade_date.isoformat(), "u": underlying, "ts": _naive(datetime.now(IST))},
             )
             db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def carry_waiting_go_picks(self, session_date: date) -> int:
+        """Move still-waiting DIV picks onto the session date. GO-enabled rows stay put."""
+        self.ensure()
+        from backend.database import SessionLocal
+
+        session = _as_trade_date(session_date)
+        if session is None:
+            return 0
+        db = SessionLocal()
+        moved = 0
+        try:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT trade_date, underlying, side
+                    FROM premium_futures_divergence_pick
+                    WHERE active = TRUE AND enter_enabled = FALSE
+                      AND trade_date < CAST(:d AS DATE)
+                    ORDER BY trade_date DESC, updated_at DESC
+                    """
+                ),
+                {"d": session.isoformat()},
+            ).mappings().all()
+            seen: set = set()
+            for row in rows:
+                und = row.get("underlying")
+                side = row.get("side")
+                key = (und, side)
+                old = row.get("trade_date")
+                old_iso = old.isoformat() if hasattr(old, "isoformat") else str(old)
+                if key in seen:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE premium_futures_divergence_pick
+                            SET active = FALSE, ticker_eligible = FALSE
+                            WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :s
+                              AND enter_enabled = FALSE
+                            """
+                        ),
+                        {"d": old_iso, "u": und, "s": side},
+                    )
+                    continue
+                seen.add(key)
+                exists = db.execute(
+                    text(
+                        """
+                        SELECT 1 FROM premium_futures_divergence_pick
+                        WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :s
+                        """
+                    ),
+                    {"d": session.isoformat(), "u": und, "s": side},
+                ).first()
+                if exists:
+                    db.execute(
+                        text(
+                            """
+                            UPDATE premium_futures_divergence_pick
+                            SET active = FALSE, ticker_eligible = FALSE
+                            WHERE trade_date = CAST(:d AS DATE) AND underlying = :u AND side = :s
+                              AND enter_enabled = FALSE
+                            """
+                        ),
+                        {"d": old_iso, "u": und, "s": side},
+                    )
+                    continue
+                db.execute(
+                    text(
+                        """
+                        UPDATE premium_futures_divergence_pick
+                        SET trade_date = CAST(:new AS DATE)
+                        WHERE trade_date = CAST(:old AS DATE) AND underlying = :u AND side = :s
+                          AND active = TRUE AND enter_enabled = FALSE
+                        """
+                    ),
+                    {"new": session.isoformat(), "old": old_iso, "u": und, "s": side},
+                )
+                moved += 1
+            db.commit()
+            return moved
         except Exception:
             db.rollback()
             raise
@@ -1125,6 +1259,7 @@ def apply_divergence_event(
     ltp_fn: LtpFn,
     now: datetime,
     lot_fn: Optional[Callable[[str], Any]] = None,
+    candle_fn: Optional[Callable[[str, datetime], Optional[float]]] = None,
 ) -> Dict[str, Any]:
     """Apply one parsed divergence alert. Unknown master symbols are dropped."""
     result = _base_result(alert)
@@ -1148,6 +1283,7 @@ def apply_divergence_event(
     clock = _event_clock(alert, now)
     trade_date = _session_date(clock)
     stamp = _naive(clock)
+    _carry_waiting_go_picks(store, trade_date)
 
     if kind == "DIV":
         existing = store.get_pick(trade_date, underlying, side)
@@ -1251,15 +1387,17 @@ def apply_divergence_event(
         )
         return result
 
-    # EXIT: remove from both Today's pick sections. Stamp the matching could-have row when one exists.
+    # EXIT: remove from both Today's pick sections. Stamp the matching could-have
+    # row when one already exists. Never create a could-have row from EXIT alone.
+    # BULL-EXIT closes only the bullish row; BEAR-EXIT closes only the bearish one.
     open_row = store.open_could(trade_date, underlying, side)
     if open_row:
-        price, missing = _safe_ltp(ltp_fn, ikey)
+        price, missing = _exit_mark_at_receipt(ltp_fn, ikey, clock, candle_fn=candle_fn)
         store.stamp_exit(int(open_row["id"]), price, clock, ltp_missing=missing)
         result["exit_ltp"] = price
         result["ltp_missing"] = missing
         if missing:
-            result["reason"] = "LTP missing; exit stored with null price"
+            result["reason"] = "LTP missing; exit time stored and Current LTP left at last mark"
     store.deactivate_symbol(trade_date, underlying)
     result["applied"] = True
     result["enter_enabled"] = False
@@ -1273,9 +1411,20 @@ def apply_divergence_event(
     return result
 
 
+def _carry_waiting_go_picks(store: Any, trade_date: date) -> None:
+    fn = getattr(store, "carry_waiting_go_picks", None)
+    if not callable(fn):
+        return
+    try:
+        fn(trade_date)
+    except Exception:
+        logger.warning("premium_futures waiting-for-GO carry failed", exc_info=True)
+
+
 def divergence_workspace_picks(
     store: Any, trade_date: date
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    _carry_waiting_go_picks(store, trade_date)
     bull: List[Dict[str, Any]] = []
     bear: List[Dict[str, Any]] = []
     for pick in store.active_picks(trade_date):
@@ -1357,10 +1506,10 @@ def _public_could_row(c: Dict[str, Any]) -> Dict[str, Any]:
         "entry_time": _hm(entry_display),
         "entry_ltp": entry_ltp,
         "entry_price": entry_ltp,
-        "exit_time": _scan_hm(exit_at),
+        "exit_time": _hm(exit_at),
         "exit_ltp": exit_ltp,
         "exit_price": exit_ltp,
-        "exit_scan_time": _scan_hm(exit_at),
+        "exit_scan_time": _hm(exit_at),
         "exit_scan_ltp": exit_ltp if exit_at is not None else None,
         "last_hit_at": _scan_iso(exit_at if exit_at is not None else first_raw),
         "first_hit_at": _scan_iso(first_raw),
@@ -1543,6 +1692,65 @@ def repair_future_scan_stamps(trade_date: date, now: Optional[datetime] = None) 
     return changed
 
 
+def _underlying_key(row: Dict[str, Any]) -> str:
+    return str(row.get("underlying") or "").strip().upper()
+
+
+def _direction_key(row: Dict[str, Any]) -> str:
+    raw = str(row.get("direction_type") or row.get("side") or "").strip().upper()
+    if raw in {"SHORT", "BEAR", "BEARISH"}:
+        return "SHORT"
+    if raw in {"LONG", "BULL", "BULLISH"}:
+        return "LONG"
+    return raw
+
+
+def hide_picks_already_in_trade_or_running(
+    bull: List[Dict[str, Any]],
+    bear: List[Dict[str, Any]],
+    low_bull: List[Dict[str, Any]],
+    low_bear: List[Dict[str, Any]],
+    running: List[Dict[str, Any]],
+    closed: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Drop Today's pick rows whose underlying is already a running order or today's trade.
+
+    The trade rows themselves are left untouched.
+    """
+    occupied = {
+        _underlying_key(row)
+        for row in list(running or []) + list(closed or [])
+        if _underlying_key(row)
+    }
+
+    def _keep(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [row for row in (rows or []) if _underlying_key(row) not in occupied]
+
+    return _keep(bull), _keep(bear), _keep(low_bull), _keep(low_bear)
+
+
+def hide_could_have_in_todays_trade(
+    rows: List[Dict[str, Any]],
+    closed: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Hide could-have rows that match today's actual trade (underlying and direction).
+
+    Historical rows stay in storage; this only filters the workspace list.
+    """
+    taken = {
+        (_underlying_key(row), _direction_key(row))
+        for row in (closed or [])
+        if _underlying_key(row) and _direction_key(row)
+    }
+    out: List[Dict[str, Any]] = []
+    for row in rows or []:
+        key = (_underlying_key(row), _direction_key(row))
+        if key[0] and key[1] and key in taken:
+            continue
+        out.append(row)
+    return out
+
+
 def load_divergence_sections(
     trade_date: date,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -1553,7 +1761,9 @@ def load_divergence_sections(
     try:
         store = DbDivergenceStore()
         bull, bear = divergence_workspace_picks(store, trade_date)
-        # Frozen rows stay on the prior session until 09:00 IST (through 08:59). Not cleared at midnight.
+        # Waiting-for-GO picks are carried onto this session inside divergence_workspace_picks.
+        # GO-enabled picks stay on the prior date and drop off at the 09:00 session roll.
+        # Frozen could-have rows stay on the prior session until 09:00 IST (through 08:59).
         return bull, bear, divergence_could_have_rows(
             store, trade_date, now=datetime.now(IST), persist_flat=True
         )
@@ -1669,6 +1879,81 @@ def _candle_close_near(
     if after:
         return round(min(after, key=lambda item: item[0])[1], 4)
     return None
+
+
+def _candle_close_at_or_before(
+    candles: List[Dict[str, Any]],
+    target: datetime,
+) -> Optional[float]:
+    """Nearest 1-minute close at or before the receipt clock. Never a later bar."""
+    target_aware = _aware(target)
+    if target_aware is None:
+        return None
+    best_dt: Optional[datetime] = None
+    best_px: Optional[float] = None
+    for candle in candles or []:
+        dt = _candle_dt_ist(candle.get("timestamp"))
+        if dt is None or dt > target_aware:
+            continue
+        try:
+            px = float(candle.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if px <= 0:
+            continue
+        if best_dt is None or dt > best_dt:
+            best_dt = dt
+            best_px = px
+    return round(best_px, 4) if best_px is not None else None
+
+
+def _exit_candle_close(instrument_key: str, target: datetime) -> Optional[float]:
+    """Upstox 1-minute close at or before the EXIT receipt. None when history is missing."""
+    ik = str(instrument_key or "").strip()
+    target_aware = _aware(target)
+    if not ik or target_aware is None:
+        return None
+    candles: List[Dict[str, Any]] = []
+    try:
+        from backend.config import settings
+        from backend.services.daily_futures_service import _fetch_intraday_1m_cached
+        from backend.services.upstox_service import UpstoxService
+
+        if not getattr(settings, "UPSTOX_API_KEY", None):
+            return None
+        upstox = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        candles = _fetch_intraday_1m_cached(upstox, ik, target_aware.date()) or []
+    except Exception:
+        logger.debug("premium_futures exit candle close failed ik=%s", ik, exc_info=True)
+        return None
+    return _candle_close_at_or_before(candles, target_aware)
+
+
+def _exit_mark_at_receipt(
+    ltp_fn: LtpFn,
+    instrument_key: str,
+    at: datetime,
+    *,
+    candle_fn: Optional[Callable[[str, datetime], Optional[float]]] = None,
+) -> Tuple[Optional[float], bool]:
+    """Receipt LTP, else the candle close at or before that time. Missing both → (None, True)."""
+    price, _missing = _safe_ltp(ltp_fn, instrument_key)
+    if price is not None:
+        return price, False
+    lookup = candle_fn if candle_fn is not None else _exit_candle_close
+    hist: Any = None
+    try:
+        hist = lookup(instrument_key, at)
+    except Exception:
+        logger.debug("premium_futures exit candle lookup failed ik=%s", instrument_key, exc_info=True)
+        hist = None
+    try:
+        hist_px = float(hist) if hist is not None else None
+    except (TypeError, ValueError):
+        hist_px = None
+    if hist_px is not None and hist_px > 0:
+        return round(hist_px, 4), False
+    return None, True
 
 
 def _historical_1m_ltp_at(instrument_key: str, target: datetime) -> Optional[float]:

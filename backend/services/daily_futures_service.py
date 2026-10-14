@@ -2489,7 +2489,7 @@ def _build_trade_if_could_rows(
             "first_scan_time": _fmt_scan_hm(first_hit),
             "entry_time": _fmt_hm(entry_dt),
             "entry_ltp": entry_ltp,
-            "exit_scan_time": _fmt_scan_hm(exit_at) if exit_at else None,
+            "exit_scan_time": _fmt_hm(exit_at) if exit_at else None,
             "current_ltp": current_ltp,
             "pnl_scan_rupees": could_have_pnl_rupees(direction, entry_ltp, current_ltp, qty_num),
             "first_hit_at": _iso_scan_display(first_hit),
@@ -4894,6 +4894,26 @@ def get_workspace(db: Session, user_id: int, lite_mode: bool = False) -> Dict[st
     running = _sort_by_last_scan_desc(list(running))
     closed = _sort_by_last_scan_desc(list(closed))
 
+    try:
+        from backend.services.premium_futures_divergence import (
+            hide_could_have_in_todays_trade,
+            hide_picks_already_in_trade_or_running,
+        )
+
+        picks_bull, picks_bearish, picks_low_conv_bull, picks_low_conv_bear = (
+            hide_picks_already_in_trade_or_running(
+                picks_bull,
+                picks_bearish,
+                picks_low_conv_bull,
+                picks_low_conv_bear,
+                running,
+                closed,
+            )
+        )
+        could_rows = hide_could_have_in_todays_trade(could_rows, closed)
+    except Exception as e:
+        logger.warning("daily_futures: hide traded symbols from picks/could-have skipped: %s", e)
+
     return {
         "trade_date": str(td),
         "session_before_open": False,
@@ -4987,6 +5007,12 @@ def get_workspace_trade_if_could(db: Session, user_id: int) -> Dict[str, Any]:
         rows = list(rows) + list(extra)
     except Exception as e:
         logger.warning("daily_futures: divergence could-have merge skipped: %s", e)
+    try:
+        from backend.services.premium_futures_divergence import hide_could_have_in_todays_trade
+
+        rows = hide_could_have_in_todays_trade(rows, list(base.get("closed") or []))
+    except Exception as e:
+        logger.warning("daily_futures: hide could-have already traded skipped: %s", e)
     return {
         "trade_date": base.get("trade_date"),
         "session_before_open": False,
