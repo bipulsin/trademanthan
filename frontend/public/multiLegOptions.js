@@ -226,6 +226,11 @@
     return !!(leg && leg.exit_price != null && leg.exit_price !== "" && leg.exit_time);
   }
 
+  function exitClockText(iso) {
+    var parts = clockParts(iso);
+    return parts ? formatClock(parts.hour, parts.minute) : "";
+  }
+
   function setSyncBanner(msg, isError) {
     var el = $("mloSyncBanner");
     if (!msg) { el.hidden = true; el.textContent = ""; el.classList.remove("is-error"); return; }
@@ -770,6 +775,18 @@
     var cards = activeTrades.length ? activeTrades.map(function (t) {
       var open = !!expandedTrades[t.id];
       var legs = (t.legs || []).map(function (leg) {
+        if (isStraddle(t) && legIsExited(leg)) {
+          return '<div class="mlo-leg-ro mlo-leg-exited">' +
+            '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
+            '<span data-label="Side">' + esc(leg.side) + "</span>" +
+            '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
+            '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
+            '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
+            '<span data-label="LTP">ExP-' + esc(leg.exit_price) + "</span>" +
+            '<span data-label="Delta">ExT-' + esc(exitClockText(leg.exit_time)) + "</span>" +
+            '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
+            "</div>";
+        }
         var mark = leg.exited ? leg.exit_price : leg.ltp;
         var markLabel = leg.exited ? "Exit" : "LTP";
         return '<div class="mlo-leg-ro">' +

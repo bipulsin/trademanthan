@@ -616,6 +616,15 @@ body.mlo-page .right-panel {
     border-top: 0;
 }
 
+.mlo-leg-ro.mlo-leg-exited {
+    color: #8b9198;
+    background: rgba(139, 145, 152, 0.16);
+}
+
+.mlo-leg-ro.mlo-leg-exited span {
+    color: #8b9198;
+}
+
 @media (max-width: 800px) {
     .mlo-form-grid,
     .mlo-leg-ro {
