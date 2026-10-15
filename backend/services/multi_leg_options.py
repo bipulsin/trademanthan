@@ -1,4 +1,4 @@
-"""Manual multi-leg options journal (Straddle, Iron Fly, Iron Condor).
+"""Manual multi-leg options journal (Straddle, Iron Fly, Iron Condor, Ladder).
 
 PnL sign
 --------
@@ -36,14 +36,15 @@ logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 
-TRADE_TYPES = ("STRADDLE", "IRON_FLY", "IRON_CONDOR")
+TRADE_TYPES = ("STRADDLE", "IRON_FLY", "IRON_CONDOR", "LADDER")
 # UNCLASSIFIED is written by Upstox sync (and kept on edit). Manual create still
 # goes through assert_min_legs, which only accepts TRADE_TYPES.
 ACCEPTED_TRADE_TYPES = TRADE_TYPES + ("UNCLASSIFIED",)
-MIN_LEGS = {"STRADDLE": 2, "IRON_FLY": 4, "IRON_CONDOR": 4}
+# Ladder is one or more legs. It does not use the paired CE/PE template.
+MIN_LEGS = {"STRADDLE": 2, "IRON_FLY": 4, "IRON_CONDOR": 4, "LADDER": 1}
 SIDES = ("BUY", "SELL")
 OPTION_TYPES = ("CE", "PE")
-QUALIFIERS = ("MAIN", "WING", "ADJ")
+QUALIFIERS = ("MAIN", "WING", "ADJ", "EXIT")
 # Spot must clear the green-zone strike by this many points before an adjustment alert.
 GREEN_ZONE_BUFFER = 50
 # Straddle LTP skew: max(CE, PE) / min(CE, PE) on the latest active Main/Adj pair.
@@ -55,6 +56,7 @@ _COMPACT_TYPES = {
     "STRADDLE": "Straddle",
     "IRON_FLY": "IronFly",
     "IRON_CONDOR": "IronCondor",
+    "LADDER": "Ladder",
     "UNCLASSIFIED": "Unclassified",
 }
 
@@ -135,6 +137,7 @@ def default_leg_slots(trade_type: Any) -> List[Dict[str, str]]:
 
     Iron Fly and Iron Condor: Main CE, Main PE, Wing CE, Wing PE.
     Straddle: Main CE, Main PE. Legs added past this list default to Adj.
+    Ladder has no paired template; the caller supplies each leg.
     """
     kind = _normalize_trade_type(trade_type)
     if kind in ("IRON_FLY", "IRON_CONDOR"):
@@ -418,10 +421,10 @@ def _trade_needs_spot(trade: Dict[str, Any]) -> bool:
 
 
 def assert_min_legs(trade_type: str, leg_count: int) -> None:
-    kind = str(trade_type or "").strip().upper()
+    kind = _normalize_trade_type(trade_type)
     if kind not in MIN_LEGS:
         raise MultiLegValidationError(
-            "trade_type must be STRADDLE, IRON_FLY, or IRON_CONDOR"
+            "trade_type must be STRADDLE, IRON_FLY, IRON_CONDOR, or LADDER"
         )
     need = MIN_LEGS[kind]
     n = int(leg_count)
@@ -460,6 +463,53 @@ def status_after_save(*, closing: bool, legs: Sequence[Dict[str, Any]]) -> str:
         assert_ready_to_close(legs)
         return "CLOSED"
     return "ACTIVE"
+
+
+def _qualifier_token(leg: Dict[str, Any]) -> str:
+    return str(leg.get("qualifier") or "").strip().upper()
+
+
+def _lot_qty(leg: Dict[str, Any]) -> int:
+    qty = _as_int(leg.get("lot_size"))
+    if qty is None or qty <= 0:
+        return 0
+    return qty
+
+
+def apply_ladder_exit_balance(legs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Account for every still-open BUY lot on the last exited EXIT leg.
+
+    Open BUY quantity is the sum of lot sizes on BUY legs that are not EXIT
+    and are not themselves exited. Exit quantity is the sum of lot sizes on
+    EXIT legs that have both an exit price and an exit time. When the exit
+    quantity is short, the difference is added to the last such EXIT leg.
+
+    If no EXIT leg has both price and time, this raises and does not invent a
+    price. Lots on legs that are still open are left unchanged.
+    """
+    rows = [dict(leg) for leg in (legs or [])]
+    open_buy = 0
+    for leg in rows:
+        if _qualifier_token(leg) == "EXIT":
+            continue
+        if str(leg.get("side") or "").strip().upper() != "BUY":
+            continue
+        if leg_is_exited(leg):
+            continue
+        open_buy += _lot_qty(leg)
+    exited_at = [
+        i for i, leg in enumerate(rows)
+        if _qualifier_token(leg) == "EXIT" and leg_is_exited(leg)
+    ]
+    if not exited_at:
+        raise MultiLegValidationError(
+            "ladder close needs an exit leg with exit price and exit time"
+        )
+    exited_qty = sum(_lot_qty(rows[i]) for i in exited_at)
+    if exited_qty < open_buy:
+        last = exited_at[-1]
+        rows[last]["lot_size"] = _lot_qty(rows[last]) + (open_buy - exited_qty)
+    return rows
 
 
 def mark_price(leg: Dict[str, Any]) -> Optional[float]:
@@ -1336,7 +1386,7 @@ def _ensure_upstox_sync_schema(conn) -> None:
         """
         ALTER TABLE multi_leg_trades
         ADD CONSTRAINT multi_leg_trades_trade_type_check
-        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'UNCLASSIFIED'))
+        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'LADDER', 'UNCLASSIFIED'))
         """
     ))
 
@@ -1454,19 +1504,22 @@ def _clean_qualifier(raw: Any) -> Optional[str]:
     if token == "":
         return None
     if token not in QUALIFIERS:
-        raise MultiLegValidationError("leg qualifier must be MAIN, WING, or ADJ")
+        raise MultiLegValidationError("leg qualifier must be MAIN, WING, ADJ, or EXIT")
     return token
 
 
 def _resolve_qualifier(raw: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Optional[str]:
-    """New legs must be MAIN, WING, or ADJ. A blank on an existing leg keeps the stored value (null on old rows)."""
+    """New legs must be MAIN, WING, ADJ, or EXIT. Blank stays blank and is not stored as EXIT.
+
+    A blank on an existing leg keeps the stored value (null on old rows).
+    """
     if "qualifier" in raw:
         cleaned = _clean_qualifier(raw.get("qualifier"))
         if cleaned is not None:
             return cleaned
     if previous is not None:
         return _clean_qualifier(previous.get("qualifier"))
-    raise MultiLegValidationError("leg qualifier must be MAIN, WING, or ADJ")
+    raise MultiLegValidationError("leg qualifier must be MAIN, WING, ADJ, or EXIT")
 
 
 def _normalize_leg_input(
@@ -1475,6 +1528,7 @@ def _normalize_leg_input(
     instrument: str,
     header_expiry: date,
     previous: Optional[Dict[str, Any]] = None,
+    preserve_lot: bool = False,
 ) -> Dict[str, Any]:
     side = str(raw.get("side") or "").strip().upper()
     right = str(raw.get("option_type") or "").strip().upper()
@@ -1500,15 +1554,20 @@ def _normalize_leg_input(
         raise MultiLegValidationError("exit price and exit time must both be set to close a leg")
     if exit_px is not None and exit_px < 0:
         raise MultiLegValidationError("exit_price must be >= 0")
+    client_lot = _as_int(raw.get("lot_size"))
     try:
         resolved = resolve_option_contract(instrument, strike, right, leg_exp)
         lot = int(resolved["lot_size"])
         key = resolved["instrument_key"]
     except MultiLegValidationError:
-        lot = _as_int(raw.get("lot_size"))
+        lot = client_lot
         key = str(raw.get("instrument_key") or "").strip() or None
         if not lot or lot <= 0 or not key:
             raise
+    # Ladder quantities are the lots the user entered. Other types keep the
+    # contract lot from the instrument master.
+    if preserve_lot and client_lot and client_lot > 0:
+        lot = client_lot
     ltp = _as_float(raw.get("ltp"))
     delta = _as_float(raw.get("delta"))
     order_id = str(raw.get("upstox_order_id") or "").strip() or None
@@ -1534,9 +1593,11 @@ def _normalize_leg_input(
 
 
 def _header_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
-    kind = str(body.get("trade_type") or "").strip().upper()
+    kind = _normalize_trade_type(body.get("trade_type"))
     if kind not in ACCEPTED_TRADE_TYPES:
-        raise MultiLegValidationError("trade_type must be STRADDLE, IRON_FLY, or IRON_CONDOR")
+        raise MultiLegValidationError(
+            "trade_type must be STRADDLE, IRON_FLY, IRON_CONDOR, or LADDER"
+        )
     instrument = str(body.get("instrument") or "").strip().upper()
     if not instrument:
         raise MultiLegValidationError("instrument is required")
@@ -1744,8 +1805,14 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(raw_legs, list):
         raise MultiLegValidationError("legs must be a list")
     assert_min_legs(header["trade_type"], len(raw_legs))
+    preserve_lot = header["trade_type"] == "LADDER"
     legs = [
-        _normalize_leg_input(raw, instrument=header["instrument"], header_expiry=header["expiry_date"])
+        _normalize_leg_input(
+            raw,
+            instrument=header["instrument"],
+            header_expiry=header["expiry_date"],
+            preserve_lot=preserve_lot,
+        )
         for raw in raw_legs
     ]
     status = status_after_save(closing=False, legs=legs)
@@ -1814,13 +1881,18 @@ def get_trade(trade_id: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
-def list_active() -> List[Dict[str, Any]]:
+def _query_trades(where_sql: str = "", params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     ensure_multi_leg_tables()
     db = SessionLocal()
     try:
-        return _load_trade_rows(db, where_sql="t.status = 'ACTIVE'")
+        return _load_trade_rows(db, where_sql=where_sql, params=params)
     finally:
         db.close()
+
+
+def list_active() -> List[Dict[str, Any]]:
+    """Open Straddle, Iron Fly, Iron Condor, and Unclassified trades. Ladders are excluded."""
+    return _query_trades("t.status = 'ACTIVE' AND t.trade_type <> 'LADDER'")
 
 
 def list_report(
@@ -1831,8 +1903,7 @@ def list_report(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    ensure_multi_leg_tables()
-    clauses: List[str] = []
+    clauses: List[str] = ["t.trade_type <> 'LADDER'"]
     params: Dict[str, Any] = {}
     st = str(status or "").strip().upper()
     if st and st != "ALL":
@@ -1844,9 +1915,9 @@ def list_report(
     if inst:
         clauses.append("UPPER(t.instrument) = :instrument")
         params["instrument"] = inst
-    kind = str(trade_type or "").strip().upper()
+    kind = _normalize_trade_type(trade_type) if str(trade_type or "").strip() else ""
     if kind:
-        if kind not in ACCEPTED_TRADE_TYPES:
+        if kind == "LADDER" or kind not in ACCEPTED_TRADE_TYPES:
             raise MultiLegValidationError("trade_type filter is invalid")
         clauses.append("t.trade_type = :trade_type")
         params["trade_type"] = kind
@@ -1859,11 +1930,40 @@ def list_report(
         clauses.append("t.entry_date <= :date_to")
         params["date_to"] = end
     where = " AND ".join(clauses)
-    db = SessionLocal()
+    return _query_trades(where, params)
+
+
+def list_ladder_report() -> List[Dict[str, Any]]:
+    """Active and closed Ladder trades for the Ladder Report tab."""
+    trades = _query_trades("t.trade_type = 'LADDER'")
     try:
-        return _load_trade_rows(db, where_sql=where, params=params)
-    finally:
-        db.close()
+        annotate_adjustment_alerts(trades, persist=False)
+    except Exception:
+        logger.info("ladder report spot annotate failed", exc_info=True)
+    keys: List[str] = []
+    for trade in trades:
+        trade["future_ltp"] = None
+        if str(trade.get("status") or "").strip().upper() != "ACTIVE":
+            continue
+        try:
+            fik = resolve_future_instrument_key(trade.get("instrument"), trade.get("expiry_date"))
+        except Exception:
+            logger.info("ladder future resolve failed for %s", trade.get("instrument"), exc_info=True)
+            fik = None
+        trade["_future_key"] = fik
+        if fik:
+            keys.append(fik)
+    ltps: Dict[str, Optional[float]] = {}
+    if keys:
+        try:
+            ltps = _fetch_ltps(keys)
+        except Exception:
+            logger.info("ladder future ltp fetch failed", exc_info=True)
+    for trade in trades:
+        fik = trade.pop("_future_key", None)
+        if fik:
+            trade["future_ltp"] = ltps.get(fik)
+    return trades
 
 
 def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -1872,7 +1972,13 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
     current = get_trade(trade_id)
     if not current:
         raise MultiLegNotFound("trade not found")
-    if current.get("status") != "ACTIVE":
+    # A closed ladder stays on Ladder Report and can still be edited. Other
+    # closed trades stay locked.
+    ladder_closed = (
+        _normalize_trade_type(current.get("trade_type")) == "LADDER"
+        and str(current.get("status") or "").strip().upper() == "CLOSED"
+    )
+    if str(current.get("status") or "").strip().upper() != "ACTIVE" and not ladder_closed:
         raise MultiLegValidationError("only ACTIVE trades can be edited")
     merged = {
         "trade_type": body.get("trade_type") or current.get("trade_type"),
@@ -1912,6 +2018,7 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                 instrument=header["instrument"],
                 header_expiry=header["expiry_date"],
                 previous=prev,
+                preserve_lot=header["trade_type"] == "LADDER",
             )
         )
     # Manual min-leg rules stay for the three typed structures. Sync may save
@@ -1921,7 +2028,8 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
             raise MultiLegValidationError("UNCLASSIFIED trade needs at least one leg")
     else:
         assert_min_legs(header["trade_type"], len(prepared))
-    status = status_after_save(closing=False, legs=prepared)
+    status = "CLOSED" if ladder_closed else status_after_save(closing=False, legs=prepared)
+    status_guard = "CLOSED" if ladder_closed else "ACTIVE"
     total = trade_pnl(l.get("leg_pnl") for l in prepared)
     # Exit and other saves that omit max_profit or green zones must not null the stored values.
     max_set, max_profit = max_profit_from_body(body)
@@ -1963,7 +2071,7 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                     total_pnl = :pnl,
                     {extra_sql}
                     updated_at = NOW()
-                WHERE id = CAST(:id AS uuid) AND status = 'ACTIVE'
+                WHERE id = CAST(:id AS uuid) AND status = '{status_guard}'
                 """
             ),
             params,
@@ -2000,10 +2108,18 @@ def close_trade(trade_id: str, body: Optional[Dict[str, Any]] = None) -> Dict[st
     if current.get("status") != "ACTIVE":
         raise MultiLegValidationError("trade is already closed")
     payload = dict(body or {})
-    if payload.get("legs"):
-        current = update_trade(trade_id, {**current, **payload, "legs": payload["legs"]})
-    legs = current.get("legs") or []
-    assert_ready_to_close(legs)
+    kind = _normalize_trade_type(payload.get("trade_type") or current.get("trade_type"))
+    if kind == "LADDER":
+        source = payload.get("legs") if payload.get("legs") else list(current.get("legs") or [])
+        # Raises before any write when no EXIT leg has both price and time.
+        adjusted = apply_ladder_exit_balance(source)
+        current = update_trade(trade_id, {**current, **payload, "trade_type": "LADDER", "legs": adjusted})
+        legs = current.get("legs") or adjusted
+    else:
+        if payload.get("legs"):
+            current = update_trade(trade_id, {**current, **payload, "legs": payload["legs"]})
+        legs = current.get("legs") or []
+        assert_ready_to_close(legs)
     exit_at = datetime.now(IST)
     total = trade_pnl(l.get("leg_pnl") for l in legs)
     db = SessionLocal()
@@ -2069,7 +2185,9 @@ def delete_trade(trade_id: str) -> None:
 def refresh_active_quotes() -> Dict[str, Any]:
     """Batch LTP + option-greek for open legs, future LTP for the collapsed row, persist, and refresh WS subscriptions."""
     ensure_multi_leg_tables()
-    trades = list_active()
+    # Marks include open ladders so Ladder Report can show the saved LTP.
+    # The payload returned below is still the non-ladder Active tab.
+    trades = _query_trades("t.status = 'ACTIVE'")
     open_legs: List[Dict[str, Any]] = []
     for trade in trades:
         for leg in trade.get("legs") or []:

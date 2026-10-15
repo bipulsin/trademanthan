@@ -2,9 +2,12 @@
 (function () {
   "use strict";
 
-  var MIN_LEGS = { STRADDLE: 2, IRON_FLY: 4, IRON_CONDOR: 4 };
+  var MIN_LEGS = { STRADDLE: 2, IRON_FLY: 4, IRON_CONDOR: 4, LADDER: 1 };
+  var LADDER_EXIT_MIN = 4;
+  var LADDER_EXIT_MAX = 6;
   var instruments = { indices: [], equities: [], commodities: [] };
   var activeTrades = [];
+  var ladderTrades = [];
   var orphanLegs = [];
   var assignableTrades = [];
   var reportRows = [];
@@ -152,7 +155,7 @@
   }
 
   function typeLabel(t) {
-    return { STRADDLE: "Straddle", IRON_FLY: "Iron Fly", IRON_CONDOR: "Iron Condor", UNCLASSIFIED: "Unclassified" }[t] || t;
+    return { STRADDLE: "Straddle", IRON_FLY: "Iron Fly", IRON_CONDOR: "Iron Condor", LADDER: "Ladder", UNCLASSIFIED: "Unclassified" }[t] || t;
   }
 
   function legTypeLabel(qualifier) {
@@ -160,7 +163,12 @@
     if (role === "MAIN") return "Main";
     if (role === "WING") return "Wing";
     if (role === "ADJ") return "Adj";
+    if (role === "EXIT") return "Exit";
     return "—";
+  }
+
+  function isLadderType(kind) {
+    return String(kind || "").toUpperCase().replace(/[\s-]/g, "_") === "LADDER";
   }
 
   function lastWeekday(year, month, weekday) {
@@ -263,6 +271,7 @@
   }
 
   function typeTemplate(kind) {
+    if (kind === "LADDER") return [];
     if (kind === "IRON_FLY" || kind === "IRON_CONDOR") {
       return [
         { qualifier: "MAIN", option_type: "CE" },
@@ -282,6 +291,21 @@
 
   function applyTypeTemplate() {
     if (mode !== "new") return;
+    if (isLadderType($("mloType").value)) {
+      var existing = $("mloLegs").querySelectorAll(".mlo-leg");
+      var untouched = true;
+      existing.forEach(function (row) {
+        var entry = row.querySelector('[data-f="entry_price"]');
+        var strike = row.querySelector('[data-f="strike_price"]');
+        if (row.dataset.id || (entry && entry.value) || (strike && strike.value)) untouched = false;
+      });
+      if (untouched) {
+        $("mloLegs").innerHTML = "";
+        addLeg({ side: "BUY", qualifier: "MAIN" });
+      }
+      refreshSaveGate();
+      return;
+    }
     var slots = typeTemplate($("mloType").value);
     while (legCount() < slots.length) addLeg(null);
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
@@ -300,13 +324,21 @@
     return $("mloLegs").querySelectorAll(".mlo-leg").length;
   }
 
+  function visibleLegCount() {
+    var n = 0;
+    $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+      if (!rowIsBlankExitSlot(row)) n++;
+    });
+    return n;
+  }
+
   function refreshSaveGate() {
-    var under = legCount() < minForType();
+    var under = visibleLegCount() < minForType();
     $("mloSave").disabled = under;
     $("mloSave").title = under ? "Need at least " + minForType() + " legs" : "";
     var closeBtn = $("mloCloseTrade");
     if (!closeBtn.hidden) {
-      closeBtn.disabled = !allLegsExited();
+      closeBtn.disabled = isLadderType($("mloType").value) ? !ladderHasExitedExitLeg() : !allLegsExited();
     }
     scheduleModalPayoff();
   }
@@ -397,7 +429,7 @@
       ? '<button type="button" class="mlo-icon-btn mlo-leg-exit-btn" aria-label="Exit leg"><i class="fas fa-right-from-bracket" aria-hidden="true"></i></button>'
       : "";
     wrap.innerHTML =
-      '<select data-f="qualifier" aria-label="Qualifier"><option value="" hidden>Role</option><option value="MAIN">Main</option><option value="WING">Wing</option><option value="ADJ">Adj</option></select>' +
+      '<select data-f="qualifier" aria-label="Qualifier"><option value="" hidden>Role</option><option value="MAIN">Main</option><option value="WING">Wing</option><option value="ADJ">Adj</option><option value="EXIT">Exit</option></select>' +
       '<select data-f="side" aria-label="Side" required><option value="" hidden>Side</option><option>BUY</option><option>SELL</option></select>' +
       '<select data-f="option_type" aria-label="Type" required><option value="" hidden>Type</option><option>CE</option><option>PE</option></select>' +
       '<input data-f="strike_price" type="number" min="0" step="0.01" placeholder="Strike" aria-label="Strike" required>' +
@@ -408,9 +440,12 @@
       exit +
       exitBtn +
       '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
+    if (leg && leg.exit_slot) wrap.dataset.exitSlot = "1";
     var role = wrap.querySelector('[data-f="qualifier"]');
     if (leg && leg.qualifier) role.value = String(leg.qualifier).toUpperCase();
-    wrap.querySelector('[data-f="side"]').value = (leg && leg.side) || "SELL";
+    var sideEl = wrap.querySelector('[data-f="side"]');
+    sideEl.value = (leg && leg.side) || "SELL";
+    sideEl.addEventListener("change", function () { sideEl.dataset.userSet = "1"; });
     wrap.querySelector('[data-f="option_type"]').value = (leg && leg.option_type) || "CE";
     wrap.querySelector('[data-f="strike_price"]').value = leg && leg.strike_price != null ? leg.strike_price : "";
     var expiryInp = wrap.querySelector('[data-f="leg_expiry_date"]');
@@ -432,6 +467,9 @@
       shell.remove();
       refreshSaveGate();
     });
+    if (wrap.dataset.exitSlot === "1") {
+      wrap.querySelectorAll("[required]").forEach(function (inp) { inp.required = false; });
+    }
     if (exited) {
       wrap.querySelectorAll("input, select").forEach(function (inp) {
         if (inp.type === "hidden") return;
@@ -520,7 +558,7 @@
       var body = payload();
       var data = await api("/trades/" + editingId, { method: "PUT", body: JSON.stringify(body) });
       openModal("edit", data.trade);
-      await loadActive(true);
+      await reloadCurrent();
     } catch (e) {
       showFormError(e.message || "Leg exit failed");
     }
@@ -537,6 +575,29 @@
     refreshSaveGate();
   }
 
+  function rowIsBlankExitSlot(row) {
+    if (!row || row.getAttribute("data-exit-slot") !== "1") return false;
+    var entry = row.querySelector('[data-f="entry_price"]');
+    var exitPx = row.querySelector('[data-f="exit_price"]');
+    var entryBlank = !entry || String(entry.value).trim() === "";
+    var exitBlank = !exitPx || String(exitPx.value).trim() === "";
+    return entryBlank && exitBlank;
+  }
+
+  function ladderHasExitedExitLeg() {
+    var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    for (var i = 0; i < rows.length; i++) {
+      if (rowIsBlankExitSlot(rows[i])) continue;
+      var role = rows[i].querySelector('[data-f="qualifier"]');
+      if (!role || String(role.value).toUpperCase() !== "EXIT") continue;
+      var px = rows[i].querySelector('[data-f="exit_price"]');
+      var day = rows[i].querySelector('[data-f="exit_date"]');
+      var clock = rows[i].querySelector('[data-f="exit_clock"]');
+      if (px && day && clock && px.value !== "" && day.value && parseClock(clock.value)) return true;
+    }
+    return false;
+  }
+
   function allLegsExited() {
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
     if (!rows.length) return false;
@@ -551,7 +612,10 @@
   }
 
   function readLegs() {
-    return Array.prototype.map.call($("mloLegs").querySelectorAll(".mlo-leg"), function (row) {
+    var rows = Array.prototype.filter.call($("mloLegs").querySelectorAll(".mlo-leg"), function (row) {
+      return !rowIsBlankExitSlot(row);
+    });
+    return rows.map(function (row) {
       function val(name) {
         var el = row.querySelector('[data-f="' + name + '"]');
         return el ? el.value : "";
@@ -565,6 +629,8 @@
         entry_price: Number(val("entry_price")),
         entry_time: composeClock($("mloEntryDate").value, val("entry_clock")),
       };
+      var lotRaw = val("lot_size").trim();
+      if (lotRaw !== "" && !Number.isNaN(Number(lotRaw))) leg.lot_size = Number(lotRaw);
       if (row.dataset.id) leg.id = row.dataset.id;
       var exitPx = val("exit_price");
       var exitDay = val("exit_date");
@@ -582,6 +648,7 @@
   function legClockError() {
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
     for (var i = 0; i < rows.length; i++) {
+      if (rowIsBlankExitSlot(rows[i])) continue;
       var entry = rows[i].querySelector('[data-f="entry_clock"]');
       if (!entry || !parseClock(entry.value)) return "Time must look like 03:10 PM";
       var exitPx = rows[i].querySelector('[data-f="exit_price"]');
@@ -593,15 +660,62 @@
     return "";
   }
 
+  function legEntryError() {
+    var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    for (var i = 0; i < rows.length; i++) {
+      if (rowIsBlankExitSlot(rows[i])) continue;
+      var entry = rows[i].querySelector('[data-f="entry_price"]');
+      if (!entry || String(entry.value).trim() === "") return "Each leg needs an entry price";
+    }
+    return "";
+  }
+
   function qualifierError() {
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
     for (var i = 0; i < rows.length; i++) {
+      if (rowIsBlankExitSlot(rows[i])) continue;
       var role = rows[i].querySelector('[data-f="qualifier"]');
       if (role && role.value) continue;
       if (rows[i].dataset.id) continue;
-      return "Each new leg needs Main, Wing, or Adj";
+      return "Each new leg needs Main, Wing, Adj, or Exit";
     }
     return "";
+  }
+
+  function firstBuyLeg(legs) {
+    var first = null;
+    for (var i = 0; i < (legs || []).length; i++) {
+      var leg = legs[i];
+      if (String(leg.side || "").toUpperCase() !== "BUY") continue;
+      if (String(leg.qualifier || "").toUpperCase() === "EXIT") continue;
+      if (!first) first = leg;
+      if (!legIsExited(leg)) return leg;
+    }
+    return first;
+  }
+
+  function ensureLadderExitSlots(trade) {
+    if (mode !== "edit" && mode !== "exit") return;
+    if (!isLadderType($("mloType").value)) return;
+    var exitRows = 0;
+    $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+      var role = row.querySelector('[data-f="qualifier"]');
+      if (role && String(role.value).toUpperCase() === "EXIT") exitRows++;
+    });
+    if (exitRows >= LADDER_EXIT_MIN) return;
+    var add = Math.min(LADDER_EXIT_MAX - exitRows, LADDER_EXIT_MIN - exitRows);
+    if (add <= 0) return;
+    var buy = firstBuyLeg((trade && trade.legs) || []);
+    for (var i = 0; i < add; i++) {
+      addLeg({
+        qualifier: "EXIT",
+        side: "SELL",
+        option_type: (buy && buy.option_type) || "CE",
+        strike_price: buy && buy.strike_price != null ? buy.strike_price : "",
+        leg_expiry_date: (buy && buy.leg_expiry_date) || $("mloExpiry").value || "",
+        exit_slot: true,
+      });
+    }
   }
 
   function payload() {
@@ -709,6 +823,7 @@
       legs.forEach(function (leg) { addLeg(leg); });
     }
     if (nextMode === "new") applyTypeTemplate();
+    else ensureLadderExitSlots(trade);
     if (!trade) loadExpiry();
     refreshDte();
     refreshSaveGate();
@@ -766,13 +881,7 @@
       cards + "</section>";
   }
 
-  function renderActive(trades, orphans) {
-    activeTrades = trades || [];
-    if (orphans) orphanLegs = orphans;
-    if (assignFieldFocused()) return;
-    var host = $("mloActive");
-    var empty = '<p class="mlo-empty">No active trades. Use + New Trade to record a straddle, iron fly, or iron condor.</p>';
-    var cards = activeTrades.length ? activeTrades.map(function (t) {
+  function tradeCard(t) {
       var open = !!expandedTrades[t.id];
       var legs = (t.legs || []).map(function (leg) {
         if (isStraddle(t) && legIsExited(leg)) {
@@ -823,12 +932,22 @@
           '<span class="mlo-row-actions">' +
             iconButton("edit", "Edit", "fa-pen") +
             iconButton("delete", "Delete", "fa-trash") +
-            iconButton("exit", "Exit Trade", "fa-right-from-bracket") +
+            (String(t.status || "ACTIVE").toUpperCase() === "CLOSED"
+              ? ""
+              : iconButton("exit", "Exit Trade", "fa-right-from-bracket")) +
             iconButton("toggle", open ? "Collapse" : "Expand", open ? "fa-chevron-up" : "fa-chevron-down", open) +
           "</span></div>" +
         '<div class="mlo-row-body"' + (open ? "" : " hidden") + ">" + head + legs +
           '<div class="mlo-payoff" data-payoff="' + esc(t.id) + '"></div></div></article>';
-    }).join("") : empty;
+  }
+
+  function renderActive(trades, orphans) {
+    activeTrades = trades || [];
+    if (orphans) orphanLegs = orphans;
+    if (assignFieldFocused()) return;
+    var host = $("mloActive");
+    var empty = '<p class="mlo-empty">No active trades. Use + New Trade to record a straddle, iron fly, or iron condor.</p>';
+    var cards = activeTrades.length ? activeTrades.map(tradeCard).join("") : empty;
     host.innerHTML = renderOrphans(orphanLegs) + cards;
     activeTrades.forEach(function (t) {
       if (t.spot_ltp != null && !isNaN(Number(t.spot_ltp))) {
@@ -912,6 +1031,32 @@
     }
   }
 
+  async function loadLadder(refreshQuotes) {
+    try {
+      if (refreshQuotes) {
+        try { await api("/quotes"); } catch (e) { /* stored marks still render */ }
+      }
+      var data = await api("/trades/ladder");
+      renderLadder(data.trades || []);
+    } catch (e) {
+      setBanner(e.message || "Could not load ladder report");
+    }
+  }
+
+  function renderLadder(trades) {
+    ladderTrades = trades || [];
+    var host = $("mloLadder");
+    if (!host) return;
+    var empty = '<p class="mlo-empty">No ladder trades.</p>';
+    host.innerHTML = ladderTrades.length ? ladderTrades.map(tradeCard).join("") : empty;
+    ladderTrades.forEach(function (t) {
+      if (t.spot_ltp != null && !isNaN(Number(t.spot_ltp))) {
+        lastInstrumentSpot[String(t.instrument || "").toUpperCase()] = Number(t.spot_ltp);
+      }
+    });
+    paintExpandedPayoffs(false);
+  }
+
   function showTab(name) {
     tab = name;
     document.querySelectorAll(".bf-tab").forEach(function (btn) {
@@ -919,7 +1064,10 @@
     });
     $("mloActive").hidden = name !== "active";
     $("mloReport").hidden = name !== "report";
+    var ladder = $("mloLadder");
+    if (ladder) ladder.hidden = name !== "ladder";
     if (name === "report") loadReport();
+    else if (name === "ladder") loadLadder(true);
     else loadActive(true);
   }
 
@@ -952,7 +1100,18 @@
   }
 
   function tradeById(id) {
-    return activeTrades.filter(function (t) { return t.id === id; })[0] || null;
+    var pools = [activeTrades, ladderTrades];
+    for (var p = 0; p < pools.length; p++) {
+      var hit = pools[p].filter(function (t) { return t.id === id; })[0];
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  async function reloadCurrent() {
+    if (tab === "ladder") await loadLadder(true);
+    else if (tab === "report") await loadReport();
+    else await loadActive(true);
   }
 
   $("mloNewTrade").addEventListener("click", function () { openModal("new", null); });
@@ -960,6 +1119,10 @@
   $("mloCancel").addEventListener("click", closeModal);
   $("mloModalClose").addEventListener("click", closeModal);
   $("mloAddLeg").addEventListener("click", function () {
+    if (isLadderType($("mloType").value)) {
+      addLeg(null);
+      return;
+    }
     if (mode !== "new") {
       addLeg({ qualifier: "ADJ" });
       return;
@@ -970,6 +1133,7 @@
   });
   $("mloType").addEventListener("change", function () {
     if (mode === "new") applyTypeTemplate();
+    else ensureLadderExitSlots(tradeById(editingId));
     refreshSaveGate();
   });
   $("mloEntryDate").addEventListener("change", function () {
@@ -1005,7 +1169,7 @@
   $("mloForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
     showFormError("");
-    if (legCount() < minForType()) {
+    if (visibleLegCount() < minForType()) {
       showFormError(typeLabel($("mloType").value) + " needs at least " + minForType() + " legs");
       return;
     }
@@ -1019,12 +1183,26 @@
       showFormError(roleErr);
       return;
     }
+    var entryErr = legEntryError();
+    if (entryErr) {
+      showFormError(entryErr);
+      return;
+    }
     var body = payload();
     try {
-      if (mode === "new") await api("/trades", { method: "POST", body: JSON.stringify(body) });
-      else await api("/trades/" + editingId, { method: "PUT", body: JSON.stringify(body) });
+      if (mode === "exit" && isLadderType(body.trade_type)) {
+        if (!ladderHasExitedExitLeg()) {
+          showFormError("Close needs an exit leg with an exit price and exit time");
+          return;
+        }
+        await api("/trades/" + editingId + "/close", { method: "POST", body: JSON.stringify({ legs: body.legs }) });
+      } else if (mode === "new") {
+        await api("/trades", { method: "POST", body: JSON.stringify(body) });
+      } else {
+        await api("/trades/" + editingId, { method: "PUT", body: JSON.stringify(body) });
+      }
       closeModal();
-      await loadActive(true);
+      await reloadCurrent();
     } catch (e) {
       showFormError(e.message || "Save failed");
     }
@@ -1032,14 +1210,25 @@
 
   $("mloCloseTrade").addEventListener("click", async function () {
     showFormError("");
-    if (!allLegsExited()) {
+    var ladder = isLadderType($("mloType").value);
+    if (ladder) {
+      if (!ladderHasExitedExitLeg()) {
+        showFormError("Close needs an exit leg with an exit price and exit time");
+        return;
+      }
+      var entryErr = legEntryError();
+      if (entryErr) {
+        showFormError(entryErr);
+        return;
+      }
+    } else if (!allLegsExited()) {
       showFormError("Close requires every leg to have an exit price and exit time");
       return;
     }
     try {
       await api("/trades/" + editingId + "/close", { method: "POST", body: JSON.stringify({ legs: readLegs() }) });
       closeModal();
-      await loadActive(true);
+      await reloadCurrent();
     } catch (e) {
       showFormError(e.message || "Close failed");
     }
@@ -1130,7 +1319,7 @@
     if (input) showAssignList(input);
   });
 
-  $("mloActive").addEventListener("click", async function (ev) {
+  async function onTradeListClick(ev) {
     var pick = ev.target.closest("button[data-trade]");
     if (pick) {
       var legId = pick.getAttribute("data-leg");
@@ -1165,12 +1354,12 @@
       if (!window.confirm("Delete this " + trade.instrument + " trade?")) return;
       try {
         await api("/trades/" + trade.id, { method: "DELETE" });
-        await loadActive(true);
+        await reloadCurrent();
       } catch (e) {
         setBanner(e.message || "Delete failed");
       }
     }
-  });
+  }
 
   document.querySelectorAll(".bf-tab").forEach(function (btn) {
     btn.addEventListener("click", function () { showTab(btn.dataset.tab); });
@@ -1285,7 +1474,7 @@
   }
 
   function paintExpandedPayoffs(force) {
-    activeTrades.forEach(function (trade) {
+    activeTrades.concat(ladderTrades).forEach(function (trade) {
       if (!expandedTrades[trade.id]) return;
       paintTradePayoff(trade, force);
     });
@@ -1476,8 +1665,12 @@
   }
 
   loadInstruments().then(function () { return loadActive(true); });
+  $("mloActive").addEventListener("click", onTradeListClick);
+  var ladderHost = $("mloLadder");
+  if (ladderHost) ladderHost.addEventListener("click", onTradeListClick);
   pollTimer = setInterval(function () {
-    if (tab === "active" && $("mloModal").hidden) loadActive(true);
+    if ($("mloModal").hidden && tab === "active") loadActive(true);
+    else if ($("mloModal").hidden && tab === "ladder") loadLadder(true);
     else pollAlertsOnly();
   }, 8000);
   payoffTimer = setInterval(refreshPayoffClock, PAYOFF_REFRESH_MS);

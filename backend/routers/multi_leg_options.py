@@ -25,6 +25,7 @@ from backend.services.multi_leg_options import (
     get_trade,
     list_active,
     list_instruments,
+    list_ladder_report,
     list_report,
     refresh_active_quotes,
     suggested_expiry,
@@ -56,6 +57,7 @@ class LegBody(BaseModel):
     entry_time: str
     exit_price: Optional[float] = Field(None, ge=0)
     exit_time: Optional[str] = None
+    lot_size: Optional[int] = Field(None, gt=0)
     ltp: Optional[float] = None
     delta: Optional[float] = None
 
@@ -185,6 +187,13 @@ def report(
         date_from=date_from,
         date_to=date_to,
     )
+    return {"ok": True, "count": len(trades), "trades": trades}
+
+
+@router.get("/trades/ladder")
+def ladder_report(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
+    """Active and historical Ladder trades. Other types stay on Active and Trade Report."""
+    trades = _call(list_ladder_report)
     return {"ok": True, "count": len(trades), "trades": trades}
 
 

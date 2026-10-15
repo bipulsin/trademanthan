@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=13" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=14" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -36,7 +36,7 @@
                         <h1 class="settings-title so-page-title">
                             <i class="fas fa-sitemap" aria-hidden="true"></i> Multi-Leg Options
                         </h1>
-                        <p class="settings-subtitle so-subtitle-oneline">Manual journal for Straddle, Iron Fly, and Iron Condor. Live P&amp;L only.</p>
+                        <p class="settings-subtitle so-subtitle-oneline">Manual journal for Straddle, Iron Fly, Iron Condor, and Ladder. Live P&amp;L only.</p>
                     </div>
                     <div class="so-header-aside">
                         <div class="mlo-header-actions">
@@ -55,8 +55,13 @@
                         <span class="bf-tab-full">Trade Report</span>
                         <span class="bf-tab-short">Report</span>
                     </button>
+                    <button type="button" class="bf-tab" data-tab="ladder">
+                        <span class="bf-tab-full">Ladder Report</span>
+                        <span class="bf-tab-short">Ladder</span>
+                    </button>
                 </nav>
                 <section id="mloActive" class="mlo-panel"></section>
+                <section id="mloLadder" class="mlo-panel" hidden></section>
                 <section id="mloReport" class="mlo-panel so-card" hidden>
                     <div class="mlo-filters">
                         <label>Instrument <input id="mloFInstrument" type="text" placeholder="Any" /></label>
@@ -117,6 +122,7 @@
                             <option value="STRADDLE">Straddle</option>
                             <option value="IRON_FLY">Iron Fly</option>
                             <option value="IRON_CONDOR">Iron Condor</option>
+                            <option value="LADDER">Ladder</option>
                         </select>
                     </label>
                     <label class="mlo-combo-label">Instrument
@@ -181,6 +187,6 @@
     </div>
     <script src="left-menu.js?v=3.52"></script>
     <script src="multiLegPayoff.js?v=3"></script>
-    <script src="multiLegOptions.js?v=13"></script>
+    <script src="multiLegOptions.js?v=14"></script>
 </body>
 </html>

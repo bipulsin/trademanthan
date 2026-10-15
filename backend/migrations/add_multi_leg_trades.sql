@@ -1,10 +1,10 @@
--- Manual multi-leg options journal (Straddle / Iron Fly / Iron Condor).
+-- Manual multi-leg options journal (Straddle / Iron Fly / Iron Condor / Ladder).
 -- Record-keeping and live mark-to-market only. No broker orders.
 
 CREATE TABLE IF NOT EXISTS multi_leg_trades (
     id UUID PRIMARY KEY,
     trade_type TEXT NOT NULL
-        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'UNCLASSIFIED')),
+        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'LADDER', 'UNCLASSIFIED')),
     instrument TEXT NOT NULL,
     spot_price_entry NUMERIC(18, 4) NOT NULL,
     entry_date DATE NOT NULL,

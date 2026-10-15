@@ -755,3 +755,154 @@ def test_future_key_is_same_expiry_month_not_the_option():
 
     mcx = [_fut_row("SILVERM", "MCX_FO|SILVERM", 2026, 11, 30, segment="MCX_FO")]
     assert resolve_future_instrument_key("SILVERMINI", date(2026, 11, 30), rows=mcx) == "MCX_FO|SILVERM"
+
+
+def test_ladder_saves_one_leg_and_blank_qualifier_is_not_exit(monkeypatch):
+    from backend.services.multi_leg_options import _clean_qualifier
+
+    assert _clean_qualifier(None) is None
+    assert _clean_qualifier("") is None
+    assert _clean_qualifier("   ") is None
+    assert _clean_qualifier("exit") == "EXIT"
+
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db)
+    buy = _leg("CE", "MAIN")
+    buy["side"] = "BUY"
+    buy["lot_size"] = 50
+    mlo.create_trade(_trade_body(trade_type="LADDER", legs=[buy]))
+    params, _sql = _sql_params(db, "INSERT INTO multi_leg_trades")
+    assert params["trade_type"] == "LADDER"
+    leg_params = [p for s, p in db.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert len(leg_params) == 1
+    assert leg_params[0]["qualifier"] == "MAIN"
+    assert leg_params[0]["side"] == "BUY"
+    assert leg_params[0]["lot_size"] == 50
+
+    blank = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, blank)
+    naked = dict(buy)
+    naked["qualifier"] = ""
+    with pytest.raises(MultiLegValidationError, match="qualifier"):
+        mlo.create_trade(_trade_body(trade_type="LADDER", legs=[naked]))
+    assert not any(
+        p.get("qualifier") == "EXIT"
+        for s, p in blank.statements
+        if "INSERT INTO multi_leg_trade_legs" in s
+    )
+
+
+def test_ladder_hidden_from_active_and_report_and_listed_on_ladder_report(monkeypatch):
+    from backend.services import multi_leg_options as mlo
+
+    seen = []
+
+    def capture(db, trade_id=None, where_sql="", params=None):
+        seen.append(where_sql)
+        return []
+
+    monkeypatch.setattr(mlo, "ensure_multi_leg_tables", lambda: None)
+    monkeypatch.setattr(mlo, "SessionLocal", lambda: _RecordingDB())
+    monkeypatch.setattr(mlo, "_load_trade_rows", capture)
+    mlo.list_active()
+    mlo.list_report()
+    mlo.list_ladder_report()
+    assert "ACTIVE" in seen[0] and "<>" in seen[0] and "LADDER" in seen[0]
+    assert "<>" in seen[1] and "LADDER" in seen[1]
+    assert seen[2] == "t.trade_type = 'LADDER'"
+
+
+def _ladder_legs():
+    buy = _leg("PE", "MAIN")
+    buy["side"] = "BUY"
+    buy["lot_size"] = 100
+    buy["id"] = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    still_open = _leg("PE", "EXIT")
+    still_open["side"] = "SELL"
+    still_open["lot_size"] = 15
+    still_open["id"] = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    first_exit = _leg("PE", "EXIT")
+    first_exit["side"] = "SELL"
+    first_exit["lot_size"] = 30
+    first_exit["exit_price"] = 10
+    first_exit["exit_time"] = "2026-10-15T14:00:00+05:30"
+    first_exit["id"] = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    last_exit = _leg("PE", "EXIT")
+    last_exit["side"] = "SELL"
+    last_exit["lot_size"] = 20
+    last_exit["exit_price"] = 12
+    last_exit["exit_time"] = "2026-10-15T15:10:00+05:30"
+    last_exit["id"] = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    return [buy, still_open, first_exit, last_exit]
+
+
+def test_ladder_close_puts_balance_lots_on_last_exited_leg(monkeypatch):
+    from backend.services.multi_leg_options import apply_ladder_exit_balance
+
+    legs = _ladder_legs()
+    adjusted = apply_ladder_exit_balance(legs)
+    assert adjusted[0]["lot_size"] == 100
+    assert adjusted[1]["lot_size"] == 15
+    assert adjusted[2]["lot_size"] == 30
+    assert adjusted[3]["lot_size"] == 70
+    assert legs[1]["lot_size"] == 15
+    assert legs[3]["lot_size"] == 20
+
+    stored = _trade_body(trade_type="LADDER", legs=legs)
+    stored["id"] = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    stored["status"] = "ACTIVE"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    mlo.close_trade(stored["id"], {"legs": legs})
+    inserted = [p for s, p in db.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert [p["lot_size"] for p in inserted] == [100, 15, 30, 70]
+    assert inserted[0]["qualifier"] == "MAIN"
+    assert inserted[1]["exit_price"] is None
+    assert any("status = 'CLOSED'" in sql for sql, _params in db.statements)
+
+
+def test_ladder_close_refused_without_exit_price_and_time(monkeypatch):
+    from backend.services.multi_leg_options import apply_ladder_exit_balance
+
+    buy = _leg("CE", "MAIN")
+    buy["side"] = "BUY"
+    buy["lot_size"] = 100
+    priced = _leg("CE", "EXIT")
+    priced["side"] = "SELL"
+    priced["lot_size"] = 40
+    priced["exit_price"] = 9
+    timed = _leg("CE", "EXIT")
+    timed["side"] = "SELL"
+    timed["lot_size"] = 40
+    timed["exit_time"] = "2026-10-15T15:10:00+05:30"
+    with pytest.raises(MultiLegValidationError, match="exit price and exit time"):
+        apply_ladder_exit_balance([buy, priced])
+    with pytest.raises(MultiLegValidationError, match="exit price and exit time"):
+        apply_ladder_exit_balance([buy, timed])
+
+    stored = _trade_body(trade_type="LADDER", legs=[buy, priced])
+    stored["id"] = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    stored["status"] = "ACTIVE"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    with pytest.raises(MultiLegValidationError, match="exit price and exit time"):
+        mlo.close_trade(stored["id"], {"legs": [buy, priced]})
+    assert not any("status = 'CLOSED'" in sql for sql, _params in db.statements)
+    assert not any("INSERT INTO multi_leg_trade_legs" in sql for sql, _params in db.statements)
+
+
+def test_closed_ladder_can_still_be_edited(monkeypatch):
+    buy = _leg("CE", "MAIN")
+    buy["side"] = "BUY"
+    buy["lot_size"] = 50
+    buy["id"] = "11111111-1111-1111-1111-111111111111"
+    stored = _trade_body(trade_type="LADDER", legs=[buy])
+    stored["id"] = "22222222-2222-2222-2222-222222222222"
+    stored["status"] = "CLOSED"
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db, stored)
+    mlo.update_trade(stored["id"], _trade_body(trade_type="LADDER", legs=[buy], spot_price_entry=25100))
+    params, sql = _sql_params(db, "UPDATE multi_leg_trades SET")
+    assert params["status"] == "CLOSED"
+    assert "status = 'CLOSED'" in sql
+    assert params["spot"] == 25100
