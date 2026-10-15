@@ -340,6 +340,7 @@
     if (!closeBtn.hidden) {
       closeBtn.disabled = isLadderType($("mloType").value) ? !ladderHasExitedExitLeg() : !allLegsExited();
     }
+    refreshLadderRowPnls();
     scheduleModalPayoff();
   }
 
@@ -398,18 +399,246 @@
     });
   }
 
+  function ladderRowRole(row) {
+    var role = row && row.querySelector('[data-f="qualifier"]');
+    return role ? String(role.value || "").toUpperCase() : "";
+  }
+
+  function ladderSignedPnl(mainSide, entry, mark, qty) {
+    if (entry == null || mark == null || mark === "" || !(Number(qty) > 0)) return null;
+    var px = Number(mark);
+    var basis = Number(entry);
+    if (Number.isNaN(px) || Number.isNaN(basis)) return null;
+    if (String(mainSide || "").toUpperCase() === "SELL") return (basis - px) * Number(qty);
+    return (px - basis) * Number(qty);
+  }
+
+  function ladderAnchorFromForm() {
+    var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    var first = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (rowIsBlankExitSlot(rows[i])) continue;
+      if (ladderRowRole(rows[i]) === "EXIT") continue;
+      var sideEl = rows[i].querySelector('[data-f="side"]');
+      var entryEl = rows[i].querySelector('[data-f="entry_price"]');
+      var lotEl = rows[i].querySelector('[data-f="lot_size"]');
+      var rightEl = rows[i].querySelector('[data-f="option_type"]');
+      var strikeEl = rows[i].querySelector('[data-f="strike_price"]');
+      var entry = entryEl && String(entryEl.value).trim() !== "" ? Number(entryEl.value) : null;
+      var found = {
+        side: sideEl ? String(sideEl.value).toUpperCase() : "",
+        entry: entry,
+        qty: lotEl && String(lotEl.value).trim() !== "" ? Number(lotEl.value) : 0,
+        ltp: rows[i].dataset.ltp != null && rows[i].dataset.ltp !== "" ? Number(rows[i].dataset.ltp) : null,
+        option_type: rightEl ? rightEl.value : "",
+        strike_price: strikeEl && strikeEl.value !== "" ? Number(strikeEl.value) : null,
+      };
+      if (!first) first = found;
+      if (found.side === "BUY" && entry != null) return found;
+    }
+    return first;
+  }
+
+  function refreshLadderRowPnls() {
+    if (!$("mloType") || !isLadderType($("mloType").value)) return;
+    var anchor = ladderAnchorFromForm();
+    $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+      var pnlEl = row.querySelector("[data-ladder-pnl]");
+      if (!pnlEl) return;
+      var isExit = ladderRowRole(row) === "EXIT";
+      if (!isExit) {
+        pnlEl.hidden = true;
+        pnlEl.textContent = "";
+        return;
+      }
+      var pxEl = row.querySelector('[data-f="exit_price"]');
+      var lotEl = row.querySelector('[data-f="lot_size"]');
+      var px = pxEl ? pxEl.value.trim() : "";
+      var qty = lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0;
+      var pnl = px === "" || !anchor ? null : ladderSignedPnl(anchor.side, anchor.entry, px, qty);
+      pnlEl.hidden = false;
+      pnlEl.textContent = inr(pnl);
+      pnlEl.className = "mlo-leg-realized " + pnlClass(pnl);
+    });
+  }
+
+  function ladderFormLivePnl() {
+    var anchor = ladderAnchorFromForm();
+    if (!anchor || anchor.entry == null) return null;
+    var filled = 0;
+    var total = 0;
+    var any = false;
+    $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+      if (ladderRowRole(row) !== "EXIT") return;
+      var pxEl = row.querySelector('[data-f="exit_price"]');
+      var lotEl = row.querySelector('[data-f="lot_size"]');
+      if (!pxEl || pxEl.value.trim() === "") return;
+      var qty = lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0;
+      var pnl = ladderSignedPnl(anchor.side, anchor.entry, pxEl.value, qty);
+      if (pnl == null) return;
+      total += pnl;
+      filled += qty;
+      any = true;
+    });
+    var remain = (Number(anchor.qty) || 0) - filled;
+    if (remain > 0 && anchor.ltp != null && !Number.isNaN(Number(anchor.ltp))) {
+      var openPnl = ladderSignedPnl(anchor.side, anchor.entry, anchor.ltp, remain);
+      if (openPnl != null) {
+        total += openPnl;
+        any = true;
+      }
+    }
+    return any ? total : null;
+  }
+
+  function ladderPayoffLegs(legs) {
+    var list = legs || [];
+    var anchor = null;
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].qualifier || "").toUpperCase() === "EXIT") continue;
+      if (!anchor) anchor = list[i];
+      if (String(list[i].side || "").toUpperCase() === "BUY") {
+        anchor = list[i];
+        break;
+      }
+    }
+    if (!anchor) return list;
+    var entry = Number(anchor.entry_price);
+    var side = String(anchor.side || "BUY").toUpperCase();
+    var filled = 0;
+    var out = [];
+    for (var j = 0; j < list.length; j++) {
+      var leg = list[j];
+      if (String(leg.qualifier || "").toUpperCase() !== "EXIT") continue;
+      if (leg.exit_price == null || leg.exit_price === "") continue;
+      var qty = Number(leg.lot_size) || 0;
+      filled += qty;
+      out.push({
+        side: side,
+        option_type: anchor.option_type,
+        strike_price: anchor.strike_price,
+        entry_price: entry,
+        lot_size: qty,
+        exit_price: Number(leg.exit_price),
+        exit_time: leg.exit_time || "set",
+      });
+    }
+    var remain = (Number(anchor.lot_size) || 0) - filled;
+    if (remain > 0) {
+      out.unshift({
+        side: side,
+        option_type: anchor.option_type,
+        strike_price: anchor.strike_price,
+        entry_price: entry,
+        lot_size: remain,
+        exit_price: null,
+        exit_time: null,
+      });
+    }
+    return out;
+  }
+
+  function applyLadderLegChrome(shell, wrap) {
+    var ladder = isLadderType($("mloType").value);
+    var isExit = ladder && ladderRowRole(wrap) === "EXIT";
+    shell.classList.toggle("is-ladder-exit", isExit);
+    shell.classList.toggle("is-ladder-main", ladder && !isExit);
+    wrap.classList.toggle("is-ladder-exit", isExit);
+    wrap.classList.toggle("is-ladder-main", ladder && !isExit);
+    var entry = wrap.querySelector('[data-f="entry_price"]');
+    var entryClock = wrap.querySelector('[data-f="entry_clock"]');
+    var exitPx = wrap.querySelector('[data-f="exit_price"].mlo-ladder-px');
+    var exitClock = wrap.querySelector('[data-f="exit_clock"].mlo-ladder-px');
+    var panel = shell.querySelector(".mlo-leg-exit-panel");
+    var exitBtn = wrap.querySelector(".mlo-leg-exit-btn");
+    if (exitBtn) exitBtn.hidden = ladder;
+    if (!ladder) {
+      shell.classList.remove("is-ladder-main", "is-ladder-exit");
+      wrap.classList.remove("is-ladder-main", "is-ladder-exit");
+      if (entry) entry.hidden = false;
+      if (entryClock) entryClock.hidden = false;
+      if (exitPx) exitPx.hidden = true;
+      if (exitClock) exitClock.hidden = true;
+      return;
+    }
+    if (panel) panel.hidden = true;
+    if (isExit) {
+      if (exitPx && entry && String(exitPx.value).trim() === "" && String(entry.value).trim() !== "") {
+        exitPx.value = entry.value;
+      }
+      if (exitClock && entryClock && String(exitClock.value).trim() === "" && String(entryClock.value).trim() !== "") {
+        exitClock.value = entryClock.value;
+      }
+      if (entry) {
+        entry.required = false;
+        entry.hidden = true;
+        entry.value = "";
+      }
+      if (entryClock) {
+        entryClock.required = false;
+        entryClock.hidden = true;
+      }
+      if (exitPx) {
+        exitPx.hidden = false;
+        exitPx.required = false;
+        exitPx.placeholder = "Exit price";
+        exitPx.setAttribute("aria-label", "Exit price");
+      }
+      if (exitClock) {
+        exitClock.hidden = false;
+        exitClock.required = false;
+        exitClock.placeholder = "Time";
+        exitClock.setAttribute("aria-label", "Exit time");
+      }
+    } else {
+      if (entry) {
+        entry.hidden = false;
+        entry.required = wrap.dataset.exitSlot !== "1";
+      }
+      if (entryClock) {
+        entryClock.hidden = false;
+        entryClock.required = wrap.dataset.exitSlot !== "1";
+      }
+      if (exitPx) {
+        exitPx.value = "";
+        exitPx.required = false;
+        exitPx.hidden = true;
+      }
+      if (exitClock) {
+        exitClock.value = "";
+        exitClock.required = false;
+        exitClock.hidden = true;
+      }
+    }
+  }
+
   function legCard(leg, exitMode) {
     var shell = document.createElement("div");
     shell.className = "mlo-leg-wrap";
     var wrap = document.createElement("div");
     wrap.className = "mlo-leg";
     if (leg && leg.id) wrap.dataset.id = leg.id;
-    var exited = !exitMode && legIsExited(leg);
+    var ladder = isLadderType($("mloType").value);
+    var ladderExit = ladder && leg && String(leg.qualifier || "").toUpperCase() === "EXIT";
+    var exited = !exitMode && !ladder && legIsExited(leg);
     if (exited) shell.classList.add("is-exited");
     var entryClock = clockParts(leg && leg.entry_time);
     var entryText = entryClock ? formatClock(entryClock.hour, entryClock.minute) : DEFAULT_CLOCK;
     var exit = "";
-    if (exitMode) {
+    var ladderExitPx = "";
+    var ladderExitClock = "";
+    if (ladder) {
+      var exitShown = "";
+      var exitClockShown = "";
+      if (ladderExit) {
+        if (leg.exit_price != null && leg.exit_price !== "") exitShown = leg.exit_price;
+        else if (leg.entry_price != null) exitShown = leg.entry_price;
+        var exitSrc = clockParts(leg.exit_time) || (leg.exit_price == null ? clockParts(leg.entry_time) : null);
+        exitClockShown = exitSrc ? formatClock(exitSrc.hour, exitSrc.minute) : DEFAULT_CLOCK;
+      }
+      ladderExitPx = '<input class="mlo-ladder-px" data-f="exit_price" type="number" min="0" step="0.01" placeholder="Exit price" aria-label="Exit price" value="' + esc(exitShown) + '">';
+      ladderExitClock = '<input class="mlo-ladder-px" data-f="exit_clock" type="text" placeholder="Time" aria-label="Exit time" value="' + esc(exitClockShown) + '">';
+    } else if (exitMode) {
       var exitClock = clockParts(leg && leg.exit_time);
       var exitDate = exitClock ? exitClock.date : todayISO();
       var exitText = exitClock ? formatClock(exitClock.hour, exitClock.minute) : DEFAULT_CLOCK;
@@ -425,9 +654,10 @@
         '<input data-f="exit_clock" type="hidden" value="' + esc(doneText) + '">' +
         '<span class="mlo-leg-realized ' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>";
     }
-    var exitBtn = (!exitMode && !exited)
+    var exitBtn = (!ladder && !exitMode && !exited)
       ? '<button type="button" class="mlo-icon-btn mlo-leg-exit-btn" aria-label="Exit leg"><i class="fas fa-right-from-bracket" aria-hidden="true"></i></button>'
       : "";
+    var ladderPnl = ladder ? '<span class="mlo-leg-realized" data-ladder-pnl hidden></span>' : "";
     wrap.innerHTML =
       '<select data-f="qualifier" aria-label="Qualifier"><option value="" hidden>Role</option><option value="MAIN">Main</option><option value="WING">Wing</option><option value="ADJ">Adj</option><option value="EXIT">Exit</option></select>' +
       '<select data-f="side" aria-label="Side" required><option value="" hidden>Side</option><option>BUY</option><option>SELL</option></select>' +
@@ -435,9 +665,12 @@
       '<input data-f="strike_price" type="number" min="0" step="0.01" placeholder="Strike" aria-label="Strike" required>' +
       dateField("leg_expiry_date", "", "Expiry") +
       '<input data-f="entry_price" type="number" min="0" step="0.01" placeholder="Entry price" aria-label="Entry price" required>' +
+      ladderExitPx +
       '<input data-f="lot_size" type="number" min="1" step="1" placeholder="Lot" aria-label="Lot size">' +
       '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
+      ladderExitClock +
       exit +
+      ladderPnl +
       exitBtn +
       '<button type="button" class="mlo-icon-btn mlo-remove" aria-label="Remove leg"><i class="fas fa-trash" aria-hidden="true"></i></button>';
     if (leg && leg.exit_slot) wrap.dataset.exitSlot = "1";
@@ -446,12 +679,19 @@
     var sideEl = wrap.querySelector('[data-f="side"]');
     sideEl.value = (leg && leg.side) || "SELL";
     sideEl.addEventListener("change", function () { sideEl.dataset.userSet = "1"; });
+    role.addEventListener("change", function () {
+      applyLadderLegChrome(shell, wrap);
+      refreshSaveGate();
+    });
     wrap.querySelector('[data-f="option_type"]').value = (leg && leg.option_type) || "CE";
     wrap.querySelector('[data-f="strike_price"]').value = leg && leg.strike_price != null ? leg.strike_price : "";
     var expiryInp = wrap.querySelector('[data-f="leg_expiry_date"]');
     expiryInp.value = (leg && leg.leg_expiry_date) || $("mloExpiry").value || "";
     if (expiryInp.value) expiryInp.type = "date";
-    wrap.querySelector('[data-f="entry_price"]').value = leg && leg.entry_price != null ? leg.entry_price : "";
+    var entryValue = leg && leg.entry_price != null ? leg.entry_price : "";
+    if (ladderExit && (leg.exit_price == null || leg.exit_price === "")) entryValue = "";
+    wrap.querySelector('[data-f="entry_price"]').value = entryValue;
+    if (leg && leg.ltp != null && leg.ltp !== "") wrap.dataset.ltp = String(leg.ltp);
     var lotInp = wrap.querySelector('[data-f="lot_size"]');
     if (leg && leg.lot_size) {
       lotInp.value = String(leg.lot_size);
@@ -482,7 +722,8 @@
       });
     }
     shell.appendChild(wrap);
-    if (!exitMode && !exited) {
+    applyLadderLegChrome(shell, wrap);
+    if (!ladder && !exitMode && !exited) {
       var panel = document.createElement("div");
       panel.className = "mlo-leg-exit-panel";
       panel.hidden = true;
@@ -579,8 +820,9 @@
     if (!row || row.getAttribute("data-exit-slot") !== "1") return false;
     var entry = row.querySelector('[data-f="entry_price"]');
     var exitPx = row.querySelector('[data-f="exit_price"]');
-    var entryBlank = !entry || String(entry.value).trim() === "";
     var exitBlank = !exitPx || String(exitPx.value).trim() === "";
+    if (isLadderType($("mloType").value) && ladderRowRole(row) === "EXIT") return exitBlank;
+    var entryBlank = !entry || String(entry.value).trim() === "";
     return entryBlank && exitBlank;
   }
 
@@ -588,12 +830,10 @@
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
     for (var i = 0; i < rows.length; i++) {
       if (rowIsBlankExitSlot(rows[i])) continue;
-      var role = rows[i].querySelector('[data-f="qualifier"]');
-      if (!role || String(role.value).toUpperCase() !== "EXIT") continue;
+      if (ladderRowRole(rows[i]) !== "EXIT") continue;
       var px = rows[i].querySelector('[data-f="exit_price"]');
-      var day = rows[i].querySelector('[data-f="exit_date"]');
       var clock = rows[i].querySelector('[data-f="exit_clock"]');
-      if (px && day && clock && px.value !== "" && day.value && parseClock(clock.value)) return true;
+      if (px && clock && px.value !== "" && parseClock(clock.value)) return true;
     }
     return false;
   }
@@ -620,18 +860,37 @@
         var el = row.querySelector('[data-f="' + name + '"]');
         return el ? el.value : "";
       }
+      var ladder = isLadderType($("mloType").value);
+      var role = String(val("qualifier") || "").toUpperCase();
       var leg = {
         qualifier: val("qualifier") || null,
         side: val("side"),
         option_type: val("option_type"),
         strike_price: Number(val("strike_price")),
         leg_expiry_date: val("leg_expiry_date"),
-        entry_price: Number(val("entry_price")),
-        entry_time: composeClock($("mloEntryDate").value, val("entry_clock")),
       };
       var lotRaw = val("lot_size").trim();
       if (lotRaw !== "" && !Number.isNaN(Number(lotRaw))) leg.lot_size = Number(lotRaw);
       if (row.dataset.id) leg.id = row.dataset.id;
+      if (ladder && role === "EXIT") {
+        // The price and clock on an Exit row are the exit. There is no second entry.
+        var exitPx = val("exit_price");
+        if (exitPx !== "") {
+          leg.exit_price = Number(exitPx);
+          leg.exit_time = composeClock($("mloEntryDate").value, val("exit_clock")) || null;
+        } else {
+          leg.exit_price = null;
+          leg.exit_time = null;
+        }
+        return leg;
+      }
+      leg.entry_price = Number(val("entry_price"));
+      leg.entry_time = composeClock($("mloEntryDate").value, val("entry_clock"));
+      if (ladder) {
+        leg.exit_price = null;
+        leg.exit_time = null;
+        return leg;
+      }
       var exitPx = val("exit_price");
       var exitDay = val("exit_date");
       if (exitPx !== "") {
@@ -646,14 +905,24 @@
   }
 
   function legClockError() {
+    var ladder = isLadderType($("mloType").value);
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
     for (var i = 0; i < rows.length; i++) {
       if (rowIsBlankExitSlot(rows[i])) continue;
+      if (ladder && ladderRowRole(rows[i]) === "EXIT") {
+        var exitPx = rows[i].querySelector('[data-f="exit_price"]');
+        var exitClock = rows[i].querySelector('[data-f="exit_clock"]');
+        if (exitPx && exitPx.value !== "" && exitClock && !parseClock(exitClock.value)) {
+          return "Exit time must look like 03:10 PM";
+        }
+        continue;
+      }
       var entry = rows[i].querySelector('[data-f="entry_clock"]');
       if (!entry || !parseClock(entry.value)) return "Time must look like 03:10 PM";
-      var exitPx = rows[i].querySelector('[data-f="exit_price"]');
-      var exitClock = rows[i].querySelector('[data-f="exit_clock"]');
-      if (exitPx && exitPx.value !== "" && exitClock && !parseClock(exitClock.value)) {
+      if (ladder) continue;
+      var otherPx = rows[i].querySelector('[data-f="exit_price"]');
+      var otherClock = rows[i].querySelector('[data-f="exit_clock"]');
+      if (otherPx && otherPx.value !== "" && otherClock && !parseClock(otherClock.value)) {
         return "Exit time must look like 03:10 PM";
       }
     }
@@ -661,9 +930,11 @@
   }
 
   function legEntryError() {
+    var ladder = isLadderType($("mloType").value);
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
     for (var i = 0; i < rows.length; i++) {
       if (rowIsBlankExitSlot(rows[i])) continue;
+      if (ladder && ladderRowRole(rows[i]) === "EXIT") continue;
       var entry = rows[i].querySelector('[data-f="entry_price"]');
       if (!entry || String(entry.value).trim() === "") return "Each leg needs an entry price";
     }
@@ -881,9 +1152,31 @@
       cards + "</section>";
   }
 
+  function ladderReportLeg(leg) {
+    var role = String(leg.qualifier || "").toUpperCase();
+    var pnl = '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>";
+    var common = '<div class="mlo-leg-ro">' +
+      '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
+      '<span data-label="Side">' + esc(leg.side) + "</span>" +
+      '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
+      '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
+      '<span data-label="Entry">' + esc(leg.entry_price == null ? "—" : leg.entry_price) + "</span>";
+    if (role === "EXIT") {
+      return common +
+        '<span data-label="Exit">' + esc(leg.exit_price == null ? "—" : leg.exit_price) + "</span>" +
+        '<span data-label="Exit time">' + esc(exitClockText(leg.exit_time) || "—") + "</span>" +
+        pnl + "</div>";
+    }
+    return common +
+      '<span data-label="LTP">' + esc(leg.ltp == null ? "—" : leg.ltp) + "</span>" +
+      '<span data-label="Delta">' + (leg.delta == null ? "—" : esc(Number(leg.delta).toFixed(4))) + "</span>" +
+      pnl + "</div>";
+  }
+
   function tradeCard(t) {
       var open = !!expandedTrades[t.id];
       var legs = (t.legs || []).map(function (leg) {
+        if (isLadderType(t.trade_type)) return ladderReportLeg(leg);
         if (isStraddle(t) && legIsExited(leg)) {
           return '<div class="mlo-leg-ro mlo-leg-exited">' +
             '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
@@ -909,7 +1202,9 @@
           '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
           "</div>";
       }).join("");
-      var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
+      var head = isLadderType(t.trade_type)
+        ? '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>Exit / LTP</span><span>Time</span><span>Leg P&L</span></div>'
+        : '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
       var ratioField = "";
       if (isStraddle(t)) {
         var hot = t.ltp_ratio != null && Number(t.ltp_ratio) >= 3;
@@ -1134,6 +1429,10 @@
   $("mloType").addEventListener("change", function () {
     if (mode === "new") applyTypeTemplate();
     else ensureLadderExitSlots(tradeById(editingId));
+    $("mloLegs").querySelectorAll(".mlo-leg-wrap").forEach(function (shell) {
+      var wrap = shell.querySelector(".mlo-leg");
+      if (wrap) applyLadderLegChrome(shell, wrap);
+    });
     refreshSaveGate();
   });
   $("mloEntryDate").addEventListener("change", function () {
@@ -1466,7 +1765,7 @@
     var spot = trade.spot_ltp;
     var snap = payoffSnapshot(String(trade.id), spot, trade.total_pnl, force);
     window.MultiLegPayoff.renderPayoff(host, {
-      legs: trade.legs || [],
+      legs: isLadderType(trade.trade_type) ? ladderPayoffLegs(trade.legs || []) : (trade.legs || []),
       spot: snap.spot,
       instrument: trade.instrument,
       livePnl: snap.livePnl,
@@ -1486,6 +1785,10 @@
   }
 
   function modalLivePnl() {
+    if ($("mloType") && isLadderType($("mloType").value) && $("mloModal") && !$("mloModal").hidden) {
+      var preview = ladderFormLivePnl();
+      if (preview != null) return preview;
+    }
     if (!editingId) return null;
     var trade = tradeById(editingId);
     return trade ? trade.total_pnl : null;
@@ -1570,6 +1873,37 @@
   }
 
   function formPayoffLegs() {
+    if (isLadderType($("mloType").value)) {
+      var anchor = ladderAnchorFromForm();
+      if (!anchor) return [];
+      var built = [{
+        qualifier: "MAIN",
+        side: anchor.side,
+        option_type: anchor.option_type,
+        strike_price: anchor.strike_price,
+        entry_price: anchor.entry,
+        lot_size: anchor.qty,
+        ltp: anchor.ltp,
+      }];
+      $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+        if (ladderRowRole(row) !== "EXIT") return;
+        var pxEl = row.querySelector('[data-f="exit_price"]');
+        var lotEl = row.querySelector('[data-f="lot_size"]');
+        var clockEl = row.querySelector('[data-f="exit_clock"]');
+        if (!pxEl || pxEl.value.trim() === "") return;
+        built.push({
+          qualifier: "EXIT",
+          side: "SELL",
+          option_type: anchor.option_type,
+          strike_price: anchor.strike_price,
+          entry_price: anchor.entry,
+          lot_size: lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0,
+          exit_price: Number(pxEl.value),
+          exit_time: clockEl && parseClock(clockEl.value) ? "set" : null,
+        });
+      });
+      return ladderPayoffLegs(built);
+    }
     return Array.prototype.map.call($("mloLegs").querySelectorAll(".mlo-leg"), function (row) {
       function val(name) {
         var field = row.querySelector('[data-f="' + name + '"]');

@@ -13,6 +13,12 @@ which is the same formula with direction_sign = -1.
 Trade PnL is the sum of leg PnLs. A leg with both exit_price and exit_time
 is marked at the exit price. Other legs stay marked to LTP. Saving a partial
 exit leaves the trade ACTIVE. Close requires every leg to be exited.
+
+Ladder is different. The main leg has no exit of its own. Each EXIT leg's
+price is an exit of the main entry (the first non-exit BUY, else the first
+non-exit leg). A priced exit is (exit − entry) × qty when the main is BUY,
+and (entry − exit) × qty when the main is SELL. Trade PnL is the sum of those
+exits, plus live LTP on quantity that no exit leg has taken yet.
 """
 from __future__ import annotations
 
@@ -494,8 +500,8 @@ def apply_ladder_exit_balance(legs: Sequence[Dict[str, Any]]) -> List[Dict[str, 
             continue
         if str(leg.get("side") or "").strip().upper() != "BUY":
             continue
-        if leg_is_exited(leg):
-            continue
+        # A stored exit on the main leg is leftover from the old per-leg box.
+        # Ladder exits live on EXIT rows, so that stored exit does not close the main.
         open_buy += _lot_qty(leg)
     exited_at = [
         i for i, leg in enumerate(rows)
@@ -520,6 +526,119 @@ def mark_price(leg: Dict[str, Any]) -> Optional[float]:
 
 def leg_pnl_from_row(leg: Dict[str, Any]) -> Optional[float]:
     return leg_pnl(leg.get("side"), leg.get("entry_price"), mark_price(leg), leg.get("lot_size"))
+
+
+def ladder_anchor_leg(legs: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Open ladder entry: the first non-EXIT BUY, else the first non-EXIT leg."""
+    non_exit = [leg for leg in (legs or []) if _qualifier_token(leg) != "EXIT"]
+    for leg in non_exit:
+        if str(leg.get("side") or "").strip().upper() == "BUY":
+            return leg
+    return non_exit[0] if non_exit else None
+
+
+def ladder_exit_leg_pnl(main_side: Any, main_entry: Any, exit_price: Any, qty: Any) -> Optional[float]:
+    """One ladder exit against the main entry.
+
+    BUY main: (exit − entry) × qty. SELL main: (entry − exit) × qty.
+    """
+    entry = _as_float(main_entry)
+    px = _as_float(exit_price)
+    lot = _as_int(qty)
+    if entry is None or px is None or lot is None or lot <= 0:
+        return None
+    side = str(main_side or "").strip().upper()
+    if side == "BUY":
+        return (px - entry) * lot
+    if side == "SELL":
+        return (entry - px) * lot
+    return None
+
+
+def _ladder_typed_exit_price(leg: Dict[str, Any], anchor_entry: Optional[float]) -> Optional[float]:
+    """Premium typed on an EXIT leg.
+
+    That premium is exit_price. Older screens saved it in entry_price and left
+    exit_price empty. An entry equal to the main entry is not an exit fill,
+    and a placeholder 0 is not one either.
+    """
+    px = _as_float(leg.get("exit_price"))
+    if px is not None:
+        return px
+    typed = _as_float(leg.get("entry_price"))
+    if typed is None or typed == 0:
+        return None
+    if anchor_entry is not None and abs(typed - anchor_entry) <= 1e-9:
+        return None
+    return typed
+
+
+def finalize_ladder_legs(legs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Price a ladder from the main entry. Exit-leg prices are exits, not entries.
+
+    Non-exit legs drop any stored exit price and exit time. Each priced EXIT
+    leg keeps the main entry as its entry and its own price as the exit.
+    Unpriced exit slots add nothing. Quantity still open is marked to the main
+    leg's LTP and is not counted again on an exit leg.
+    """
+    rows = [dict(leg) for leg in (legs or [])]
+    anchor = ladder_anchor_leg(rows)
+    anchor_entry = _as_float(anchor.get("entry_price")) if anchor else None
+    anchor_side = str(anchor.get("side") or "").strip().upper() if anchor else ""
+    anchor_time = anchor.get("entry_time") if anchor else None
+    filled_qty = 0
+    for leg in rows:
+        if _qualifier_token(leg) != "EXIT":
+            leg["exit_price"] = None
+            leg["exit_time"] = None
+            leg["leg_pnl"] = None
+            leg["exited"] = False
+            continue
+        mark = _ladder_typed_exit_price(leg, anchor_entry)
+        if mark is None:
+            leg["leg_pnl"] = None
+            leg["exited"] = False
+            continue
+        # Older rows stored the exit clock on entry_time and left exit_time empty.
+        if leg.get("exit_time") in (None, "") and _as_float(leg.get("exit_price")) is None:
+            if leg.get("entry_time") not in (None, ""):
+                leg["exit_time"] = leg.get("entry_time")
+        leg["exit_price"] = mark
+        if anchor_entry is not None:
+            leg["entry_price"] = anchor_entry
+        if anchor_time is not None:
+            leg["entry_time"] = anchor_time
+        qty = _lot_qty(leg)
+        leg["leg_pnl"] = ladder_exit_leg_pnl(anchor_side, anchor_entry, mark, qty)
+        filled_qty += qty
+        leg["exited"] = leg_is_exited(leg)
+    if anchor is not None and anchor_entry is not None:
+        remain = _lot_qty(anchor) - filled_qty
+        if remain < 0:
+            remain = 0
+        ltp = _as_float(anchor.get("ltp"))
+        if remain > 0 and ltp is not None:
+            anchor["leg_pnl"] = ladder_exit_leg_pnl(anchor_side, anchor_entry, ltp, remain)
+        else:
+            anchor["leg_pnl"] = None
+    return rows
+
+
+def _drop_blank_ladder_exits(legs: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop EXIT rows that have no exit premium and no real entry."""
+    kept: List[Dict[str, Any]] = []
+    for leg in legs or []:
+        if _qualifier_token(leg) != "EXIT":
+            kept.append(leg)
+            continue
+        if _as_float(leg.get("exit_price")) is not None:
+            kept.append(leg)
+            continue
+        entry = _as_float(leg.get("entry_price"))
+        if entry is None or entry == 0:
+            continue
+        kept.append(leg)
+    return kept
 
 
 def _as_float(raw: Any) -> Optional[float]:
@@ -1529,6 +1648,7 @@ def _normalize_leg_input(
     header_expiry: date,
     previous: Optional[Dict[str, Any]] = None,
     preserve_lot: bool = False,
+    trade_type: str = "",
 ) -> Dict[str, Any]:
     side = str(raw.get("side") or "").strip().upper()
     right = str(raw.get("option_type") or "").strip().upper()
@@ -1539,21 +1659,40 @@ def _normalize_leg_input(
     strike = _as_float(raw.get("strike_price") if raw.get("strike_price") is not None else raw.get("strike"))
     if strike is None or strike <= 0:
         raise MultiLegValidationError("leg strike_price must be > 0")
+    qualifier = _resolve_qualifier(raw, previous)
+    ladder = _normalize_trade_type(trade_type) == "LADDER"
+    ladder_exit = ladder and qualifier == "EXIT"
     entry_px = _as_float(raw.get("entry_price"))
-    if entry_px is None or entry_px < 0:
-        raise MultiLegValidationError("leg entry_price is required")
     entry_time = _parse_dt(raw.get("entry_time"))
-    if entry_time is None:
-        raise MultiLegValidationError("leg entry_time is required")
     leg_exp = _parse_date(raw.get("leg_expiry_date") or raw.get("expiry") or header_expiry)
     if leg_exp is None:
         raise MultiLegValidationError("leg expiry is required")
     exit_px = _as_float(raw.get("exit_price"))
     exit_time = _parse_dt(raw.get("exit_time"))
-    if (exit_px is None) ^ (exit_time is None):
-        raise MultiLegValidationError("exit price and exit time must both be set to close a leg")
-    if exit_px is not None and exit_px < 0:
-        raise MultiLegValidationError("exit_price must be >= 0")
+    if ladder and not ladder_exit:
+        # The main ladder leg has no exit of its own. Ignore a submitted exit.
+        exit_px = None
+        exit_time = None
+    if ladder_exit:
+        # The typed price is the exit. Entry is copied from the main leg later.
+        # A price alone is enough to count the fill; a clock without a price is not.
+        if entry_px is None:
+            entry_px = 0.0
+        if entry_time is None:
+            entry_time = exit_time or datetime.now(IST)
+        if exit_px is None:
+            exit_time = None
+        elif exit_px < 0:
+            raise MultiLegValidationError("exit_price must be >= 0")
+    else:
+        if entry_px is None or entry_px < 0:
+            raise MultiLegValidationError("leg entry_price is required")
+        if entry_time is None:
+            raise MultiLegValidationError("leg entry_time is required")
+        if (exit_px is None) ^ (exit_time is None):
+            raise MultiLegValidationError("exit price and exit time must both be set to close a leg")
+        if exit_px is not None and exit_px < 0:
+            raise MultiLegValidationError("exit_price must be >= 0")
     client_lot = _as_int(raw.get("lot_size"))
     try:
         resolved = resolve_option_contract(instrument, strike, right, leg_exp)
@@ -1573,7 +1712,7 @@ def _normalize_leg_input(
     order_id = str(raw.get("upstox_order_id") or "").strip() or None
     leg = {
         "id": _uuid_or_none(raw.get("id")),
-        "qualifier": _resolve_qualifier(raw, previous),
+        "qualifier": qualifier,
         "side": side,
         "option_type": right,
         "strike_price": strike,
@@ -1709,6 +1848,10 @@ def _public_leg(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     public_legs = [_public_leg(l) for l in legs]
+    if _normalize_trade_type(header.get("trade_type")) == "LADDER":
+        # Recompute from the main entry. Stored main-leg exits and exit-leg
+        # entries from the old screen are not used for display or PnL.
+        public_legs = finalize_ladder_legs(public_legs)
     total = trade_pnl(l.get("leg_pnl") for l in public_legs)
     expiry = _parse_date(header.get("expiry_date"))
     entry = _parse_date(header.get("entry_date"))
@@ -1812,9 +1955,12 @@ def create_trade(body: Dict[str, Any]) -> Dict[str, Any]:
             instrument=header["instrument"],
             header_expiry=header["expiry_date"],
             preserve_lot=preserve_lot,
+            trade_type=header["trade_type"],
         )
         for raw in raw_legs
     ]
+    if header["trade_type"] == "LADDER":
+        legs = _drop_blank_ladder_exits(finalize_ladder_legs(legs))
     status = status_after_save(closing=False, legs=legs)
     trade_id = str(uuid.uuid4())
     total = trade_pnl(l.get("leg_pnl") for l in legs)
@@ -2019,8 +2165,11 @@ def update_trade(trade_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
                 header_expiry=header["expiry_date"],
                 previous=prev,
                 preserve_lot=header["trade_type"] == "LADDER",
+                trade_type=header["trade_type"],
             )
         )
+    if header["trade_type"] == "LADDER":
+        prepared = _drop_blank_ladder_exits(finalize_ladder_legs(prepared))
     # Manual min-leg rules stay for the three typed structures. Sync may save
     # UNCLASSIFIED with any leg count; Edit keeps that type until the user corrects it.
     if header["trade_type"] == "UNCLASSIFIED":
@@ -2189,8 +2338,16 @@ def refresh_active_quotes() -> Dict[str, Any]:
     # The payload returned below is still the non-ladder Active tab.
     trades = _query_trades("t.status = 'ACTIVE'")
     open_legs: List[Dict[str, Any]] = []
+    ladder_trades: List[Dict[str, Any]] = []
     for trade in trades:
+        is_ladder = _normalize_trade_type(trade.get("trade_type")) == "LADDER"
+        if is_ladder:
+            ladder_trades.append(trade)
         for leg in trade.get("legs") or []:
+            leg["_ladder"] = is_ladder
+            # An EXIT row is an exit fill, not a position to mark against its own price.
+            if is_ladder and _qualifier_token(leg) == "EXIT":
+                continue
             if leg.get("exited"):
                 continue
             if not leg.get("instrument_key"):
@@ -2249,6 +2406,13 @@ def refresh_active_quotes() -> Dict[str, Any]:
             # Keep the last persisted LTP when the live quote is missing.
             use_ltp = ltp if ltp is not None else _as_float(leg.get("ltp"))
             use_delta = delta if delta is not None else _as_float(leg.get("delta"))
+            if leg.get("_ladder"):
+                # Remainder PnL is written with the other ladder legs below.
+                if use_ltp is not None:
+                    leg["ltp"] = use_ltp
+                if use_delta is not None:
+                    leg["delta"] = use_delta
+                continue
             pnl = leg_pnl(leg.get("side"), leg.get("entry_price"), use_ltp, leg.get("lot_size"))
             db.execute(
                 text(
@@ -2271,6 +2435,37 @@ def refresh_active_quotes() -> Dict[str, Any]:
                     "pnl": pnl,
                 },
             )
+        for trade in ladder_trades:
+            priced = finalize_ladder_legs(trade.get("legs") or [])
+            for leg in priced:
+                if not leg.get("id"):
+                    continue
+                db.execute(
+                    text(
+                        """
+                        UPDATE multi_leg_trade_legs SET
+                            entry_price = :entry_price,
+                            entry_time = :entry_time,
+                            exit_price = :exit_price,
+                            exit_time = :exit_time,
+                            ltp = :ltp,
+                            delta = :delta,
+                            leg_pnl = :pnl,
+                            updated_at = NOW()
+                        WHERE id = CAST(:id AS uuid)
+                        """
+                    ),
+                    {
+                        "id": leg["id"],
+                        "entry_price": leg.get("entry_price"),
+                        "entry_time": _parse_dt(leg.get("entry_time")),
+                        "exit_price": leg.get("exit_price"),
+                        "exit_time": _parse_dt(leg.get("exit_time")),
+                        "ltp": leg.get("ltp"),
+                        "delta": leg.get("delta"),
+                        "pnl": leg.get("leg_pnl"),
+                    },
+                )
         db.commit()
     except Exception:
         db.rollback()
@@ -2321,6 +2516,105 @@ def refresh_active_quotes() -> Dict[str, Any]:
     }
 
 
+def reprice_ladder_on_ltp(leg_id: str, ltp: float, ts: datetime) -> bool:
+    """Update a ladder from a live tick. Returns True when the leg is on a ladder.
+
+    Exit legs are not marked as if their price were an entry. The main leg's
+    open remainder is marked to this LTP. A stored exit on the main leg is cleared.
+    """
+    db = SessionLocal()
+    ladder = False
+    try:
+        meta = db.execute(
+            text(
+                """
+                SELECT t.id AS trade_id, t.trade_type, l.qualifier
+                FROM multi_leg_trade_legs l
+                JOIN multi_leg_trades t ON t.id = l.trade_id
+                WHERE l.id = CAST(:id AS uuid)
+                """
+            ),
+            {"id": leg_id},
+        ).mappings().first()
+        if not meta or _normalize_trade_type(meta["trade_type"]) != "LADDER":
+            return False
+        ladder = True
+        if _qualifier_token({"qualifier": meta.get("qualifier")}) != "EXIT":
+            db.execute(
+                text(
+                    """
+                    UPDATE multi_leg_trade_legs
+                    SET ltp = :ltp, updated_at = :ts
+                    WHERE id = CAST(:id AS uuid)
+                    """
+                ),
+                {"id": leg_id, "ltp": ltp, "ts": ts},
+            )
+        rows = db.execute(
+            text(
+                """
+                SELECT id AS leg_id, qualifier, side, option_type, strike_price,
+                       entry_price, entry_time, exit_price, exit_time, ltp, delta, lot_size
+                FROM multi_leg_trade_legs
+                WHERE trade_id = CAST(:trade_id AS uuid)
+                ORDER BY sort_order ASC, created_at ASC
+                """
+            ),
+            {"trade_id": str(meta["trade_id"])},
+        ).mappings().all()
+        raw = []
+        for row in rows:
+            leg = dict(row)
+            leg["id"] = str(leg.pop("leg_id"))
+            raw.append(leg)
+        priced = finalize_ladder_legs(raw)
+        for leg in priced:
+            db.execute(
+                text(
+                    """
+                    UPDATE multi_leg_trade_legs SET
+                        entry_price = :entry_price,
+                        entry_time = :entry_time,
+                        exit_price = :exit_price,
+                        exit_time = :exit_time,
+                        ltp = :ltp,
+                        leg_pnl = :pnl,
+                        updated_at = :ts
+                    WHERE id = CAST(:id AS uuid)
+                    """
+                ),
+                {
+                    "id": leg["id"],
+                    "entry_price": leg.get("entry_price"),
+                    "entry_time": _parse_dt(leg.get("entry_time")),
+                    "exit_price": leg.get("exit_price"),
+                    "exit_time": _parse_dt(leg.get("exit_time")),
+                    "ltp": leg.get("ltp"),
+                    "pnl": leg.get("leg_pnl"),
+                    "ts": ts,
+                },
+            )
+        total = trade_pnl(leg.get("leg_pnl") for leg in priced)
+        db.execute(
+            text(
+                """
+                UPDATE multi_leg_trades
+                SET total_pnl = :pnl, updated_at = :ts
+                WHERE id = CAST(:id AS uuid) AND status = 'ACTIVE'
+                """
+            ),
+            {"id": str(meta["trade_id"]), "pnl": total, "ts": ts},
+        )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        logger.debug("ladder ltp reprice failed for %s", leg_id, exc_info=True)
+        return ladder
+    finally:
+        db.close()
+
+
 def active_open_leg_keys() -> List[Dict[str, Any]]:
     """Open (not exited) active legs for the websocket sidecar."""
     ensure_multi_leg_tables()
@@ -2336,6 +2630,10 @@ def active_open_leg_keys() -> List[Dict[str, Any]]:
                   AND l.exit_time IS NULL
                   AND l.instrument_key IS NOT NULL
                   AND TRIM(l.instrument_key) <> ''
+                  AND NOT (
+                    t.trade_type = 'LADDER'
+                    AND UPPER(COALESCE(l.qualifier, '')) = 'EXIT'
+                  )
                 """
             )
         ).mappings().all()

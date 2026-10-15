@@ -328,6 +328,13 @@ body.mlo-page .right-panel {
 
 .mlo-leg-exit-panel[hidden] { display: none; }
 
+.mlo-leg-wrap.is-ladder-main .mlo-leg-exit-panel,
+.mlo-leg-wrap.is-ladder-main .mlo-leg-exit-btn,
+.mlo-leg.is-ladder-exit [data-f="entry_price"],
+.mlo-leg.is-ladder-exit [data-f="entry_clock"] {
+    display: none !important;
+}
+
 .mlo-leg-exit-panel input {
     background: var(--bg1, #0e1613);
     color: var(--text);

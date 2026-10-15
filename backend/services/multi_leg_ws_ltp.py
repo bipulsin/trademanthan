@@ -127,7 +127,11 @@ def on_upstox_multi_leg_tick(
 
 
 def _persist_leg_ltp(leg_id: str, ltp: float, ts: datetime) -> None:
-    """Update LTP and leg PnL. direction_sign is +1 BUY / -1 SELL (see multi_leg_options)."""
+    from backend.services.multi_leg_options import reprice_ladder_on_ltp
+
+    if reprice_ladder_on_ltp(leg_id, ltp, ts):
+        return
+    # Non-ladder: (ltp - entry) × direction_sign × lot. BUY is +1, SELL is -1.
     db = SessionLocal()
     try:
         db.execute(

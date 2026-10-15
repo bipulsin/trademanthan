@@ -891,6 +891,126 @@ def test_ladder_close_refused_without_exit_price_and_time(monkeypatch):
     assert not any("INSERT INTO multi_leg_trade_legs" in sql for sql, _params in db.statements)
 
 
+def test_sensex_ladder_exit_prices_use_the_main_entry():
+    """SENSEX 15 Oct 2026 ladder: BUY 219.9 x 80, four exits of 20.
+
+    Each exit price is an exit of the main entry, not a new entry.
+    A stored exit on the main leg is ignored. A SELL main uses (entry − exit) × qty.
+    """
+    from backend.services.multi_leg_options import finalize_ladder_legs, trade_pnl
+
+    exits = (233.4, 280.05, 288.15, 329.75)
+    expected = [(px - 219.9) * 20 for px in exits]
+    main = {
+        "qualifier": "MAIN",
+        "side": "BUY",
+        "entry_price": 219.9,
+        "entry_time": "2026-10-15T09:25:00+05:30",
+        "lot_size": 80,
+        "exit_price": 999,
+        "exit_time": "2026-10-15T15:10:00+05:30",
+        "ltp": 400,
+    }
+    legs = [main]
+    for px in exits:
+        # The old screen stored the exit premium in entry_price.
+        legs.append({
+            "qualifier": "EXIT",
+            "side": "SELL",
+            "entry_price": px,
+            "entry_time": "2026-10-15T09:29:00+05:30",
+            "lot_size": 20,
+        })
+    legs.append({"qualifier": "EXIT", "side": "SELL", "entry_price": None, "lot_size": 20})
+    priced = finalize_ladder_legs(legs)
+    for i, want in enumerate(expected, start=1):
+        assert priced[i]["leg_pnl"] == pytest.approx(want)
+        assert priced[i]["entry_price"] == pytest.approx(219.9)
+        assert priced[i]["exit_price"] == pytest.approx(exits[i - 1])
+    assert priced[5]["leg_pnl"] is None
+    assert priced[0]["exit_price"] is None
+    assert priced[0]["exit_time"] is None
+    assert priced[0]["leg_pnl"] is None
+    total = trade_pnl(leg["leg_pnl"] for leg in priced)
+    assert total == pytest.approx(sum(expected))
+    assert total == pytest.approx(270 + 1203 + 1365 + 2197)
+
+    short = finalize_ladder_legs([
+        {
+            "qualifier": "MAIN",
+            "side": "SELL",
+            "entry_price": 219.9,
+            "entry_time": "2026-10-15T09:25:00+05:30",
+            "lot_size": 20,
+        },
+        {
+            "qualifier": "EXIT",
+            "side": "BUY",
+            "exit_price": 233.4,
+            "exit_time": "2026-10-15T09:29:00+05:30",
+            "entry_price": 1,
+            "lot_size": 20,
+        },
+    ])
+    assert short[1]["leg_pnl"] == pytest.approx((219.9 - 233.4) * 20)
+    assert short[1]["entry_price"] == pytest.approx(219.9)
+
+    partial = finalize_ladder_legs([
+        {
+            "qualifier": "MAIN",
+            "side": "BUY",
+            "entry_price": 219.9,
+            "entry_time": "2026-10-15T09:25:00+05:30",
+            "lot_size": 80,
+            "ltp": 250,
+        },
+        {
+            "qualifier": "EXIT",
+            "side": "SELL",
+            "exit_price": 233.4,
+            "exit_time": "2026-10-15T09:29:00+05:30",
+            "lot_size": 20,
+        },
+        {"qualifier": "EXIT", "side": "SELL", "lot_size": 20},
+    ])
+    assert partial[1]["leg_pnl"] == pytest.approx(270)
+    assert partial[2]["leg_pnl"] is None
+    assert partial[0]["leg_pnl"] == pytest.approx((250 - 219.9) * 60)
+
+
+def test_ladder_save_does_not_write_exit_onto_the_main_leg(monkeypatch):
+    main = _leg("CE", "MAIN")
+    main["side"] = "BUY"
+    main["entry_price"] = 219.9
+    main["lot_size"] = 80
+    main["exit_price"] = 300
+    main["exit_time"] = "2026-10-15T15:10:00+05:30"
+    exit_leg = _leg("CE", "EXIT")
+    exit_leg["side"] = "SELL"
+    exit_leg["entry_price"] = None
+    exit_leg["entry_time"] = None
+    exit_leg["exit_price"] = 233.4
+    exit_leg["exit_time"] = "2026-10-15T09:29:00+05:30"
+    exit_leg["lot_size"] = 20
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db)
+    mlo.create_trade(_trade_body(
+        trade_type="LADDER",
+        instrument="SENSEX",
+        legs=[main, exit_leg],
+    ))
+    inserted = [p for s, p in db.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert inserted[0]["qualifier"] == "MAIN"
+    assert inserted[0]["exit_price"] is None
+    assert inserted[0]["exit_time"] is None
+    assert inserted[0]["entry_price"] == pytest.approx(219.9)
+    assert inserted[1]["entry_price"] == pytest.approx(219.9)
+    assert inserted[1]["exit_price"] == pytest.approx(233.4)
+    assert inserted[1]["leg_pnl"] == pytest.approx(270)
+    params, _sql = _sql_params(db, "INSERT INTO multi_leg_trades")
+    assert params["pnl"] == pytest.approx(270)
+
+
 def test_closed_ladder_can_still_be_edited(monkeypatch):
     buy = _leg("CE", "MAIN")
     buy["side"] = "BUY"
