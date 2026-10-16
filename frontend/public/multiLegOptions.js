@@ -20,6 +20,7 @@
   var pollTimer = null;
   var payoffTimer = null;
   var alertLatch = {};
+  var NIFTY_ADJ_AUDIO_MS = 60 * 60 * 1000;
   var PAYOFF_REFRESH_MS = 10 * 60 * 1000;
   var payoffClock = {};
   var lastInstrumentSpot = {};
@@ -1687,14 +1688,39 @@
     } catch (e) { /* autoplay can be blocked until a click */ }
   }
 
-  function considerAlert(key, active, message, file, useBanner) {
+  function isNiftyInstrument(trade) {
+    return String((trade && trade.instrument) || "").trim().toUpperCase() === "NIFTY";
+  }
+
+  function niftyAdjAudioStorageKey(kind) {
+    return "mloNiftyAdjAudio:" + kind;
+  }
+
+  function playNiftyAdjAudioIfDue(kind, file) {
+    var storageKey = niftyAdjAudioStorageKey(kind);
+    var now = Date.now();
+    var last = 0;
+    try {
+      last = Number(localStorage.getItem(storageKey)) || 0;
+    } catch (e) {
+      last = 0;
+    }
+    if (!isFinite(last) || last < 0) last = 0;
+    if (last && now - last < NIFTY_ADJ_AUDIO_MS) return;
+    try {
+      localStorage.setItem(storageKey, String(now));
+    } catch (e) { /* private mode: still play this pass */ }
+    playAlert(file);
+  }
+
+  function considerAlert(key, active, message, file, useBanner, skipAudio) {
     if (!active) {
       alertLatch[key] = false;
       return;
     }
     if (alertLatch[key]) return;
     alertLatch[key] = true;
-    playAlert(file);
+    if (!skipAudio) playAlert(file);
     if (useBanner) return;
     if (message) window.alert(message);
   }
@@ -1702,6 +1728,8 @@
   function handleAlerts(trades) {
     var seen = {};
     var straddleAdj = false;
+    var niftyAdj = false;
+    var niftyExit = false;
     (trades || []).forEach(function (t) {
       if (!t || (t.status && t.status !== "ACTIVE")) return;
       var id = t.id || ((t.trade_type || "") + ":" + (t.instrument || ""));
@@ -1711,16 +1739,22 @@
       seen[adjKey] = true;
       seen[exitKey] = true;
       if (isStraddle(t) && t.adjustment_alert) straddleAdj = true;
+      var nifty = isNiftyInstrument(t);
+      if (nifty && t.adjustment_alert) niftyAdj = true;
+      if (nifty && t.exit_adjustment_alert) niftyExit = true;
       considerAlert(
         adjKey,
         !!t.adjustment_alert,
         t.adjustment_message || "Adjustment",
         "adjustment.mp3",
-        isStraddle(t)
+        isStraddle(t),
+        nifty
       );
-      considerAlert(exitKey, !!t.exit_adjustment_alert, "Exit Adjustment", "adjustment_exit.mp3", false);
+      considerAlert(exitKey, !!t.exit_adjustment_alert, "Exit Adjustment", "adjustment_exit.mp3", false, nifty);
     });
     setAdjBanner(straddleAdj);
+    if (niftyAdj) playNiftyAdjAudioIfDue("adjustment", "adjustment.mp3");
+    if (niftyExit) playNiftyAdjAudioIfDue("adjustment_exit", "adjustment_exit.mp3");
     Object.keys(alertLatch).forEach(function (key) {
       if (!seen[key]) alertLatch[key] = false;
     });
