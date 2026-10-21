@@ -16,6 +16,7 @@
   var expandedTrades = {};
   var mode = "new";
   var editingId = null;
+  var editingTradeType = "";
   var expiryTouched = false;
   var pollTimer = null;
   var payoffTimer = null;
@@ -50,10 +51,19 @@
     var res = await fetch(apiBase() + "/api/multi-leg-options" + path, Object.assign({ headers: authHeaders() }, opts || {}));
     var data = await res.json().catch(function () { return {}; });
     if (!res.ok) {
-      var detail = data.detail || data.message || res.statusText;
-      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      var detail = data.detail != null ? data.detail : data.message;
+      var text = typeof detail === "string" ? detail.trim() : "";
+      throw new Error(text || res.statusText || "Request failed");
     }
     return data;
+  }
+
+  function saveErrorText(err, fallback) {
+    var text = String((err && err.message) || "").trim();
+    if (!text || text === "Unprocessable Entity" || text.charAt(0) === "[" || text.charAt(0) === "{") {
+      return fallback;
+    }
+    return text;
   }
 
   function esc(s) {
@@ -802,7 +812,7 @@
       openModal("edit", data.trade);
       await reloadCurrent();
     } catch (e) {
-      showFormError(e.message || "Leg exit failed");
+      showFormError(saveErrorText(e, "Could not save this leg exit. Check the legs and try again."));
     }
   }
 
@@ -991,8 +1001,9 @@
   }
 
   function payload() {
+    var kind = $("mloType").value || editingTradeType;
     var body = {
-      trade_type: $("mloType").value,
+      trade_type: kind,
       instrument: $("mloInstrument").value.trim().toUpperCase(),
       spot_price_entry: Number($("mloSpot").value),
       entry_date: $("mloEntryDate").value,
@@ -1062,6 +1073,7 @@
   function openModal(nextMode, trade) {
     mode = nextMode;
     editingId = trade ? trade.id : null;
+    editingTradeType = trade && trade.trade_type ? String(trade.trade_type) : "";
     expiryTouched = !!trade;
     ensureTypeOptions(trade);
     $("mloModalTitle").textContent = nextMode === "new" ? "New Trade" : nextMode === "exit" ? "Exit Trade" : "Edit Trade";
@@ -1073,7 +1085,7 @@
       tradeNo.hidden = false;
       $("mloTradeNoVal").textContent = trade && trade.trade_no != null ? String(trade.trade_no) : "—";
     }
-    $("mloType").value = (trade && trade.trade_type) || "STRADDLE";
+    $("mloType").value = editingTradeType || "STRADDLE";
     $("mloInstrument").value = (trade && trade.instrument) || "";
     $("mloSpot").value = trade && trade.spot_price_entry != null ? trade.spot_price_entry : "";
     $("mloEntryDate").value = (trade && trade.entry_date) || todayISO();
@@ -1509,7 +1521,7 @@
       closeModal();
       await reloadCurrent();
     } catch (e) {
-      showFormError(e.message || "Save failed");
+      showFormError(saveErrorText(e, "Could not save this trade. Check the legs and try again."));
     }
   });
 
@@ -1535,7 +1547,7 @@
       closeModal();
       await reloadCurrent();
     } catch (e) {
-      showFormError(e.message || "Close failed");
+      showFormError(saveErrorText(e, "Could not close this trade. Check the legs and try again."));
     }
   });
 

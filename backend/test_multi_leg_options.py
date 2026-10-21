@@ -1011,6 +1011,99 @@ def test_ladder_save_does_not_write_exit_onto_the_main_leg(monkeypatch):
     assert params["pnl"] == pytest.approx(270)
 
 
+def test_ladder_exit_legs_save_without_their_own_entry(monkeypatch):
+    """A Ladder EXIT leg is an exit of the main entry, so entry_price and entry_time stay off the body."""
+    from pydantic import ValidationError
+
+    from backend.routers.multi_leg_options import TradeBody
+
+    main = {
+        "qualifier": "MAIN",
+        "side": "BUY",
+        "option_type": "PE",
+        "strike_price": 73500,
+        "leg_expiry_date": "2026-12-29",
+        "entry_price": 362.55,
+        "entry_time": "2026-10-21T12:42 PM",
+        "lot_size": 80,
+    }
+    exits = [
+        (413.85, "2026-10-21T01:14 PM"),
+        (433.5, "2026-10-21T01:47 PM"),
+        (442.3, "2026-10-21T02:23 PM"),
+        (425.95, "2026-10-21T02:30 PM"),
+    ]
+    exit_legs = [
+        {
+            "qualifier": "EXIT",
+            "side": "SELL",
+            "option_type": "PE",
+            "strike_price": 73500,
+            "leg_expiry_date": "2026-12-29",
+            "exit_price": px,
+            "exit_time": clock,
+            "lot_size": 20,
+        }
+        for px, clock in exits
+    ]
+    raw = {
+        "trade_type": "LADDER",
+        "instrument": "SENSEX",
+        "spot_price_entry": 73500,
+        "entry_date": "2026-10-21",
+        "expiry_date": "2026-12-29",
+        "legs": [main, *exit_legs],
+    }
+    parsed = TradeBody.model_validate(raw)
+    body = parsed.model_dump(exclude_unset=True)
+    assert body["trade_type"] == "LADDER"
+    for leg, (px, _clock) in zip(body["legs"][1:], exits):
+        assert leg["qualifier"] == "EXIT"
+        assert leg["exit_price"] == pytest.approx(px)
+        assert "entry_price" not in leg
+        assert "entry_time" not in leg
+
+    for kind in ("STRADDLE", "IRON_FLY", "IRON_CONDOR"):
+        other = {**raw, "trade_type": kind, "legs": [dict(exit_legs[0]), dict(main)]}
+        with pytest.raises(ValidationError, match="entry_price"):
+            TradeBody.model_validate(other)
+    bare_main = {k: v for k, v in main.items() if k not in ("entry_price", "entry_time")}
+    with pytest.raises(ValidationError, match="entry_price"):
+        TradeBody.model_validate({**raw, "legs": [bare_main]})
+
+    db = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, db)
+    mlo.create_trade(body)
+    inserted = [p for s, p in db.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert len(inserted) == 5
+    assert inserted[0]["qualifier"] == "MAIN"
+    assert inserted[0]["entry_price"] == pytest.approx(362.55)
+    assert inserted[0]["exit_price"] is None
+    for row, (px, _clock) in zip(inserted[1:], exits):
+        assert row["qualifier"] == "EXIT"
+        assert row["exit_price"] == pytest.approx(px)
+        assert row["entry_price"] == pytest.approx(362.55)
+
+    stored = {
+        "id": "99999999-9999-9999-9999-999999999999",
+        "status": "ACTIVE",
+        "trade_type": "LADDER",
+        "instrument": "SENSEX",
+        "spot_price_entry": 73500,
+        "entry_date": "2026-10-21",
+        "expiry_date": "2026-12-29",
+        "legs": [],
+    }
+    edited = _RecordingDB()
+    mlo = _bind_multi_leg_db(monkeypatch, edited, stored)
+    mlo.update_trade(stored["id"], body)
+    updated = [p for s, p in edited.statements if "INSERT INTO multi_leg_trade_legs" in s]
+    assert updated[1]["entry_price"] == pytest.approx(362.55)
+    assert updated[1]["exit_price"] == pytest.approx(413.85)
+    header, _sql = _sql_params(edited, "UPDATE multi_leg_trades SET")
+    assert header["trade_type"] == "LADDER"
+
+
 def test_closed_ladder_can_still_be_edited(monkeypatch):
     buy = _leg("CE", "MAIN")
     buy["side"] = "BUY"

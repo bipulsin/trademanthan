@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -54,13 +54,23 @@ class LegBody(BaseModel):
     option_type: str
     strike_price: float = Field(..., gt=0)
     leg_expiry_date: Optional[str] = None
-    entry_price: float = Field(..., ge=0)
-    entry_time: str
+    # Ladder EXIT rows price the exit only. The main leg supplies their entry.
+    entry_price: Optional[float] = Field(None, ge=0)
+    entry_time: Optional[str] = None
     exit_price: Optional[float] = Field(None, ge=0)
     exit_time: Optional[str] = None
     lot_size: Optional[int] = Field(None, gt=0)
     ltp: Optional[float] = None
     delta: Optional[float] = None
+
+
+def _body_trade_kind(trade_type: Any) -> str:
+    return str(trade_type or "").strip().upper().replace(" ", "_").replace("-", "_")
+
+
+def _ladder_exit_leg(trade_type: Any, leg: LegBody) -> bool:
+    role = str(leg.qualifier or "").strip().upper()
+    return _body_trade_kind(trade_type) == "LADDER" and role == "EXIT"
 
 
 class TradeBody(BaseModel):
@@ -73,6 +83,18 @@ class TradeBody(BaseModel):
     green_zone_ce: Optional[float] = None
     green_zone_pe: Optional[float] = None
     legs: List[LegBody] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def entry_required_except_ladder_exit(self):
+        """EXIT legs on a Ladder use the main entry. Every other leg still needs its own."""
+        for leg in self.legs:
+            if _ladder_exit_leg(self.trade_type, leg):
+                continue
+            if leg.entry_price is None:
+                raise ValueError("leg entry_price is required")
+            if leg.entry_time is None or str(leg.entry_time).strip() == "":
+                raise ValueError("leg entry_time is required")
+        return self
 
 
 class CloseBody(BaseModel):
