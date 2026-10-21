@@ -801,3 +801,295 @@ body.stock-options-page[data-theme="light"] .mlo-ladder-day-title {
         font-family: var(--font-body);
     }
 }
+
+/* Phone records stay one row until expanded. Desktop rules above are unchanged. */
+.mlo-orphan-summary { display: none; }
+.mlo-report-chevron { display: none; }
+
+@media (max-width: 767px) {
+    .mlo-trade .mlo-row-summary,
+    .mlo-ladder-trade .mlo-ladder-row,
+    .mlo-orphan-summary,
+    #mloReportTable tr.mlo-report-row {
+        cursor: pointer;
+    }
+
+    .mlo-trade .mlo-row-summary,
+    .mlo-ladder-trade .mlo-ladder-row {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+    }
+
+    .mlo-trade .mlo-row-summary { padding-right: 40px; }
+
+    .mlo-ladder-trade .mlo-ladder-row { padding: 8px 40px 8px 12px; }
+
+    .mlo-row-identity,
+    .mlo-row-pnl { min-width: 0; }
+
+    .mlo-trade .mlo-row-identity,
+    .mlo-ladder-trade .mlo-row-identity {
+        order: 1;
+        flex: 1 1 0;
+    }
+
+    .mlo-trade .mlo-row-pnl,
+    .mlo-ladder-trade .mlo-row-pnl {
+        order: 2;
+        flex: 0 0 auto;
+    }
+
+    .mlo-trade .mlo-row-identity,
+    .mlo-trade .mlo-row-pnl {
+        flex-direction: row;
+        align-items: center;
+    }
+
+    .mlo-trade .mlo-row-identity .mlo-row-k,
+    .mlo-trade .mlo-row-pnl .mlo-row-k { display: none; }
+
+    .mlo-trade .mlo-row-identity > span:last-child {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+
+    .mlo-trade .mlo-row-pnl > span:last-child {
+        font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .mlo-trade:not(.is-open) .mlo-row-summary .mlo-row-field:not(.mlo-row-identity):not(.mlo-row-pnl) {
+        display: none;
+    }
+
+    .mlo-trade.is-open .mlo-row-summary .mlo-row-field:not(.mlo-row-identity):not(.mlo-row-pnl) {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 100%;
+        order: 4;
+    }
+
+    .mlo-trade.is-open .mlo-row-zone { white-space: normal; }
+
+    .mlo-ladder-trade .mlo-row-identity,
+    .mlo-ladder-trade .mlo-row-pnl {
+        display: block;
+        padding: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .mlo-ladder-trade .mlo-row-identity { font-weight: 600; }
+
+    .mlo-ladder-trade .mlo-row-identity::before,
+    .mlo-ladder-trade .mlo-row-pnl::before { content: none; }
+
+    .mlo-ladder-trade:not(.is-open) .mlo-ladder-cell:not(.mlo-row-identity):not(.mlo-row-pnl) {
+        display: none;
+    }
+
+    .mlo-ladder-trade.is-open .mlo-ladder-cell:not(.mlo-row-identity):not(.mlo-row-pnl) {
+        display: flex;
+        flex: 1 1 100%;
+        order: 4;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 3px 0;
+        overflow: visible;
+        white-space: normal;
+    }
+
+    .mlo-trade:not(.is-open) .mlo-row-actions .mlo-icon-btn:not(.mlo-row-chevron),
+    .mlo-ladder-trade:not(.is-open) .mlo-row-actions .mlo-icon-btn:not(.mlo-row-chevron) {
+        display: none;
+    }
+
+    .mlo-trade:not(.is-open) .mlo-row-actions,
+    .mlo-ladder-trade:not(.is-open) .mlo-row-actions {
+        position: absolute;
+        top: 50%;
+        right: 0;
+        margin: 0;
+        transform: translateY(-50%);
+    }
+
+    .mlo-trade.is-open .mlo-row-actions,
+    .mlo-ladder-trade.is-open .mlo-row-actions {
+        position: static;
+        display: flex;
+        flex: 1 1 100%;
+        order: 6;
+        margin: 8px 0 0;
+        justify-content: flex-end;
+        transform: none;
+    }
+
+    .mlo-trade.is-open .mlo-row-chevron {
+        position: absolute;
+        top: 0;
+        right: 0;
+        z-index: 1;
+    }
+
+    .mlo-ladder-trade.is-open .mlo-row-chevron {
+        position: absolute;
+        top: 8px;
+        right: 0;
+        z-index: 1;
+    }
+
+    .mlo-orphan { padding: 8px 12px; }
+
+    .mlo-orphan-summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 44px;
+    }
+
+    .mlo-orphan-identity {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+
+    .mlo-orphan-value {
+        flex: 0 0 auto;
+        font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .mlo-orphan-summary .mlo-icon-btn {
+        width: 30px;
+        height: 30px;
+        flex: 0 0 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 0.85rem;
+        padding: 0;
+        margin: 0;
+        line-height: 1;
+    }
+
+    .mlo-orphan:not(.is-open) .mlo-orphan-details { display: none; }
+
+    #mloReport .mlo-table-wrap { overflow: visible; }
+
+    #mloReportTable { display: block; width: 100%; }
+
+    #mloReportTable > tbody { display: block; width: 100%; }
+
+    #mloReportTable > thead { display: none; }
+
+    #mloReportTable tr.mlo-report-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 8px;
+        row-gap: 4px;
+        min-height: 44px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--line);
+    }
+
+    #mloReportTable tr.mlo-report-row td {
+        display: none;
+        border: 0;
+        padding: 0;
+    }
+
+    #mloReportTable tr.mlo-report-row td:first-child {
+        display: block;
+        grid-column: 1;
+        grid-row: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+    }
+
+    #mloReportTable tr.mlo-report-row td.mlo-row-pnl {
+        display: block;
+        grid-column: 2;
+        grid-row: 1;
+        white-space: nowrap;
+        font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+        font-weight: 600;
+        text-align: right;
+    }
+
+    #mloReportTable tr.mlo-report-row.is-open td[data-label] {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        grid-column: 1 / -1;
+        padding-top: 4px;
+        font-weight: 500;
+        white-space: normal;
+    }
+
+    #mloReportTable tr.mlo-report-row.is-open td[data-label]::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-family: var(--font-body);
+        font-size: 0.72rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    #mloReportTable tr.mlo-report-row .mlo-meta::before { content: " · "; }
+
+    #mloReportTable .mlo-expand {
+        display: inline;
+        background: none;
+        border: 0;
+        padding: 0;
+        margin: 0;
+        color: inherit;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    #mloReportTable .mlo-report-chevron {
+        display: inline-block;
+        margin-right: 6px;
+        color: var(--muted);
+        font-size: 0.8rem;
+    }
+
+    #mloReportTable tr.mlo-legs-detail { display: block; }
+
+    #mloReportTable tr.mlo-legs-detail[hidden] { display: none !important; }
+
+    #mloReportTable tr.mlo-legs-detail > td {
+        display: block;
+        overflow-x: auto;
+        border: 0;
+        padding: 8px 0 12px;
+    }
+
+    #mloReportTable > tbody > tr:not(.mlo-report-row):not(.mlo-legs-detail),
+    #mloReportTable > tbody > tr:not(.mlo-report-row):not(.mlo-legs-detail) > td {
+        display: block;
+        border: 0;
+    }
+}

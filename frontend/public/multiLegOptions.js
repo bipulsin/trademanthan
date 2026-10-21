@@ -14,6 +14,7 @@
   var reportSort = { key: "entry_date", dir: -1 };
   var tab = "active";
   var expandedTrades = {};
+  var expandedOrphans = {};
   var mode = "new";
   var editingId = null;
   var editingTradeType = "";
@@ -1130,39 +1131,64 @@
     return num + " · " + t.instrument + " · " + t.expiry_date;
   }
 
-  function rowField(label, value, extraClass) {
-    return '<span class="mlo-row-field"><span class="mlo-row-k">' + label + "</span>" +
+  function rowField(label, value, extraClass, fieldClass) {
+    return '<span class="mlo-row-field' + (fieldClass ? " " + fieldClass : "") + '"><span class="mlo-row-k">' + label + "</span>" +
       '<span class="' + (extraClass || "") + '">' + esc(value) + "</span></span>";
   }
 
   function iconButton(act, label, icon, expanded) {
-    return '<button type="button" class="mlo-icon-btn" data-act="' + act + '" aria-label="' + esc(label) + '"' +
+    return '<button type="button" class="mlo-icon-btn' + (act === "toggle" ? " mlo-row-chevron" : "") + '" data-act="' + act + '" aria-label="' + esc(label) + '"' +
       (act === "toggle" ? ' aria-expanded="' + (expanded ? "true" : "false") + '"' : "") + ">" +
       '<i class="fas ' + icon + '" aria-hidden="true"></i></button>';
+  }
+
+  function orphanPnl(leg) {
+    if (!leg || leg.leg_pnl == null || leg.leg_pnl === "" || Number.isNaN(Number(leg.leg_pnl))) return null;
+    return Number(leg.leg_pnl);
+  }
+
+  function orphanIdentityText(leg) {
+    var inst = (leg && leg.instrument) || "—";
+    if (orphanPnl(leg) == null) return inst;
+    var parts = [inst];
+    if (leg.strike_price != null && leg.strike_price !== "") parts.push(zoneNum(leg.strike_price));
+    if (leg.option_type) parts.push(String(leg.option_type).toUpperCase());
+    return parts.join(" ");
   }
 
   function renderOrphans(orphans) {
     if (!orphans || !orphans.length) return "";
     var cards = orphans.map(function (leg) {
-      return '<article class="mlo-card mlo-orphan so-card" data-leg="' + esc(leg.id) + '">' +
-        '<div class="mlo-orphan-bar">' +
-          '<div class="mlo-leg-ro">' +
-            '<span data-label="Underlying">' + esc(leg.instrument || "—") + "</span>" +
-            '<span data-label="Expiry">' + esc(leg.expiry_date) + "</span>" +
-            '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
-            '<span data-label="Side">' + esc(leg.side) + "</span>" +
-            '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
-            '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
-            '<span data-label="Entry time">' + esc(toLocal(leg.entry_time) || leg.entry_time || "—") + "</span>" +
-            '<span class="mlo-badge">Orphan</span>' +
-          "</div>" +
-          '<span class="mlo-row-actions">' +
-            iconButton("delete", "Delete orphan", "fa-trash") +
-          "</span>" +
+      var open = !!expandedOrphans[leg.id];
+      var pnl = orphanPnl(leg);
+      var value = pnl == null ? "" :
+        '<span class="mlo-orphan-value ' + pnlClass(pnl) + '">' + esc(inr(pnl)) + "</span>";
+      return '<article class="mlo-card mlo-orphan so-card' + (open ? " is-open" : "") + '" data-leg="' + esc(leg.id) + '">' +
+        '<div class="mlo-orphan-summary">' +
+          '<span class="mlo-orphan-identity">' + esc(orphanIdentityText(leg)) + "</span>" +
+          value +
+          iconButton("toggle", open ? "Collapse" : "Expand", open ? "fa-chevron-up" : "fa-chevron-down", open) +
         "</div>" +
-        '<div class="mlo-combo mlo-orphan-assign">' +
-          '<input type="text" placeholder="Assign to trade — search number, instrument, or expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
-          '<div class="mlo-combo-list" hidden></div>' +
+        '<div class="mlo-orphan-details">' +
+          '<div class="mlo-orphan-bar">' +
+            '<div class="mlo-leg-ro">' +
+              '<span data-label="Underlying">' + esc(leg.instrument || "—") + "</span>" +
+              '<span data-label="Expiry">' + esc(leg.expiry_date) + "</span>" +
+              '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
+              '<span data-label="Side">' + esc(leg.side) + "</span>" +
+              '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
+              '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
+              '<span data-label="Entry time">' + esc(toLocal(leg.entry_time) || leg.entry_time || "—") + "</span>" +
+              '<span class="mlo-badge">Orphan</span>' +
+            "</div>" +
+            '<span class="mlo-row-actions">' +
+              iconButton("delete", "Delete orphan", "fa-trash") +
+            "</span>" +
+          "</div>" +
+          '<div class="mlo-combo mlo-orphan-assign">' +
+            '<input type="text" placeholder="Assign to trade — search number, instrument, or expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
+            '<div class="mlo-combo-list" hidden></div>' +
+          "</div>" +
         "</div></article>";
     }).join("");
     return '<section class="mlo-orphans"><h2 class="mlo-orphans-title">Orphan legs</h2>' +
@@ -1232,16 +1258,16 @@
           hot ? "mlo-ratio-hot" : "mlo-ratio-ok"
         );
       }
-      return '<article class="mlo-trade so-card" data-id="' + esc(t.id) + '">' +
+      return '<article class="mlo-trade so-card' + (open ? " is-open" : "") + '" data-id="' + esc(t.id) + '">' +
         '<div class="mlo-row-summary">' +
           rowField("Trade No", t.trade_no == null ? "—" : t.trade_no) +
-          rowField("Instrument and Type", t.instrument + " · " + typeLabel(t.trade_type)) +
+          rowField("Instrument and Type", t.instrument + " · " + typeLabel(t.trade_type), "", "mlo-row-identity") +
           rowField("Expiry date", t.expiry_date || "—") +
           rowField("DTE", t.dte == null ? "—" : t.dte) +
           rowField("Future LTP", futureLtpText(t.future_ltp)) +
           rowField("Green zone", greenZoneText(t), "mlo-row-zone") +
           ratioField +
-          rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl)) +
+          rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl), "mlo-row-pnl") +
           '<span class="mlo-row-actions">' +
             iconButton("edit", "Edit", "fa-pen") +
             iconButton("delete", "Delete", "fa-trash") +
@@ -1302,10 +1328,14 @@
           '</td><td class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</td></tr>";
       }).join("");
       return '<tr class="mlo-report-row" data-idx="' + idx + '">' +
-        '<td><button type="button" class="mlo-btn mlo-expand" data-idx="' + idx + '">' + esc(t.instrument) + "</button> " +
+        '<td><button type="button" class="mlo-btn mlo-expand" data-idx="' + idx + '" aria-expanded="false">' +
+        '<i class="fas fa-chevron-down mlo-report-chevron" aria-hidden="true"></i>' +
+        esc(t.instrument) + "</button> " +
         '<span class="mlo-meta">' + esc(typeLabel(t.trade_type)) + "</span></td>" +
-        "<td>" + esc(t.expiry_date) + "</td><td>" + esc(t.entry_date) + "</td><td>" + esc(t.exit_date || "") + "</td>" +
-        '<td class="' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</td></tr>" +
+        '<td data-label="Contract expiry">' + esc(t.expiry_date) + "</td>" +
+        '<td data-label="Entry date">' + esc(t.entry_date) + "</td>" +
+        '<td data-label="Exit date">' + esc(t.exit_date || "") + "</td>" +
+        '<td class="mlo-row-pnl ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</td></tr>" +
         '<tr class="mlo-legs-detail" data-detail="' + idx + '" hidden><td colspan="5"><table class="mlo-table"><thead><tr>' +
         "<th>Side</th><th>CE/PE</th><th>Strike</th><th>Entry</th><th>Exit or LTP</th><th>Leg P&L</th></tr></thead><tbody>" +
         legs + "</tbody></table></td></tr>";
@@ -1383,16 +1413,16 @@
       ? ladderReportGroups.formatLadderDay(ladderReportGroups.ladderTradeDate(t))
       : (t.entry_date || "—");
     var closed = String(t.status || "ACTIVE").toUpperCase() === "CLOSED";
-    return '<article class="mlo-trade mlo-ladder-trade" data-id="' + esc(t.id) + '">' +
+    return '<article class="mlo-trade mlo-ladder-trade' + (open ? " is-open" : "") + '" data-id="' + esc(t.id) + '">' +
       '<div class="mlo-ladder-row">' +
         ladderCell("Trade No", esc(t.trade_no == null ? "—" : t.trade_no)) +
         ladderCell("Trade date", esc(dateText)) +
-        ladderCell("Instrument", esc((t.instrument || "—") + " · " + typeLabel(t.trade_type))) +
+        ladderCell("Instrument", esc((t.instrument || "—") + " · " + typeLabel(t.trade_type)), "mlo-row-identity") +
         ladderCell("Expiry", esc(t.expiry_date || "—")) +
         ladderCell("DTE", esc(t.dte == null ? "—" : t.dte)) +
         ladderCell("Strike", esc(strike)) +
         ladderCell("CE/PE", esc(opt)) +
-        ladderCell("P&L", esc(inr(t.total_pnl)), pnlClass(t.total_pnl)) +
+        ladderCell("P&L", esc(inr(t.total_pnl)), (pnlClass(t.total_pnl) ? pnlClass(t.total_pnl) + " " : "") + "mlo-row-pnl") +
         '<span class="mlo-row-actions">' +
           iconButton("edit", "Edit", "fa-pen") +
           iconButton("delete", "Delete", "fa-trash") +
@@ -1723,6 +1753,45 @@
     if (input) showAssignList(input);
   });
 
+  function narrowScreen() {
+    return window.matchMedia("(max-width: 767px)").matches;
+  }
+
+  function setChevron(btn, open) {
+    if (!btn) return;
+    var icon = btn.querySelector("i");
+    if (icon) icon.className = open ? "fas fa-chevron-up" : "fas fa-chevron-down";
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.setAttribute("aria-label", open ? "Collapse" : "Expand");
+  }
+
+  function toggleTradeCard(card) {
+    if (!card) return;
+    var trade = tradeById(card.getAttribute("data-id"));
+    if (!trade) return;
+    var body = card.querySelector(".mlo-row-body");
+    var willOpen = !!(body && body.hidden);
+    if (body) body.hidden = !willOpen;
+    card.classList.toggle("is-open", willOpen);
+    if (willOpen) {
+      expandedTrades[trade.id] = true;
+      paintTradePayoff(trade, false);
+    } else delete expandedTrades[trade.id];
+    setChevron(card.querySelector("[data-act='toggle']"), willOpen);
+  }
+
+  function toggleOrphanCard(card) {
+    if (!card) return;
+    var id = card.getAttribute("data-leg");
+    var willOpen = !card.classList.contains("is-open");
+    card.classList.toggle("is-open", willOpen);
+    if (id) {
+      if (willOpen) expandedOrphans[id] = true;
+      else delete expandedOrphans[id];
+    }
+    setChevron(card.querySelector(".mlo-orphan-summary [data-act='toggle']"), willOpen);
+  }
+
   async function onTradeListClick(ev) {
     var pick = ev.target.closest("button[data-trade]");
     if (pick) {
@@ -1732,10 +1801,25 @@
       return;
     }
     var btn = ev.target.closest("button[data-act]");
+    if (!btn && narrowScreen()) {
+      if (ev.target.closest("a, input, select, textarea")) return;
+      var orphanHit = ev.target.closest(".mlo-orphan-summary");
+      if (orphanHit) {
+        toggleOrphanCard(orphanHit.closest(".mlo-orphan"));
+        return;
+      }
+      var rowHit = ev.target.closest(".mlo-row-summary, .mlo-ladder-row");
+      if (rowHit) toggleTradeCard(rowHit.closest(".mlo-trade"));
+      return;
+    }
     if (!btn) return;
     if (btn.closest(".mlo-orphan") && btn.getAttribute("data-act") === "delete") {
       var orphanId = btn.closest(".mlo-orphan").getAttribute("data-leg");
       if (orphanId) await deleteOrphan(orphanId);
+      return;
+    }
+    if (btn.closest(".mlo-orphan") && btn.getAttribute("data-act") === "toggle") {
+      toggleOrphanCard(btn.closest(".mlo-orphan"));
       return;
     }
     var card = btn.closest(".mlo-trade");
@@ -1744,17 +1828,7 @@
     if (!trade) return;
     var act = btn.getAttribute("data-act");
     if (act === "toggle") {
-      var body = card.querySelector(".mlo-row-body");
-      var willOpen = !!(body && body.hidden);
-      if (body) body.hidden = !willOpen;
-      if (willOpen) {
-        expandedTrades[trade.id] = true;
-        paintTradePayoff(trade, false);
-      } else delete expandedTrades[trade.id];
-      var icon = btn.querySelector("i");
-      if (icon) icon.className = willOpen ? "fas fa-chevron-up" : "fas fa-chevron-down";
-      btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
-      btn.setAttribute("aria-label", willOpen ? "Collapse" : "Expand");
+      toggleTradeCard(card);
       return;
     }
     if (act === "edit") openModal("edit", trade);
@@ -1783,10 +1857,20 @@
     renderReport();
   });
   $("mloReportBody").addEventListener("click", function (ev) {
+    var row = ev.target.closest(".mlo-report-row");
     var btn = ev.target.closest(".mlo-expand");
-    if (!btn) return;
-    var detail = $("mloReportBody").querySelector('[data-detail="' + btn.getAttribute("data-idx") + '"]');
-    if (detail) detail.hidden = !detail.hidden;
+    if (!row) return;
+    if (!btn && !narrowScreen()) return;
+    if (!btn && ev.target.closest("a, input, select, textarea")) return;
+    var detail = $("mloReportBody").querySelector('[data-detail="' + row.getAttribute("data-idx") + '"]');
+    if (!detail) return;
+    detail.hidden = !detail.hidden;
+    var open = !detail.hidden;
+    row.classList.toggle("is-open", open);
+    var icon = row.querySelector(".mlo-report-chevron");
+    if (icon) icon.className = "fas mlo-report-chevron " + (open ? "fa-chevron-up" : "fa-chevron-down");
+    var expandBtn = row.querySelector(".mlo-expand");
+    if (expandBtn) expandBtn.setAttribute("aria-expanded", open ? "true" : "false");
   });
 
   function playAlert(file) {
