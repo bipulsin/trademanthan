@@ -1356,12 +1356,87 @@
     }
   }
 
+  function ladderMainLeg(trade) {
+    var legs = (trade && trade.legs) || [];
+    var nonExit = [];
+    for (var i = 0; i < legs.length; i++) {
+      if (String(legs[i].qualifier || "").toUpperCase() !== "EXIT") nonExit.push(legs[i]);
+    }
+    for (var j = 0; j < nonExit.length; j++) {
+      if (String(nonExit[j].side || "").toUpperCase() === "BUY") return nonExit[j];
+    }
+    return nonExit[0] || null;
+  }
+
+  function ladderCell(label, value, extraClass) {
+    return '<span class="mlo-ladder-cell' + (extraClass ? " " + extraClass : "") + '" data-label="' + esc(label) + '">' + value + "</span>";
+  }
+
+  function ladderTradeArticle(t) {
+    var open = !!expandedTrades[t.id];
+    var legs = (t.legs || []).map(ladderReportLeg).join("");
+    var head = '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>Exit / LTP</span><span>Time</span><span>Leg P&L</span></div>';
+    var main = ladderMainLeg(t);
+    var strike = main && main.strike_price != null && main.strike_price !== "" ? zoneNum(main.strike_price) : "—";
+    var opt = main && main.option_type ? String(main.option_type).toUpperCase() : "—";
+    var dateText = window.ladderReportGroups
+      ? ladderReportGroups.formatLadderDay(ladderReportGroups.ladderTradeDate(t))
+      : (t.entry_date || "—");
+    var closed = String(t.status || "ACTIVE").toUpperCase() === "CLOSED";
+    return '<article class="mlo-trade mlo-ladder-trade" data-id="' + esc(t.id) + '">' +
+      '<div class="mlo-ladder-row">' +
+        ladderCell("Trade No", esc(t.trade_no == null ? "—" : t.trade_no)) +
+        ladderCell("Trade date", esc(dateText)) +
+        ladderCell("Instrument", esc((t.instrument || "—") + " · " + typeLabel(t.trade_type))) +
+        ladderCell("Expiry", esc(t.expiry_date || "—")) +
+        ladderCell("DTE", esc(t.dte == null ? "—" : t.dte)) +
+        ladderCell("Strike", esc(strike)) +
+        ladderCell("CE/PE", esc(opt)) +
+        ladderCell("P&L", esc(inr(t.total_pnl)), pnlClass(t.total_pnl)) +
+        '<span class="mlo-row-actions">' +
+          iconButton("edit", "Edit", "fa-pen") +
+          iconButton("delete", "Delete", "fa-trash") +
+          (closed ? "" : iconButton("exit", "Exit Trade", "fa-right-from-bracket")) +
+          iconButton("toggle", open ? "Collapse" : "Expand", open ? "fa-chevron-up" : "fa-chevron-down", open) +
+        "</span></div>" +
+      '<div class="mlo-row-body"' + (open ? "" : " hidden") + ">" + head + legs +
+        '<div class="mlo-payoff" data-payoff="' + esc(t.id) + '"></div></div></article>';
+  }
+
+  function ladderListHead() {
+    var cols = ["Trade No", "Trade date", "Instrument", "Expiry", "DTE", "Strike", "CE/PE", "P&L", ""];
+    return '<div class="mlo-ladder-head">' + cols.map(function (col) {
+      return "<span>" + esc(col) + "</span>";
+    }).join("") + "</div>";
+  }
+
+  function ladderPnlText(n) {
+    return '<span class="' + pnlClass(n) + '">' + esc(inr(n)) + "</span>";
+  }
+
   function renderLadder(trades) {
     ladderTrades = trades || [];
     var host = $("mloLadder");
     if (!host) return;
-    var empty = '<p class="mlo-empty">No ladder trades.</p>';
-    host.innerHTML = ladderTrades.length ? ladderTrades.map(tradeCard).join("") : empty;
+    if (!ladderTrades.length) {
+      host.innerHTML = '<p class="mlo-empty">No ladder trades.</p>';
+      return;
+    }
+    var grouped = window.ladderReportGroups
+      ? ladderReportGroups.groupLadderReport(ladderTrades)
+      : { months: [] };
+    host.innerHTML = '<div class="mlo-ladder-board">' + ladderListHead() +
+      grouped.months.map(function (month) {
+        return '<section class="mlo-ladder-month">' +
+          '<h2 class="mlo-ladder-month-title">' + esc(month.label) + " · Monthly PnL " + ladderPnlText(month.pnl) + "</h2>" +
+          month.days.map(function (day) {
+            return '<section class="mlo-ladder-day">' +
+              '<h3 class="mlo-ladder-day-title">' + esc(day.label) + " · PnL " + ladderPnlText(day.pnl) + "</h3>" +
+              day.trades.map(ladderTradeArticle).join("") +
+              "</section>";
+          }).join("") +
+          "</section>";
+      }).join("") + "</div>";
     ladderTrades.forEach(function (t) {
       if (t.spot_ltp != null && !isNaN(Number(t.spot_ltp))) {
         lastInstrumentSpot[String(t.instrument || "").toUpperCase()] = Number(t.spot_ltp);

@@ -650,6 +650,102 @@ body.mlo-page .right-panel {
     color: #8b9198;
 }
 
+.mlo-ladder-board {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+    overflow-x: auto;
+}
+
+.mlo-ladder-head,
+.mlo-ladder-row {
+    display: grid;
+    grid-template-columns: 4.4rem 6.6rem minmax(7.5rem, 1.35fr) 6.5rem 2.8rem 4.4rem 3.2rem minmax(6.4rem, 0.9fr) 10.5rem;
+    column-gap: 10px;
+    align-items: center;
+    padding: 8px 12px;
+}
+
+.mlo-ladder-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    color: var(--muted);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: var(--card-inner, #121a17);
+    border-bottom: 1px solid rgba(61, 186, 122, 0.35);
+    border-radius: 14px 14px 0 0;
+}
+
+.mlo-ladder-month-title,
+.mlo-ladder-day-title {
+    margin: 0;
+    font-family: Syne, var(--font-display), sans-serif;
+    font-weight: 700;
+}
+
+.mlo-ladder-month-title {
+    padding: 10px 12px;
+    background: linear-gradient(90deg, rgba(61, 186, 122, 0.16), rgba(26, 38, 33, 0.55));
+    border-left: 3px solid var(--accent);
+    border-bottom: 1px solid rgba(61, 186, 122, 0.28);
+    color: #b8f5d0;
+    font-size: 0.98rem;
+}
+
+.mlo-ladder-day-title {
+    padding: 7px 12px;
+    color: #c9f5dd;
+    font-size: 0.86rem;
+    background: rgba(18, 26, 23, 0.72);
+    border-bottom: 1px solid var(--line);
+}
+
+.mlo-ladder-board .mlo-trade {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    border-bottom: 1px solid var(--line);
+}
+
+.mlo-ladder-day .mlo-ladder-trade:last-child {
+    border-bottom: 0;
+}
+
+.mlo-ladder-cell {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+    font-size: 0.88rem;
+}
+
+.mlo-ladder-board .mlo-row-body {
+    padding: 0 12px 10px;
+}
+
+.mlo-ladder-row .mlo-row-actions {
+    margin-left: 0;
+    justify-self: end;
+}
+
+body.stock-options-page[data-theme="light"] .mlo-ladder-month-title {
+    color: #14532d;
+    background: linear-gradient(90deg, rgba(31, 122, 77, 0.14), rgba(240, 244, 241, 0.95));
+}
+
+body.stock-options-page[data-theme="light"] .mlo-ladder-day-title {
+    color: #14532d;
+    background: var(--card-inner, #f0f4f1);
+}
+
 @media (max-width: 800px) {
     .mlo-form-grid,
     .mlo-leg-ro {
@@ -660,7 +756,32 @@ body.mlo-page .right-panel {
         flex-wrap: nowrap;
     }
     body.mlo-page .so-header-aside { align-items: stretch; width: 100%; }
-    .mlo-leg-head { display: none; }
+    .mlo-leg-head,
+    .mlo-ladder-head { display: none; }
+    .mlo-ladder-row {
+        display: block;
+        padding: 10px 12px;
+    }
+    .mlo-ladder-cell {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 3px 0;
+        overflow: visible;
+        white-space: normal;
+    }
+    .mlo-ladder-cell::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-family: var(--font-body);
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .mlo-ladder-row .mlo-row-actions {
+        justify-content: flex-end;
+        margin-top: 6px;
+    }
     .mlo-leg-ro {
         display: block;
         padding: 10px;
