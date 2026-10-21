@@ -1196,6 +1196,54 @@
       cards + "</section>";
   }
 
+  function pnlSpan(n) {
+    return '<span class="' + pnlClass(n) + '">' + esc(inr(n)) + "</span>";
+  }
+
+  function legPhoneBlock(lines) {
+    return '<div class="mlo-leg-phone">' + lines.map(function (line) {
+      return '<div class="mlo-leg-phone-line">' + line + "</div>";
+    }).join("") + "</div>";
+  }
+
+  function legTitleLine(leg) {
+    return esc(legTypeLabel(leg.qualifier)) + " · " + esc(leg.side) + " " +
+      esc(leg.option_type) + " " + esc(leg.strike_price);
+  }
+
+  function activeLegPhone(leg) {
+    var mark = leg.exited ? leg.exit_price : leg.ltp;
+    var delta = leg.delta == null || leg.delta === "" ? "—" : Number(leg.delta).toFixed(4);
+    return legPhoneBlock([
+      legTitleLine(leg),
+      esc(leg.entry_price) + " → " + esc(mark == null ? "—" : mark) + " · Δ " + esc(delta) + " · " + pnlSpan(leg.leg_pnl),
+    ]);
+  }
+
+  function exitedStraddlePhone(leg) {
+    return legPhoneBlock([
+      legTitleLine(leg),
+      esc(leg.entry_price) + " → ExP-" + esc(leg.exit_price) + " · ExT-" +
+        esc(exitClockText(leg.exit_time)) + " · " + pnlSpan(leg.leg_pnl),
+    ]);
+  }
+
+  function ladderLegPhone(leg) {
+    var role = String(leg.qualifier || "").toUpperCase();
+    var parts = [
+      esc(legTypeLabel(leg.qualifier)),
+      esc(leg.side) + " " + esc(leg.option_type) + " " + esc(leg.strike_price),
+      esc(leg.entry_price == null ? "—" : leg.entry_price),
+    ];
+    if (role === "EXIT") {
+      parts.push(esc(leg.exit_price == null ? "—" : leg.exit_price));
+    } else {
+      parts.push(esc(leg.ltp == null ? "—" : leg.ltp));
+      if (leg.delta != null && leg.delta !== "") parts.push("Δ " + esc(Number(leg.delta).toFixed(4)));
+    }
+    return legPhoneBlock([parts.join(" · ") + " · " + pnlSpan(leg.leg_pnl)]);
+  }
+
   function ladderReportLeg(leg) {
     var role = String(leg.qualifier || "").toUpperCase();
     var pnl = '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>";
@@ -1205,16 +1253,17 @@
       '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
       '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
       '<span data-label="Entry">' + esc(leg.entry_price == null ? "—" : leg.entry_price) + "</span>";
+    var phone = ladderLegPhone(leg);
     if (role === "EXIT") {
       return common +
         '<span data-label="Exit">' + esc(leg.exit_price == null ? "—" : leg.exit_price) + "</span>" +
         '<span data-label="Exit time">' + esc(exitClockText(leg.exit_time) || "—") + "</span>" +
-        pnl + "</div>";
+        pnl + phone + "</div>";
     }
     return common +
       '<span data-label="LTP">' + esc(leg.ltp == null ? "—" : leg.ltp) + "</span>" +
       '<span data-label="Delta">' + (leg.delta == null ? "—" : esc(Number(leg.delta).toFixed(4))) + "</span>" +
-      pnl + "</div>";
+      pnl + phone + "</div>";
   }
 
   function tradeCard(t) {
@@ -1231,6 +1280,7 @@
             '<span data-label="LTP">ExP-' + esc(leg.exit_price) + "</span>" +
             '<span data-label="Delta">ExT-' + esc(exitClockText(leg.exit_time)) + "</span>" +
             '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
+            exitedStraddlePhone(leg) +
             "</div>";
         }
         var mark = leg.exited ? leg.exit_price : leg.ltp;
@@ -1244,6 +1294,7 @@
           '<span data-label="' + markLabel + '">' + esc(mark == null ? "—" : mark) + "</span>" +
           '<span data-label="Delta">' + (leg.delta == null ? "—" : esc(Number(leg.delta).toFixed(4))) + "</span>" +
           '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
+          activeLegPhone(leg) +
           "</div>";
       }).join("");
       var head = isLadderType(t.trade_type)
@@ -1255,18 +1306,25 @@
         ratioField = rowField(
           "LTP Ratio",
           fmtRatio(t.ltp_ratio),
-          hot ? "mlo-ratio-hot" : "mlo-ratio-ok"
+          hot ? "mlo-ratio-hot" : "mlo-ratio-ok",
+          "mlo-row-ratio"
         );
       }
       return '<article class="mlo-trade so-card' + (open ? " is-open" : "") + '" data-id="' + esc(t.id) + '">' +
         '<div class="mlo-row-summary">' +
-          rowField("Trade No", t.trade_no == null ? "—" : t.trade_no) +
+          '<span class="mlo-row-hold">' +
+            rowField("Trade No", t.trade_no == null ? "—" : t.trade_no, "", "mlo-row-no") +
+          "</span>" +
           rowField("Instrument and Type", t.instrument + " · " + typeLabel(t.trade_type), "", "mlo-row-identity") +
-          rowField("Expiry date", t.expiry_date || "—") +
-          rowField("DTE", t.dte == null ? "—" : t.dte) +
-          rowField("Future LTP", futureLtpText(t.future_ltp)) +
-          rowField("Green zone", greenZoneText(t), "mlo-row-zone") +
-          ratioField +
+          '<span class="mlo-row-meta">' +
+            rowField("Expiry date", t.expiry_date || "—", "", "mlo-row-expiry") +
+            rowField("DTE", t.dte == null ? "—" : t.dte, "", "mlo-row-dte") +
+            ratioField +
+          "</span>" +
+          '<span class="mlo-row-hold">' +
+            rowField("Future LTP", futureLtpText(t.future_ltp), "", "mlo-row-future") +
+            rowField("Green zone", greenZoneText(t), "mlo-row-zone", "mlo-row-green") +
+          "</span>" +
           rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl), "mlo-row-pnl") +
           '<span class="mlo-row-actions">' +
             iconButton("edit", "Edit", "fa-pen") +
@@ -1327,16 +1385,25 @@
           "</td><td>" + esc(leg.entry_price) + "</td><td>" + esc(mark == null ? "—" : mark) +
           '</td><td class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</td></tr>";
       }).join("");
+      var phone = (t.legs || []).map(function (leg) {
+        if (isStraddle(t) && legIsExited(leg)) return exitedStraddlePhone(leg);
+        return activeLegPhone(leg);
+      }).join("");
+      var when = [t.entry_date, t.exit_date].filter(function (d) { return d; });
+      var whenHtml = when.length ? '<span class="mlo-report-when"> · ' + when.map(esc).join(" · ") + "</span>" : "";
       return '<tr class="mlo-report-row" data-idx="' + idx + '">' +
-        '<td><button type="button" class="mlo-btn mlo-expand" data-idx="' + idx + '" aria-expanded="false">' +
+        '<td><span class="mlo-report-id"><button type="button" class="mlo-btn mlo-expand" data-idx="' + idx + '" aria-expanded="false">' +
         '<i class="fas fa-chevron-down mlo-report-chevron" aria-hidden="true"></i>' +
         esc(t.instrument) + "</button> " +
-        '<span class="mlo-meta">' + esc(typeLabel(t.trade_type)) + "</span></td>" +
+        '<span class="mlo-meta">' + esc(typeLabel(t.trade_type)) + "</span></span>" +
+        '<span class="mlo-report-sub">' + esc(t.expiry_date || "—") + whenHtml + "</span></td>" +
         '<td data-label="Contract expiry">' + esc(t.expiry_date) + "</td>" +
         '<td data-label="Entry date">' + esc(t.entry_date) + "</td>" +
         '<td data-label="Exit date">' + esc(t.exit_date || "") + "</td>" +
         '<td class="mlo-row-pnl ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</td></tr>" +
-        '<tr class="mlo-legs-detail" data-detail="' + idx + '" hidden><td colspan="5"><table class="mlo-table"><thead><tr>' +
+        '<tr class="mlo-legs-detail" data-detail="' + idx + '" hidden><td colspan="5">' +
+        '<div class="mlo-report-legs-phone">' + phone + "</div>" +
+        '<table class="mlo-table mlo-report-leg-table"><thead><tr>' +
         "<th>Side</th><th>CE/PE</th><th>Strike</th><th>Entry</th><th>Exit or LTP</th><th>Leg P&L</th></tr></thead><tbody>" +
         legs + "</tbody></table></td></tr>";
     }).join("");
@@ -1415,13 +1482,19 @@
     var closed = String(t.status || "ACTIVE").toUpperCase() === "CLOSED";
     return '<article class="mlo-trade mlo-ladder-trade' + (open ? " is-open" : "") + '" data-id="' + esc(t.id) + '">' +
       '<div class="mlo-ladder-row">' +
-        ladderCell("Trade No", esc(t.trade_no == null ? "—" : t.trade_no)) +
-        ladderCell("Trade date", esc(dateText)) +
+        '<span class="mlo-row-hold">' +
+          ladderCell("Trade No", esc(t.trade_no == null ? "—" : t.trade_no), "mlo-ladder-no") +
+          ladderCell("Trade date", esc(dateText), "mlo-ladder-date") +
+        "</span>" +
         ladderCell("Instrument", esc((t.instrument || "—") + " · " + typeLabel(t.trade_type)), "mlo-row-identity") +
-        ladderCell("Expiry", esc(t.expiry_date || "—")) +
-        ladderCell("DTE", esc(t.dte == null ? "—" : t.dte)) +
-        ladderCell("Strike", esc(strike)) +
-        ladderCell("CE/PE", esc(opt)) +
+        '<span class="mlo-row-meta">' +
+          ladderCell("Expiry", esc(t.expiry_date || "—"), "mlo-ladder-expiry") +
+          ladderCell("DTE", esc(t.dte == null ? "—" : t.dte), "mlo-ladder-dte") +
+        "</span>" +
+        '<span class="mlo-row-hold">' +
+          ladderCell("Strike", esc(strike), "mlo-ladder-strike") +
+          ladderCell("CE/PE", esc(opt), "mlo-ladder-opt") +
+        "</span>" +
         ladderCell("P&L", esc(inr(t.total_pnl)), (pnlClass(t.total_pnl) ? pnlClass(t.total_pnl) + " " : "") + "mlo-row-pnl") +
         '<span class="mlo-row-actions">' +
           iconButton("edit", "Edit", "fa-pen") +
