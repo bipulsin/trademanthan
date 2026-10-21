@@ -4,13 +4,15 @@ from datetime import date, datetime, timedelta
 import pytz
 import pytest
 
-from backend.services.multi_leg_options import MultiLegValidationError
+from backend.services.multi_leg_options import MultiLegNotFound, MultiLegValidationError
 from backend.services.multi_leg_upstox_sync import (
     GROUP_WINDOW,
+    _load_existing,
     assign_orphan,
     build_contract_index,
     build_sync_plan,
     classify_leg_count,
+    dismiss_orphan,
     group_new_legs,
     historical_row_to_order,
     parse_trade_date,
@@ -21,6 +23,7 @@ EXPIRY = date(2026, 9, 29)
 TODAY = date(2026, 9, 26)
 LEG_ID = "11111111-1111-1111-1111-111111111111"
 TRADE_ID = "22222222-2222-2222-2222-222222222222"
+MERGED_LEG_ID = "33333333-3333-3333-3333-333333333333"
 
 
 def _stamp(minute, second=0):
@@ -313,3 +316,104 @@ def test_assign_sets_trade_id(monkeypatch):
     assert out["leg_id"] == LEG_ID
     with pytest.raises(MultiLegValidationError):
         assign_orphan("not-a-uuid", TRADE_ID)
+
+
+def test_deleted_orphan_is_not_recreated_on_later_sync(monkeypatch):
+    """Dismissing an orphan stores its order id, so the next sync skips that fill."""
+    memory = {
+        "legs": {
+            LEG_ID: {"trade_id": None, "upstox_order_id": "OID-ORPHAN"},
+            MERGED_LEG_ID: {"trade_id": TRADE_ID, "upstox_order_id": "OID-MERGED"},
+        },
+        "dismissed": set(),
+    }
+
+    class Result:
+        def __init__(self, rows=None, rowcount=0):
+            self._rows = rows or []
+            self.rowcount = rowcount
+
+        def fetchone(self):
+            return self._rows[0] if self._rows else None
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return list(self._rows)
+
+    class DB:
+        def execute(self, stmt, params=None):
+            sql = " ".join(str(stmt).split())
+            params = params or {}
+            if "DELETE FROM multi_leg_trade_legs" in sql:
+                assert "trade_id IS NULL" in sql
+                leg = memory["legs"].get(params["leg_id"])
+                if not leg or leg["trade_id"] is not None:
+                    return Result(rowcount=0)
+                del memory["legs"][params["leg_id"]]
+                return Result(rowcount=1)
+            if "INSERT INTO multi_leg_dismissed_upstox_orders" in sql:
+                memory["dismissed"].add(params["upstox_order_id"])
+                return Result(rowcount=1)
+            if "trade_id IS NULL" in sql and "upstox_order_id" in sql:
+                leg = memory["legs"].get(params["leg_id"])
+                if not leg or leg["trade_id"] is not None:
+                    return Result([])
+                return Result([(leg["upstox_order_id"],)])
+            if "multi_leg_dismissed_upstox_orders" in sql:
+                rows = [
+                    (leg["upstox_order_id"],)
+                    for leg in memory["legs"].values()
+                    if leg.get("upstox_order_id")
+                ]
+                rows.extend((oid,) for oid in memory["dismissed"])
+                return Result(rows)
+            if "FROM multi_leg_trades" in sql:
+                return Result([{"instrument": "NIFTY", "expiry_date": EXPIRY}])
+            raise AssertionError(sql)
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("backend.services.multi_leg_upstox_sync.ensure_multi_leg_tables", lambda: None)
+    monkeypatch.setattr("backend.services.multi_leg_upstox_sync.SessionLocal", lambda: DB())
+
+    out = dismiss_orphan(LEG_ID)
+    assert out["deleted"] == LEG_ID
+    assert out["upstox_order_id"] == "OID-ORPHAN"
+    assert LEG_ID not in memory["legs"]
+    assert memory["dismissed"] == {"OID-ORPHAN"}
+
+    # Same underlying and expiry already has a trade, so this fill would be an
+    # orphan again if the dismissal were not part of the sync dedupe set.
+    ids, keys = _load_existing(DB())
+    assert "OID-ORPHAN" in ids
+    assert "OID-MERGED" in ids
+    assert ("NIFTY", EXPIRY) in keys
+    index = _index(_contract("NSE_FO|1", "CE", 25000))
+    plan = build_sync_plan(
+        [_order("OID-ORPHAN", "NSE_FO|1", "SELL", 100, _stamp(0))],
+        index,
+        existing_order_ids=ids,
+        existing_trades=keys,
+        today=TODAY,
+    )
+    assert plan["orphans"] == 0
+    assert plan["creates"] == []
+    assert plan["orphan_legs"] == []
+    assert plan["duplicates_skipped"] == 1
+
+    with pytest.raises(MultiLegNotFound):
+        dismiss_orphan(MERGED_LEG_ID)
+    assert MERGED_LEG_ID in memory["legs"]
+    assert "OID-MERGED" not in memory["dismissed"]

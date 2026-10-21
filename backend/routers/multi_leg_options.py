@@ -33,6 +33,7 @@ from backend.services.multi_leg_options import (
 )
 from backend.services.multi_leg_upstox_sync import (
     assign_orphan,
+    dismiss_orphan,
     journal_orphan_state,
     sync_from_upstox,
 )
@@ -168,6 +169,15 @@ def assign_orphan_leg(
     _user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
     return _call(assign_orphan, leg_id, body.trade_id)
+
+
+@router.delete("/orphans/{leg_id}")
+def dismiss_orphan_leg(
+    leg_id: str,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Drop one unassigned sync leg. Does not cancel or delete the broker fill."""
+    return _call(dismiss_orphan, leg_id)
 
 
 @router.get("/trades/report")

@@ -1486,6 +1486,14 @@ def _ensure_upstox_sync_schema(conn) -> None:
         WHERE upstox_order_id IS NOT NULL
         """
     ))
+    conn.execute(text(
+        """
+        CREATE TABLE IF NOT EXISTS multi_leg_dismissed_upstox_orders (
+            upstox_order_id TEXT PRIMARY KEY,
+            dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    ))
     names = conn.execute(text(
         """
         SELECT con.conname AS name

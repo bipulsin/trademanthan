@@ -64,3 +64,10 @@ ALTER TABLE multi_leg_trades ADD COLUMN IF NOT EXISTS exit_adj_alert_first_trigg
 
 -- upstox_order_id unique index is created in ensure_multi_leg_tables after the
 -- additive column exists on databases created from an older copy of this file.
+
+-- Broker fills the user removed from the orphan list. Sync treats these ids
+-- as already imported so the same order is not inserted again.
+CREATE TABLE IF NOT EXISTS multi_leg_dismissed_upstox_orders (
+    upstox_order_id TEXT PRIMARY KEY,
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

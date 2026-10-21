@@ -1133,15 +1133,20 @@
     if (!orphans || !orphans.length) return "";
     var cards = orphans.map(function (leg) {
       return '<article class="mlo-card mlo-orphan so-card" data-leg="' + esc(leg.id) + '">' +
-        '<div class="mlo-leg-ro">' +
-          '<span data-label="Underlying">' + esc(leg.instrument || "—") + "</span>" +
-          '<span data-label="Expiry">' + esc(leg.expiry_date) + "</span>" +
-          '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
-          '<span data-label="Side">' + esc(leg.side) + "</span>" +
-          '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
-          '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
-          '<span data-label="Entry time">' + esc(toLocal(leg.entry_time) || leg.entry_time || "—") + "</span>" +
-          '<span class="mlo-badge">Orphan</span>' +
+        '<div class="mlo-orphan-bar">' +
+          '<div class="mlo-leg-ro">' +
+            '<span data-label="Underlying">' + esc(leg.instrument || "—") + "</span>" +
+            '<span data-label="Expiry">' + esc(leg.expiry_date) + "</span>" +
+            '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
+            '<span data-label="Side">' + esc(leg.side) + "</span>" +
+            '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
+            '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
+            '<span data-label="Entry time">' + esc(toLocal(leg.entry_time) || leg.entry_time || "—") + "</span>" +
+            '<span class="mlo-badge">Orphan</span>' +
+          "</div>" +
+          '<span class="mlo-row-actions">' +
+            iconButton("delete", "Delete orphan", "fa-trash") +
+          "</span>" +
         "</div>" +
         '<div class="mlo-combo mlo-orphan-assign">' +
           '<input type="text" placeholder="Assign to trade — search number, instrument, or expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
@@ -1550,6 +1555,18 @@
     list.hidden = false;
   }
 
+  async function deleteOrphan(legId) {
+    var leg = orphanLegs.filter(function (item) { return item.id === legId; })[0];
+    var name = leg && leg.instrument ? leg.instrument + " orphan fill" : "orphan fill";
+    if (!window.confirm("Delete this " + name + "?")) return;
+    try {
+      await api("/orphans/" + encodeURIComponent(legId), { method: "DELETE" });
+      await loadActive(true);
+    } catch (e) {
+      setBanner(e.message || "Delete failed");
+    }
+  }
+
   async function assignOrphan(legId, tradeId) {
     try {
       await api("/orphans/" + encodeURIComponent(legId) + "/assign", {
@@ -1629,6 +1646,11 @@
     }
     var btn = ev.target.closest("button[data-act]");
     if (!btn) return;
+    if (btn.closest(".mlo-orphan") && btn.getAttribute("data-act") === "delete") {
+      var orphanId = btn.closest(".mlo-orphan").getAttribute("data-leg");
+      if (orphanId) await deleteOrphan(orphanId);
+      return;
+    }
     var card = btn.closest(".mlo-trade");
     if (!card) return;
     var trade = tradeById(card.getAttribute("data-id"));

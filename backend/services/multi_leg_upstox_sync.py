@@ -7,7 +7,8 @@ through ``create_trade``. This module never places orders.
 
 Orphan rule: a new fill whose underlying and expiry already belong to any
 trade (Active or Closed, manual or synced) is stored with trade_id null.
-Matching does not attach the leg to that trade.
+Matching does not attach the leg to that trade. Deleting an orphan records
+its upstox_order_id so a later sync does not insert that fill again.
 """
 from __future__ import annotations
 
@@ -348,10 +349,10 @@ def build_sync_plan(
 ) -> Dict[str, Any]:
     """Decide creates vs orphans. Does not write.
 
-    An order id that is already on a leg is skipped. Groups of new legs that
-    share an underlying and expiry with any trade become orphans instead of a
-    new trade. A trade created earlier in this plan counts, so a later group
-    on the same underlying+expiry is also orphaned.
+    An order id already on a leg, or dismissed from the orphan list, is skipped.
+    Groups of new legs that share an underlying and expiry with any trade
+    become orphans instead of a new trade. A trade created earlier in this
+    plan counts, so a later group on the same underlying+expiry is also orphaned.
     """
     as_of = today or datetime.now(IST).date()
     known_ids = {str(item).strip() for item in existing_order_ids if str(item or "").strip()}
@@ -436,10 +437,15 @@ def build_sync_plan(
 
 
 def _load_existing(db) -> Tuple[set, set]:
+    """Known order ids are legs still stored plus orphans the user deleted."""
     id_rows = db.execute(text(
         """
         SELECT upstox_order_id
         FROM multi_leg_trade_legs
+        WHERE upstox_order_id IS NOT NULL AND TRIM(upstox_order_id) <> ''
+        UNION
+        SELECT upstox_order_id
+        FROM multi_leg_dismissed_upstox_orders
         WHERE upstox_order_id IS NOT NULL AND TRIM(upstox_order_id) <> ''
         """
     )).fetchall()
@@ -846,6 +852,68 @@ def journal_orphan_state() -> Dict[str, Any]:
         "orphans": list_orphans(),
         "assignable_trades": list_assignable_trades(),
     }
+
+
+def dismiss_orphan(leg_id: str) -> Dict[str, Any]:
+    """Remove one unassigned sync leg and remember its broker order id.
+
+    Legs already on a trade are left in place. The broker fill is not touched.
+    """
+    ensure_multi_leg_tables()
+    try:
+        leg = str(uuid.UUID(str(leg_id).strip()))
+    except (ValueError, AttributeError) as exc:
+        raise MultiLegValidationError("leg id must be a uuid") from exc
+    db = SessionLocal()
+    order_id = ""
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT upstox_order_id
+                FROM multi_leg_trade_legs
+                WHERE id = CAST(:leg_id AS uuid)
+                  AND trade_id IS NULL
+                """
+            ),
+            {"leg_id": leg},
+        ).fetchone()
+        if not row:
+            raise MultiLegNotFound("orphan leg not found")
+        order_id = str(row[0]).strip() if row[0] else ""
+        if order_id:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO multi_leg_dismissed_upstox_orders (upstox_order_id)
+                    VALUES (:upstox_order_id)
+                    ON CONFLICT (upstox_order_id) DO NOTHING
+                    """
+                ),
+                {"upstox_order_id": order_id},
+            )
+        result = db.execute(
+            text(
+                """
+                DELETE FROM multi_leg_trade_legs
+                WHERE id = CAST(:leg_id AS uuid)
+                  AND trade_id IS NULL
+                """
+            ),
+            {"leg_id": leg},
+        )
+        if getattr(result, "rowcount", 0) == 0:
+            raise MultiLegNotFound("orphan leg not found")
+        db.commit()
+    except (MultiLegNotFound, MultiLegValidationError):
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {"ok": True, "deleted": leg, "upstox_order_id": order_id or None}
 
 
 def assign_orphan(leg_id: str, trade_id: str) -> Dict[str, Any]:
