@@ -11,7 +11,7 @@
   var orphanLegs = [];
   var assignableTrades = [];
   var reportRows = [];
-  var reportSort = { key: "entry_date", dir: -1 };
+  var reportSort = { key: "exit_date", dir: -1 };
   var tab = "active";
   var expandedTrades = {};
   var expandedOrphans = {};
@@ -121,7 +121,51 @@
 
   function pad2(n) { return String(n).padStart(2, "0"); }
 
+  var MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var DEFAULT_CLOCK = "03:10 PM";
+
+  /** Display as "YYYY Mon dd hh:mm AM/PM"; date-only values omit the clock. */
+  function formatHumanDateTime(v) {
+    if (v == null || v === "") return "—";
+    var s = String(v).trim();
+    if (!s) return "—";
+    var day = s.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return s;
+    var mo = Number(day.slice(5, 7)) - 1;
+    if (mo < 0 || mo > 11) return s;
+    var label = day.slice(0, 4) + " " + MONTHS_SHORT[mo] + " " + day.slice(8, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s) || !/\d{1,2}:\d{2}/.test(s)) return label;
+    var ampm = s.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (ampm) {
+      var shown = normalizeClock(ampm[0]);
+      return shown ? label + " " + shown : label;
+    }
+    var parts = clockParts(s);
+    if (!parts) return label;
+    // Midnight-only stamps (legacy DATE→timestamp) stay date-only.
+    if (parts.hour === 0 && parts.minute === 0 && /[T ]00:00(:00)?/.test(s)) return label;
+    return label + " " + formatClock(parts.hour, parts.minute);
+  }
+
+  /** Prefer earliest leg entry_time so Entry shows a real clock when available. */
+  function tradeEntryStamp(t) {
+    var day = t && t.entry_date ? String(t.entry_date).slice(0, 10) : "";
+    if (!day) return "";
+    var bestTime = "";
+    var best = null;
+    (t.legs || []).forEach(function (leg) {
+      if (!leg || !leg.entry_time) return;
+      var parts = clockParts(leg.entry_time);
+      if (!parts) return;
+      if (!best || parts.date < best.date ||
+          (parts.date === best.date &&
+            (parts.hour < best.hour || (parts.hour === best.hour && parts.minute < best.minute)))) {
+        best = parts;
+        bestTime = leg.entry_time;
+      }
+    });
+    return bestTime || day;
+  }
 
   function parseClock(text) {
     var match = String(text || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -1370,12 +1414,14 @@
   }
 
   function renderReport() {
-    var rows = reportRows.slice().sort(function (a, b) {
+    var rows = reportRows.filter(function (t) {
+      return !!(t && t.exit_date);
+    }).slice().sort(function (a, b) {
       return cmp(a, b, reportSort.key) * reportSort.dir;
     });
     var body = $("mloReportBody");
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="5" class="mlo-empty">No trades for these filters.</td></tr>';
+      body.innerHTML = '<tr><td colspan="5" class="mlo-empty">No exited trades for these filters.</td></tr>';
       return;
     }
     body.innerHTML = rows.map(function (t, idx) {
@@ -1389,17 +1435,18 @@
         if (isStraddle(t) && legIsExited(leg)) return exitedStraddlePhone(leg);
         return activeLegPhone(leg);
       }).join("");
-      var when = [t.entry_date, t.exit_date].filter(function (d) { return d; });
-      var whenHtml = when.length ? '<span class="mlo-report-when"> · ' + when.map(esc).join(" · ") + "</span>" : "";
-      return '<tr class="mlo-report-row" data-idx="' + idx + '">' +
+      var entryLabel = formatHumanDateTime(tradeEntryStamp(t));
+      var exitLabel = formatHumanDateTime(t.exit_date);
+      var whenHtml = '<span class="mlo-report-when"> · ' + esc(entryLabel) + " · " + esc(exitLabel) + "</span>";
+      return '<tr class="mlo-report-row" data-idx="' + idx + '" tabindex="0" role="button" aria-expanded="false">' +
         '<td><span class="mlo-report-id"><button type="button" class="mlo-btn mlo-expand" data-idx="' + idx + '" aria-expanded="false">' +
         '<i class="fas fa-chevron-down mlo-report-chevron" aria-hidden="true"></i>' +
         esc(t.instrument) + "</button> " +
         '<span class="mlo-meta">' + esc(typeLabel(t.trade_type)) + "</span></span>" +
         '<span class="mlo-report-sub">' + esc(t.expiry_date || "—") + whenHtml + "</span></td>" +
         '<td data-label="Contract expiry">' + esc(t.expiry_date) + "</td>" +
-        '<td data-label="Entry date">' + esc(t.entry_date) + "</td>" +
-        '<td data-label="Exit date">' + esc(t.exit_date || "") + "</td>" +
+        '<td data-label="Entry date">' + esc(entryLabel) + "</td>" +
+        '<td data-label="Exit date">' + esc(exitLabel) + "</td>" +
         '<td class="mlo-row-pnl ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</td></tr>" +
         '<tr class="mlo-legs-detail" data-detail="' + idx + '" hidden><td colspan="5">' +
         '<div class="mlo-report-legs-phone">' + phone + "</div>" +
@@ -1929,21 +1976,32 @@
     else { reportSort.key = key; reportSort.dir = 1; }
     renderReport();
   });
-  $("mloReportBody").addEventListener("click", function (ev) {
-    var row = ev.target.closest(".mlo-report-row");
-    var btn = ev.target.closest(".mlo-expand");
+  function toggleReportRow(row) {
     if (!row) return;
-    if (!btn && !narrowScreen()) return;
-    if (!btn && ev.target.closest("a, input, select, textarea")) return;
     var detail = $("mloReportBody").querySelector('[data-detail="' + row.getAttribute("data-idx") + '"]');
     if (!detail) return;
     detail.hidden = !detail.hidden;
     var open = !detail.hidden;
     row.classList.toggle("is-open", open);
+    row.setAttribute("aria-expanded", open ? "true" : "false");
     var icon = row.querySelector(".mlo-report-chevron");
     if (icon) icon.className = "fas mlo-report-chevron " + (open ? "fa-chevron-up" : "fa-chevron-down");
     var expandBtn = row.querySelector(".mlo-expand");
     if (expandBtn) expandBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  $("mloReportBody").addEventListener("click", function (ev) {
+    var row = ev.target.closest(".mlo-report-row");
+    if (!row) return;
+    if (ev.target.closest("a, input, select, textarea")) return;
+    toggleReportRow(row);
+  });
+  $("mloReportBody").addEventListener("keydown", function (ev) {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    var row = ev.target.closest(".mlo-report-row");
+    if (!row || ev.target !== row) return;
+    ev.preventDefault();
+    toggleReportRow(row);
   });
 
   function playAlert(file) {

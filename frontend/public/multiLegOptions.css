@@ -585,6 +585,30 @@ body.mlo-page .right-panel {
 .mlo-legs-detail td { background: rgba(0, 0, 0, 0.2); }
 .mlo-empty { color: var(--muted); padding: 20px 4px; }
 
+#mloReportTable tr.mlo-report-row {
+    cursor: pointer;
+}
+#mloReportTable .mlo-expand {
+    display: inline;
+    background: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+#mloReportTable .mlo-report-chevron {
+    display: inline-block;
+    margin-right: 6px;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+#mloReportTable tr.mlo-report-row.is-open .mlo-report-chevron {
+    color: var(--text, #e8efe9);
+}
+
 .mlo-payoff {
     margin-top: 14px;
     padding: 12px 12px 8px;
@@ -818,7 +842,6 @@ body.stock-options-page[data-theme="light"] .mlo-ladder-day-title {
 
 /* Phone records stay one row until expanded. Desktop rules above are unchanged. */
 .mlo-orphan-summary { display: none; }
-.mlo-report-chevron { display: none; }
 
 @media (max-width: 767px) {
     .mlo-trade .mlo-row-summary,
