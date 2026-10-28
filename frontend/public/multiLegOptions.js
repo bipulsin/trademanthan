@@ -1226,17 +1226,21 @@
               '<span class="mlo-badge">Orphan</span>' +
             "</div>" +
             '<span class="mlo-row-actions">' +
+              iconButton("as-main", "Mark as Main (new Ladder)", "fa-flag") +
               iconButton("delete", "Delete orphan", "fa-trash") +
             "</span>" +
           "</div>" +
-          '<div class="mlo-combo mlo-orphan-assign">' +
-            '<input type="text" placeholder="Assign to trade — search number, instrument, or expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
-            '<div class="mlo-combo-list" hidden></div>' +
+          '<div class="mlo-orphan-actions">' +
+            '<button type="button" class="mlo-btn so-modal-btn secondary" data-act="as-main">Mark as Main → Ladder</button>' +
+            '<div class="mlo-combo mlo-orphan-assign">' +
+              '<input type="text" placeholder="Or assign to an existing trade — search number, instrument, or expiry" autocomplete="off" data-leg="' + esc(leg.id) + '" />' +
+              '<div class="mlo-combo-list" hidden></div>' +
+            "</div>" +
           "</div>" +
         "</div></article>";
     }).join("");
     return '<section class="mlo-orphans"><h2 class="mlo-orphans-title">Orphan legs</h2>' +
-      '<p class="mlo-meta">These fills are not on a trade. Assign one to count it in that trade’s P&amp;L.</p>' +
+      '<p class="mlo-meta">These fills are not on a trade. Mark one as Main to start a new Ladder, or assign it to an existing trade.</p>' +
       cards + "</section>";
   }
 
@@ -1816,6 +1820,26 @@
     }
   }
 
+  async function orphanAsLadderMain(legId) {
+    var leg = orphanLegs.filter(function (item) { return item.id === legId; })[0];
+    var name = leg && leg.instrument ? leg.instrument : "this orphan";
+    var detail = [
+      leg && leg.side,
+      leg && leg.option_type,
+      leg && leg.strike_price != null ? leg.strike_price : "",
+    ].filter(Boolean).join(" ");
+    var label = detail ? name + " " + detail : name;
+    if (!window.confirm("Create a new Ladder trade with " + label + " as the Main leg?")) return;
+    try {
+      var data = await api("/orphans/" + encodeURIComponent(legId) + "/as-main", { method: "POST" });
+      var no = data && data.trade_no != null ? "#" + data.trade_no + " " : "";
+      setBanner("Created Ladder " + no + "with this fill as Main. Open the Ladder Report tab to edit exits.");
+      await loadActive(true);
+    } catch (e) {
+      setBanner(e.message || "Could not create Ladder from orphan");
+    }
+  }
+
   function openSyncModal() {
     $("mloSyncDate").value = todayISO();
     $("mloSyncErr").hidden = true;
@@ -1933,6 +1957,11 @@
       return;
     }
     if (!btn) return;
+    if (btn.closest(".mlo-orphan") && btn.getAttribute("data-act") === "as-main") {
+      var mainId = btn.closest(".mlo-orphan").getAttribute("data-leg");
+      if (mainId) await orphanAsLadderMain(mainId);
+      return;
+    }
     if (btn.closest(".mlo-orphan") && btn.getAttribute("data-act") === "delete") {
       var orphanId = btn.closest(".mlo-orphan").getAttribute("data-leg");
       if (orphanId) await deleteOrphan(orphanId);

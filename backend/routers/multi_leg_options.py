@@ -35,6 +35,7 @@ from backend.services.multi_leg_upstox_sync import (
     assign_orphan,
     dismiss_orphan,
     journal_orphan_state,
+    promote_orphan_as_ladder_main,
     sync_from_upstox,
 )
 
@@ -191,6 +192,15 @@ def assign_orphan_leg(
     _user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
     return _call(assign_orphan, leg_id, body.trade_id)
+
+
+@router.post("/orphans/{leg_id}/as-main")
+def orphan_as_ladder_main(
+    leg_id: str,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Create a new Ladder trade with this orphan fill as the MAIN leg."""
+    return _call(promote_orphan_as_ladder_main, leg_id)
 
 
 @router.delete("/orphans/{leg_id}")

@@ -16,6 +16,7 @@ from backend.services.multi_leg_upstox_sync import (
     group_new_legs,
     historical_row_to_order,
     parse_trade_date,
+    promote_orphan_as_ladder_main,
 )
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -316,6 +317,83 @@ def test_assign_sets_trade_id(monkeypatch):
     assert out["leg_id"] == LEG_ID
     with pytest.raises(MultiLegValidationError):
         assign_orphan("not-a-uuid", TRADE_ID)
+
+
+def test_promote_orphan_creates_ladder_main(monkeypatch):
+    captured = []
+    orphan_row = {
+        "id": LEG_ID,
+        "side": "BUY",
+        "option_type": "CE",
+        "strike_price": 25000,
+        "leg_expiry_date": EXPIRY,
+        "entry_price": 120.5,
+        "entry_time": IST.localize(datetime(2026, 9, 26, 10, 15, 0)),
+        "lot_size": 75,
+        "instrument_key": "NSE_FO|25000",
+        "upstox_order_id": "OID-ORPHAN",
+    }
+
+    class MappingResult:
+        rowcount = 1
+
+        def fetchone(self):
+            return orphan_row
+
+        def mappings(self):
+            return self
+
+    class DB:
+        def execute(self, stmt, params=None):
+            captured.append((str(stmt), params or {}))
+            return MappingResult()
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("backend.services.multi_leg_upstox_sync.ensure_multi_leg_tables", lambda: None)
+    monkeypatch.setattr("backend.services.multi_leg_upstox_sync.SessionLocal", lambda: DB())
+    monkeypatch.setattr("backend.services.multi_leg_upstox_sync._refresh_subscriptions", lambda: None)
+    monkeypatch.setattr("backend.services.multi_leg_upstox_sync.allocate_trade_no", lambda _db: 42)
+    monkeypatch.setattr(
+        "backend.services.multi_leg_upstox_sync.journal_contract_index",
+        lambda: build_contract_index([
+            {
+                "underlying_symbol": "NIFTY",
+                "instrument_type": "CE",
+                "strike_price": 25000,
+                "expiry": EXPIRY,
+                "lot_size": 75,
+                "instrument_key": "NSE_FO|25000",
+            }
+        ]),
+    )
+    monkeypatch.setattr(
+        "backend.services.multi_leg_upstox_sync._spot_prices",
+        lambda _names: {"NIFTY": 24980.0},
+    )
+
+    out = promote_orphan_as_ladder_main(LEG_ID)
+    inserts = [item for item in captured if "INSERT INTO multi_leg_trades" in item[0]]
+    updates = [item for item in captured if "qualifier = 'MAIN'" in item[0]]
+    assert inserts
+    assert inserts[0][1]["instrument"] == "NIFTY"
+    assert inserts[0][1]["spot"] == 24980.0
+    assert inserts[0][1]["trade_no"] == 42
+    assert updates
+    assert updates[0][1]["leg_id"] == LEG_ID
+    assert updates[0][1]["trade_id"] == out["trade_id"]
+    assert out["trade_type"] == "LADDER"
+    assert out["trade_no"] == 42
+    assert out["instrument"] == "NIFTY"
+    with pytest.raises(MultiLegValidationError):
+        promote_orphan_as_ladder_main("not-a-uuid")
 
 
 def test_deleted_orphan_is_not_recreated_on_later_sync(monkeypatch):

@@ -962,3 +962,115 @@ def assign_orphan(leg_id: str, trade_id: str) -> Dict[str, Any]:
         db.close()
     _refresh_subscriptions()
     return {"ok": True, "leg_id": leg, "trade_id": trade}
+
+
+def promote_orphan_as_ladder_main(leg_id: str) -> Dict[str, Any]:
+    """Turn one orphan fill into a new Ladder trade with that leg as MAIN.
+
+    Keeps the existing leg row (and its Upstox order id) so a later sync still
+    dedupes. The new trade shows on the Ladder Report tab.
+    """
+    ensure_multi_leg_tables()
+    try:
+        leg = str(uuid.UUID(str(leg_id).strip()))
+    except (ValueError, AttributeError) as exc:
+        raise MultiLegValidationError("leg id must be a uuid") from exc
+
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT CAST(id AS text) AS id, side, option_type, strike_price, leg_expiry_date,
+                       entry_price, entry_time, lot_size, instrument_key, upstox_order_id
+                FROM multi_leg_trade_legs
+                WHERE id = CAST(:leg_id AS uuid)
+                  AND trade_id IS NULL
+                """
+            ),
+            {"leg_id": leg},
+        ).mappings().fetchone()
+        if not row:
+            raise MultiLegNotFound("orphan leg not found")
+
+        contract = lookup_contract(journal_contract_index(), row.get("instrument_key"))
+        instrument = str((contract or {}).get("instrument") or "").strip().upper() or None
+        if not instrument:
+            raise MultiLegValidationError(
+                "Could not resolve the underlying for this orphan. Assign it to an existing trade instead."
+            )
+
+        expiry = _parse_date(row.get("leg_expiry_date")) or _parse_date((contract or {}).get("expiry"))
+        if expiry is None:
+            raise MultiLegValidationError("orphan leg is missing expiry")
+        entry_dt = _parse_dt(row.get("entry_time"))
+        entry_date = entry_dt.astimezone(IST).date() if entry_dt is not None else datetime.now(IST).date()
+        try:
+            strike = float(row["strike_price"]) if row.get("strike_price") is not None else None
+        except (TypeError, ValueError):
+            strike = None
+        if strike is None or strike <= 0:
+            raise MultiLegValidationError("orphan leg is missing strike")
+
+        spots = _spot_prices([instrument])
+        spot = spots.get(instrument)
+        if spot is None or spot <= 0:
+            spot = float(strike)
+
+        trade_id = str(uuid.uuid4())
+        trade_no = allocate_trade_no(db)
+        db.execute(
+            text(
+                """
+                INSERT INTO multi_leg_trades (
+                    id, trade_type, instrument, spot_price_entry, entry_date, expiry_date,
+                    status, total_pnl, trade_no
+                ) VALUES (
+                    CAST(:id AS uuid), 'LADDER', :instrument, :spot, :entry_date, :expiry_date,
+                    'ACTIVE', NULL, :trade_no
+                )
+                """
+            ),
+            {
+                "id": trade_id,
+                "instrument": instrument,
+                "spot": spot,
+                "entry_date": entry_date,
+                "expiry_date": expiry,
+                "trade_no": trade_no,
+            },
+        )
+        result = db.execute(
+            text(
+                """
+                UPDATE multi_leg_trade_legs
+                SET trade_id = CAST(:trade_id AS uuid),
+                    qualifier = 'MAIN',
+                    sort_order = 0,
+                    updated_at = NOW()
+                WHERE id = CAST(:leg_id AS uuid)
+                  AND trade_id IS NULL
+                """
+            ),
+            {"trade_id": trade_id, "leg_id": leg},
+        )
+        if getattr(result, "rowcount", 0) == 0:
+            raise MultiLegNotFound("orphan leg not found")
+        db.commit()
+    except (MultiLegNotFound, MultiLegValidationError):
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    _refresh_subscriptions()
+    return {
+        "ok": True,
+        "leg_id": leg,
+        "trade_id": trade_id,
+        "trade_no": trade_no,
+        "trade_type": "LADDER",
+        "instrument": instrument,
+    }
