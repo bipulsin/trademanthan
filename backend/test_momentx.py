@@ -1,0 +1,211 @@
+"""Unit tests for MomentX indicators, Stage-1 filter, EMA order, trigger."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import pytz
+
+from backend.services.momentx.config import MomentXConfig
+from backend.services.momentx.filter import evaluate_stage1
+from backend.services.momentx.indicators import (
+    ema_last,
+    ema_series,
+    is_ema_trigger,
+    order_emas_by_value,
+    sma,
+    wilder_adx,
+    wilder_rsi,
+    williams_r,
+)
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def test_sma_basic():
+    assert sma([1, 2, 3, 4, 5], 5) == 3.0
+    assert sma([1, 2, 3], 5) is None
+
+
+def test_ema_series_seed():
+    closes = [10.0, 11.0, 12.0, 13.0, 14.0]
+    series = ema_series(closes, 3)
+    assert len(series) == 5
+    assert series[0] == 10.0
+    assert ema_last(closes, 3) == series[-1]
+
+
+def test_wilder_rsi_known_ramp():
+    # Strictly rising closes → RSI near 100
+    closes = [float(i) for i in range(1, 30)]
+    rsi = wilder_rsi(closes, 14)
+    assert rsi is not None
+    assert rsi > 70
+
+
+def test_wilder_rsi_flat():
+    closes = [50.0] * 30
+    rsi = wilder_rsi(closes, 14)
+    assert rsi is not None
+    assert 45 <= rsi <= 55
+
+
+def test_williams_r_at_high():
+    # Close at period high → Williams %R near 0
+    highs = [10 + i * 0.1 for i in range(20)]
+    lows = [9 + i * 0.1 for i in range(20)]
+    closes = list(highs)
+    wr = williams_r(highs, lows, closes, 14)
+    assert wr is not None
+    assert wr >= -5
+
+
+def test_williams_r_at_low():
+    highs = [100.0] * 20
+    lows = [90.0] * 20
+    closes = [90.0] * 20
+    wr = williams_r(highs, lows, closes, 14)
+    assert wr is not None
+    assert wr <= -95
+
+
+def test_adx_trending():
+    # Strong uptrend: rising highs/lows/closes
+    n = 80
+    highs, lows, closes = [], [], []
+    for i in range(n):
+        c = 100 + i * 0.5
+        closes.append(c)
+        highs.append(c + 1)
+        lows.append(c - 1)
+    adx = wilder_adx(highs, lows, closes, 14)
+    assert adx is not None
+    assert adx > 20
+
+
+def test_order_emas_highest_to_lowest():
+    ordered = order_emas_by_value(10.0, 12.0, 8.0)
+    assert [x[0] for x in ordered] == ["EMA(15)", "EMA(5)", "EMA(50)"]
+    assert [x[1] for x in ordered] == [12.0, 10.0, 8.0]
+
+
+def test_ema_trigger_condition():
+    assert is_ema_trigger(12.0, 10.0, 9.0) is True
+    assert is_ema_trigger(10.0, 12.0, 9.0) is False
+    assert is_ema_trigger(12.0, 10.0, 13.0) is False
+    assert is_ema_trigger(None, 10.0, 9.0) is False
+
+
+def _bar(day_offset: int, close: float, volume: float = 1_000_000, *, minute: int = 0):
+    ts = IST.localize(datetime(2026, 3, 10, 9, 15) + timedelta(days=day_offset, minutes=minute))
+    return {
+        "timestamp": ts.isoformat(),
+        "open": close,
+        "high": close + 1,
+        "low": close - 1,
+        "close": close,
+        "volume": volume,
+    }
+
+
+def test_stage1_qualifies_when_all_pass():
+    # Build 220 completed daily bars ending yesterday; price below SMA200 but +2% day.
+    daily = []
+    for i in range(220):
+        # Flat history around 100, then yesterday close 100
+        daily.append(_bar(i - 220, 100.0, volume=1_000_000))
+    # Today partial daily
+    daily.append(_bar(0, 102.0, volume=6_000_000))
+
+    # 15m bars: strong trend so RSI/ADX/Williams pass; last close 102 (= +2%)
+    m15 = []
+    base = IST.localize(datetime(2026, 3, 9, 9, 15))
+    for i in range(120):
+        c = 95.0 + i * 0.06
+        ts = base + timedelta(minutes=15 * i)
+        m15.append(
+            {
+                "timestamp": ts.isoformat(),
+                "open": c - 0.1,
+                "high": c + 0.5,
+                "low": c - 0.5,
+                "close": c,
+                "volume": 50_000,
+            }
+        )
+    # Force last closed close to 102 for pct-change
+    m15[-1]["close"] = 102.0
+    m15[-1]["high"] = 103.0
+    m15[-1]["low"] = 101.0
+
+    cfg = MomentXConfig(
+        sma_period=200,
+        rsi_min=50.0,
+        adx_min=10.0,
+        williams_min=-80.0,
+        pct_change_min=1.0,
+        pct_change_max=3.0,
+        minutes15_min_bars=50,
+        volume_sma_days=5,
+        time_adjusted_volume=False,
+    )
+    now = IST.localize(datetime(2026, 3, 10, 14, 0))
+    ev = evaluate_stage1(daily=daily, minutes15=m15, price=102.0, now=now, cfg=cfg)
+    assert ev.get("skip_reason") is None
+    assert ev["pct_change"] is not None
+    assert 1.0 <= ev["pct_change"] <= 3.0
+    assert "conditions" in ev
+    assert ev["conditions"]["pct_in_band"] is True
+    # Flat daily SMA ≈ 100; price 102 is ABOVE SMA200.
+    assert ev["conditions"]["below_sma200"] is False
+    # Price below SMA but negative day change fails the +1..+3 band.
+    ev2 = evaluate_stage1(daily=daily, minutes15=m15, price=98.0, now=now, cfg=cfg)
+    assert ev2["conditions"]["below_sma200"] is True
+    assert ev2["conditions"]["pct_in_band"] is False
+
+
+def test_stage1_pct_and_volume_gates():
+    daily = [_bar(i - 210, 100.0, volume=1_000_000) for i in range(210)]
+    daily.append(_bar(0, 102.0, volume=8_000_000))
+    m15 = []
+    base = IST.localize(datetime(2026, 3, 5, 9, 15))
+    for i in range(110):
+        c = 100.0 + (i % 5) * 0.2
+        ts = base + timedelta(minutes=15 * i)
+        m15.append(
+            {
+                "timestamp": ts.isoformat(),
+                "open": c,
+                "high": c + 1,
+                "low": c - 1,
+                "close": c,
+                "volume": 80_000,
+            }
+        )
+    # Put several bars on "today" 2026-03-10
+    today_base = IST.localize(datetime(2026, 3, 10, 9, 15))
+    for i in range(10):
+        m15.append(
+            {
+                "timestamp": (today_base + timedelta(minutes=15 * i)).isoformat(),
+                "open": 101.5,
+                "high": 102.5,
+                "low": 101.0,
+                "close": 102.0,
+                "volume": 900_000,
+            }
+        )
+    cfg = MomentXConfig(
+        sma_period=200,
+        rsi_min=0.0,
+        adx_min=0.0,
+        williams_min=-100.0,
+        minutes15_min_bars=50,
+        volume_sma_days=5,
+        time_adjusted_volume=False,
+    )
+    now = IST.localize(datetime(2026, 3, 10, 12, 0))
+    ev = evaluate_stage1(daily=daily, minutes15=m15, price=102.0, now=now, cfg=cfg)
+    assert ev["conditions"]["pct_in_band"] is True
+    assert ev["today_volume"] is not None
+    assert ev["volume_sma5"] is not None
+    assert ev["conditions"]["volume_ok"] is True
