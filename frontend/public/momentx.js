@@ -226,6 +226,17 @@
     $("mxMarket").textContent = "Market: " + ((data && data.market_status) || "—");
     var ready = (data && data.ready) || [];
     $("mxCount").textContent = "Ready: " + ready.length;
+    if (data && data.scan_running && !ready.length) {
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = "Scanning universe (≈3 min first run)… Ready stocks will appear when Stage 1 finishes.";
+      }
+      if (grid) grid.hidden = true;
+      return;
+    }
+    if (empty && !ready.length) {
+      empty.textContent = "No stocks are Ready to Trade right now. The next 15m scan may add some.";
+    }
 
     var nextKnown = {};
     ready.forEach(function (c) {

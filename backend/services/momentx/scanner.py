@@ -183,7 +183,12 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
 
 
 def ensure_scan_if_needed() -> None:
-    """On API/page load: run a scan once if market is open and no result yet."""
+    """On API/page load: kick a background scan if market is open and none yet.
+
+    Runs off-thread so ``GET /ready`` stays fast (~3 min full-universe candle fetch).
+    """
+    import threading
+
     from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
     snap = mx_state.snapshot()
@@ -195,4 +200,12 @@ def ensure_scan_if_needed() -> None:
     if not _session_open():
         mx_state.set_market_status("closed")
         return
-    run_stage1_scan(force=False)
+
+    def _bg() -> None:
+        try:
+            run_stage1_scan(force=False)
+        except Exception:
+            logger.exception("momentx background ensure scan failed")
+
+    mx_state.set_scan_running(True)
+    threading.Thread(target=_bg, name="momentx-ensure-scan", daemon=True).start()
