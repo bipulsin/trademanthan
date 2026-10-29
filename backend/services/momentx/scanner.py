@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,9 @@ from backend.services.momentx.universe import load_momentx_universe
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
+
+# Prevent overlapping ensure/startup scans in one process.
+_SCAN_GATE = threading.Lock()
 
 
 def _session_open(now: Optional[datetime] = None) -> bool:
@@ -187,8 +191,6 @@ def ensure_scan_if_needed() -> None:
 
     Runs off-thread so ``GET /ready`` stays fast (~3 min full-universe candle fetch).
     """
-    import threading
-
     from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
     snap = mx_state.snapshot()
@@ -200,12 +202,26 @@ def ensure_scan_if_needed() -> None:
     if not _session_open():
         mx_state.set_market_status("closed")
         return
+    if not _SCAN_GATE.acquire(blocking=False):
+        return
 
     def _bg() -> None:
         try:
+            # Re-check inside the worker — another path may have finished meanwhile.
+            snap2 = mx_state.snapshot()
+            if snap2.get("scan_at"):
+                return
             run_stage1_scan(force=False)
         except Exception:
             logger.exception("momentx background ensure scan failed")
+        finally:
+            # Clear ensure's optimistic claim even if run_stage1 early-returned.
+            mx_state.set_scan_running(False)
+            try:
+                _SCAN_GATE.release()
+            except RuntimeError:
+                pass
 
+    # Mark running immediately so concurrent /ready polls show "Scanning…" and skip re-queue.
     mx_state.set_scan_running(True)
     threading.Thread(target=_bg, name="momentx-ensure-scan", daemon=True).start()
