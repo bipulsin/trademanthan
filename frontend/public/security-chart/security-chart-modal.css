@@ -1242,3 +1242,47 @@ body[data-theme="light"] .uscm-setup-pop-body input {
 .uscm-setup-save:hover {
     background: #1d4ed8;
 }
+
+
+/* Full screen toggle */
+.uscm-fs-btn {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 1.15rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 6px;
+    margin-left: auto;
+}
+
+.uscm-fs-btn:hover {
+    color: #f8fafc;
+    background: #334155;
+}
+
+.uscm-backdrop.uscm-fullscreen {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.uscm-backdrop.uscm-fullscreen .uscm-panel {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+}
+
+body[data-theme="light"] .uscm-fs-btn {
+    color: #64748b;
+}
+
+body[data-theme="light"] .uscm-fs-btn:hover {
+    color: #0f172a;
+    background: #e2e8f0;
+}

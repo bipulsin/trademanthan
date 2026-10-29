@@ -2,7 +2,7 @@
 (function (global) {
   "use strict";
 
-  var ENGINE_SRC = "security-chart/security-chart-engine.js?v=16";
+  var ENGINE_SRC = "security-chart/security-chart-engine.js?v=17";
 
   function ensureChartEngine() {
     if (global.SecurityChartEngine) return Promise.resolve(global.SecurityChartEngine);

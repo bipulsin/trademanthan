@@ -1,24 +1,28 @@
 /**
- * Reusable oscillator sub-pane (RSI or Williams %R) with upper/lower bands.
+ * Reusable oscillator sub-pane (RSI or Williams %R) with upper/lower bands + zone fill.
  */
 (function (global) {
     'use strict';
 
-    function theme(isDark) {
+    function theme(isDark, kind) {
         if (isDark) {
             return {
-                line: '#a78bfa',
-                band: 'rgba(148, 163, 184, 0.55)',
-                fill: 'rgba(167, 139, 250, 0.12)',
+                line: kind === 'williams' ? '#f472b6' : '#a78bfa',
+                band: 'rgba(148, 163, 184, 0.7)',
+                fillTop: kind === 'williams' ? 'rgba(244, 114, 182, 0.22)' : 'rgba(167, 139, 250, 0.22)',
+                fillBottom: kind === 'williams' ? 'rgba(244, 114, 182, 0.06)' : 'rgba(167, 139, 250, 0.06)',
+                mask: '#0c1210',
                 grid: 'rgba(180, 210, 190, 0.14)',
                 text: '#8fa398',
                 bg: '#0c1210',
             };
         }
         return {
-            line: '#7c3aed',
-            band: 'rgba(100, 116, 139, 0.7)',
-            fill: 'rgba(124, 58, 237, 0.1)',
+            line: kind === 'williams' ? '#db2777' : '#7c3aed',
+            band: 'rgba(100, 116, 139, 0.75)',
+            fillTop: kind === 'williams' ? 'rgba(219, 39, 119, 0.18)' : 'rgba(124, 58, 237, 0.18)',
+            fillBottom: kind === 'williams' ? 'rgba(219, 39, 119, 0.05)' : 'rgba(124, 58, 237, 0.05)',
+            mask: '#f4f7f5',
             grid: 'rgba(40, 70, 55, 0.16)',
             text: '#3d5248',
             bg: '#f4f7f5',
@@ -109,15 +113,30 @@
         } catch (e) { /* */ }
     };
 
+    OscillatorPaneIndicator.prototype.resize = function (w, h) {
+        if (!this.chart) return;
+        try {
+            this.chart.applyOptions({
+                width: w || 400,
+                height: h || 120,
+            });
+        } catch (e) { /* */ }
+    };
+
     OscillatorPaneIndicator.prototype.render = function (opts) {
         const LWC = global.LightweightCharts;
         if (!LWC || !opts || !opts.container) return;
         const bars = opts.bars || [];
         const period = Math.max(2, Math.floor(Number(opts.period) || 14));
-        const upper = Number(opts.upper);
-        const lower = Number(opts.lower);
+        let upper = Number(opts.upper);
+        let lower = Number(opts.lower);
+        if (Number.isFinite(upper) && Number.isFinite(lower) && upper < lower) {
+            const tmp = upper;
+            upper = lower;
+            lower = tmp;
+        }
         const isDark = !!opts.isDark;
-        const colors = theme(isDark);
+        const colors = theme(isDark, this.kind);
         const key = this._cacheKeyFor(bars, period, upper, lower);
         if (key !== this._cacheKey || !this._lineData) {
             this._cacheKey = key;
@@ -154,11 +173,24 @@
                 width: el.clientWidth || 400,
                 height: el.clientHeight || 120,
             });
-            this.series.line = this.chart.addLineSeries({
-                color: this.kind === 'williams' ? '#f472b6' : colors.line,
-                lineWidth: 2,
+            // Zone fill: shade from upper down, then mask everything below lower with bg.
+            this.series.zone = this.chart.addAreaSeries({
+                topColor: colors.fillTop,
+                bottomColor: colors.fillBottom,
+                lineColor: 'transparent',
+                lineWidth: 1,
                 priceLineVisible: false,
-                lastValueVisible: true,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            this.series.zoneMask = this.chart.addAreaSeries({
+                topColor: colors.mask,
+                bottomColor: colors.mask,
+                lineColor: 'transparent',
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
             });
             this.series.upper = this.chart.addLineSeries({
                 color: colors.band,
@@ -166,6 +198,7 @@
                 lineStyle: LWC.LineStyle.Dashed,
                 priceLineVisible: false,
                 lastValueVisible: false,
+                crosshairMarkerVisible: false,
             });
             this.series.lower = this.chart.addLineSeries({
                 color: colors.band,
@@ -173,29 +206,43 @@
                 lineStyle: LWC.LineStyle.Dashed,
                 priceLineVisible: false,
                 lastValueVisible: false,
+                crosshairMarkerVisible: false,
             });
-            if (this.kind === 'rsi') {
-                this.chart.priceScale('right').applyOptions({
-                    scaleMargins: { top: 0.08, bottom: 0.08 },
-                });
-            }
+            this.series.line = this.chart.addLineSeries({
+                color: colors.line,
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+            });
+            this.chart.priceScale('right').applyOptions({
+                scaleMargins: { top: 0.08, bottom: 0.08 },
+            });
         }
 
-        this.series.line.setData(lineData);
+        if (this.series.zone && bandUpper.length) this.series.zone.setData(bandUpper);
+        if (this.series.zoneMask && bandLower.length) this.series.zoneMask.setData(bandLower);
         this.series.upper.setData(bandUpper);
         this.series.lower.setData(bandLower);
+        this.series.line.setData(lineData);
 
-        // Autosize scale range
-        if (this.kind === 'rsi') {
-            this.chart.priceScale('right').applyOptions({ autoScale: true });
-        } else {
-            this.chart.priceScale('right').applyOptions({ autoScale: true });
-        }
-
+        this.chart.priceScale('right').applyOptions({ autoScale: true });
         this.chart.applyOptions({
             width: el.clientWidth || 400,
             height: el.clientHeight || 120,
+            layout: { background: { color: colors.bg }, textColor: colors.text },
         });
+        if (this.series.zoneMask) {
+            this.series.zoneMask.applyOptions({
+                topColor: colors.mask,
+                bottomColor: colors.mask,
+            });
+        }
+        if (this.series.zone) {
+            this.series.zone.applyOptions({
+                topColor: colors.fillTop,
+                bottomColor: colors.fillBottom,
+            });
+        }
 
         if (opts.mainChart && !this._syncUnsub) {
             const self = this;
@@ -224,6 +271,15 @@
             this.kind === 'williams' ? buildWilliams(bars, period) : buildRsi(bars, period);
         if (data.length) {
             this.series.line.update(data[data.length - 1]);
+        }
+        if (bars.length && this.series.zone && opts) {
+            const upper = Number(opts.upper);
+            const lower = Number(opts.lower);
+            const t = bars[bars.length - 1].time;
+            if (Number.isFinite(upper)) this.series.zone.update({ time: t, value: Math.max(upper, lower) });
+            if (this.series.zoneMask && Number.isFinite(lower)) {
+                this.series.zoneMask.update({ time: t, value: Math.min(upper, lower) });
+            }
         }
     };
 

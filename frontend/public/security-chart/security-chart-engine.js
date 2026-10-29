@@ -13,12 +13,12 @@
     const TF_OPTIONS = ['5m', '10m', '15m', '30m', '1hr', '2h', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=13';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=14';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
         'security-chart/indicators/williams-r.js?v=1',
-        'security-chart/indicators/oscillator-pane.js?v=1',
+        'security-chart/indicators/oscillator-pane.js?v=2',
         'security-chart/indicators/movingAverages.js?v=1',
         'security-chart/indicators/hilega-milega.js?v=2',
         'security-chart/indicators/macd-divergence.js?v=2',
@@ -38,7 +38,11 @@
     const EMA_SLOT_DEFAULTS = [9, 30, 100];
     const EMA_COLORS = ['#eab308', '#38bdf8', '#f97316'];
     const RSI_PANE_DEFAULT_PX = 130;
+    const RSI_PANE_MIN_PX = 70;
+    const RSI_PANE_MAX_PX = 360;
     const WR_PANE_DEFAULT_PX = 130;
+    const WR_PANE_MIN_PX = 70;
+    const WR_PANE_MAX_PX = 360;
     const RSI_DEFAULTS = { period: 14, upper: 55, lower: 35 };
     const WR_DEFAULTS = { period: 14, upper: -25, lower: -75 };
     const INTEL_PANEL_MAX_PX = 380;
@@ -658,6 +662,7 @@
         this.wrUpper = WR_DEFAULTS.upper;
         this.wrLower = WR_DEFAULTS.lower;
         this._skipSavedPrefs = false;
+        this._fullscreen = false;
         this.volumeEnabled = true;
         this._crosshairUnsubs = [];
     }
@@ -810,10 +815,14 @@
         const rsiEl = root.querySelector('[data-uscm-rsi-chart]');
         const wrEl = root.querySelector('[data-uscm-wr-chart]');
         function resizeOsc(ind, el) {
-            if (!ind || !ind.chart || !el || !el.clientWidth || !el.clientHeight) return;
+            if (!ind || !el || !el.clientWidth || !el.clientHeight) return;
             try {
-                ind.chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
-                if (selfResize.chart) {
+                if (typeof ind.resize === 'function') {
+                    ind.resize(el.clientWidth, el.clientHeight);
+                } else if (ind.chart) {
+                    ind.chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+                }
+                if (ind.chart && selfResize.chart) {
                     const r = selfResize.chart.timeScale().getVisibleLogicalRange();
                     if (r) ind.chart.timeScale().setVisibleLogicalRange(r);
                 }
@@ -881,6 +890,7 @@
             '<div class="uscm-chg" data-uscm-chg></div>' +
             '</div></div>' +
             '<div class="uscm-tf-group" data-uscm-tf></div>' +
+            '<button type="button" class="uscm-fs-btn" data-uscm-fullscreen aria-label="Full screen" title="Full screen">⛶</button>' +
             '<button type="button" class="uscm-close" data-uscm-close aria-label="Close">&times;</button>' +
             '</header>' +
             '<div class="uscm-body uscm-body--split" data-uscm-split>' +
@@ -925,11 +935,24 @@
         backdrop.querySelector('[data-uscm-close]').addEventListener('click', function () {
             self.close();
         });
+        const fsBtn = backdrop.querySelector('[data-uscm-fullscreen]');
+        if (fsBtn) {
+            fsBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                self.toggleFullscreen();
+            });
+        }
         backdrop.addEventListener('click', function (e) {
             if (e.target === backdrop) self.close();
         });
         global.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && self._open) self.close();
+            if (e.key !== 'Escape' || !self._open) return;
+            if (self._fullscreen) {
+                self.setFullscreen(false);
+                return;
+            }
+            self.close();
         });
         const tfHost = backdrop.querySelector('[data-uscm-tf]');
         TF_OPTIONS.forEach(function (tf) {
@@ -946,6 +969,8 @@
         bindIntelSplitter(backdrop, self);
         bindHmSplitter(backdrop, self);
         bindMdSplitter(backdrop, self);
+        bindRsiSplitter(backdrop, self);
+        bindWrSplitter(backdrop, self);
         bindOverlayControls(backdrop, self);
         bindIndicatorDropdown(backdrop);
         bindOscillatorControlsIfNeeded(backdrop, self);
@@ -956,6 +981,27 @@
     SecurityChartModal.prototype._upgradeChartDom = function () {
         const root = modalRoot;
         if (!root) return;
+
+        if (!root.querySelector('[data-uscm-fullscreen]')) {
+            const closeBtn = root.querySelector('[data-uscm-close]');
+            if (closeBtn) {
+                const fs = document.createElement('button');
+                fs.type = 'button';
+                fs.className = 'uscm-fs-btn';
+                fs.setAttribute('data-uscm-fullscreen', '');
+                fs.setAttribute('aria-label', 'Full screen');
+                fs.setAttribute('title', 'Full screen');
+                fs.textContent = '⛶';
+                const selfFs = this;
+                fs.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selfFs.toggleFullscreen();
+                });
+                closeBtn.parentNode.insertBefore(fs, closeBtn);
+            }
+        }
+
         const indBtn = root.querySelector('[data-uscm-indicator-toggle]');
         if (indBtn) {
             indBtn.textContent = 'fx';
@@ -1065,6 +1111,8 @@
         if (!wrap || wrap.querySelector('[data-uscm-chart-stack]')) {
             bindHmSplitter(root, this);
             bindMdSplitter(root, this);
+            bindRsiSplitter(root, this);
+            bindWrSplitter(root, this);
             bindHmCheckboxIfNeeded(root, this);
             bindMdCheckboxIfNeeded(root, this);
             bindVolumeCheckboxIfNeeded(root, this);
@@ -1108,6 +1156,8 @@
         }
         bindHmSplitter(root, this);
         bindMdSplitter(root, this);
+        bindRsiSplitter(root, this);
+        bindWrSplitter(root, this);
         bindHmCheckboxIfNeeded(root, this);
         bindMdCheckboxIfNeeded(root, this);
         bindVolumeCheckboxIfNeeded(root, this);
@@ -1315,6 +1365,49 @@
         });
     }
 
+
+    function oscPaneBoundaryY(stack, modal, afterKind) {
+        const chain = [
+            {
+                kind: 'md',
+                sel: '[data-uscm-md-splitter]',
+                on: function () {
+                    return !!modal.mdEnabled;
+                },
+            },
+            {
+                kind: 'rsi',
+                sel: '[data-uscm-rsi-splitter]',
+                on: function () {
+                    return !!modal.rsiEnabled;
+                },
+            },
+            {
+                kind: 'wr',
+                sel: '[data-uscm-wr-splitter]',
+                on: function () {
+                    return !!modal.wrEnabled;
+                },
+            },
+        ];
+        const start = { hm: 0, md: 1, rsi: 2, wr: 3 }[afterKind];
+        const from = start == null ? 0 : start;
+        for (let i = from; i < chain.length; i++) {
+            if (!chain[i].on()) continue;
+            const el = stack.querySelector(chain[i].sel);
+            if (el && !el.classList.contains('uscm-hidden')) {
+                return el.getBoundingClientRect().top;
+            }
+        }
+        return stack.getBoundingClientRect().bottom;
+    }
+
+    function clampOscPaneHeight(px, minPx, maxPx, stack) {
+        const stackH = (stack && stack.clientHeight) || 600;
+        const dynamicMax = Math.max(maxPx, Math.floor(stackH * 0.55));
+        return Math.max(minPx, Math.min(dynamicMax, px));
+    }
+
     function bindHmSplitter(root, modalInstance) {
         const splitter = root.querySelector('[data-uscm-hm-splitter]');
         const stack = root.querySelector('[data-uscm-chart-stack]');
@@ -1323,26 +1416,15 @@
 
         let dragging = false;
 
-        function clampHmHeight(px) {
-            return Math.max(HM_PANE_MIN_PX, Math.min(HM_PANE_MAX_PX, px));
-        }
-
         function setHmHeight(px) {
-            modalInstance.hmPaneHeight = clampHmHeight(px);
+            modalInstance.hmPaneHeight = clampOscPaneHeight(
+                px,
+                HM_PANE_MIN_PX,
+                HM_PANE_MAX_PX,
+                stack
+            );
             stack.style.setProperty('--uscm-hm-h', modalInstance.hmPaneHeight + 'px');
             modalInstance._notifyChartResize();
-        }
-
-        function hmBottomY() {
-            const mdSplitter = stack.querySelector('[data-uscm-md-splitter]');
-            if (
-                modalInstance.mdEnabled &&
-                mdSplitter &&
-                !mdSplitter.classList.contains('uscm-hidden')
-            ) {
-                return mdSplitter.getBoundingClientRect().top;
-            }
-            return stack.getBoundingClientRect().bottom;
         }
 
         splitter.addEventListener('pointerdown', function (e) {
@@ -1360,7 +1442,7 @@
 
         splitter.addEventListener('pointermove', function (e) {
             if (!dragging) return;
-            setHmHeight(hmBottomY() - e.clientY);
+            setHmHeight(oscPaneBoundaryY(stack, modalInstance, 'hm') - e.clientY);
         });
 
         function endDrag(e) {
@@ -1388,12 +1470,13 @@
 
         let dragging = false;
 
-        function clampMdHeight(px) {
-            return Math.max(MD_PANE_MIN_PX, Math.min(MD_PANE_MAX_PX, px));
-        }
-
         function setMdHeight(px) {
-            modalInstance.mdPaneHeight = clampMdHeight(px);
+            modalInstance.mdPaneHeight = clampOscPaneHeight(
+                px,
+                MD_PANE_MIN_PX,
+                MD_PANE_MAX_PX,
+                stack
+            );
             stack.style.setProperty('--uscm-md-h', modalInstance.mdPaneHeight + 'px');
             modalInstance._notifyChartResize();
         }
@@ -1413,14 +1496,119 @@
 
         splitter.addEventListener('pointermove', function (e) {
             if (!dragging) return;
-            const sr = stack.getBoundingClientRect();
-            setMdHeight(sr.bottom - e.clientY);
+            setMdHeight(oscPaneBoundaryY(stack, modalInstance, 'md') - e.clientY);
         });
 
         function endDrag(e) {
             if (!dragging) return;
             dragging = false;
             splitter.classList.remove('uscm-md-splitter--active');
+            document.body.classList.remove('uscm-row-resize');
+            try {
+                splitter.releasePointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerup', endDrag);
+        splitter.addEventListener('pointercancel', endDrag);
+    }
+
+    function bindRsiSplitter(root, modalInstance) {
+        const splitter = root.querySelector('[data-uscm-rsi-splitter]');
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        if (!splitter || !stack || splitter._uscmRsiBound) return;
+        splitter._uscmRsiBound = true;
+        let dragging = false;
+
+        function setRsiHeight(px) {
+            modalInstance.rsiPaneHeight = clampOscPaneHeight(
+                px,
+                RSI_PANE_MIN_PX,
+                RSI_PANE_MAX_PX,
+                stack
+            );
+            stack.style.setProperty('--uscm-rsi-h', modalInstance.rsiPaneHeight + 'px');
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerdown', function (e) {
+            if (!root.classList.contains('uscm-panel--rsi')) return;
+            dragging = true;
+            splitter.classList.add('uscm-rsi-splitter--active');
+            try {
+                splitter.setPointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            document.body.classList.add('uscm-row-resize');
+            e.preventDefault();
+        });
+
+        splitter.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            setRsiHeight(oscPaneBoundaryY(stack, modalInstance, 'rsi') - e.clientY);
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            splitter.classList.remove('uscm-rsi-splitter--active');
+            document.body.classList.remove('uscm-row-resize');
+            try {
+                splitter.releasePointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerup', endDrag);
+        splitter.addEventListener('pointercancel', endDrag);
+    }
+
+    function bindWrSplitter(root, modalInstance) {
+        const splitter = root.querySelector('[data-uscm-wr-splitter]');
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        if (!splitter || !stack || splitter._uscmWrBound) return;
+        splitter._uscmWrBound = true;
+        let dragging = false;
+
+        function setWrHeight(px) {
+            modalInstance.wrPaneHeight = clampOscPaneHeight(
+                px,
+                WR_PANE_MIN_PX,
+                WR_PANE_MAX_PX,
+                stack
+            );
+            stack.style.setProperty('--uscm-wr-h', modalInstance.wrPaneHeight + 'px');
+            modalInstance._notifyChartResize();
+        }
+
+        splitter.addEventListener('pointerdown', function (e) {
+            if (!root.classList.contains('uscm-panel--wr')) return;
+            dragging = true;
+            splitter.classList.add('uscm-wr-splitter--active');
+            try {
+                splitter.setPointerCapture(e.pointerId);
+            } catch (err) {
+                /* ignore */
+            }
+            document.body.classList.add('uscm-row-resize');
+            e.preventDefault();
+        });
+
+        splitter.addEventListener('pointermove', function (e) {
+            if (!dragging) return;
+            setWrHeight(oscPaneBoundaryY(stack, modalInstance, 'wr') - e.clientY);
+        });
+
+        function endDrag(e) {
+            if (!dragging) return;
+            dragging = false;
+            splitter.classList.remove('uscm-wr-splitter--active');
             document.body.classList.remove('uscm-row-resize');
             try {
                 splitter.releasePointerCapture(e.pointerId);
@@ -1951,9 +2139,36 @@
         if (el) el.innerHTML = '';
     };
 
+
+    SecurityChartModal.prototype.setFullscreen = function (on) {
+        const root = modalRoot;
+        if (!root) return;
+        this._fullscreen = !!on;
+        root.classList.toggle('uscm-fullscreen', this._fullscreen);
+        const btn = root.querySelector('[data-uscm-fullscreen]');
+        if (btn) {
+            btn.textContent = this._fullscreen ? '❐' : '⛶';
+            btn.setAttribute('aria-label', this._fullscreen ? 'Exit full screen' : 'Full screen');
+            btn.setAttribute('title', this._fullscreen ? 'Exit full screen' : 'Full screen');
+            btn.setAttribute('aria-pressed', this._fullscreen ? 'true' : 'false');
+        }
+        const self = this;
+        requestAnimationFrame(function () {
+            self._notifyChartResize();
+            requestAnimationFrame(function () {
+                self._notifyChartResize();
+            });
+        });
+    };
+
+    SecurityChartModal.prototype.toggleFullscreen = function () {
+        this.setFullscreen(!this._fullscreen);
+    };
+
     SecurityChartModal.prototype.close = function () {
         this._open = false;
         this._openSeq = (this._openSeq || 0) + 1;
+        if (this._fullscreen) this.setFullscreen(false);
         if (this.abortLoad) {
             this.abortLoad.aborted = true;
             this.abortLoad = null;
