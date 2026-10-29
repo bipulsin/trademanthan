@@ -113,9 +113,11 @@ def _run_daily_cache_refresh() -> None:
         return
     try:
         from backend.services.momentx.candles import clear_daily_cache
+        from backend.services.momentx import state as mx_state
 
         clear_daily_cache()
-        logger.info("momentx daily candle cache cleared at market open")
+        mx_state.clear_day_board(reason="market_open")
+        logger.info("momentx daily candle cache + day board cleared at market open")
     except Exception:
         logger.exception("momentx daily cache refresh failed")
 

@@ -209,3 +209,35 @@ def test_stage1_pct_and_volume_gates():
     assert ev["today_volume"] is not None
     assert ev["volume_sma5"] is not None
     assert ev["conditions"]["volume_ok"] is True
+
+
+def test_merge_day_cards_keeps_inactive_and_sorts_active_first():
+    from backend.services.momentx.day_board import merge_day_cards
+
+    prev = [
+        {"stock": "AAA", "active": True, "trigger": False, "first_seen_at": "t0", "ltp": 10},
+        {"stock": "BBB", "active": True, "trigger": True, "first_seen_at": "t1", "ltp": 20},
+    ]
+    qualified = [
+        {"stock": "CCC", "active": True, "trigger": False, "ltp": None},
+        {"stock": "BBB", "active": True, "trigger": True, "ltp": 21},
+    ]
+    stage1 = {"AAA": {"pct_change": 0.5, "conditions": {"pct_in_band": False}}}
+    now = IST.localize(datetime(2026, 3, 10, 12, 0))
+    out = merge_day_cards(
+        prev_cards=prev,
+        qualified_cards=qualified,
+        stage1_by_stock=stage1,
+        now=now,
+    )
+    by = {c["stock"]: c for c in out}
+    assert set(by) == {"AAA", "BBB", "CCC"}
+    assert by["AAA"]["active"] is False
+    assert by["AAA"]["stage1"]["pct_change"] == 0.5
+    assert by["AAA"]["ltp"] == 10
+    assert by["BBB"]["active"] is True
+    assert by["BBB"]["ltp"] == 21
+    assert by["CCC"]["active"] is True
+    assert by["CCC"]["first_seen_at"] == now.isoformat()
+    # Active before inactive; among active, trigger first
+    assert [c["stock"] for c in out] == ["BBB", "CCC", "AAA"]

@@ -12,6 +12,7 @@ import pytz
 from backend.services.momentx import state as mx_state
 from backend.services.momentx.candles import batch_fetch, fetch_daily_cached
 from backend.services.momentx.config import CONFIG
+from backend.services.momentx.day_board import board_date_str, merge_day_cards
 from backend.services.momentx.filter import evaluate_stage1
 from backend.services.momentx.universe import load_momentx_universe
 
@@ -53,8 +54,14 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
     started = time.monotonic()
     skipped: List[str] = []
     qualified: List[Dict[str, Any]] = []
+    stage1_by_stock: Dict[str, Dict[str, Any]] = {}
+    today_iso = board_date_str(now.date())
 
     try:
+        cleared = mx_state.ensure_board_date(today_iso)
+        if cleared:
+            logger.info("momentx day board cleared for new IST date %s", today_iso)
+
         universe = load_momentx_universe()
         equity_keys = [u["equity_instrument_key"] for u in universe]
         logger.info("momentx scan start universe=%s", len(universe))
@@ -103,6 +110,19 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                 if ev.get("skip_reason"):
                     skipped.append(f"{stock}:{ev['skip_reason']}")
                     continue
+                stage1 = {
+                    "price": ev.get("price"),
+                    "sma200": ev.get("sma200"),
+                    "prev_close": ev.get("prev_close"),
+                    "pct_change": ev.get("pct_change"),
+                    "rsi": ev.get("rsi"),
+                    "williams_r": ev.get("williams_r"),
+                    "adx": ev.get("adx"),
+                    "today_volume": ev.get("today_volume"),
+                    "volume_sma5": ev.get("volume_sma5"),
+                    "conditions": ev.get("conditions") or {},
+                }
+                stage1_by_stock[stock.upper()] = stage1
                 if not ev.get("qualified"):
                     continue
                 prev = prev_by_stock.get(stock.upper()) or {}
@@ -111,18 +131,8 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                     "equity_instrument_key": eq,
                     "future_symbol": row["future_symbol"],
                     "future_instrument_key": row["future_instrument_key"],
-                    "stage1": {
-                        "price": ev.get("price"),
-                        "sma200": ev.get("sma200"),
-                        "prev_close": ev.get("prev_close"),
-                        "pct_change": ev.get("pct_change"),
-                        "rsi": ev.get("rsi"),
-                        "williams_r": ev.get("williams_r"),
-                        "adx": ev.get("adx"),
-                        "today_volume": ev.get("today_volume"),
-                        "volume_sma5": ev.get("volume_sma5"),
-                        "conditions": ev.get("conditions") or {},
-                    },
+                    "stage1": stage1,
+                    "active": True,
                     # Preserve Stage-2 fields across rescans when still Ready.
                     "ltp": prev.get("ltp"),
                     "ltp_at": prev.get("ltp_at"),
@@ -140,16 +150,24 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                 skipped.append(f"{stock}:error")
                 logger.info("momentx scan symbol error %s: %s", stock, e, exc_info=True)
 
+        merged = merge_day_cards(
+            prev_cards=list(prev_by_stock.values()),
+            qualified_cards=qualified,
+            stage1_by_stock=stage1_by_stock,
+            now=now,
+        )
+
         duration = time.monotonic() - started
         mx_state.replace_ready(
-            qualified,
+            merged,
             scan_at=now.isoformat(),
             universe_size=len(universe),
             skipped=skipped[:50],
             duration_sec=round(duration, 2),
             error=None,
+            board_date=today_iso,
         )
-        # Refresh futures WS subscriptions for the new Ready set.
+        # Refresh futures WS subscriptions for the day board (active + inactive).
         try:
             from backend.services.momentx.ws_ltp import sync_momentx_subscriptions
 
@@ -157,7 +175,7 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
         except Exception as e:
             logger.info("momentx scan: ws sync failed: %s", e)
 
-        # Kick an immediate EMA refresh for Ready cards.
+        # Kick an immediate EMA refresh for day-board cards.
         try:
             from backend.services.momentx.tracker import refresh_emas
 
@@ -165,10 +183,12 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
         except Exception as e:
             logger.info("momentx scan: ema refresh failed: %s", e)
 
+        active_n = sum(1 for c in merged if c.get("active"))
         summary = {
             "ok": True,
             "universe": len(universe),
-            "qualified": len(qualified),
+            "qualified": active_n,
+            "day_board": len(merged),
             "skipped": len(skipped),
             "duration_sec": round(duration, 2),
         }

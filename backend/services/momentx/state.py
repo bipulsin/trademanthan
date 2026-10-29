@@ -16,10 +16,12 @@ _STATE: Dict[str, Any] = {
     "ema_at": None,
     "market_status": "unknown",
     "universe_size": 0,
-    "qualified_count": 0,
+    "qualified_count": 0,  # currently active (filters pass)
+    "day_count": 0,  # all cards kept for the IST trading day
+    "board_date": None,  # IST YYYY-MM-DD; cleared on new session day
     "scan_duration_sec": None,
     "skipped": [],
-    "ready": [],  # list of card dicts
+    "ready": [],  # day board: active + inactive (grey) cards
     "last_error": None,
     "scan_running": False,
     "ema_running": False,
@@ -55,6 +57,32 @@ def set_last_error(error: Optional[str]) -> None:
         _STATE["last_error"] = error
 
 
+def clear_day_board(*, reason: Optional[str] = None) -> None:
+    """Drop all Ready cards (new IST trading day / market open)."""
+    with _LOCK:
+        _STATE["ready"] = []
+        _STATE["qualified_count"] = 0
+        _STATE["day_count"] = 0
+        _STATE["board_date"] = None
+        if reason:
+            _STATE["last_error"] = None
+
+
+def ensure_board_date(today_iso: str) -> bool:
+    """If the board is from a prior IST day, clear it. Returns True if cleared."""
+    with _LOCK:
+        prev = _STATE.get("board_date")
+        if prev and prev != today_iso:
+            _STATE["ready"] = []
+            _STATE["qualified_count"] = 0
+            _STATE["day_count"] = 0
+            _STATE["board_date"] = today_iso
+            return True
+        if not prev:
+            _STATE["board_date"] = today_iso
+        return False
+
+
 def replace_ready(
     cards: List[Dict[str, Any]],
     *,
@@ -63,14 +91,19 @@ def replace_ready(
     skipped: Optional[List[str]] = None,
     duration_sec: Optional[float] = None,
     error: Optional[str] = None,
+    board_date: Optional[str] = None,
 ) -> None:
     with _LOCK:
-        _STATE["ready"] = list(cards)
-        _STATE["qualified_count"] = len(cards)
+        ready = list(cards)
+        _STATE["ready"] = ready
+        _STATE["qualified_count"] = sum(1 for c in ready if c.get("active", True))
+        _STATE["day_count"] = len(ready)
         _STATE["universe_size"] = int(universe_size)
         _STATE["skipped"] = list(skipped or [])
         _STATE["scan_duration_sec"] = duration_sec
         _STATE["last_error"] = error
+        if board_date is not None:
+            _STATE["board_date"] = board_date
         if scan_at is not None:
             _STATE["scan_at"] = scan_at
         else:

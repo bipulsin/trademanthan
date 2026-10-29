@@ -19,8 +19,14 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
             mx_state.set_last_error(str(e)[:300])
     snap = mx_state.snapshot()
     cards: List[Dict[str, Any]] = list(snap.get("ready") or [])
-    # Stable sort: triggered first, then stock name.
-    cards.sort(key=lambda c: (0 if c.get("trigger") else 1, str(c.get("stock") or "")))
+    # Active first, then triggered, then stock name.
+    cards.sort(
+        key=lambda c: (
+            0 if c.get("active", True) else 1,
+            0 if c.get("trigger") else 1,
+            str(c.get("stock") or ""),
+        )
+    )
     return {
         "ok": True,
         "scan_at": snap.get("scan_at"),
@@ -28,6 +34,8 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
         "market_status": snap.get("market_status"),
         "universe_size": snap.get("universe_size"),
         "qualified_count": snap.get("qualified_count"),
+        "day_count": snap.get("day_count") if snap.get("day_count") is not None else len(cards),
+        "board_date": snap.get("board_date"),
         "scan_duration_sec": snap.get("scan_duration_sec"),
         "scan_running": snap.get("scan_running"),
         "ema_running": snap.get("ema_running"),

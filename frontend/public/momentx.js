@@ -186,20 +186,30 @@
 
   function cardHtml(card) {
     var stock = card.stock || "—";
-    var trigger = !!card.trigger;
+    var active = card.active !== false;
+    var trigger = !!card.trigger && active;
     var dir = card.ltp_dir || "flat";
+    var cls = "mx-card";
+    if (!active) cls += " is-inactive";
+    if (trigger) cls += " is-trigger";
+    var status = active
+      ? '<span class="mx-status-pill is-active">Active</span>'
+      : '<span class="mx-status-pill is-inactive">Filters off</span>';
     return (
-      '<article class="mx-card' + (trigger ? " is-trigger" : "") + '" data-stock="' + esc(stock) + '">' +
+      '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-active="' + (active ? "1" : "0") + '">' +
       '<div class="mx-card-top">' +
         "<div><p class=\"mx-symbol\">" + esc(card.future_symbol || stock) + "</p>" +
-        '<span class="mx-expiry">' + esc(stock) + " · curr mth FUT</span></div>" +
+        '<span class="mx-expiry">' + esc(stock) + " · curr mth FUT</span>" +
+        status +
+        "</div>" +
         '<div class="mx-ltp ' + esc(dir) + '">' + esc(fmtNum(card.ltp)) + "</div>" +
       "</div>" +
       emaStackHtml(card) +
       '<div class="mx-ema-updated">EMA @ ' + esc(fmtTime(card.ema_at)) + "</div>" +
       stage1Html(card.stage1) +
       '<div class="mx-card-actions">' +
-        '<button type="button" class="mx-btn mx-btn-primary mx-take" data-act="take">Take Trade</button>' +
+        '<button type="button" class="mx-btn mx-btn-primary mx-take" data-act="take"' +
+        (active ? "" : " disabled") + ">Take Trade</button>" +
       "</div></article>"
     );
   }
@@ -225,7 +235,10 @@
     $("mxEmaAt").textContent = "5m EMA: " + fmtTime(data && data.ema_at);
     $("mxMarket").textContent = "Market: " + ((data && data.market_status) || "—");
     var ready = (data && data.ready) || [];
-    $("mxCount").textContent = "Ready: " + ready.length;
+    var activeN = ready.filter(function (c) { return c.active !== false; }).length;
+    var dayN = ready.length;
+    $("mxCount").textContent =
+      dayN > 0 ? ("Active: " + activeN + " · Day: " + dayN) : "Ready: 0";
     if (data && data.scan_running && !ready.length) {
       if (empty) {
         empty.hidden = false;
@@ -235,29 +248,18 @@
       return;
     }
     if (empty && !ready.length) {
-      empty.textContent = "No stocks are Ready to Trade right now. The next 15m scan may add some.";
+      empty.textContent = "No stocks on the day board yet. The next 15m scan may add some.";
     }
 
     var nextKnown = {};
     ready.forEach(function (c) {
       var stock = String(c.stock || "").toUpperCase();
       nextKnown[stock] = true;
-      if (c.trigger) {
+      var active = c.active !== false;
+      if (active && c.trigger) {
         playTradeSound(stock);
       } else {
         clearTriggerMemory(stock);
-      }
-    });
-
-    // Animate out cards that dropped
-    var existing = grid.querySelectorAll(".mx-card");
-    existing.forEach(function (el) {
-      var stock = String(el.getAttribute("data-stock") || "").toUpperCase();
-      if (!nextKnown[stock]) {
-        el.classList.add("is-leaving");
-        setTimeout(function () {
-          if (el.parentNode) el.parentNode.removeChild(el);
-        }, 360);
       }
     });
 
@@ -269,6 +271,7 @@
     }
     empty.hidden = true;
     grid.hidden = false;
+    // Full re-render keeps active cards on top (API sort) without removing day cards.
     grid.innerHTML = ready.map(cardHtml).join("");
     knownStocks = nextKnown;
   }
