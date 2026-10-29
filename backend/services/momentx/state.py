@@ -50,6 +50,11 @@ def set_ema_running(flag: bool) -> None:
         _STATE["ema_running"] = bool(flag)
 
 
+def set_last_error(error: Optional[str]) -> None:
+    with _LOCK:
+        _STATE["last_error"] = error
+
+
 def replace_ready(
     cards: List[Dict[str, Any]],
     *,

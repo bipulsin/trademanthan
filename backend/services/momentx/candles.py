@@ -22,9 +22,10 @@ def clear_daily_cache() -> None:
 
 
 def _upstox():
+    from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
-    return UpstoxService()
+    return UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
 
 
 def _parse_ts(ts: Any) -> Optional[datetime]:

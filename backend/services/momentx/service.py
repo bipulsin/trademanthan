@@ -12,8 +12,11 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
     if ensure:
         try:
             ensure_scan_if_needed()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).exception("momentx ensure_scan_if_needed failed: %s", e)
+            mx_state.set_last_error(str(e)[:300])
     snap = mx_state.snapshot()
     cards: List[Dict[str, Any]] = list(snap.get("ready") or [])
     # Stable sort: triggered first, then stock name.

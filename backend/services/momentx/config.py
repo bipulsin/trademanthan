@@ -18,9 +18,9 @@ class MomentXConfig:
     adx_period: int = 14
     adx_min: float = 30.0
     volume_sma_days: int = 5
-    # Literal rule (default): today cumulative vol vs plain 5-day full-day average.
-    # When True: compare vs average of prior days' volume up to the same clock time.
-    time_adjusted_volume: bool = False
+    # Compare today cumulative vol vs prior days. True = same clock time of day
+    # (fair intraday). False = full-day 5d average (rarely passes before close).
+    time_adjusted_volume: bool = True
 
     # Candle fetch windows
     daily_days_back: int = 420  # calendar days for ~200 trading sessions + buffer

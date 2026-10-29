@@ -55,16 +55,34 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
         equity_keys = [u["equity_instrument_key"] for u in universe]
         logger.info("momentx scan start universe=%s", len(universe))
 
-        # Daily cache per symbol (shared for the day).
+        # Daily candles (process cache inside fetch_daily_cached) then 15m bars.
         daily_by_ik: Dict[str, List[Dict[str, Any]]] = {}
-        for ik in equity_keys:
-            daily_by_ik[ik] = fetch_daily_cached(ik)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=CONFIG.candle_workers) as pool:
+            futs = {pool.submit(fetch_daily_cached, ik): ik for ik in equity_keys}
+            for fut in as_completed(futs):
+                ik = futs[fut]
+                try:
+                    daily_by_ik[ik] = fut.result() or []
+                except Exception as e:
+                    logger.info("momentx daily fetch failed %s: %s", ik, e)
+                    daily_by_ik[ik] = []
 
         m15_by_ik = batch_fetch(
             equity_keys,
             "minutes/15",
             CONFIG.minutes15_days_back,
             max_workers=CONFIG.candle_workers,
+        )
+        daily_ok = sum(1 for v in daily_by_ik.values() if len(v) >= CONFIG.sma_period)
+        m15_ok = sum(1 for v in m15_by_ik.values() if len(v) >= CONFIG.minutes15_min_bars)
+        logger.info(
+            "momentx candles ready daily_ok=%s/%s m15_ok=%s/%s",
+            daily_ok,
+            len(equity_keys),
+            m15_ok,
+            len(equity_keys),
         )
 
         prev_by_stock = {
