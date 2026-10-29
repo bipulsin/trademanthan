@@ -9,6 +9,7 @@
   var soundOn = false;
   var pollTimer = null;
   var knownStocks = {};
+  var cardsByStock = {};
   var pendingTrade = null;
   var audioUnlocked = false;
 
@@ -218,7 +219,8 @@
     return (
       '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-status="' + esc(status) + '">' +
       '<div class="mx-card-top">' +
-        "<div><p class=\"mx-symbol\">" + esc(card.future_symbol || stock) + "</p>" +
+        "<div><button type=\"button\" class=\"mx-sym-link mx-symbol\" data-act=\"chart\">" +
+          esc(card.future_symbol || stock) + "</button>" +
         '<div class="mx-lot-row">' + lot + pill + "</div>" +
         "</div>" +
         '<div class="mx-ltp ' + esc(dir) + '">' + esc(fmtNum(card.ltp)) + "</div>" +
@@ -295,6 +297,35 @@
     // Full re-render keeps active cards on top (API sort) without removing day cards.
     grid.innerHTML = ready.map(cardHtml).join("");
     knownStocks = nextKnown;
+    cardsByStock = {};
+    ready.forEach(function (c) {
+      cardsByStock[String(c.stock || "").toUpperCase()] = c;
+    });
+  }
+
+  function toLocalInputNow() {
+    try {
+      var d = new Date();
+      var parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(d);
+      var map = {};
+      parts.forEach(function (p) { map[p.type] = p.value; });
+      return map.year + "-" + map.month + "-" + map.day + "T" + map.hour + ":" + map.minute;
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function fromLocalInput(v) {
+    if (!v) return null;
+    return String(v) + ":00+05:30";
   }
 
   async function loadReady() {
@@ -324,11 +355,16 @@
     var body =
       "Symbol: " + (card.future_symbol || card.stock) + "\n" +
       "Stock: " + (card.stock || "—") + "\n" +
+      "Lot: " + (card.lot_size != null ? card.lot_size : "—") + "\n" +
       "LTP: " + fmtNum(card.ltp) + "\n" +
       "EMA(5): " + fmtNum(card.ema5) + "\n" +
       "EMA(15): " + fmtNum(card.ema15) + "\n" +
       "EMA(50): " + fmtNum(card.ema50);
     $("mxTradeBody").textContent = body;
+    var ltp = card.ltp != null ? Number(card.ltp) : "";
+    $("mxTradeEntryPrice").value = ltp;
+    $("mxTradeExitPrice").value = ltp;
+    $("mxTradeEntryTime").value = toLocalInputNow();
     $("mxTradeModal").hidden = false;
   }
 
@@ -339,11 +375,23 @@
 
   async function confirmTrade() {
     if (!pendingTrade) return;
+    var entryPrice = $("mxTradeEntryPrice").value === "" ? null : Number($("mxTradeEntryPrice").value);
+    var entryTime = fromLocalInput($("mxTradeEntryTime").value);
+    var exitPrice = pendingTrade.ltp != null ? Number(pendingTrade.ltp) : null;
+    if (entryPrice != null && (exitPrice == null || Number.isNaN(exitPrice))) {
+      exitPrice = entryPrice;
+    }
+    $("mxTradeExitPrice").value = exitPrice != null ? exitPrice : "";
     var body = {
       stock: pendingTrade.stock,
       future_symbol: pendingTrade.future_symbol,
       future_instrument_key: pendingTrade.future_instrument_key,
+      lot_size: pendingTrade.lot_size,
       ltp: pendingTrade.ltp,
+      entry_price: entryPrice,
+      entry_time: entryTime,
+      exit_price: exitPrice,
+      exit_time: entryTime,
       ema5: pendingTrade.ema5,
       ema15: pendingTrade.ema15,
       ema50: pendingTrade.ema50,
@@ -375,27 +423,36 @@
     });
 
     $("mxGrid").addEventListener("click", function (ev) {
+      var chartBtn = ev.target.closest("[data-act='chart']");
+      if (chartBtn) {
+        var cardEl0 = chartBtn.closest(".mx-card");
+        var stock0 = cardEl0 ? cardEl0.getAttribute("data-stock") : "";
+        var card0 = cardsByStock[String(stock0 || "").toUpperCase()] || {};
+        if (typeof openMomentxChart === "function") {
+          openMomentxChart({
+            instrumentKey: card0.future_instrument_key,
+            displaySymbol: card0.future_symbol || stock0,
+            stock: stock0,
+          });
+        }
+        return;
+      }
       var btn = ev.target.closest("[data-act='take']");
-      if (!btn) return;
+      if (!btn || btn.disabled) return;
       var cardEl = btn.closest(".mx-card");
       if (!cardEl) return;
       var stock = cardEl.getAttribute("data-stock");
-      // Re-read from current DOM payload via data attributes is limited; fetch from last render by stock text.
+      var live = cardsByStock[String(stock || "").toUpperCase()];
+      if (live) {
+        openTradeModal(live);
+        return;
+      }
       var label = cardEl.querySelector(".mx-symbol");
       var ltpEl = cardEl.querySelector(".mx-ltp");
-      var emas = cardEl.querySelectorAll(".mx-ema-row");
-      var emaMap = {};
-      emas.forEach(function (row) {
-        var spans = row.querySelectorAll("span");
-        if (spans.length >= 2) emaMap[spans[0].textContent.trim()] = Number(String(spans[1].textContent).replace(/,/g, ""));
-      });
       openTradeModal({
         stock: stock,
         future_symbol: label ? label.textContent : stock,
         ltp: ltpEl ? Number(String(ltpEl.textContent).replace(/,/g, "")) : null,
-        ema5: emaMap["EMA(5)"],
-        ema15: emaMap["EMA(15)"],
-        ema50: emaMap["EMA(50)"],
       });
     });
 

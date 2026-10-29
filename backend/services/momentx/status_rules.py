@@ -50,11 +50,30 @@ def _parse_iso(iso: Any) -> Optional[datetime]:
 def activate_card(card: Dict[str, Any], now: datetime) -> None:
     """Mark card Active and stamp first/current activation times."""
     now_iso = now.isoformat()
+    was_first = not card.get("first_active_at")
     card["status"] = STATUS_ACTIVE
     card["active"] = True
     card["active_since"] = now_iso
-    if not card.get("first_active_at"):
+    if was_first:
         card["first_active_at"] = now_iso
+    try:
+        from backend.services.momentx.persistence import record_activation
+
+        lot = card.get("lot_size")
+        try:
+            lot_i = int(lot) if lot is not None else None
+        except (TypeError, ValueError):
+            lot_i = None
+        record_activation(
+            stock=str(card.get("stock") or ""),
+            future_symbol=card.get("future_symbol"),
+            future_instrument_key=card.get("future_instrument_key"),
+            lot_size=lot_i,
+            ltp=card.get("ltp") or ((card.get("stage1") or {}).get("price")),
+            activated_at=now,
+        )
+    except Exception:
+        pass
 
 
 def apply_status_to_card(

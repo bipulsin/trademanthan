@@ -1,10 +1,12 @@
-"""MomentX API — Ready-to-Trade list + manual scan/EMA triggers."""
+"""MomentX API — Ready list, trade log, chart data, scan triggers."""
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -21,14 +23,35 @@ def _auth_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db
     return get_user_from_token(token, db)
 
 
+def _parse_date(s: Optional[str]) -> Optional[date]:
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(str(s)[:10])
+    except Exception:
+        return None
+
+
 class TakeTradeBody(BaseModel):
     stock: str = Field(..., min_length=1)
     future_symbol: Optional[str] = None
     future_instrument_key: Optional[str] = None
+    lot_size: Optional[int] = None
     ltp: Optional[float] = None
+    entry_price: Optional[float] = None
+    entry_time: Optional[str] = None
+    exit_price: Optional[float] = None
+    exit_time: Optional[str] = None
     ema5: Optional[float] = None
     ema15: Optional[float] = None
     ema50: Optional[float] = None
+
+
+class EditTradeBody(BaseModel):
+    entry_price: Optional[float] = None
+    entry_time: Optional[str] = None
+    exit_price: Optional[float] = None
+    exit_time: Optional[str] = None
 
 
 @router.get("/ready")
@@ -42,8 +65,6 @@ def trigger_scan(
     background_tasks: BackgroundTasks,
     _user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
-    """Kick a Stage-1 scan in the background (market-hours only unless forced by job)."""
-
     def _run() -> None:
         from backend.services.momentx.scanner import run_stage1_scan
 
@@ -69,5 +90,59 @@ def trigger_ema(
 
 @router.post("/take-trade")
 def take_trade(body: TakeTradeBody, _user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    """Confirm Take Trade — logs only; does not place an order."""
+    """Confirm Take Trade — logs entry/exit into momentx day log (no broker order)."""
     return take_trade_log(body.model_dump())
+
+
+@router.get("/log")
+def trade_log(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    from backend.services.momentx.persistence import fetch_log
+
+    return fetch_log(date_from=_parse_date(date_from), date_to=_parse_date(date_to))
+
+
+@router.get("/log.csv")
+def trade_log_csv(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    _user: User = Depends(_auth_user),
+) -> Response:
+    from backend.services.momentx.persistence import log_csv
+
+    fname, body = log_csv(date_from=_parse_date(date_from), date_to=_parse_date(date_to))
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.patch("/log/{row_id}")
+def edit_trade_log(
+    row_id: int,
+    body: EditTradeBody,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    from backend.services.momentx.persistence import update_trade_fields
+
+    return update_trade_fields(row_id, body.model_dump(exclude_unset=True))
+
+
+@router.get("/chart")
+def chart_data(
+    instrument_key: str = Query(..., min_length=3),
+    interval: str = Query("minutes/5"),
+    days_back: int = Query(10, ge=2, le=60),
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    from backend.services.momentx.chart_data import build_chart_payload
+
+    return build_chart_payload(
+        instrument_key=instrument_key,
+        interval=interval,
+        days_back=int(days_back),
+    )

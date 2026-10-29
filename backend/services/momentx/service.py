@@ -47,18 +47,22 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
 
 
 def take_trade_log(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Record a Take Trade confirmation (no order placement)."""
+    """Record a Take Trade confirmation (no order placement) into the day log."""
     import logging
+
+    from backend.services.momentx.persistence import record_take_trade
 
     logger = logging.getLogger(__name__)
     stock = str((payload or {}).get("stock") or "").strip().upper()
     logger.info(
-        "momentx take_trade stock=%s future=%s ltp=%s ema5=%s ema15=%s ema50=%s",
+        "momentx take_trade stock=%s future=%s entry=%s exit=%s ltp=%s",
         stock,
         (payload or {}).get("future_symbol"),
+        (payload or {}).get("entry_price"),
+        (payload or {}).get("exit_price"),
         (payload or {}).get("ltp"),
-        (payload or {}).get("ema5"),
-        (payload or {}).get("ema15"),
-        (payload or {}).get("ema50"),
     )
-    return {"ok": True, "logged": True, "stock": stock}
+    result = record_take_trade(payload or {})
+    result["logged"] = bool(result.get("ok"))
+    result["stock"] = stock
+    return result

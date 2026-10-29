@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>MomentX Trade Log - TradeWithCTO</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+  <script src="auth-check.js?v=1"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="settings.css?v=2" />
+  <link rel="stylesheet" href="left-menu.css?v=3.48" />
+  <link rel="stylesheet" href="theme.css?v=1.4" />
+  <link rel="stylesheet" href="momentx.css?v=1.5" />
+</head>
+<body class="momentx-page theme-page left-menu-web-hamburger" data-theme="dark">
+  <div class="mobile-title-bar">
+    <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+    <div class="mobile-title-content">
+      <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
+      <h1 class="mobile-title">MomentX Log</h1>
+    </div>
+  </div>
+  <div class="app-container app-with-left-menu">
+    <div id="left-menu-container"></div>
+    <main class="right-panel main-content-area">
+      <div class="mx-page">
+        <header class="mx-head">
+          <div>
+            <h1 class="mx-page-title"><i class="fas fa-book" aria-hidden="true"></i> MomentX Trade Log</h1>
+          </div>
+          <div class="mx-meta">
+            <a class="mx-btn" href="momentx.html"><i class="fas fa-bolt"></i> MomentX</a>
+            <label class="mx-filter-label">From
+              <input type="date" id="mxLogFrom" class="mx-input" />
+            </label>
+            <label class="mx-filter-label">To
+              <input type="date" id="mxLogTo" class="mx-input" />
+            </label>
+            <button type="button" class="mx-btn mx-btn-primary" id="mxLogReload"><i class="fas fa-sync-alt"></i> Load</button>
+            <button type="button" class="mx-btn" id="mxLogCsv"><i class="fas fa-download"></i> CSV</button>
+          </div>
+        </header>
+
+        <div id="mxLogLoading" class="mx-status">Loading trade log…</div>
+        <div id="mxLogError" class="mx-status mx-error" hidden></div>
+        <div id="mxLogEmpty" class="mx-status" hidden>No filtered symbols in this date range.</div>
+        <div id="mxLogRoot" class="mx-log-root" hidden></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="mx-modal" id="mxLogEditModal" hidden>
+    <div class="mx-modal-card" role="dialog" aria-modal="true">
+      <h2>Edit trade</h2>
+      <div class="mx-form-grid">
+        <label>Entry price <input type="number" step="0.01" id="mxEditEntryPrice" class="mx-input" /></label>
+        <label>Entry time <input type="datetime-local" id="mxEditEntryTime" class="mx-input" /></label>
+        <label>Exit price <input type="number" step="0.01" id="mxEditExitPrice" class="mx-input" /></label>
+        <label>Exit time <input type="datetime-local" id="mxEditExitTime" class="mx-input" /></label>
+      </div>
+      <div class="mx-modal-actions">
+        <button type="button" class="mx-btn" id="mxEditCancel">Cancel</button>
+        <button type="button" class="mx-btn mx-btn-primary" id="mxEditSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="left-menu.js?v=3.52"></script>
+  <script src="momentx-chart.js?v=1.0"></script>
+  <script src="momentxlog.js?v=1.0"></script>
+</body>
+</html>

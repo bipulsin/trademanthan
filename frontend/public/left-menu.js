@@ -63,6 +63,7 @@ class LeftMenu {
         if (path.includes('kavachIgnitionDiag')) return 'kavachIgnitionDiag';
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
+        if (path.includes('momentxlog')) return 'momentx';
         if (path.includes('momentx')) return 'momentx';
         if (path.includes('breakfast')) return 'breakfast';
         if (path.toLowerCase().includes('multilegoptions')) return 'multilegoptions';
