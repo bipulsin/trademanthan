@@ -306,7 +306,8 @@
     var bg = cssVar("--bg1", "#121a17");
     var green = cssVar("--accent", "#3dba7a");
     var red = cssVar("--danger", "#e06b6b");
-    var spotColor = cssVar("--warn", "#d4a017");
+    // Bright orange so the current-price marker stays readable on the dark chart.
+    var spotColor = "#f59e0b";
     var padL = 52;
     var padR = 12;
     var padT = 26;
@@ -447,23 +448,44 @@
     var spot = num(model.spot);
     if (spot != null && spot > 0) {
       var sxLine = mapX(spot, result, padL, padR, width);
+      ctx.save();
       ctx.strokeStyle = spotColor;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
       ctx.beginPath();
       ctx.moveTo(sxLine, padT);
       ctx.lineTo(sxLine, height - padB);
       ctx.stroke();
+      ctx.setLineDash([]);
+      // Orange marker on the price axis.
+      ctx.fillStyle = spotColor;
+      ctx.beginPath();
+      ctx.moveTo(sxLine, height - padB);
+      ctx.lineTo(sxLine - 5, height - padB + 8);
+      ctx.lineTo(sxLine + 5, height - padB + 8);
+      ctx.closePath();
+      ctx.fill();
       var name = String(model.instrument || "").trim().toUpperCase();
-      var label = (name ? name + " Spot: " : "Spot: ") + spotText(spot);
+      var label = (name ? name + " " : "") + spotText(spot);
       ctx.font = '600 12px "IBM Plex Mono", ui-monospace, monospace';
-      var labelW = ctx.measureText(label).width + 10;
+      var labelW = ctx.measureText(label).width + 12;
       var labelX = Math.max(padL, Math.min(sxLine - labelW / 2, width - padR - labelW));
-      ctx.fillStyle = bg;
-      ctx.fillRect(labelX, 4, labelW, 16);
+      ctx.fillStyle = "rgba(18, 26, 23, 0.92)";
+      ctx.strokeStyle = spotColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") {
+        ctx.roundRect(labelX, 3, labelW, 18, 4);
+      } else {
+        ctx.rect(labelX, 3, labelW, 18);
+      }
+      ctx.fill();
+      ctx.stroke();
       ctx.fillStyle = spotColor;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
-      ctx.fillText(label, labelX + 5, 6);
+      ctx.fillText(label, labelX + 6, 6);
+      ctx.restore();
     }
   }
 

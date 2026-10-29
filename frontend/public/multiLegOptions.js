@@ -2143,13 +2143,24 @@
     return row;
   }
 
+  function tradeCurrentPrice(trade) {
+    if (!trade) return null;
+    if (trade.spot_ltp != null && !isNaN(Number(trade.spot_ltp)) && Number(trade.spot_ltp) > 0) {
+      return Number(trade.spot_ltp);
+    }
+    if (trade.future_ltp != null && !isNaN(Number(trade.future_ltp)) && Number(trade.future_ltp) > 0) {
+      return Number(trade.future_ltp);
+    }
+    return null;
+  }
+
   function paintTradePayoff(trade, force) {
     if (!trade || !window.MultiLegPayoff) return;
     var host = document.querySelector('[data-payoff="' + trade.id + '"]');
     if (!host) return;
     var body = host.closest(".mlo-row-body");
     if (body && body.hidden) return;
-    var spot = trade.spot_ltp;
+    var spot = tradeCurrentPrice(trade);
     var snap = payoffSnapshot(String(trade.id), spot, trade.total_pnl, force);
     window.MultiLegPayoff.renderPayoff(host, {
       legs: isLadderType(trade.trade_type) ? ladderPayoffLegs(trade.legs || []) : (trade.legs || []),
@@ -2185,7 +2196,8 @@
     var inst = $("mloInstrument").value.trim().toUpperCase();
     if (editingId) {
       var trade = tradeById(editingId);
-      if (trade && trade.spot_ltp != null && !isNaN(Number(trade.spot_ltp))) return Number(trade.spot_ltp);
+      var fromTrade = tradeCurrentPrice(trade);
+      if (fromTrade != null) return fromTrade;
     }
     if (lastInstrumentSpot[inst] != null) return lastInstrumentSpot[inst];
     return null;
