@@ -651,6 +651,12 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                     on_upstox_multi_leg_tick(ik, ltp=float(eff_ltp), now=now_ist)
                 except Exception as ml_exc:
                     logger.debug("upstox_market_feed: multi_leg tick skipped %s: %s", ik, ml_exc)
+                try:
+                    from backend.services.momentx.ws_ltp import on_upstox_momentx_tick
+
+                    on_upstox_momentx_tick(ik, ltp=float(eff_ltp), now=now_ist)
+                except Exception as mx_exc:
+                    logger.debug("upstox_market_feed: momentx tick skipped %s: %s", ik, mx_exc)
 
 
 def _decode_and_ingest(binary: bytes) -> None:

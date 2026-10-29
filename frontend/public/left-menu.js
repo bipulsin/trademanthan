@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|momentx|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
     }
 
     getCurrentPage() {
@@ -63,6 +63,7 @@ class LeftMenu {
         if (path.includes('kavachIgnitionDiag')) return 'kavachIgnitionDiag';
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
+        if (path.includes('momentx')) return 'momentx';
         if (path.includes('breakfast')) return 'breakfast';
         if (path.toLowerCase().includes('multilegoptions')) return 'multilegoptions';
         if (path.toLowerCase().includes('commdiv')) return 'commdiv';
@@ -470,6 +471,10 @@ class LeftMenu {
                 <li class="nav-item" data-page="future_screener.html">
                     <a class="nav-item-link" href="future_screener.html"><i class="fas fa-filter"></i>
                     <span>Future Screener</span></a>
+                </li>
+                <li class="nav-item" data-page="momentx.html">
+                    <a class="nav-item-link" href="momentx.html"><i class="fas fa-bolt" style="color:#3dba7a;"></i>
+                    <span>MomentX</span></a>
                 </li>
                 <li class="nav-item" data-page="breakfast.html">
                     <a class="nav-item-link" href="breakfast.html"><i class="fas fa-mug-hot" style="color:#f59e0b;"></i>
@@ -1029,6 +1034,7 @@ class LeftMenu {
             tradelog: 'Trade Log',
             'kavach-bt-checkpoint': 'Kavach BT Checkpoint',
             future_screener: 'Future Screener',
+            momentx: 'MomentX',
             breakfast: 'Breakfast Strategy',
             commdiv: 'Commodities Div',
             dailyRSchecklist: 'TWCTO Kavach',
@@ -1149,6 +1155,7 @@ class LeftMenu {
             case 'settings': return 'settings.html';
             case 'admin': return 'admintwc.html';
             case 'future_screener': return 'future_screener.html';
+            case 'momentx': return 'momentx.html';
             case 'breakfast': return 'breakfast.html';
             case 'commdiv': return 'commDiv.html';
             case 'multilegoptions': return 'multiLegOptions.html';

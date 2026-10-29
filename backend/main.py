@@ -43,6 +43,7 @@ import backend.routers.tarang as tarang
 import backend.routers.stock_option as stock_option
 import backend.routers.crypto_options_report as crypto_options_report
 import backend.routers.multi_leg_options as multi_leg_options
+import backend.routers.momentx as momentx
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -120,6 +121,10 @@ from backend.services.tarang.scheduler import (
 from backend.services.crypto_options_report.scheduler import (
     start_crypto_options_scheduler,
     stop_crypto_options_scheduler,
+)
+from backend.services.momentx.scheduler import (
+    start_momentx_scheduler,
+    stop_momentx_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -326,6 +331,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Crypto Options Report scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Crypto Options Report scheduler")
 
+        try:
+            logger.info("Starting MomentX scheduler (15m scan + 5m EMA)...")
+            start_momentx_scheduler()
+            logger.info("✅ MomentX scheduler: STARTED (15m/5m IST market hours)")
+        except Exception as e:
+            logger.error(f"❌ MomentX scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without MomentX scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -477,6 +490,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping Crypto Options Report scheduler: {e}", exc_info=True)
 
+    try:
+        stop_momentx_scheduler()
+        logger.info("✅ MomentX scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping MomentX scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -556,6 +575,8 @@ app.include_router(crypto_options_report.router)
 app.include_router(crypto_options_report.router, prefix="/api")
 app.include_router(multi_leg_options.router)
 app.include_router(multi_leg_options.router, prefix="/api")
+app.include_router(momentx.router, prefix="/api")
+app.include_router(momentx.router, prefix="")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")
