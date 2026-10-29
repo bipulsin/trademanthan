@@ -56,6 +56,7 @@ def merge_day_cards(
             "ema_at",
             "trigger",
             "trigger_since",
+            "lot_size",
         ):
             if card.get(fld) is None and prev.get(fld) is not None:
                 card[fld] = prev.get(fld)

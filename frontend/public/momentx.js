@@ -195,11 +195,15 @@
     var status = active
       ? '<span class="mx-status-pill is-active">Active</span>'
       : '<span class="mx-status-pill is-inactive">Filters off</span>';
+    var lot =
+      card.lot_size != null && card.lot_size !== ""
+        ? '<span class="mx-lot">Lot ' + esc(fmtNum(card.lot_size, 0)) + "</span>"
+        : '<span class="mx-lot">Lot —</span>';
     return (
       '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-active="' + (active ? "1" : "0") + '">' +
       '<div class="mx-card-top">' +
         "<div><p class=\"mx-symbol\">" + esc(card.future_symbol || stock) + "</p>" +
-        '<span class="mx-expiry">' + esc(stock) + " · curr mth FUT</span>" +
+        lot +
         status +
         "</div>" +
         '<div class="mx-ltp ' + esc(dir) + '">' + esc(fmtNum(card.ltp)) + "</div>" +

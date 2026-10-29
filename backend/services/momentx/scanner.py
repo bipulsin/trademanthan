@@ -126,11 +126,15 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                 if not ev.get("qualified"):
                     continue
                 prev = prev_by_stock.get(stock.upper()) or {}
+                lot_size = row.get("lot_size")
+                if lot_size is None:
+                    lot_size = prev.get("lot_size")
                 card = {
                     "stock": stock,
                     "equity_instrument_key": eq,
                     "future_symbol": row["future_symbol"],
                     "future_instrument_key": row["future_instrument_key"],
+                    "lot_size": lot_size,
                     "stage1": stage1,
                     "active": True,
                     # Preserve Stage-2 fields across rescans when still Ready.
@@ -156,6 +160,12 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
             stage1_by_stock=stage1_by_stock,
             now=now,
         )
+        lot_by_stock = {
+            str(u.get("stock") or "").upper(): u.get("lot_size") for u in universe
+        }
+        for c in merged:
+            if c.get("lot_size") is None:
+                c["lot_size"] = lot_by_stock.get(str(c.get("stock") or "").upper())
 
         duration = time.monotonic() - started
         mx_state.replace_ready(
