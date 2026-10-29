@@ -41,6 +41,8 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
     """Scan the universe; replace Ready-to-Trade cards (preserving EMA fields when possible)."""
     from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
+    from backend.services.momentx.status_rules import past_scan_cutoff
+
     now = datetime.now(IST)
     if not force and should_skip_scheduled_market_jobs_ist():
         mx_state.set_market_status("holiday")
@@ -48,6 +50,9 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
     if not force and not _session_open(now):
         mx_state.set_market_status("closed")
         return {"ok": True, "skipped": "market_closed"}
+    if not force and past_scan_cutoff(now):
+        mx_state.set_market_status("open")
+        return {"ok": True, "skipped": "scan_cutoff"}
 
     mx_state.set_market_status("open" if _session_open(now) else "closed")
     mx_state.set_scan_running(True)
@@ -154,7 +159,7 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                 skipped.append(f"{stock}:error")
                 logger.info("momentx scan symbol error %s: %s", stock, e, exc_info=True)
 
-        merged = merge_day_cards(
+        merged, newly_filtered = merge_day_cards(
             prev_cards=list(prev_by_stock.values()),
             qualified_cards=qualified,
             stage1_by_stock=stage1_by_stock,
@@ -166,6 +171,18 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
         for c in merged:
             if c.get("lot_size") is None:
                 c["lot_size"] = lot_by_stock.get(str(c.get("stock") or "").upper())
+
+        if newly_filtered:
+            try:
+                from backend.services.momentx.persistence import record_filtered_symbols
+
+                record_filtered_symbols(
+                    newly_filtered,
+                    trade_date=now.date(),
+                    filtered_at=now,
+                )
+            except Exception as e:
+                logger.info("momentx persist filtered failed: %s", e)
 
         duration = time.monotonic() - started
         mx_state.replace_ready(
@@ -193,12 +210,13 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
         except Exception as e:
             logger.info("momentx scan: ema refresh failed: %s", e)
 
-        active_n = sum(1 for c in merged if c.get("active"))
+        active_n = sum(1 for c in merged if c.get("status") == "active")
         summary = {
             "ok": True,
             "universe": len(universe),
             "qualified": active_n,
             "day_board": len(merged),
+            "newly_filtered": len(newly_filtered),
             "skipped": len(skipped),
             "duration_sec": round(duration, 2),
         }
@@ -231,6 +249,10 @@ def ensure_scan_if_needed() -> None:
         return
     if not _session_open():
         mx_state.set_market_status("closed")
+        return
+    from backend.services.momentx.status_rules import past_scan_cutoff
+
+    if past_scan_cutoff():
         return
     if not _SCAN_GATE.acquire(blocking=False):
         return

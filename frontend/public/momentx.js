@@ -43,21 +43,33 @@
     });
   }
 
-  function fmtTime(iso) {
+  function fmtHm(iso) {
     if (!iso) return "—";
     try {
       var d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return String(iso).slice(0, 19);
-      return d.toLocaleString("en-IN", {
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleString("en-GB", {
         timeZone: "Asia/Kolkata",
         hour: "2-digit",
         minute: "2-digit",
-        second: "2-digit",
-        hour12: true,
+        hour12: false,
       });
     } catch (e) {
-      return String(iso).slice(0, 19);
+      return "—";
     }
+  }
+
+  function fmtTime(iso) {
+    return fmtHm(iso);
+  }
+
+  function cardStatus(card) {
+    var s = String((card && card.status) || "").toLowerCase();
+    if (s === "locked") return "locked";
+    if (s === "filters_off") return "filters_off";
+    if (s === "active") return "active";
+    if (card && card.active === false) return "filters_off";
+    return "active";
   }
 
   function loadSoundPref() {
@@ -186,34 +198,40 @@
 
   function cardHtml(card) {
     var stock = card.stock || "—";
-    var active = card.active !== false;
-    var trigger = !!card.trigger && active;
+    var status = cardStatus(card);
+    var canTrade = status === "active" && !!card.trigger;
     var dir = card.ltp_dir || "flat";
     var cls = "mx-card";
-    if (!active) cls += " is-inactive";
-    if (trigger) cls += " is-trigger";
-    var status = active
-      ? '<span class="mx-status-pill is-active">Active</span>'
-      : '<span class="mx-status-pill is-inactive">Filters off</span>';
+    if (status === "filters_off") cls += " is-inactive";
+    if (status === "locked") cls += " is-locked";
+    if (canTrade) cls += " is-trigger";
+    var pill =
+      status === "active"
+        ? '<span class="mx-status-pill is-active">Active</span>'
+        : status === "locked"
+          ? '<span class="mx-status-pill is-locked">Locked</span>'
+          : '<span class="mx-status-pill is-inactive">Filters Off</span>';
     var lot =
       card.lot_size != null && card.lot_size !== ""
         ? '<span class="mx-lot">Lot ' + esc(fmtNum(card.lot_size, 0)) + "</span>"
         : '<span class="mx-lot">Lot —</span>';
     return (
-      '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-active="' + (active ? "1" : "0") + '">' +
+      '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-status="' + esc(status) + '">' +
       '<div class="mx-card-top">' +
         "<div><p class=\"mx-symbol\">" + esc(card.future_symbol || stock) + "</p>" +
-        lot +
-        status +
+        '<div class="mx-lot-row">' + lot + pill + "</div>" +
         "</div>" +
         '<div class="mx-ltp ' + esc(dir) + '">' + esc(fmtNum(card.ltp)) + "</div>" +
       "</div>" +
       emaStackHtml(card) +
-      '<div class="mx-ema-updated">EMA @ ' + esc(fmtTime(card.ema_at)) + "</div>" +
+      '<div class="mx-ema-updated">' +
+        "EMA @ " + esc(fmtHm(card.ema_at)) +
+        " · 1st Activ @ " + esc(fmtHm(card.first_active_at)) +
+      "</div>" +
       stage1Html(card.stage1) +
       '<div class="mx-card-actions">' +
         '<button type="button" class="mx-btn mx-btn-primary mx-take" data-act="take"' +
-        (active ? "" : " disabled") + ">Take Trade</button>" +
+        (canTrade ? "" : " disabled") + ">Take Trade</button>" +
       "</div></article>"
     );
   }
@@ -239,7 +257,7 @@
     $("mxEmaAt").textContent = "5m EMA: " + fmtTime(data && data.ema_at);
     $("mxMarket").textContent = "Market: " + ((data && data.market_status) || "—");
     var ready = (data && data.ready) || [];
-    var activeN = ready.filter(function (c) { return c.active !== false; }).length;
+    var activeN = ready.filter(function (c) { return cardStatus(c) === "active"; }).length;
     var dayN = ready.length;
     $("mxCount").textContent =
       dayN > 0 ? ("Active: " + activeN + " · Day: " + dayN) : "Ready: 0";
@@ -259,8 +277,7 @@
     ready.forEach(function (c) {
       var stock = String(c.stock || "").toUpperCase();
       nextKnown[stock] = true;
-      var active = c.active !== false;
-      if (active && c.trigger) {
+      if (cardStatus(c) === "active" && c.trigger) {
         playTradeSound(stock);
       } else {
         clearTriggerMemory(stock);

@@ -178,3 +178,15 @@ def is_ema_trigger(
     if ema5 is None or ema15 is None or ema50 is None:
         return False
     return float(ema5) > float(ema15) and float(ema5) > float(ema50)
+
+
+def ema_cross_above_from_below(
+    fast_series: Sequence[float],
+    slow_series: Sequence[float],
+) -> bool:
+    """True when fast crosses above slow on the last closed bar (from below or equal)."""
+    if len(fast_series) < 2 or len(slow_series) < 2:
+        return False
+    prev_f, curr_f = float(fast_series[-2]), float(fast_series[-1])
+    prev_s, curr_s = float(slow_series[-2]), float(slow_series[-1])
+    return prev_f <= prev_s and curr_f > curr_s

@@ -215,16 +215,16 @@ def test_merge_day_cards_keeps_inactive_and_sorts_active_first():
     from backend.services.momentx.day_board import merge_day_cards
 
     prev = [
-        {"stock": "AAA", "active": True, "trigger": False, "first_seen_at": "t0", "ltp": 10},
-        {"stock": "BBB", "active": True, "trigger": True, "first_seen_at": "t1", "ltp": 20},
+        {"stock": "AAA", "status": "active", "filters_ok": True, "trigger": False, "first_seen_at": "t0", "ltp": 10},
+        {"stock": "BBB", "status": "active", "filters_ok": True, "trigger": True, "first_seen_at": "t1", "ltp": 20},
     ]
     qualified = [
-        {"stock": "CCC", "active": True, "trigger": False, "ltp": None},
-        {"stock": "BBB", "active": True, "trigger": True, "ltp": 21},
+        {"stock": "CCC", "trigger": False, "ltp": None},
+        {"stock": "BBB", "trigger": True, "ltp": 21},
     ]
     stage1 = {"AAA": {"pct_change": 0.5, "conditions": {"pct_in_band": False}}}
     now = IST.localize(datetime(2026, 3, 10, 12, 0))
-    out = merge_day_cards(
+    out, newly = merge_day_cards(
         prev_cards=prev,
         qualified_cards=qualified,
         stage1_by_stock=stage1,
@@ -232,12 +232,44 @@ def test_merge_day_cards_keeps_inactive_and_sorts_active_first():
     )
     by = {c["stock"]: c for c in out}
     assert set(by) == {"AAA", "BBB", "CCC"}
-    assert by["AAA"]["active"] is False
+    assert by["AAA"]["status"] == "filters_off"
     assert by["AAA"]["stage1"]["pct_change"] == 0.5
     assert by["AAA"]["ltp"] == 10
-    assert by["BBB"]["active"] is True
+    assert by["BBB"]["status"] == "active"
     assert by["BBB"]["ltp"] == 21
-    assert by["CCC"]["active"] is True
+    assert by["CCC"]["status"] == "active"
     assert by["CCC"]["first_seen_at"] == now.isoformat()
-    # Active before inactive; among active, trigger first
+    assert [c["stock"] for c in newly] == ["CCC"]
+    # Active before filters_off; among active, trigger first
     assert [c["stock"] for c in out] == ["BBB", "CCC", "AAA"]
+
+
+def test_ema_cross_above_from_below():
+    from backend.services.momentx.indicators import ema_cross_above_from_below
+
+    assert ema_cross_above_from_below([1, 2], [2, 1.5]) is True
+    assert ema_cross_above_from_below([3, 4], [1, 2]) is False  # already above
+    assert ema_cross_above_from_below([1, 1], [2, 3]) is False
+
+
+def test_active_locks_after_five_minutes():
+    from backend.services.momentx.status_rules import apply_status_to_card
+
+    now = IST.localize(datetime(2026, 3, 10, 12, 10))
+    card = {
+        "stock": "AAA",
+        "filters_ok": True,
+        "status": "active",
+        "active_since": IST.localize(datetime(2026, 3, 10, 12, 0)).isoformat(),
+    }
+    out = apply_status_to_card(card, now=now)
+    assert out["status"] == "locked"
+
+
+def test_lock_all_after_1500():
+    from backend.services.momentx.status_rules import apply_status_to_card
+
+    now = IST.localize(datetime(2026, 3, 10, 15, 1))
+    card = {"stock": "AAA", "filters_ok": True, "status": "active", "active_since": now.isoformat()}
+    out = apply_status_to_card(card, now=now)
+    assert out["status"] == "locked"

@@ -64,10 +64,15 @@ def _schedule_delayed(job_id: str, name: str, fn, delay_sec: int) -> None:
 
 
 def _on_15m_close_tick() -> None:
+    from backend.services.momentx.status_rules import past_scan_cutoff
+
     if should_skip_scheduled_market_jobs_ist():
         logger.info("momentx 15m: skipped holiday/weekend")
         return
     if not _within_session() or not _after_first_15m():
+        return
+    if past_scan_cutoff():
+        logger.info("momentx 15m: skipped after scan cutoff")
         return
     _schedule_delayed(
         "momentx_scan_delayed",
@@ -78,9 +83,13 @@ def _on_15m_close_tick() -> None:
 
 
 def _on_5m_close_tick() -> None:
+    from backend.services.momentx.status_rules import past_scan_cutoff
+
     if should_skip_scheduled_market_jobs_ist():
         return
     if not _within_session():
+        return
+    if past_scan_cutoff():
         return
     _schedule_delayed(
         "momentx_ema_delayed",
@@ -88,6 +97,18 @@ def _on_5m_close_tick() -> None:
         _run_ema,
         CONFIG.ema_delay_sec,
     )
+
+
+def _run_status_tick() -> None:
+    """Apply Active→Locked timeout and 15:00 lock-all without new candle scans."""
+    try:
+        from backend.services.momentx import state as mx_state
+        from backend.services.momentx.status_rules import refresh_board_statuses
+
+        refreshed = refresh_board_statuses(mx_state.ready_cards())
+        mx_state.set_ready_cards(refreshed)
+    except Exception:
+        logger.exception("momentx status tick failed")
 
 
 def _run_scan() -> None:
@@ -184,12 +205,36 @@ def start_momentx_scheduler() -> None:
         coalesce=True,
         misfire_grace_time=30,
     )
+    # Status / lock-all tick (no candle fetches)
+    sched.add_job(
+        _run_status_tick,
+        CronTrigger(minute="*", hour="9-15", timezone="Asia/Kolkata"),
+        id="momentx_status_tick",
+        name="MomentX status / lock tick",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
     sched.start()
     _scheduler = sched
     logger.info("momentx scheduler started (15m scan + 5m EMA + WS sync)")
+    try:
+        from backend.services.momentx.persistence import ensure_momentx_tables
+
+        ensure_momentx_tables()
+    except Exception:
+        logger.exception("momentx table ensure failed")
     # After deploy/restart, in-memory Ready is empty — kick a scan if session is open.
     try:
-        if not should_skip_scheduled_market_jobs_ist() and _within_session() and _after_first_15m():
+        from backend.services.momentx.status_rules import past_scan_cutoff
+
+        if (
+            not should_skip_scheduled_market_jobs_ist()
+            and _within_session()
+            and _after_first_15m()
+            and not past_scan_cutoff()
+        ):
             _schedule_delayed(
                 "momentx_scan_startup",
                 "MomentX Stage1 scan (startup)",

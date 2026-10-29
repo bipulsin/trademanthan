@@ -96,7 +96,7 @@ def replace_ready(
     with _LOCK:
         ready = list(cards)
         _STATE["ready"] = ready
-        _STATE["qualified_count"] = sum(1 for c in ready if c.get("active", True))
+        _STATE["qualified_count"] = sum(1 for c in ready if str(c.get("status") or "") == "active")
         _STATE["day_count"] = len(ready)
         _STATE["universe_size"] = int(universe_size)
         _STATE["skipped"] = list(skipped or [])
@@ -108,6 +108,15 @@ def replace_ready(
             _STATE["scan_at"] = scan_at
         else:
             _STATE["scan_at"] = _now_iso()
+
+
+def set_ready_cards(cards: List[Dict[str, Any]]) -> None:
+    """Replace day-board cards without touching scan metadata."""
+    with _LOCK:
+        ready = list(cards)
+        _STATE["ready"] = ready
+        _STATE["qualified_count"] = sum(1 for c in ready if str(c.get("status") or "") == "active")
+        _STATE["day_count"] = len(ready)
 
 
 def update_ema_fields(updates: Dict[str, Dict[str, Any]], *, ema_at: Optional[str] = None) -> None:

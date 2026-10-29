@@ -31,8 +31,11 @@ class MomentXConfig:
 
     # --- Stage 2 (futures, 5m) ---
     ema_fast: int = 5
+    ema_cross: int = 10  # Active reactivation: EMA(5) cross above EMA(10)
     ema_mid: int = 15
     ema_slow: int = 50
+    # Active → Locked after this many seconds continuously Active
+    active_lock_after_sec: int = 300
 
     # Schedule (IST)
     scan_delay_sec: int = 8
@@ -40,6 +43,10 @@ class MomentXConfig:
     market_open_hhmm: tuple = (9, 15)
     market_close_hhmm: tuple = (15, 30)
     first_15m_scan_hhmm: tuple = (9, 30)
+    # No new Stage-1 / EMA scans at or after this time
+    scan_cutoff_hhmm: tuple = (14, 45)
+    # Force-lock every day-board card at or after this time
+    lock_all_hhmm: tuple = (15, 0)
 
     # Batching
     candle_workers: int = 8
@@ -51,6 +58,8 @@ class MomentXConfig:
         d["market_open_hhmm"] = list(self.market_open_hhmm)
         d["market_close_hhmm"] = list(self.market_close_hhmm)
         d["first_15m_scan_hhmm"] = list(self.first_15m_scan_hhmm)
+        d["scan_cutoff_hhmm"] = list(self.scan_cutoff_hhmm)
+        d["lock_all_hhmm"] = list(self.lock_all_hhmm)
         # Spec alias
         d["timeAdjustedVolume"] = self.time_adjusted_volume
         return d

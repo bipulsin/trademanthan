@@ -17,16 +17,16 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
 
             logging.getLogger(__name__).exception("momentx ensure_scan_if_needed failed: %s", e)
             mx_state.set_last_error(str(e)[:300])
+    # Keep Active→Locked and 15:00 lock-all fresh between scans.
+    try:
+        from backend.services.momentx.status_rules import refresh_board_statuses
+
+        refreshed = refresh_board_statuses(mx_state.ready_cards())
+        mx_state.set_ready_cards(refreshed)
+    except Exception:
+        pass
     snap = mx_state.snapshot()
     cards: List[Dict[str, Any]] = list(snap.get("ready") or [])
-    # Active first, then triggered, then stock name.
-    cards.sort(
-        key=lambda c: (
-            0 if c.get("active", True) else 1,
-            0 if c.get("trigger") else 1,
-            str(c.get("stock") or ""),
-        )
-    )
     return {
         "ok": True,
         "scan_at": snap.get("scan_at"),

@@ -252,25 +252,42 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
   box-shadow: none;
 }
 
+.mx-lot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+}
+
 .mx-status-pill {
   display: inline-block;
-  margin-top: 6px;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
   font-size: 0.68rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.02em;
   font-family: var(--font-mono);
+  flex-shrink: 0;
 }
 
 .mx-status-pill.is-active {
-  color: #bbf7d0;
-  background: rgba(61, 186, 122, 0.18);
+  color: #052e16;
+  background: #22c55e;
+}
+
+.mx-status-pill.is-locked {
+  color: #fff;
+  background: #dc2626;
 }
 
 .mx-status-pill.is-inactive {
-  color: #cbd5e1;
-  background: rgba(100, 116, 139, 0.28);
+  color: #e2e8f0;
+  background: rgba(100, 116, 139, 0.45);
+}
+
+.mx-card.is-locked {
+  border-color: rgba(220, 38, 38, 0.45);
 }
 
 .mx-card-top {
@@ -290,11 +307,9 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
 }
 
 .mx-lot {
-  display: block;
   font-size: 0.75rem;
   color: var(--muted);
   font-family: var(--font-mono);
-  margin-top: 4px;
 }
 
 .mx-ltp {
