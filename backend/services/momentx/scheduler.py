@@ -185,6 +185,18 @@ def start_momentx_scheduler() -> None:
     sched.start()
     _scheduler = sched
     logger.info("momentx scheduler started (15m scan + 5m EMA + WS sync)")
+    # After deploy/restart, in-memory Ready is empty — kick a scan if session is open.
+    try:
+        if not should_skip_scheduled_market_jobs_ist() and _within_session() and _after_first_15m():
+            _schedule_delayed(
+                "momentx_scan_startup",
+                "MomentX Stage1 scan (startup)",
+                _run_scan,
+                3,
+            )
+            logger.info("momentx startup scan queued")
+    except Exception:
+        logger.exception("momentx startup scan queue failed")
 
 
 def stop_momentx_scheduler() -> None:
