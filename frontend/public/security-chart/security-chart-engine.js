@@ -13,10 +13,12 @@
     const TF_OPTIONS = ['5m', '10m', '15m', '30m', '1hr', '2h', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=11';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=13';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
+        'security-chart/indicators/williams-r.js?v=1',
+        'security-chart/indicators/oscillator-pane.js?v=1',
         'security-chart/indicators/movingAverages.js?v=1',
         'security-chart/indicators/hilega-milega.js?v=2',
         'security-chart/indicators/macd-divergence.js?v=2',
@@ -35,6 +37,10 @@
     const EMA_PERIOD_MAX = 200;
     const EMA_SLOT_DEFAULTS = [9, 30, 100];
     const EMA_COLORS = ['#eab308', '#38bdf8', '#f97316'];
+    const RSI_PANE_DEFAULT_PX = 130;
+    const WR_PANE_DEFAULT_PX = 130;
+    const RSI_DEFAULTS = { period: 14, upper: 55, lower: 35 };
+    const WR_DEFAULTS = { period: 14, upper: -25, lower: -75 };
     const INTEL_PANEL_MAX_PX = 380;
     const INTEL_PANEL_MIN_PX = 200;
     const INTEL_PANEL_DEFAULT_PX = 320;
@@ -199,6 +205,14 @@
             volume: !!modal.volumeEnabled,
             hm: !!modal.hmEnabled,
             md: !!modal.mdEnabled,
+            rsi: !!modal.rsiEnabled,
+            williams: !!modal.wrEnabled,
+            rsiPeriod: modal.rsiPeriod,
+            rsiUpper: modal.rsiUpper,
+            rsiLower: modal.rsiLower,
+            wrPeriod: modal.wrPeriod,
+            wrUpper: modal.wrUpper,
+            wrLower: modal.wrLower,
         };
     }
 
@@ -212,6 +226,14 @@
         if (prefs.hm != null) modal.hmEnabled = !!prefs.hm;
         if (prefs.md != null) modal.mdEnabled = !!prefs.md;
         else if (prefs.macd != null) modal.mdEnabled = !!prefs.macd;
+        if (prefs.rsi != null) modal.rsiEnabled = !!prefs.rsi;
+        if (prefs.williams != null) modal.wrEnabled = !!prefs.williams;
+        if (prefs.rsiPeriod != null) modal.rsiPeriod = Math.max(2, Math.floor(Number(prefs.rsiPeriod)) || RSI_DEFAULTS.period);
+        if (prefs.rsiUpper != null && Number.isFinite(Number(prefs.rsiUpper))) modal.rsiUpper = Number(prefs.rsiUpper);
+        if (prefs.rsiLower != null && Number.isFinite(Number(prefs.rsiLower))) modal.rsiLower = Number(prefs.rsiLower);
+        if (prefs.wrPeriod != null) modal.wrPeriod = Math.max(2, Math.floor(Number(prefs.wrPeriod)) || WR_DEFAULTS.period);
+        if (prefs.wrUpper != null && Number.isFinite(Number(prefs.wrUpper))) modal.wrUpper = Number(prefs.wrUpper);
+        if (prefs.wrLower != null && Number.isFinite(Number(prefs.wrLower))) modal.wrLower = Number(prefs.wrLower);
         return true;
     }
 
@@ -623,6 +645,19 @@
         this.mdEnabled = false;
         this.mdPaneHeight = MD_PANE_DEFAULT_PX;
         this.mdIndicator = null;
+        this.rsiEnabled = false;
+        this.wrEnabled = false;
+        this.rsiPaneHeight = RSI_PANE_DEFAULT_PX;
+        this.wrPaneHeight = WR_PANE_DEFAULT_PX;
+        this.rsiIndicator = null;
+        this.wrIndicator = null;
+        this.rsiPeriod = RSI_DEFAULTS.period;
+        this.rsiUpper = RSI_DEFAULTS.upper;
+        this.rsiLower = RSI_DEFAULTS.lower;
+        this.wrPeriod = WR_DEFAULTS.period;
+        this.wrUpper = WR_DEFAULTS.upper;
+        this.wrLower = WR_DEFAULTS.lower;
+        this._skipSavedPrefs = false;
         this.volumeEnabled = true;
         this._crosshairUnsubs = [];
     }
@@ -771,6 +806,23 @@
                 }
             }
         }
+        const selfResize = this;
+        const rsiEl = root.querySelector('[data-uscm-rsi-chart]');
+        const wrEl = root.querySelector('[data-uscm-wr-chart]');
+        function resizeOsc(ind, el) {
+            if (!ind || !ind.chart || !el || !el.clientWidth || !el.clientHeight) return;
+            try {
+                ind.chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+                if (selfResize.chart) {
+                    const r = selfResize.chart.timeScale().getVisibleLogicalRange();
+                    if (r) ind.chart.timeScale().setVisibleLogicalRange(r);
+                }
+            } catch (e4) {
+                /* ignore */
+            }
+        }
+        resizeOsc(this.rsiIndicator, rsiEl);
+        resizeOsc(this.wrIndicator, wrEl);
     };
 
     SecurityChartModal.prototype._ensureDom = function () {
@@ -808,6 +860,18 @@
             '<label class="uscm-ov-label">' +
             '<input type="checkbox" data-uscm-md-on> MACD Divergence' +
             '</label>' +
+            '<div class="uscm-ov-row uscm-ov-row--setup">' +
+            '<label class="uscm-ov-label">' +
+            '<input type="checkbox" data-uscm-rsi-on> RSI' +
+            '</label>' +
+            '<button type="button" class="uscm-setup-btn" data-uscm-setup="rsi" title="RSI setup" aria-label="RSI setup">⚙</button>' +
+            '</div>' +
+            '<div class="uscm-ov-row uscm-ov-row--setup">' +
+            '<label class="uscm-ov-label">' +
+            '<input type="checkbox" data-uscm-wr-on> Williams %R' +
+            '</label>' +
+            '<button type="button" class="uscm-setup-btn" data-uscm-setup="williams" title="Williams %R setup" aria-label="Williams setup">⚙</button>' +
+            '</div>' +
             '</div></div></div>' +
             '<div class="uscm-ltp-block">' +
             '<div class="uscm-ltp-row">' +
@@ -836,6 +900,16 @@
             '<div class="uscm-md-pane uscm-hidden" data-uscm-md-pane>' +
             '<div class="uscm-md-label">MACD Divergence</div>' +
             '<div class="uscm-md-chart-root" data-uscm-md-chart></div>' +
+            '</div>' +
+'<div class="uscm-rsi-splitter uscm-hidden" data-uscm-rsi-splitter role="separator" aria-orientation="horizontal" aria-label="Resize RSI panel" tabindex="0"></div>' +
+            '<div class="uscm-rsi-pane uscm-hidden" data-uscm-rsi-pane>' +
+            '<div class="uscm-rsi-label">RSI</div>' +
+            '<div class="uscm-rsi-chart-root" data-uscm-rsi-chart></div>' +
+            '</div>' +
+            '<div class="uscm-wr-splitter uscm-hidden" data-uscm-wr-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Williams %R panel" tabindex="0"></div>' +
+            '<div class="uscm-wr-pane uscm-hidden" data-uscm-wr-pane>' +
+            '<div class="uscm-wr-label">Williams %R</div>' +
+            '<div class="uscm-wr-chart-root" data-uscm-wr-chart></div>' +
             '</div>' +
             '</div>' +
             '</div>' +
@@ -874,6 +948,7 @@
         bindMdSplitter(backdrop, self);
         bindOverlayControls(backdrop, self);
         bindIndicatorDropdown(backdrop);
+        bindOscillatorControlsIfNeeded(backdrop, self);
         modalRoot = backdrop;
         return backdrop;
     };
@@ -973,6 +1048,19 @@
                 );
                 bindMdSplitter(root, this);
             }
+            if (stack && !stack.querySelector('[data-uscm-rsi-pane]')) {
+                stack.insertAdjacentHTML(
+                    'beforeend',
+                    '<div class="uscm-rsi-splitter uscm-hidden" data-uscm-rsi-splitter role="separator" aria-orientation="horizontal" aria-label="Resize RSI panel" tabindex="0"></div>' +
+                        '<div class="uscm-rsi-pane uscm-hidden" data-uscm-rsi-pane>' +
+                        '<div class="uscm-rsi-label">RSI</div>' +
+                        '<div class="uscm-rsi-chart-root" data-uscm-rsi-chart></div></div>' +
+                        '<div class="uscm-wr-splitter uscm-hidden" data-uscm-wr-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Williams %R panel" tabindex="0"></div>' +
+                        '<div class="uscm-wr-pane uscm-hidden" data-uscm-wr-pane>' +
+                        '<div class="uscm-wr-label">Williams %R</div>' +
+                        '<div class="uscm-wr-chart-root" data-uscm-wr-chart></div></div>'
+                );
+            }
         }
         if (!wrap || wrap.querySelector('[data-uscm-chart-stack]')) {
             bindHmSplitter(root, this);
@@ -980,6 +1068,7 @@
             bindHmCheckboxIfNeeded(root, this);
             bindMdCheckboxIfNeeded(root, this);
             bindVolumeCheckboxIfNeeded(root, this);
+            bindOscillatorControlsIfNeeded(root, this);
             const mainPane = root.querySelector('[data-uscm-main-pane]');
             if (mainPane && !mainPane.querySelector('[data-uscm-crosshair-time]')) {
                 mainPane.insertAdjacentHTML(
@@ -1003,7 +1092,15 @@
             '<div class="uscm-md-splitter uscm-hidden" data-uscm-md-splitter role="separator" aria-orientation="horizontal" aria-label="Resize MACD Divergence panel" tabindex="0"></div>' +
             '<div class="uscm-md-pane uscm-hidden" data-uscm-md-pane>' +
             '<div class="uscm-md-label">MACD Divergence</div>' +
-            '<div class="uscm-md-chart-root" data-uscm-md-chart></div></div></div>';
+            '<div class="uscm-md-chart-root" data-uscm-md-chart></div></div>' +
+            '<div class="uscm-rsi-splitter uscm-hidden" data-uscm-rsi-splitter role="separator" aria-orientation="horizontal" aria-label="Resize RSI panel" tabindex="0"></div>' +
+            '<div class="uscm-rsi-pane uscm-hidden" data-uscm-rsi-pane>' +
+            '<div class="uscm-rsi-label">RSI</div>' +
+            '<div class="uscm-rsi-chart-root" data-uscm-rsi-chart></div></div>' +
+            '<div class="uscm-wr-splitter uscm-hidden" data-uscm-wr-splitter role="separator" aria-orientation="horizontal" aria-label="Resize Williams %R panel" tabindex="0"></div>' +
+            '<div class="uscm-wr-pane uscm-hidden" data-uscm-wr-pane>' +
+            '<div class="uscm-wr-label">Williams %R</div>' +
+            '<div class="uscm-wr-chart-root" data-uscm-wr-chart></div></div></div>';
         const sk2 = wrap.querySelector('[data-uscm-skeleton]');
         if (sk2) {
             sk2.style.display = skDisplay || '';
@@ -1014,6 +1111,7 @@
         bindHmCheckboxIfNeeded(root, this);
         bindMdCheckboxIfNeeded(root, this);
         bindVolumeCheckboxIfNeeded(root, this);
+        bindOscillatorControlsIfNeeded(root, this);
         const mainPane = root.querySelector('[data-uscm-main-pane]');
         if (mainPane && !mainPane.querySelector('[data-uscm-crosshair-time]')) {
             mainPane.insertAdjacentHTML(
@@ -1105,6 +1203,26 @@
                 }
             );
         }
+        if (this.rsiIndicator && this.rsiIndicator.chart) {
+            this.rsiIndicator.chart.subscribeCrosshairMove(onCrosshair);
+            this._crosshairUnsubs.push(function () {
+                try {
+                    self.rsiIndicator.chart.unsubscribeCrosshairMove(onCrosshair);
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+        }
+        if (this.wrIndicator && this.wrIndicator.chart) {
+            this.wrIndicator.chart.subscribeCrosshairMove(onCrosshair);
+            this._crosshairUnsubs.push(function () {
+                try {
+                    self.wrIndicator.chart.unsubscribeCrosshairMove(onCrosshair);
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+        }
     };
 
     SecurityChartModal.prototype._applyVolumeVisibility = function () {
@@ -1120,6 +1238,54 @@
             });
         }
     };
+
+
+    function bindOscillatorControlsIfNeeded(root, modalInstance) {
+        if (!root) return;
+        const overlays = root.querySelector('[data-uscm-overlays]');
+        if (overlays && !overlays.querySelector('[data-uscm-rsi-on]')) {
+            overlays.insertAdjacentHTML(
+                'beforeend',
+                '<div class="uscm-ov-row uscm-ov-row--setup">' +
+                    '<label class="uscm-ov-label"><input type="checkbox" data-uscm-rsi-on> RSI</label>' +
+                    '<button type="button" class="uscm-setup-btn" data-uscm-setup="rsi" title="RSI setup" aria-label="RSI setup">⚙</button></div>' +
+                    '<div class="uscm-ov-row uscm-ov-row--setup">' +
+                    '<label class="uscm-ov-label"><input type="checkbox" data-uscm-wr-on> Williams %R</label>' +
+                    '<button type="button" class="uscm-setup-btn" data-uscm-setup="williams" title="Williams %R setup" aria-label="Williams setup">⚙</button></div>'
+            );
+        }
+        function refresh() {
+            modalInstance._readOverlayPrefs();
+            modalInstance._prefsGen = (modalInstance._prefsGen || 0) + 1;
+            if (!modalInstance._skipSavedPrefs) modalInstance._persistIndicatorPrefs();
+            modalInstance._rebuildOverlays();
+            modalInstance._applyHmIndicator();
+            modalInstance._applyMdIndicator();
+            modalInstance._applyRsiIndicator();
+            modalInstance._applyWrIndicator();
+        }
+        if (overlays) {
+            const rsiCb = overlays.querySelector('[data-uscm-rsi-on]');
+            const wrCb = overlays.querySelector('[data-uscm-wr-on]');
+            if (rsiCb && !rsiCb._uscmOscBound) {
+                rsiCb._uscmOscBound = true;
+                rsiCb.addEventListener('change', refresh);
+            }
+            if (wrCb && !wrCb._uscmOscBound) {
+                wrCb._uscmOscBound = true;
+                wrCb.addEventListener('change', refresh);
+            }
+            overlays.querySelectorAll('[data-uscm-setup]').forEach(function (btn) {
+                if (btn._uscmSetupBound) return;
+                btn._uscmSetupBound = true;
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    modalInstance._openIndicatorSetup(btn.getAttribute('data-uscm-setup'));
+                });
+            });
+        }
+    }
 
     function bindHmCheckboxIfNeeded(root, modalInstance) {
         const hmCb = root.querySelector('[data-uscm-hm-on]');
@@ -1419,6 +1585,183 @@
         });
     }
 
+
+    SecurityChartModal.prototype._updateRsiLayout = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        const splitter = root.querySelector('[data-uscm-rsi-splitter]');
+        const pane = root.querySelector('[data-uscm-rsi-pane]');
+        if (!stack) return;
+        if (this.rsiEnabled) {
+            root.classList.add('uscm-panel--rsi');
+            if (splitter) splitter.classList.remove('uscm-hidden');
+            if (pane) pane.classList.remove('uscm-hidden');
+            stack.style.setProperty('--uscm-rsi-h', this.rsiPaneHeight + 'px');
+        } else {
+            root.classList.remove('uscm-panel--rsi');
+            if (splitter) splitter.classList.add('uscm-hidden');
+            if (pane) pane.classList.add('uscm-hidden');
+        }
+    };
+
+    SecurityChartModal.prototype._updateWrLayout = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const stack = root.querySelector('[data-uscm-chart-stack]');
+        const splitter = root.querySelector('[data-uscm-wr-splitter]');
+        const pane = root.querySelector('[data-uscm-wr-pane]');
+        if (!stack) return;
+        if (this.wrEnabled) {
+            root.classList.add('uscm-panel--wr');
+            if (splitter) splitter.classList.remove('uscm-hidden');
+            if (pane) pane.classList.remove('uscm-hidden');
+            stack.style.setProperty('--uscm-wr-h', this.wrPaneHeight + 'px');
+        } else {
+            root.classList.remove('uscm-panel--wr');
+            if (splitter) splitter.classList.add('uscm-hidden');
+            if (pane) pane.classList.add('uscm-hidden');
+        }
+    };
+
+    SecurityChartModal.prototype._destroyRsiIndicator = function () {
+        const root = modalRoot;
+        const el = root && root.querySelector('[data-uscm-rsi-chart]');
+        if (this.rsiIndicator) {
+            this.rsiIndicator.destroy(el);
+            this.rsiIndicator = null;
+        } else if (el) el.innerHTML = '';
+    };
+
+    SecurityChartModal.prototype._destroyWrIndicator = function () {
+        const root = modalRoot;
+        const el = root && root.querySelector('[data-uscm-wr-chart]');
+        if (this.wrIndicator) {
+            this.wrIndicator.destroy(el);
+            this.wrIndicator = null;
+        } else if (el) el.innerHTML = '';
+    };
+
+    SecurityChartModal.prototype._applyRsiIndicator = function () {
+        const root = modalRoot;
+        if (!root) return;
+        this._updateRsiLayout();
+        if (!this.rsiEnabled) {
+            this._destroyRsiIndicator();
+            return;
+        }
+        if (!this.chart || !this._barsCache.length || !global.OscillatorPaneIndicator) return;
+        const el = root.querySelector('[data-uscm-rsi-chart]');
+        if (!el) return;
+        if (!this.rsiIndicator) this.rsiIndicator = new global.OscillatorPaneIndicator('rsi');
+        const self = this;
+        this.rsiIndicator.render({
+            container: el,
+            bars: this._barsCache,
+            period: this.rsiPeriod,
+            upper: this.rsiUpper,
+            lower: this.rsiLower,
+            isDark: isChartDarkTheme(),
+            mainChart: this.chart,
+            timeFormatter: function (time) { return crosshairLabelForTime(time, self.timeframe); },
+            tickMarkFormatter: function (time) { return axisTickForTime(time, self.timeframe); },
+        });
+        requestAnimationFrame(function () {
+            self._notifyChartResize();
+            if (self.rsiIndicator) self.rsiIndicator.syncFromMain(self.chart);
+            self._bindCrosshairHandlers();
+        });
+    };
+
+    SecurityChartModal.prototype._applyWrIndicator = function () {
+        const root = modalRoot;
+        if (!root) return;
+        this._updateWrLayout();
+        if (!this.wrEnabled) {
+            this._destroyWrIndicator();
+            return;
+        }
+        if (!this.chart || !this._barsCache.length || !global.OscillatorPaneIndicator) return;
+        const el = root.querySelector('[data-uscm-wr-chart]');
+        if (!el) return;
+        if (!this.wrIndicator) this.wrIndicator = new global.OscillatorPaneIndicator('williams');
+        const self = this;
+        this.wrIndicator.render({
+            container: el,
+            bars: this._barsCache,
+            period: this.wrPeriod,
+            upper: this.wrUpper,
+            lower: this.wrLower,
+            isDark: isChartDarkTheme(),
+            mainChart: this.chart,
+            timeFormatter: function (time) { return crosshairLabelForTime(time, self.timeframe); },
+            tickMarkFormatter: function (time) { return axisTickForTime(time, self.timeframe); },
+        });
+        requestAnimationFrame(function () {
+            self._notifyChartResize();
+            if (self.wrIndicator) self.wrIndicator.syncFromMain(self.chart);
+            self._bindCrosshairHandlers();
+        });
+    };
+
+    SecurityChartModal.prototype._openIndicatorSetup = function (kind) {
+        const root = modalRoot;
+        if (!root) return;
+        let pop = root.querySelector('[data-uscm-setup-pop]');
+        if (!pop) {
+            root.querySelector('.uscm-panel').insertAdjacentHTML(
+                'beforeend',
+                '<div class="uscm-setup-pop uscm-hidden" data-uscm-setup-pop role="dialog" aria-modal="true">' +
+                    '<div class="uscm-setup-pop-card">' +
+                    '<header class="uscm-setup-pop-head"><strong data-uscm-setup-title>Setup</strong>' +
+                    '<button type="button" class="uscm-setup-close" data-uscm-setup-close aria-label="Close">&times;</button></header>' +
+                    '<div class="uscm-setup-pop-body">' +
+                    '<label>Period <input type="number" data-uscm-setup-period min="2" max="200" step="1"></label>' +
+                    '<label>Upper band <input type="number" data-uscm-setup-upper step="0.1"></label>' +
+                    '<label>Lower band <input type="number" data-uscm-setup-lower step="0.1"></label>' +
+                    '</div>' +
+                    '<footer class="uscm-setup-pop-foot">' +
+                    '<button type="button" class="uscm-setup-save" data-uscm-setup-save>Save</button>' +
+                    '</footer></div></div>'
+            );
+            pop = root.querySelector('[data-uscm-setup-pop]');
+            const self = this;
+            pop.querySelector('[data-uscm-setup-close]').addEventListener('click', function () {
+                pop.classList.add('uscm-hidden');
+            });
+            pop.addEventListener('click', function (e) {
+                if (e.target === pop) pop.classList.add('uscm-hidden');
+            });
+            pop.querySelector('[data-uscm-setup-save]').addEventListener('click', function () {
+                const k = pop.getAttribute('data-kind');
+                const period = Math.max(2, Math.floor(Number(pop.querySelector('[data-uscm-setup-period]').value)) || 14);
+                const upper = Number(pop.querySelector('[data-uscm-setup-upper]').value);
+                const lower = Number(pop.querySelector('[data-uscm-setup-lower]').value);
+                if (k === 'williams') {
+                    self.wrPeriod = period;
+                    if (Number.isFinite(upper)) self.wrUpper = upper;
+                    if (Number.isFinite(lower)) self.wrLower = lower;
+                    self._applyWrIndicator();
+                } else {
+                    self.rsiPeriod = period;
+                    if (Number.isFinite(upper)) self.rsiUpper = upper;
+                    if (Number.isFinite(lower)) self.rsiLower = lower;
+                    self._applyRsiIndicator();
+                }
+                self._prefsGen = (self._prefsGen || 0) + 1;
+                if (!self._skipSavedPrefs) self._persistIndicatorPrefs();
+                pop.classList.add('uscm-hidden');
+            });
+        }
+        const isWr = kind === 'williams';
+        pop.setAttribute('data-kind', isWr ? 'williams' : 'rsi');
+        pop.querySelector('[data-uscm-setup-title]').textContent = isWr ? 'Williams %R setup' : 'RSI setup';
+        pop.querySelector('[data-uscm-setup-period]').value = String(isWr ? this.wrPeriod : this.rsiPeriod);
+        pop.querySelector('[data-uscm-setup-upper]').value = String(isWr ? this.wrUpper : this.rsiUpper);
+        pop.querySelector('[data-uscm-setup-lower]').value = String(isWr ? this.wrLower : this.rsiLower);
+        pop.classList.remove('uscm-hidden');
+    };
+
     SecurityChartModal.prototype._destroyHmIndicator = function () {
         const root = modalRoot;
         const hmEl = root && root.querySelector('[data-uscm-hm-chart]');
@@ -1585,6 +1928,8 @@
         this._clearCrosshairHandlers();
         this._destroyHmIndicator();
         this._destroyMdIndicator();
+        this._destroyRsiIndicator();
+        this._destroyWrIndicator();
         if (this.resizeObs) {
             this.resizeObs.disconnect();
             this.resizeObs = null;
@@ -1621,6 +1966,10 @@
         if (modalRoot) {
             modalRoot.classList.remove('uscm-open');
             modalRoot.classList.remove('uscm-panel--with-intel');
+            modalRoot.classList.remove('uscm-panel--rsi');
+            modalRoot.classList.remove('uscm-panel--wr');
+            const setupPop = modalRoot.querySelector('[data-uscm-setup-pop]');
+            if (setupPop) setupPop.classList.add('uscm-hidden');
             modalRoot.classList.add('uscm-intel-empty');
             modalRoot.classList.add('uscm-hidden');
             const intel = modalRoot.querySelector('[data-uscm-intel]');
@@ -1661,9 +2010,14 @@
         if (mdCb) this.mdEnabled = mdCb.checked;
         const volCb = root.querySelector('[data-uscm-vol-on]');
         if (volCb) this.volumeEnabled = volCb.checked;
+        const rsiCb = root.querySelector('[data-uscm-rsi-on]');
+        if (rsiCb) this.rsiEnabled = rsiCb.checked;
+        const wrCb = root.querySelector('[data-uscm-wr-on]');
+        if (wrCb) this.wrEnabled = wrCb.checked;
     };
 
     SecurityChartModal.prototype._persistIndicatorPrefs = function () {
+        if (this._skipSavedPrefs) return;
         const self = this;
         const prefs = snapshotIndicators(this);
         this._savedIndicatorPrefs = prefs;
@@ -1703,6 +2057,8 @@
                 self._applyVolumeVisibility();
                 self._applyHmIndicator();
                 self._applyMdIndicator();
+                self._applyRsiIndicator();
+                self._applyWrIndicator();
             })
             .catch(function () {});
     };
@@ -1733,6 +2089,10 @@
         if (volCb) volCb.checked = this.volumeEnabled;
         if (hmCb) hmCb.checked = this.hmEnabled;
         if (mdCb) mdCb.checked = this.mdEnabled;
+        const rsiCb = root.querySelector('[data-uscm-rsi-on]');
+        const wrCb = root.querySelector('[data-uscm-wr-on]');
+        if (rsiCb) rsiCb.checked = this.rsiEnabled;
+        if (wrCb) wrCb.checked = this.wrEnabled;
     };
 
     SecurityChartModal.prototype._rebuildOverlays = function () {
@@ -1915,6 +2275,8 @@
         this._seedLtpFromBars();
         this._applyHmIndicator();
         this._applyMdIndicator();
+        this._applyRsiIndicator();
+        this._applyWrIndicator();
         this._bindCrosshairHandlers();
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
@@ -2032,6 +2394,20 @@
                 this.mdIndicator.updateLastBar(this._barsCache);
                 this._applyMdPriceMarkers();
             }
+            if (this.rsiIndicator && this.rsiEnabled) {
+                this.rsiIndicator.updateLast(this._barsCache, {
+                    period: this.rsiPeriod,
+                    upper: this.rsiUpper,
+                    lower: this.rsiLower,
+                });
+            }
+            if (this.wrIndicator && this.wrEnabled) {
+                this.wrIndicator.updateLast(this._barsCache, {
+                    period: this.wrPeriod,
+                    upper: this.wrUpper,
+                    lower: this.wrLower,
+                });
+            }
         } catch (e) {
             /* ignore occasional time mismatch */
         }
@@ -2057,6 +2433,7 @@
             config.direction ||
             (this._screenerData && this._screenerData.direction) ||
             '';
+        this._skipSavedPrefs = !!config.skipSavedPrefs;
         this.emaSlots = normalizeEmaSlots(config);
         this.vwapEnabled = config.vwapEnabled != null ? !!config.vwapEnabled : true;
         this.hmEnabled = config.hmEnabled != null ? !!config.hmEnabled : false;
@@ -2067,6 +2444,46 @@
                   ? !!config.mdEnabled
                   : false;
         this.volumeEnabled = config.volumeEnabled != null ? !!config.volumeEnabled : true;
+        this.rsiEnabled =
+            config.rsiEnabled != null
+                ? !!config.rsiEnabled
+                : false;
+        this.wrEnabled =
+            config.williamsEnabled != null
+                ? !!config.williamsEnabled
+                : config.wrEnabled != null
+                  ? !!config.wrEnabled
+                  : false;
+        this.rsiPeriod =
+            config.rsiPeriod != null
+                ? Math.max(2, Math.floor(Number(config.rsiPeriod)) || RSI_DEFAULTS.period)
+                : RSI_DEFAULTS.period;
+        this.rsiUpper =
+            config.rsiUpper != null && Number.isFinite(Number(config.rsiUpper))
+                ? Number(config.rsiUpper)
+                : RSI_DEFAULTS.upper;
+        this.rsiLower =
+            config.rsiLower != null && Number.isFinite(Number(config.rsiLower))
+                ? Number(config.rsiLower)
+                : RSI_DEFAULTS.lower;
+        this.wrPeriod =
+            config.wrPeriod != null
+                ? Math.max(2, Math.floor(Number(config.wrPeriod)) || WR_DEFAULTS.period)
+                : config.williamsPeriod != null
+                  ? Math.max(2, Math.floor(Number(config.williamsPeriod)) || WR_DEFAULTS.period)
+                  : WR_DEFAULTS.period;
+        this.wrUpper =
+            config.wrUpper != null && Number.isFinite(Number(config.wrUpper))
+                ? Number(config.wrUpper)
+                : config.williamsUpper != null && Number.isFinite(Number(config.williamsUpper))
+                  ? Number(config.williamsUpper)
+                  : WR_DEFAULTS.upper;
+        this.wrLower =
+            config.wrLower != null && Number.isFinite(Number(config.wrLower))
+                ? Number(config.wrLower)
+                : config.williamsLower != null && Number.isFinite(Number(config.williamsLower))
+                  ? Number(config.williamsLower)
+                  : WR_DEFAULTS.lower;
         if (config.indicatorsEnabled === false || config.noIndicators === true) {
             this.emaSlots = this.emaSlots.map(function (s) {
                 return { enabled: false, period: s.period };
@@ -2074,12 +2491,14 @@
             this.vwapEnabled = false;
             this.hmEnabled = false;
             this.volumeEnabled = false;
+            if (config.rsiEnabled == null) this.rsiEnabled = false;
+            if (config.williamsEnabled == null && config.wrEnabled == null) this.wrEnabled = false;
             // macdDivergenceEnabled is independent of noIndicators — set after/alongside
             if (config.macdDivergenceEnabled == null && config.mdEnabled == null) {
                 this.mdEnabled = false;
             }
         }
-        if (this._savedIndicatorPrefs) {
+        if (!this._skipSavedPrefs && this._savedIndicatorPrefs) {
             applyIndicatorPrefs(this, this._savedIndicatorPrefs);
         }
         this._openSeq = (this._openSeq || 0) + 1;
@@ -2103,6 +2522,9 @@
             self._open = true;
             // Candle request starts immediately. Indicator prefs must not queue ahead of it.
             self._loadHistorical();
+            if (self._skipSavedPrefs) {
+                return Promise.resolve();
+            }
             return self._refreshIndicatorPrefs().then(function () {
                 if (!self._open || self._openSeq !== openSeq) return;
             });
