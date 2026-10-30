@@ -1,8 +1,13 @@
-"""Stage-1 qualification filter (pure; unit-tested)."""
+"""Stage-1 qualification filter (pure; unit-tested).
+
+Supports bullish and bearish sides. Volume vs SMA(5) is always computed
+(``volume_ok``) but only required for ``qualified`` when ``require_volume``
+is True.
+"""
 from __future__ import annotations
 
 from datetime import date, datetime, time as dt_time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytz
 
@@ -11,6 +16,9 @@ from backend.services.momentx.config import CONFIG, MomentXConfig
 from backend.services.momentx.indicators import sma, wilder_adx, wilder_rsi, williams_r
 
 IST = pytz.timezone("Asia/Kolkata")
+
+SIDE_BULLISH = "bullish"
+SIDE_BEARISH = "bearish"
 
 
 def _completed_daily(daily: Sequence[Dict[str, Any]], today: date) -> List[Dict[str, Any]]:
@@ -104,33 +112,11 @@ def _avg_prior_volume(
     return sum(by_day.values()) / float(len(by_day))
 
 
-def evaluate_stage1(
-    *,
-    daily: Sequence[Dict[str, Any]],
-    minutes15: Sequence[Dict[str, Any]],
-    price: Optional[float] = None,
-    now: Optional[datetime] = None,
-    cfg: Optional[MomentXConfig] = None,
-) -> Dict[str, Any]:
-    """Return qualification result + per-condition values for one equity.
-
-    ``qualified`` is True only when every condition passes.
-    """
-    cfg = cfg or CONFIG
-    now = now or datetime.now(IST)
-    if now.tzinfo is None:
-        now = IST.localize(now)
-    else:
-        now = now.astimezone(IST)
-    today = now.date()
-    asof_time = now.time()
-
-    daily_rows = list(daily or [])
-    m15 = drop_forming_candle(minutes15 or [], 15, now=now)
-    completed_daily = _completed_daily(daily_rows, today)
-
-    result: Dict[str, Any] = {
+def _empty_result(*, side: str) -> Dict[str, Any]:
+    return {
         "qualified": False,
+        "core_qualified": False,
+        "side": side,
         "skip_reason": None,
         "price": None,
         "sma200": None,
@@ -143,6 +129,101 @@ def evaluate_stage1(
         "volume_sma5": None,
         "conditions": {},
     }
+
+
+def _bullish_conditions(
+    *,
+    px: float,
+    sma200: float,
+    pct: float,
+    rsi: Optional[float],
+    wr: Optional[float],
+    adx: Optional[float],
+    today_vol: float,
+    vol_sma: Optional[float],
+    cfg: MomentXConfig,
+) -> Dict[str, bool]:
+    return {
+        "below_sma200": px < float(sma200),
+        "pct_in_band": cfg.pct_change_min <= pct <= cfg.pct_change_max,
+        "rsi_ok": rsi is not None and float(rsi) > cfg.rsi_min,
+        "williams_ok": wr is not None and float(wr) >= cfg.williams_min,
+        "adx_ok": adx is not None and float(adx) > cfg.adx_min,
+        "volume_ok": vol_sma is not None and today_vol > float(vol_sma),
+    }
+
+
+def _bearish_conditions(
+    *,
+    px: float,
+    sma200: float,
+    pct: float,
+    rsi: Optional[float],
+    wr: Optional[float],
+    adx: Optional[float],
+    today_vol: float,
+    vol_sma: Optional[float],
+    cfg: MomentXConfig,
+) -> Dict[str, bool]:
+    return {
+        "above_sma200": px > float(sma200),
+        "pct_bearish": pct <= cfg.pct_change_bearish_max,
+        "rsi_bearish": rsi is not None and float(rsi) <= cfg.rsi_bearish_max,
+        "williams_bearish": wr is not None and float(wr) <= cfg.williams_bearish_max,
+        "adx_ok": adx is not None and float(adx) > cfg.adx_min,
+        "volume_ok": vol_sma is not None and today_vol > float(vol_sma),
+    }
+
+
+def _finalize(
+    *,
+    side: str,
+    conds: Dict[str, bool],
+    require_volume: bool,
+    metrics: Dict[str, Any],
+) -> Dict[str, Any]:
+    core = {k: v for k, v in conds.items() if k != "volume_ok"}
+    core_ok = all(core.values()) if core else False
+    vol_ok = bool(conds.get("volume_ok"))
+    qualified = core_ok and (vol_ok if require_volume else True)
+    out = _empty_result(side=side)
+    out.update(metrics)
+    out["conditions"] = conds
+    out["core_qualified"] = core_ok
+    out["qualified"] = qualified
+    return out
+
+
+def evaluate_stage1(
+    *,
+    daily: Sequence[Dict[str, Any]],
+    minutes15: Sequence[Dict[str, Any]],
+    price: Optional[float] = None,
+    now: Optional[datetime] = None,
+    cfg: Optional[MomentXConfig] = None,
+    side: str = SIDE_BULLISH,
+    require_volume: bool = True,
+) -> Dict[str, Any]:
+    """Return qualification result + per-condition values for one equity.
+
+    ``core_qualified`` ignores the volume gate. ``qualified`` also requires
+    ``volume_ok`` when ``require_volume`` is True.
+    """
+    cfg = cfg or CONFIG
+    side_norm = SIDE_BEARISH if str(side).lower() == SIDE_BEARISH else SIDE_BULLISH
+    now = now or datetime.now(IST)
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+    today = now.date()
+    asof_time = now.time()
+
+    daily_rows = list(daily or [])
+    m15 = drop_forming_candle(minutes15 or [], 15, now=now)
+    completed_daily = _completed_daily(daily_rows, today)
+
+    result = _empty_result(side=side_norm)
 
     if len(completed_daily) < cfg.sma_period:
         result["skip_reason"] = "insufficient_daily"
@@ -180,28 +261,87 @@ def evaluate_stage1(
         time_adjusted=cfg.time_adjusted_volume,
     )
 
-    result.update(
-        {
-            "price": px,
-            "sma200": sma200,
-            "prev_close": prev_close,
-            "pct_change": pct,
-            "rsi": rsi,
-            "williams_r": wr,
-            "adx": adx,
-            "today_volume": today_vol,
-            "volume_sma5": vol_sma,
-        }
+    metrics = {
+        "price": px,
+        "sma200": sma200,
+        "prev_close": prev_close,
+        "pct_change": pct,
+        "rsi": rsi,
+        "williams_r": wr,
+        "adx": adx,
+        "today_volume": today_vol,
+        "volume_sma5": vol_sma,
+    }
+
+    if side_norm == SIDE_BEARISH:
+        conds = _bearish_conditions(
+            px=px,
+            sma200=float(sma200),
+            pct=pct,
+            rsi=rsi,
+            wr=wr,
+            adx=adx,
+            today_vol=today_vol,
+            vol_sma=vol_sma,
+            cfg=cfg,
+        )
+    else:
+        conds = _bullish_conditions(
+            px=px,
+            sma200=float(sma200),
+            pct=pct,
+            rsi=rsi,
+            wr=wr,
+            adx=adx,
+            today_vol=today_vol,
+            vol_sma=vol_sma,
+            cfg=cfg,
+        )
+
+    return _finalize(
+        side=side_norm,
+        conds=conds,
+        require_volume=require_volume,
+        metrics=metrics,
     )
 
-    conds = {
-        "below_sma200": px < float(sma200),
-        "pct_in_band": cfg.pct_change_min <= pct <= cfg.pct_change_max,
-        "rsi_ok": rsi is not None and float(rsi) > cfg.rsi_min,
-        "williams_ok": wr is not None and float(wr) >= cfg.williams_min,
-        "adx_ok": adx is not None and float(adx) > cfg.adx_min,
-        "volume_ok": vol_sma is not None and today_vol > float(vol_sma),
-    }
-    result["conditions"] = conds
-    result["qualified"] = all(conds.values())
-    return result
+
+def evaluate_best_side(
+    *,
+    daily: Sequence[Dict[str, Any]],
+    minutes15: Sequence[Dict[str, Any]],
+    price: Optional[float] = None,
+    now: Optional[datetime] = None,
+    cfg: Optional[MomentXConfig] = None,
+    require_volume: bool = False,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Evaluate bullish then bearish; return ``(side, result)`` for first core hit.
+
+    Prefer bullish when both core-qualify at the same clock (rare).
+    """
+    bull = evaluate_stage1(
+        daily=daily,
+        minutes15=minutes15,
+        price=price,
+        now=now,
+        cfg=cfg,
+        side=SIDE_BULLISH,
+        require_volume=require_volume,
+    )
+    if bull.get("skip_reason"):
+        return None, bull
+    if bull.get("core_qualified"):
+        return SIDE_BULLISH, bull
+
+    bear = evaluate_stage1(
+        daily=daily,
+        minutes15=minutes15,
+        price=price,
+        now=now,
+        cfg=cfg,
+        side=SIDE_BEARISH,
+        require_volume=require_volume,
+    )
+    if bear.get("core_qualified"):
+        return SIDE_BEARISH, bear
+    return None, bull

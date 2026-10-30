@@ -34,6 +34,7 @@ def _parse_date(s: Optional[str]) -> Optional[date]:
 
 class TakeTradeBody(BaseModel):
     stock: str = Field(..., min_length=1)
+    side: Optional[str] = Field("bullish", description="bullish or bearish")
     future_symbol: Optional[str] = None
     future_instrument_key: Optional[str] = None
     lot_size: Optional[int] = None
@@ -58,6 +59,25 @@ class EditTradeBody(BaseModel):
 def ready(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
     """Current Ready-to-Trade cards with LTP, EMAs, trigger flag, Stage-1 values."""
     return get_ready_payload(ensure=True)
+
+
+class PrefsBody(BaseModel):
+    volume_filter_enabled: Optional[bool] = None
+
+
+@router.post("/prefs")
+def set_prefs(body: PrefsBody, _user: User = Depends(_auth_user)) -> Dict[str, Any]:
+    """Update desk preferences (volume filter toggle shared by bullish + bearish)."""
+    from backend.services.momentx.service import set_volume_filter_pref
+
+    if body.volume_filter_enabled is None:
+        from backend.services.momentx import state as mx_state
+
+        return {
+            "ok": True,
+            "volume_filter_enabled": mx_state.volume_filter_enabled(),
+        }
+    return set_volume_filter_pref(bool(body.volume_filter_enabled))
 
 
 @router.post("/scan")

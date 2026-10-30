@@ -22,6 +22,12 @@ class MomentXConfig:
     # (fair intraday). False = full-day 5d average (rarely passes before close).
     time_adjusted_volume: bool = True
 
+    # --- Stage 1 bearish (equity, 15m scan) ---
+    # Close/price above SMA200, day down ≥1%, oversold oscillators, same ADX floor.
+    pct_change_bearish_max: float = -1.0  # pct_change <= this
+    rsi_bearish_max: float = 40.0
+    williams_bearish_max: float = -75.0
+
     # Candle fetch windows
     daily_days_back: int = 420  # calendar days for ~200 trading sessions + buffer
     minutes15_days_back: int = 12

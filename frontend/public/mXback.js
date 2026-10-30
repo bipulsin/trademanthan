@@ -66,6 +66,20 @@
   var pollTimer = null;
   var activeRunId = null;
   var runBusy = false;
+  var lastResults = null;
+  var VOL_FILTER_KEY = "momentx_volume_filter";
+
+  function volFilterOn() {
+    var el = $("mxBtVolFilter");
+    if (el) return !!el.checked;
+    try {
+      var v = localStorage.getItem(VOL_FILTER_KEY);
+      if (v === null || v === undefined || v === "") return true;
+      return v === "1";
+    } catch (e) {
+      return true;
+    }
+  }
 
   function setRunEnabled(on) {
     var btn = $("mxBtRun");
@@ -81,14 +95,37 @@
     if (el) el.textContent = "Status: " + text;
   }
 
+  function rowPassesVol(r) {
+    if (!volFilterOn()) return true;
+    if (r.volume_ok != null) return !!r.volume_ok;
+    var c = r.conditions || {};
+    if (typeof c.volume_ok === "boolean") return c.volume_ok;
+    // Legacy rows without conditions: keep visible.
+    return true;
+  }
+
   function dayBlock(day) {
-    var rows = day.symbols || [];
+    var rows = (day.symbols || []).filter(rowPassesVol);
+    var bullN = rows.filter(function (r) {
+      return String(r.side || "bullish").toLowerCase() !== "bearish";
+    }).length;
+    var bearN = rows.length - bullN;
     var body = rows
       .map(function (r) {
+        var side = String(r.side || "bullish").toLowerCase() === "bearish" ? "bearish" : "bullish";
+        var sideLabel = side === "bearish" ? "Bearish" : "Bullish";
+        var sideCls = side === "bearish" ? "mx-log-side-bearish" : "mx-log-side-bullish";
         return (
-          "<tr>" +
+          '<tr class="mx-bt-row-' +
+          side +
+          '">' +
           "<td>" +
           esc(r.stock) +
+          "</td>" +
+          "<td class=\"" +
+          sideCls +
+          "\">" +
+          esc(sideLabel) +
           "</td>" +
           "<td>" +
           esc(r.future_symbol || "—") +
@@ -127,6 +164,12 @@
         );
       })
       .join("");
+    var countNote =
+      esc(String(rows.length)) +
+      " shown" +
+      (bullN || bearN
+        ? " · " + bullN + " bull / " + bearN + " bear"
+        : "");
     return (
       '<section class="mx-bt-day">' +
       '<div class="mx-log-day-head">' +
@@ -134,16 +177,16 @@
       esc(day.trade_date) +
       "</h2>" +
       '<span class="mx-badge mx-badge-accent">' +
-      esc(String(day.count || rows.length)) +
-      " qualified</span>" +
+      countNote +
+      "</span>" +
       "</div>" +
       '<div class="mx-log-table-wrap"><table class="mx-log-table">' +
       "<thead><tr>" +
-      "<th>Stock</th><th>Future</th><th>1st filter</th><th>Day vol</th><th>Vol SMA5</th>" +
+      "<th>Stock</th><th>Side</th><th>Future</th><th>1st filter</th><th>Day vol</th><th>Vol SMA5</th>" +
       "<th>Price</th><th>%Chg</th>" +
       "<th>RSI</th><th>W%R</th><th>ADX</th><th>SMA200</th><th>Lot</th>" +
       "</tr></thead><tbody>" +
-      (body || '<tr><td colspan="12">No rows</td></tr>') +
+      (body || '<tr><td colspan="13">No rows</td></tr>') +
       "</tbody></table></div></section>"
     );
   }
@@ -152,11 +195,26 @@
     var root = $("mxBtRoot");
     var empty = $("mxBtEmpty");
     var summary = $("mxBtSummary");
-    var days = (data && data.days) || [];
+    lastResults = data || null;
+    var rawDays = (data && data.days) || [];
+    var days = rawDays
+      .map(function (d) {
+        return {
+          trade_date: d.trade_date,
+          symbols: (d.symbols || []).filter(rowPassesVol),
+          count: (d.symbols || []).filter(rowPassesVol).length,
+        };
+      })
+      .filter(function (d) {
+        return d.symbols.length > 0;
+      });
     if (!days.length) {
       root.hidden = true;
       summary.hidden = true;
       empty.hidden = false;
+      empty.textContent = volFilterOn()
+        ? "No rows after volume filter. Turn Volume filter off or run a backtest."
+        : "No qualified symbols stored for this range yet. Run a backtest.";
       return;
     }
     empty.hidden = true;
@@ -172,14 +230,30 @@
         " days";
       if (cov.complete) covNote += " (complete)";
     }
+    var shown = days.reduce(function (n, d) {
+      return n + d.symbols.length;
+    }, 0);
+    var bull = 0;
+    var bear = 0;
+    days.forEach(function (d) {
+      d.symbols.forEach(function (r) {
+        if (String(r.side || "").toLowerCase() === "bearish") bear += 1;
+        else bull += 1;
+      });
+    });
     summary.innerHTML =
       "<strong>" +
       (data.from_storage ? "Stored results" : "Run #" + esc(data.run_id != null ? data.run_id : "—")) +
       "</strong> · " +
-      esc(String(data.day_count || days.length)) +
-      " days with hits · " +
-      esc(String(data.total || 0)) +
-      " qualified rows" +
+      esc(String(days.length)) +
+      " days · " +
+      esc(String(shown)) +
+      " rows (bull " +
+      esc(String(bull)) +
+      " / bear " +
+      esc(String(bear)) +
+      ")" +
+      (volFilterOn() ? " · volume filter on" : " · volume filter off") +
       covNote;
     root.hidden = false;
     root.innerHTML = days.map(dayBlock).join("");
@@ -335,6 +409,21 @@
     $("mxBtReload").addEventListener("click", function () {
       loadResults();
     });
+    var volEl = $("mxBtVolFilter");
+    if (volEl) {
+      try {
+        var v = localStorage.getItem(VOL_FILTER_KEY);
+        if (v === "0") volEl.checked = false;
+        else if (v === "1") volEl.checked = true;
+      } catch (e) { /* */ }
+      volEl.addEventListener("change", function () {
+        try {
+          localStorage.setItem(VOL_FILTER_KEY, volEl.checked ? "1" : "0");
+        } catch (e) { /* */ }
+        if (lastResults) renderResults(lastResults);
+        else loadResults();
+      });
+    }
   }
 
   document.addEventListener("DOMContentLoaded", function () {

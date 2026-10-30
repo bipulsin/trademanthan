@@ -98,11 +98,15 @@
   function rowHtml(r) {
     var name = r.future_symbol || r.stock || "—";
     var traded = !!r.traded_at;
+    var side = String(r.side || "bullish").toLowerCase() === "bearish" ? "bearish" : "bullish";
+    var sideCls = side === "bearish" ? "mx-log-side-bearish" : "mx-log-side-bullish";
+    var sideLabel = side === "bearish" ? "Bearish" : "Bullish";
     return (
-      "<tr data-id=\"" + esc(r.id) + "\">" +
+      "<tr data-id=\"" + esc(r.id) + "\" class=\"mx-bt-row-" + side + "\">" +
       "<td><button type=\"button\" class=\"mx-sym-link\" data-act=\"chart\" " +
         "data-ik=\"" + esc(r.future_instrument_key || "") + "\" " +
         "data-sym=\"" + esc(name) + "\">" + esc(name) + "</button></td>" +
+      "<td class=\"" + sideCls + "\">" + esc(sideLabel) + "</td>" +
       "<td>" + esc(fmtHm(r.filtered_at)) + "</td>" +
       "<td>" + esc(fmtHm(r.first_active_at)) + "</td>" +
       "<td>" + esc(fmtNum(r.first_active_ltp)) + "</td>" +
@@ -135,7 +139,7 @@
       "</header>" +
       '<div class="mx-log-table-wrap"><table class="mx-log-table">' +
       "<thead><tr>" +
-      "<th>Future</th><th>Filtered</th><th>1st Activ</th><th>1st Activ LTP</th>" +
+      "<th>Future</th><th>Side</th><th>Filtered</th><th>1st Activ</th><th>1st Activ LTP</th>" +
       "<th>Last Activ</th><th>Traded</th><th>Entry</th><th>Exit</th><th>PnL</th><th></th>" +
       "</tr></thead><tbody>" +
       (g.rows || []).map(rowHtml).join("") +

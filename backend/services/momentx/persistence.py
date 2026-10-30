@@ -53,6 +53,7 @@ _ALTERS = [
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS exit_time TIMESTAMPTZ",
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS pnl DOUBLE PRECISION",
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS side TEXT NOT NULL DEFAULT 'bullish'",
 ]
 
 
@@ -90,10 +91,19 @@ def _parse_dt(v: Any) -> Optional[datetime]:
         return None
 
 
-def compute_pnl(entry: Optional[float], exit_: Optional[float], lot_size: Optional[int]) -> Optional[float]:
+def compute_pnl(
+    entry: Optional[float],
+    exit_: Optional[float],
+    lot_size: Optional[int],
+    *,
+    side: Optional[str] = None,
+) -> Optional[float]:
     if entry is None or exit_ is None:
         return None
     lot = int(lot_size or 1)
+    # Bearish = short: profit when exit < entry.
+    if str(side or "").lower() == "bearish":
+        return round((float(entry) - float(exit_)) * float(lot), 2)
     return round((float(exit_) - float(entry)) * float(lot), 2)
 
 
@@ -167,17 +177,21 @@ def record_filtered_symbols(
                 lot_i = int(lot) if lot is not None else None
             except (TypeError, ValueError):
                 lot_i = None
+            side = str(c.get("side") or (c.get("stage1") or {}).get("side") or "bullish").lower()
+            if side not in ("bullish", "bearish"):
+                side = "bullish"
             db.execute(
                 text(
                     """
                     INSERT INTO momentx_filtered_symbols
-                        (trade_date, stock, future_symbol, future_instrument_key, lot_size, filtered_at, updated_at)
+                        (trade_date, stock, future_symbol, future_instrument_key, lot_size, side, filtered_at, updated_at)
                     VALUES
-                        (:trade_date, :stock, :future_symbol, :future_instrument_key, :lot_size, :filtered_at, NOW())
+                        (:trade_date, :stock, :future_symbol, :future_instrument_key, :lot_size, :side, :filtered_at, NOW())
                     ON CONFLICT (trade_date, stock) DO UPDATE SET
                         future_symbol = COALESCE(EXCLUDED.future_symbol, momentx_filtered_symbols.future_symbol),
                         future_instrument_key = COALESCE(EXCLUDED.future_instrument_key, momentx_filtered_symbols.future_instrument_key),
                         lot_size = COALESCE(EXCLUDED.lot_size, momentx_filtered_symbols.lot_size),
+                        side = EXCLUDED.side,
                         filtered_at = LEAST(momentx_filtered_symbols.filtered_at, EXCLUDED.filtered_at),
                         updated_at = NOW()
                     """
@@ -188,6 +202,7 @@ def record_filtered_symbols(
                     "future_symbol": (c.get("future_symbol") or None),
                     "future_instrument_key": (c.get("future_instrument_key") or None),
                     "lot_size": lot_i,
+                    "side": side,
                     "filtered_at": filtered_at,
                 },
             )
@@ -277,23 +292,38 @@ def record_take_trade(payload: Dict[str, Any]) -> Dict[str, Any]:
         lot_i = int(lot) if lot is not None else None
     except (TypeError, ValueError):
         lot_i = None
-    pnl = compute_pnl(entry_price, exit_price, lot_i)
+    side = str((payload or {}).get("side") or "bullish").lower()
+    if side not in ("bullish", "bearish"):
+        side = "bullish"
     day = entry_time.date()
     db = SessionLocal()
     try:
+        existing = db.execute(
+            text(
+                """
+                SELECT side FROM momentx_filtered_symbols
+                WHERE trade_date = :trade_date AND stock = :stock
+                """
+            ),
+            {"trade_date": day, "stock": stock},
+        ).mappings().first()
+        if existing and existing.get("side"):
+            side = str(existing["side"] or side).lower()
+        pnl = compute_pnl(entry_price, exit_price, lot_i, side=side)
         db.execute(
             text(
                 """
                 INSERT INTO momentx_filtered_symbols
-                    (trade_date, stock, future_symbol, future_instrument_key, lot_size,
+                    (trade_date, stock, future_symbol, future_instrument_key, lot_size, side,
                      filtered_at, traded_at, entry_price, entry_time, exit_price, exit_time, pnl, updated_at)
                 VALUES
-                    (:trade_date, :stock, :future_symbol, :future_instrument_key, :lot_size,
+                    (:trade_date, :stock, :future_symbol, :future_instrument_key, :lot_size, :side,
                      :now, :now, :entry_price, :entry_time, :exit_price, :exit_time, :pnl, NOW())
                 ON CONFLICT (trade_date, stock) DO UPDATE SET
                     future_symbol = COALESCE(EXCLUDED.future_symbol, momentx_filtered_symbols.future_symbol),
                     future_instrument_key = COALESCE(EXCLUDED.future_instrument_key, momentx_filtered_symbols.future_instrument_key),
                     lot_size = COALESCE(EXCLUDED.lot_size, momentx_filtered_symbols.lot_size),
+                    side = COALESCE(momentx_filtered_symbols.side, EXCLUDED.side),
                     traded_at = EXCLUDED.traded_at,
                     entry_price = EXCLUDED.entry_price,
                     entry_time = EXCLUDED.entry_time,
@@ -309,6 +339,7 @@ def record_take_trade(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "future_symbol": (payload or {}).get("future_symbol"),
                 "future_instrument_key": (payload or {}).get("future_instrument_key"),
                 "lot_size": lot_i,
+                "side": side,
                 "now": now,
                 "entry_price": entry_price,
                 "entry_time": entry_time,
@@ -342,7 +373,7 @@ def update_trade_fields(row_id: int, patch: Dict[str, Any]) -> Dict[str, Any]:
         row = db.execute(
             text(
                 """
-                SELECT id, lot_size, entry_price, entry_time, exit_price, exit_time, pnl, traded_at
+                SELECT id, lot_size, side, entry_price, entry_time, exit_price, exit_time, pnl, traded_at
                 FROM momentx_filtered_symbols WHERE id = :id
                 """
             ),
@@ -363,7 +394,7 @@ def update_trade_fields(row_id: int, patch: Dict[str, Any]) -> Dict[str, Any]:
         if exit_time is None:
             exit_time = row["exit_time"]
         lot_i = row["lot_size"]
-        pnl = compute_pnl(entry_price, exit_price, lot_i)
+        pnl = compute_pnl(entry_price, exit_price, lot_i, side=row.get("side"))
         traded_at = row["traded_at"] or entry_time or _aware()
         db.execute(
             text(
@@ -419,6 +450,7 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         "id": int(r["id"]),
         "trade_date": str(r["trade_date"]),
         "stock": r["stock"],
+        "side": str(r.get("side") or "bullish"),
         "future_symbol": r["future_symbol"],
         "future_instrument_key": r["future_instrument_key"],
         "lot_size": r["lot_size"],
@@ -455,7 +487,7 @@ def fetch_log(
         rows = db.execute(
             text(
                 f"""
-                SELECT id, trade_date, stock, future_symbol, future_instrument_key, lot_size,
+                SELECT id, trade_date, stock, side, future_symbol, future_instrument_key, lot_size,
                        filtered_at, first_active_at, first_active_ltp, last_active_at,
                        traded_at, entry_price, entry_time, exit_price, exit_time, pnl
                 FROM momentx_filtered_symbols
@@ -501,6 +533,7 @@ def log_csv(
         [
             "trade_date",
             "stock",
+            "side",
             "future_symbol",
             "lot_size",
             "filtered_at",
@@ -523,6 +556,7 @@ def log_csv(
                 [
                     r.get("trade_date"),
                     r.get("stock"),
+                    r.get("side") or "bullish",
                     r.get("future_symbol"),
                     r.get("lot_size"),
                     r.get("filtered_at"),

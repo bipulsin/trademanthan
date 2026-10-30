@@ -3,15 +3,18 @@
   "use strict";
 
   var SOUND_KEY = "momentx_sound_enabled";
+  var VOL_FILTER_KEY = "momentx_volume_filter";
   var TRIGGERED_KEY = "momentx_triggered_symbols";
   var POLL_DEFAULT_MS = 5000;
   var audio = null;
   var soundOn = false;
+  var volFilterOn = true;
   var pollTimer = null;
   var knownStocks = {};
   var cardsByStock = {};
   var pendingTrade = null;
   var audioUnlocked = false;
+  var prefsSyncing = false;
 
   function apiBase() {
     if (typeof trademanthanApiBase === "function") return trademanthanApiBase();
@@ -79,6 +82,46 @@
 
   function saveSoundPref(on) {
     try { localStorage.setItem(SOUND_KEY, on ? "1" : "0"); } catch (e) { /* private */ }
+  }
+
+  function loadVolFilterPref() {
+    try {
+      var v = localStorage.getItem(VOL_FILTER_KEY);
+      if (v === null || v === undefined || v === "") return true;
+      return v === "1";
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function saveVolFilterPref(on) {
+    try { localStorage.setItem(VOL_FILTER_KEY, on ? "1" : "0"); } catch (e) { /* private */ }
+  }
+
+  function syncVolFilterUi() {
+    var el = $("mxVolFilter");
+    if (el) el.checked = !!volFilterOn;
+  }
+
+  async function pushVolFilterPref(on, reload) {
+    prefsSyncing = true;
+    try {
+      var res = await fetch(apiBase() + "/api/momentx/prefs", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ volume_filter_enabled: !!on }),
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (res.ok && data && typeof data.volume_filter_enabled === "boolean") {
+        volFilterOn = !!data.volume_filter_enabled;
+        syncVolFilterUi();
+      }
+      if (reload !== false) await loadReady();
+    } catch (e) {
+      /* keep local preference; next poll may re-sync */
+    } finally {
+      prefsSyncing = false;
+    }
   }
 
   function loadTriggeredMap() {
@@ -151,8 +194,16 @@
       : '<i class="fas fa-volume-mute" aria-hidden="true"></i> Sound off';
   }
 
+  function cardSide(card) {
+    var s = String((card && (card.side || (card.stage1 && card.stage1.side))) || "bullish").toLowerCase();
+    return s === "bearish" ? "bearish" : "bullish";
+  }
+
   function stage1Html(s1) {
     if (!s1) return "";
+    var volOk = s1.volume_ok;
+    if (volOk == null && s1.conditions) volOk = !!s1.conditions.volume_ok;
+    var volNote = volOk === true ? " ✓" : volOk === false ? " ✗" : "";
     return (
       '<details class="mx-details"><summary>Stage 1 values</summary>' +
       '<div class="mx-details-grid">' +
@@ -162,7 +213,7 @@
       "<div>RSI " + esc(fmtNum(s1.rsi)) + "</div>" +
       "<div>W%R " + esc(fmtNum(s1.williams_r)) + "</div>" +
       "<div>ADX " + esc(fmtNum(s1.adx)) + "</div>" +
-      "<div>Vol " + esc(fmtNum(s1.today_volume, 0)) + "</div>" +
+      "<div>Vol " + esc(fmtNum(s1.today_volume, 0)) + esc(volNote) + "</div>" +
       "<div>VolSMA5 " + esc(fmtNum(s1.volume_sma5, 0)) + "</div>" +
       "</div></details>"
     );
@@ -200,12 +251,17 @@
   function cardHtml(card) {
     var stock = card.stock || "—";
     var status = cardStatus(card);
+    var side = cardSide(card);
     var canTrade = status === "active" && !!card.trigger;
     var dir = card.ltp_dir || "flat";
-    var cls = "mx-card";
+    var cls = "mx-card is-" + side;
     if (status === "filters_off") cls += " is-inactive";
     if (status === "locked") cls += " is-locked";
     if (canTrade) cls += " is-trigger";
+    var sidePill =
+      '<span class="mx-side-pill is-' + side + '">' +
+      (side === "bearish" ? "Bearish" : "Bullish") +
+      "</span>";
     var pill =
       status === "active"
         ? '<span class="mx-status-pill is-active">Active</span>'
@@ -217,11 +273,11 @@
         ? '<span class="mx-lot">Lot ' + esc(fmtNum(card.lot_size, 0)) + "</span>"
         : '<span class="mx-lot">Lot —</span>';
     return (
-      '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-status="' + esc(status) + '">' +
+      '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-status="' + esc(status) + '" data-side="' + esc(side) + '">' +
       '<div class="mx-card-top">' +
         "<div><button type=\"button\" class=\"mx-sym-link mx-symbol\" data-act=\"chart\">" +
           esc(card.future_symbol || stock) + "</button>" +
-        '<div class="mx-lot-row">' + lot + pill + "</div>" +
+        '<div class="mx-lot-row">' + lot + sidePill + pill + "</div>" +
         "</div>" +
         '<div class="mx-ltp ' + esc(dir) + '">' + esc(fmtNum(card.ltp)) + "</div>" +
       "</div>" +
@@ -258,6 +314,10 @@
     $("mxScanAt").textContent = "15m scan: " + fmtTime(data && data.scan_at);
     $("mxEmaAt").textContent = "5m EMA: " + fmtTime(data && data.ema_at);
     $("mxMarket").textContent = "Market: " + ((data && data.market_status) || "—");
+    if (data && typeof data.volume_filter_enabled === "boolean" && !prefsSyncing) {
+      volFilterOn = !!data.volume_filter_enabled;
+      syncVolFilterUi();
+    }
     var ready = (data && data.ready) || [];
     var activeN = ready.filter(function (c) { return cardStatus(c) === "active"; }).length;
     var dayN = ready.length;
@@ -352,7 +412,9 @@
 
   function openTradeModal(card) {
     pendingTrade = card;
+    var side = cardSide(card);
     var body =
+      "Side: " + (side === "bearish" ? "Bearish" : "Bullish") + "\n" +
       "Symbol: " + (card.future_symbol || card.stock) + "\n" +
       "Stock: " + (card.stock || "—") + "\n" +
       "Lot: " + (card.lot_size != null ? card.lot_size : "—") + "\n" +
@@ -384,6 +446,7 @@
     $("mxTradeExitPrice").value = exitPrice != null ? exitPrice : "";
     var body = {
       stock: pendingTrade.stock,
+      side: cardSide(pendingTrade),
       future_symbol: pendingTrade.future_symbol,
       future_instrument_key: pendingTrade.future_instrument_key,
       lot_size: pendingTrade.lot_size,
@@ -409,6 +472,8 @@
   function bind() {
     soundOn = loadSoundPref();
     setSoundUi();
+    volFilterOn = loadVolFilterPref();
+    syncVolFilterUi();
 
     $("mxSoundBtn").addEventListener("click", function () {
       soundOn = !soundOn;
@@ -416,6 +481,17 @@
       setSoundUi();
       if (soundOn) unlockAudio();
     });
+
+    var volEl = $("mxVolFilter");
+    if (volEl) {
+      volEl.addEventListener("change", function () {
+        volFilterOn = !!volEl.checked;
+        saveVolFilterPref(volFilterOn);
+        pushVolFilterPref(volFilterOn, true);
+      });
+      // Align server with local preference; DOMContentLoaded still loads the board once.
+      pushVolFilterPref(volFilterOn, false);
+    }
 
     $("mxRefreshBtn").addEventListener("click", function () {
       $("mxLoading").hidden = false;

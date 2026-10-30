@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="settings.css?v=2" />
   <link rel="stylesheet" href="left-menu.css?v=3.48" />
   <link rel="stylesheet" href="theme.css?v=1.4" />
-  <link rel="stylesheet" href="momentx.css?v=1.6" />
+  <link rel="stylesheet" href="momentx.css?v=1.8" />
 </head>
 <body class="momentx-page theme-page left-menu-web-hamburger" data-theme="dark">
   <div class="mobile-title-bar">
@@ -37,6 +37,10 @@
             <span id="mxEmaAt">5m EMA: —</span>
             <span id="mxMarket" class="mx-badge">Market: —</span>
             <span id="mxCount" class="mx-badge mx-badge-accent">Ready: 0</span>
+            <label class="mx-toggle" title="When on, cards failing Day Vol &gt; SMA(Vol,5) are disabled">
+              <input type="checkbox" id="mxVolFilter" checked />
+              <span>Volume filter</span>
+            </label>
             <a class="mx-btn" href="momentxlog.html"><i class="fas fa-book"></i> Trade Log</a>
             <a class="mx-btn" href="mXback.html"><i class="fas fa-flask"></i> Backtest</a>
             <button type="button" class="mx-btn" id="mxSoundBtn" aria-pressed="false" title="Enable sound">
@@ -85,6 +89,6 @@
 
   <script src="left-menu.js?v=3.53"></script>
   <script src="momentx-chart.js?v=2.0"></script>
-  <script src="momentx.js?v=1.5"></script>
+  <script src="momentx.js?v=1.8"></script>
 </body>
 </html>

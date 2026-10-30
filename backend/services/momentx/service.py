@@ -1,11 +1,46 @@
 """API-facing MomentX facade."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.services.momentx import state as mx_state
 from backend.services.momentx.config import CONFIG
-from backend.services.momentx.scanner import ensure_scan_if_needed
+from backend.services.momentx.scanner import _filters_ok_for_card, ensure_scan_if_needed
+
+
+def apply_volume_filter_to_board(*, enabled: Optional[bool] = None) -> List[Dict[str, Any]]:
+    """Recompute filters_ok from Stage-1 conditions using the volume-filter toggle."""
+    vol_on = mx_state.volume_filter_enabled() if enabled is None else bool(enabled)
+    cards = mx_state.ready_cards()
+    out: List[Dict[str, Any]] = []
+    for c in cards:
+        card = dict(c)
+        s1 = card.get("stage1") or {}
+        # Cards on the board already passed core gates when first filtered.
+        # If stage1 missing, keep prior filters_ok.
+        if s1.get("conditions"):
+            card["filters_ok"] = _filters_ok_for_card(s1, volume_filter=vol_on)
+            card["volume_ok"] = bool((s1.get("conditions") or {}).get("volume_ok"))
+        out.append(card)
+    try:
+        from backend.services.momentx.status_rules import refresh_board_statuses
+
+        out = refresh_board_statuses(out)
+    except Exception:
+        pass
+    mx_state.set_ready_cards(out)
+    return out
+
+
+def set_volume_filter_pref(enabled: bool) -> Dict[str, Any]:
+    flag = mx_state.set_volume_filter_enabled(bool(enabled))
+    cards = apply_volume_filter_to_board(enabled=flag)
+    return {
+        "ok": True,
+        "volume_filter_enabled": flag,
+        "day_count": len(cards),
+        "qualified_count": sum(1 for c in cards if str(c.get("status") or "") == "active"),
+    }
 
 
 def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
@@ -40,6 +75,7 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
         "scan_running": snap.get("scan_running"),
         "ema_running": snap.get("ema_running"),
         "last_error": snap.get("last_error"),
+        "volume_filter_enabled": bool(snap.get("volume_filter_enabled", True)),
         "poll_sec": CONFIG.poll_ready_sec,
         "config": CONFIG.to_public_dict(),
         "ready": cards,

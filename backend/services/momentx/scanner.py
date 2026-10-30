@@ -13,8 +13,19 @@ from backend.services.momentx import state as mx_state
 from backend.services.momentx.candles import batch_fetch, fetch_daily_cached
 from backend.services.momentx.config import CONFIG
 from backend.services.momentx.day_board import board_date_str, merge_day_cards
-from backend.services.momentx.filter import evaluate_stage1
+from backend.services.momentx.filter import evaluate_best_side
 from backend.services.momentx.universe import load_momentx_universe
+
+
+def _filters_ok_for_card(stage1: Dict[str, Any], *, volume_filter: bool) -> bool:
+    """Core Stage-1 gates always required; volume optional via desk toggle."""
+    conds = (stage1 or {}).get("conditions") or {}
+    core = {k: bool(v) for k, v in conds.items() if k != "volume_ok"}
+    if not core or not all(core.values()):
+        return False
+    if not volume_filter:
+        return True
+    return bool(conds.get("volume_ok"))
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -105,13 +116,17 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
             str(c.get("stock") or "").upper(): c for c in mx_state.ready_cards()
         }
 
+        volume_filter = mx_state.volume_filter_enabled()
         for row in universe:
             stock = row["stock"]
             eq = row["equity_instrument_key"]
             try:
                 daily = daily_by_ik.get(eq) or []
                 m15 = m15_by_ik.get(eq) or []
-                ev = evaluate_stage1(daily=daily, minutes15=m15, now=now)
+                # Board membership uses core gates only; volume is applied via filters_ok.
+                side, ev = evaluate_best_side(
+                    daily=daily, minutes15=m15, now=now, require_volume=False
+                )
                 if ev.get("skip_reason"):
                     skipped.append(f"{stock}:{ev['skip_reason']}")
                     continue
@@ -126,9 +141,12 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                     "today_volume": ev.get("today_volume"),
                     "volume_sma5": ev.get("volume_sma5"),
                     "conditions": ev.get("conditions") or {},
+                    "side": side or ev.get("side") or "bullish",
+                    "volume_ok": bool((ev.get("conditions") or {}).get("volume_ok")),
+                    "core_qualified": bool(ev.get("core_qualified")),
                 }
                 stage1_by_stock[stock.upper()] = stage1
-                if not ev.get("qualified"):
+                if not ev.get("core_qualified") or not side:
                     continue
                 prev = prev_by_stock.get(stock.upper()) or {}
                 lot_size = row.get("lot_size")
@@ -140,7 +158,10 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                     "future_symbol": row["future_symbol"],
                     "future_instrument_key": row["future_instrument_key"],
                     "lot_size": lot_size,
+                    "side": side,
                     "stage1": stage1,
+                    "volume_ok": bool(stage1.get("volume_ok")),
+                    "filters_ok": _filters_ok_for_card(stage1, volume_filter=volume_filter),
                     "active": True,
                     # Preserve Stage-2 fields across rescans when still Ready.
                     "ltp": prev.get("ltp"),

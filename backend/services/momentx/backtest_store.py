@@ -76,8 +76,13 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_day_cov_date
 """
 
 
+# ruleset separates bullish-only history (v1) from bull+bear core scans (v2).
+BACKTEST_RULESET = "stage1_v2"
+
 _ALTERS = (
     "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS first_filtered_at TIMESTAMPTZ",
+    "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS side TEXT NOT NULL DEFAULT 'bullish'",
+    "ALTER TABLE momentx_backtest_day_coverage ADD COLUMN IF NOT EXISTS ruleset TEXT NOT NULL DEFAULT 'stage1_v1'",
 )
 
 
@@ -248,13 +253,14 @@ def record_day_coverage(
             text(
                 """
                 INSERT INTO momentx_backtest_day_coverage
-                    (trade_date, asof_hhmm, run_id, qualified_count, scanned_at)
+                    (trade_date, asof_hhmm, run_id, qualified_count, scanned_at, ruleset)
                 VALUES
-                    (:trade_date, :asof_hhmm, :run_id, :qualified_count, NOW())
+                    (:trade_date, :asof_hhmm, :run_id, :qualified_count, NOW(), :ruleset)
                 ON CONFLICT (trade_date, asof_hhmm) DO UPDATE SET
                     run_id = EXCLUDED.run_id,
                     qualified_count = EXCLUDED.qualified_count,
-                    scanned_at = NOW()
+                    scanned_at = NOW(),
+                    ruleset = EXCLUDED.ruleset
                 """
             ),
             {
@@ -262,6 +268,7 @@ def record_day_coverage(
                 "asof_hhmm": asof_hhmm,
                 "run_id": run_id,
                 "qualified_count": int(qualified_count or 0),
+                "ruleset": BACKTEST_RULESET,
             },
         )
         db.commit()
@@ -287,10 +294,16 @@ def covered_trade_dates(
                 SELECT trade_date FROM momentx_backtest_day_coverage
                 WHERE trade_date BETWEEN :d0 AND :d1
                   AND asof_hhmm = :asof
+                  AND ruleset = :ruleset
                 ORDER BY trade_date
                 """
             ),
-            {"d0": date_from, "d1": date_to, "asof": asof_hhmm},
+            {
+                "d0": date_from,
+                "d1": date_to,
+                "asof": asof_hhmm,
+                "ruleset": BACKTEST_RULESET,
+            },
         ).fetchall()
         out: List[date] = []
         for r in rows:
@@ -362,12 +375,12 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                     """
                     INSERT INTO momentx_backtest_qualified (
                         run_id, trade_date, stock, equity_instrument_key,
-                        future_symbol, future_instrument_key, lot_size,
+                        future_symbol, future_instrument_key, lot_size, side,
                         price, sma200, prev_close, pct_change, rsi, williams_r, adx,
                         today_volume, volume_sma5, first_filtered_at, conditions, asof_at, created_at
                     ) VALUES (
                         :run_id, :trade_date, :stock, :equity_instrument_key,
-                        :future_symbol, :future_instrument_key, :lot_size,
+                        :future_symbol, :future_instrument_key, :lot_size, :side,
                         :price, :sma200, :prev_close, :pct_change, :rsi, :williams_r, :adx,
                         :today_volume, :volume_sma5, :first_filtered_at,
                         CAST(:conditions AS JSONB), :asof_at, NOW()
@@ -377,6 +390,7 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         future_symbol = EXCLUDED.future_symbol,
                         future_instrument_key = EXCLUDED.future_instrument_key,
                         lot_size = EXCLUDED.lot_size,
+                        side = EXCLUDED.side,
                         price = EXCLUDED.price,
                         sma200 = EXCLUDED.sma200,
                         prev_close = EXCLUDED.prev_close,
@@ -399,6 +413,9 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                     "future_symbol": r.get("future_symbol"),
                     "future_instrument_key": r.get("future_instrument_key"),
                     "lot_size": r.get("lot_size"),
+                    "side": (str(r.get("side") or "bullish").lower()
+                             if str(r.get("side") or "").lower() in ("bullish", "bearish")
+                             else "bullish"),
                     "price": r.get("price"),
                     "sma200": r.get("sma200"),
                     "prev_close": r.get("prev_close"),
@@ -538,7 +555,7 @@ def fetch_qualified(
             where = "WHERE " + " AND ".join(clauses)
             sql = f"""
                 SELECT id, run_id, trade_date, stock, equity_instrument_key,
-                       future_symbol, future_instrument_key, lot_size,
+                       future_symbol, future_instrument_key, lot_size, side,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at
                 FROM momentx_backtest_qualified
@@ -558,7 +575,7 @@ def fetch_qualified(
             sql = f"""
                 SELECT DISTINCT ON (trade_date, stock)
                        id, run_id, trade_date, stock, equity_instrument_key,
-                       future_symbol, future_instrument_key, lot_size,
+                       future_symbol, future_instrument_key, lot_size, side,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at
                 FROM momentx_backtest_qualified
@@ -576,12 +593,15 @@ def fetch_qualified(
             d["trade_date"] = td
             d["asof_at"] = _iso(d.get("asof_at"))
             d["first_filtered_at"] = _iso(d.get("first_filtered_at"))
+            d["side"] = str(d.get("side") or "bullish")
             cond = d.get("conditions")
             if isinstance(cond, str):
                 try:
                     d["conditions"] = json.loads(cond)
                 except Exception:
                     d["conditions"] = {}
+            conds = d.get("conditions") if isinstance(d.get("conditions"), dict) else {}
+            d["volume_ok"] = bool(conds.get("volume_ok")) if conds else None
             flat.append(d)
             by_day.setdefault(td or "", []).append(d)
 

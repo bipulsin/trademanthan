@@ -41,6 +41,7 @@ def merge_day_cards(
             continue
         card = dict(prev)
         card["stock"] = key
+        # Core Stage-1 presence; volume gate applied from the new qualified card below.
         card["filters_ok"] = key in qualified_keys
         by_stock[key] = card
 
@@ -53,7 +54,12 @@ def merge_day_cards(
         was_new = key not in prev_keys
         card = dict(qc)
         card["stock"] = key
-        card["filters_ok"] = True
+        # Honour volume-filter toggle from scanner (`filters_ok` already set).
+        card["filters_ok"] = bool(qc.get("filters_ok", True))
+        if qc.get("side"):
+            card["side"] = qc.get("side")
+        if qc.get("volume_ok") is not None:
+            card["volume_ok"] = bool(qc.get("volume_ok"))
         card["first_seen_at"] = prev.get("first_seen_at") or now_iso or card.get("first_seen_at")
         for fld in (
             "ltp",
@@ -71,13 +77,16 @@ def merge_day_cards(
             "first_active_at",
             "active_since",
             "status",
+            "side",
         ):
             if card.get(fld) is None and prev.get(fld) is not None:
                 card[fld] = prev.get(fld)
-        re_filtered = str(prev.get("status") or "") == "filters_off"
+        # First board appearance (core gates) — even if volume currently disables Active.
+        re_filtered = str(prev.get("status") or "") == "filters_off" and card["filters_ok"]
         if was_new or re_filtered:
-            card["status"] = STATUS_ACTIVE
-            card.pop("active_since", None)
+            if card["filters_ok"]:
+                card["status"] = STATUS_ACTIVE
+                card.pop("active_since", None)
             newly_filtered.append(card)
         by_stock[key] = card
 
@@ -87,6 +96,10 @@ def merge_day_cards(
         s1 = stage1_by_stock.get(key)
         if s1:
             card["stage1"] = s1
+            if s1.get("side"):
+                card["side"] = s1.get("side")
+            if s1.get("volume_ok") is not None:
+                card["volume_ok"] = bool(s1.get("volume_ok"))
         card["filters_ok"] = False
         if not card.get("first_seen_at") and now_iso:
             card["first_seen_at"] = now_iso

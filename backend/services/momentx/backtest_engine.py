@@ -26,7 +26,6 @@ from backend.services.momentx.backtest_store import (
 )
 from backend.services.momentx.candles import candle_date, sort_candles
 from backend.services.momentx.config import CONFIG, MomentXConfig
-from backend.services.momentx.filter import evaluate_stage1
 from backend.services.momentx.universe import load_momentx_universe
 
 logger = logging.getLogger(__name__)
@@ -120,16 +119,26 @@ def _find_first_qualify(
     asof_end: datetime,
     cfg: MomentXConfig,
 ) -> Tuple[Optional[datetime], Optional[Dict[str, Any]]]:
-    """Earliest session clock where Stage-1 passes; metrics are as-of that clock."""
+    """Earliest session clock where bullish or bearish core Stage-1 passes.
+
+    Volume is recorded but not required for storage — the backtest page can
+    filter on ``volume_ok`` via the shared volume-filter checkbox.
+    """
+    from backend.services.momentx.filter import evaluate_best_side
+
     for t in _session_eval_times(trade_date, asof_end, cfg):
         m15 = _slice_m15(m15_full, trade_date, t)
         try:
-            ev = evaluate_stage1(daily=daily, minutes15=m15, now=t, cfg=cfg)
+            side, ev = evaluate_best_side(
+                daily=daily, minutes15=m15, now=t, cfg=cfg, require_volume=False
+            )
         except Exception:
             continue
         if ev.get("skip_reason"):
             continue
-        if ev.get("qualified"):
+        if side and ev.get("core_qualified"):
+            ev = dict(ev)
+            ev["side"] = side
             return t, ev
     return None, None
 
@@ -433,6 +442,7 @@ def run_stage1_backtest(
                             "future_symbol": u.get("future_symbol"),
                             "future_instrument_key": u.get("future_instrument_key"),
                             "lot_size": u.get("lot_size"),
+                            "side": ev.get("side") or "bullish",
                             "price": ev.get("price"),
                             "sma200": ev.get("sma200"),
                             "prev_close": ev.get("prev_close"),

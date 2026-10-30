@@ -25,6 +25,9 @@ _STATE: Dict[str, Any] = {
     "last_error": None,
     "scan_running": False,
     "ema_running": False,
+    # When True, cards that fail Daily Vol > SMA(Vol,5) are Filters Off.
+    # When False, volume is ignored for Active / Filters Off (other gates remain).
+    "volume_filter_enabled": True,
 }
 
 
@@ -151,6 +154,17 @@ def update_ltp(future_key: str, ltp: float) -> None:
                     except (TypeError, ValueError):
                         card["ltp_dir"] = "flat"
                 break
+
+
+def volume_filter_enabled() -> bool:
+    with _LOCK:
+        return bool(_STATE.get("volume_filter_enabled", True))
+
+
+def set_volume_filter_enabled(enabled: bool) -> bool:
+    with _LOCK:
+        _STATE["volume_filter_enabled"] = bool(enabled)
+        return bool(_STATE["volume_filter_enabled"])
 
 
 def ready_cards() -> List[Dict[str, Any]]:

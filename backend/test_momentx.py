@@ -163,6 +163,70 @@ def test_stage1_qualifies_when_all_pass():
     assert ev2["conditions"]["pct_in_band"] is False
 
 
+def test_stage1_volume_optional_and_bearish_side():
+    daily = [_bar(i - 210, 100.0, volume=1_000_000) for i in range(210)]
+    # Yesterday close high so price can sit above SMA for bearish.
+    daily[-1] = _bar(-1, 120.0, volume=1_000_000)
+    daily.append(_bar(0, 110.0, volume=100_000))  # low today volume
+    m15 = []
+    base = IST.localize(datetime(2026, 3, 5, 9, 15))
+    for i in range(100):
+        # Falling closes → oversold RSI / Williams for bearish
+        c = 130.0 - i * 0.25
+        ts = base + timedelta(minutes=15 * i)
+        m15.append(
+            {
+                "timestamp": ts.isoformat(),
+                "open": c + 0.2,
+                "high": c + 0.8,
+                "low": c - 0.8,
+                "close": c,
+                "volume": 20_000,
+            }
+        )
+    today_base = IST.localize(datetime(2026, 3, 10, 9, 15))
+    for i in range(12):
+        # Hard dump so Williams %R is deeply oversold (<= -70).
+        c = 118.0 - i * 1.2
+        m15.append(
+            {
+                "timestamp": (today_base + timedelta(minutes=15 * i)).isoformat(),
+                "open": c + 0.4,
+                "high": c + 0.6,
+                "low": c - 1.2,
+                "close": c,
+                "volume": 5_000,
+            }
+        )
+    cfg = MomentXConfig(
+        sma_period=200,
+        rsi_bearish_max=45.0,
+        williams_bearish_max=-70.0,
+        adx_min=5.0,
+        pct_change_bearish_max=-1.0,
+        minutes15_min_bars=50,
+        volume_sma_days=5,
+        time_adjusted_volume=False,
+    )
+    now = IST.localize(datetime(2026, 3, 10, 12, 0))
+    # Price ~106 vs prev 120 → about -11.6%, above SMA ~100.
+    bear = evaluate_stage1(
+        daily=daily, minutes15=m15, price=106.0, now=now, cfg=cfg, side="bearish", require_volume=False
+    )
+    assert bear.get("skip_reason") is None
+    assert bear["conditions"]["above_sma200"] is True
+    assert bear["conditions"]["pct_bearish"] is True
+    assert bear["core_qualified"] is True
+    # Low volume should fail volume_ok but still qualify when require_volume=False
+    assert bear["conditions"]["volume_ok"] is False
+    assert bear["qualified"] is True
+    bear_req = evaluate_stage1(
+        daily=daily, minutes15=m15, price=106.0, now=now, cfg=cfg, side="bearish", require_volume=True
+    )
+    assert bear_req["core_qualified"] is True
+    assert bear_req["qualified"] is False
+
+
 def test_stage1_pct_and_volume_gates():
     daily = [_bar(i - 210, 100.0, volume=1_000_000) for i in range(210)]
     daily.append(_bar(0, 102.0, volume=8_000_000))
@@ -211,6 +275,13 @@ def test_stage1_pct_and_volume_gates():
     assert ev["conditions"]["volume_ok"] is True
 
 
+def test_compute_pnl_bearish_short():
+    from backend.services.momentx.persistence import compute_pnl
+
+    assert compute_pnl(100.0, 90.0, 10, side="bullish") == -100.0
+    assert compute_pnl(100.0, 90.0, 10, side="bearish") == 100.0
+
+
 def test_merge_day_cards_keeps_inactive_and_sorts_active_first():
     from backend.services.momentx.day_board import merge_day_cards
 
@@ -219,8 +290,8 @@ def test_merge_day_cards_keeps_inactive_and_sorts_active_first():
         {"stock": "BBB", "status": "active", "filters_ok": True, "trigger": True, "first_seen_at": "t1", "ltp": 20},
     ]
     qualified = [
-        {"stock": "CCC", "trigger": False, "ltp": None},
-        {"stock": "BBB", "trigger": True, "ltp": 21},
+        {"stock": "CCC", "trigger": False, "ltp": None, "filters_ok": True, "side": "bullish"},
+        {"stock": "BBB", "trigger": True, "ltp": 21, "filters_ok": True, "side": "bullish"},
     ]
     stage1 = {"AAA": {"pct_change": 0.5, "conditions": {"pct_in_band": False}}}
     now = IST.localize(datetime(2026, 3, 10, 12, 0))
