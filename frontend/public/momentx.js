@@ -192,7 +192,7 @@
     btn.title = soundOn ? "Sound on" : "Sound off";
     btn.setAttribute("aria-label", soundOn ? "Sound on — click to mute" : "Sound off — click to enable");
     btn.innerHTML = soundOn
-      ? '<i class="fas fa-volume-high" aria-hidden="true"></i>'
+      ? '<i class="fas fa-volume-up" aria-hidden="true"></i>'
       : '<i class="fas fa-volume-xmark" aria-hidden="true"></i>';
   }
 
