@@ -116,11 +116,11 @@ def test_stage1_qualifies_when_all_pass():
     # Today partial daily
     daily.append(_bar(0, 102.0, volume=6_000_000))
 
-    # 15m bars: strong trend so RSI/ADX/Williams pass; last close 102 (= +2%)
+    # 15m bars spanning prior sessions + today; last *closed* at 13:45 when now=14:00.
     m15 = []
-    base = IST.localize(datetime(2026, 3, 9, 9, 15))
-    for i in range(120):
-        c = 95.0 + i * 0.06
+    base = IST.localize(datetime(2026, 3, 5, 9, 15))
+    for i in range(160):
+        c = 95.0 + i * 0.04
         ts = base + timedelta(minutes=15 * i)
         m15.append(
             {
@@ -132,10 +132,18 @@ def test_stage1_qualifies_when_all_pass():
                 "volume": 50_000,
             }
         )
-    # Force last closed close to 102 for pct-change
-    m15[-1]["close"] = 102.0
-    m15[-1]["high"] = 103.0
-    m15[-1]["low"] = 101.0
+    # Ensure a closed bar at 13:45 today with close 102 (+2% vs prev 100).
+    target = IST.localize(datetime(2026, 3, 10, 13, 45))
+    m15.append(
+        {
+            "timestamp": target.isoformat(),
+            "open": 101.5,
+            "high": 103.0,
+            "low": 101.0,
+            "close": 102.0,
+            "volume": 80_000,
+        }
+    )
 
     cfg = MomentXConfig(
         sma_period=200,
@@ -149,7 +157,7 @@ def test_stage1_qualifies_when_all_pass():
         time_adjusted_volume=False,
     )
     now = IST.localize(datetime(2026, 3, 10, 14, 0))
-    ev = evaluate_stage1(daily=daily, minutes15=m15, price=102.0, now=now, cfg=cfg)
+    ev = evaluate_stage1(daily=daily, minutes15=m15, now=now, cfg=cfg)
     assert ev.get("skip_reason") is None
     assert ev["pct_change"] is not None
     assert 1.0 <= ev["pct_change"] <= 3.0
@@ -158,7 +166,10 @@ def test_stage1_qualifies_when_all_pass():
     # Flat daily SMA ≈ 100; price 102 is ABOVE SMA200.
     assert ev["conditions"]["below_sma200"] is False
     # Price below SMA but negative day change fails the +1..+3 band.
-    ev2 = evaluate_stage1(daily=daily, minutes15=m15, price=98.0, now=now, cfg=cfg)
+    m15[-1]["close"] = 98.0
+    m15[-1]["high"] = 99.0
+    m15[-1]["low"] = 97.0
+    ev2 = evaluate_stage1(daily=daily, minutes15=m15, now=now, cfg=cfg)
     assert ev2["conditions"]["below_sma200"] is True
     assert ev2["conditions"]["pct_in_band"] is False
 
@@ -185,7 +196,7 @@ def test_stage1_volume_optional_and_bearish_side():
             }
         )
     today_base = IST.localize(datetime(2026, 3, 10, 9, 15))
-    for i in range(12):
+    for i in range(12):  # 09:15 .. 12:00; at now=12:00 last closed is 11:45 (i=10)
         # Hard dump so Williams %R is deeply oversold (<= -70).
         c = 118.0 - i * 1.2
         m15.append(
@@ -208,10 +219,10 @@ def test_stage1_volume_optional_and_bearish_side():
         volume_sma_days=5,
         time_adjusted_volume=False,
     )
+    # At 12:00 the last closed bar is 11:45 (i=10 → close 106).
     now = IST.localize(datetime(2026, 3, 10, 12, 0))
-    # Price ~106 vs prev 120 → about -11.6%, above SMA ~100.
     bear = evaluate_stage1(
-        daily=daily, minutes15=m15, price=106.0, now=now, cfg=cfg, side="bearish", require_volume=False
+        daily=daily, minutes15=m15, now=now, cfg=cfg, side="bearish", require_volume=False
     )
     assert bear.get("skip_reason") is None
     assert bear["conditions"]["above_sma200"] is True
@@ -221,7 +232,7 @@ def test_stage1_volume_optional_and_bearish_side():
     assert bear["conditions"]["volume_ok"] is False
     assert bear["qualified"] is True
     bear_req = evaluate_stage1(
-        daily=daily, minutes15=m15, price=106.0, now=now, cfg=cfg, side="bearish", require_volume=True
+        daily=daily, minutes15=m15, now=now, cfg=cfg, side="bearish", require_volume=True
     )
     assert bear_req["core_qualified"] is True
     assert bear_req["qualified"] is False
@@ -245,9 +256,9 @@ def test_stage1_pct_and_volume_gates():
                 "volume": 80_000,
             }
         )
-    # Put several bars on "today" 2026-03-10
+    # Put several bars on "today" 2026-03-10 through 11:45 (closed by now=12:00).
     today_base = IST.localize(datetime(2026, 3, 10, 9, 15))
-    for i in range(10):
+    for i in range(11):  # 09:15 .. 11:45 inclusive
         m15.append(
             {
                 "timestamp": (today_base + timedelta(minutes=15 * i)).isoformat(),
@@ -268,11 +279,89 @@ def test_stage1_pct_and_volume_gates():
         time_adjusted_volume=False,
     )
     now = IST.localize(datetime(2026, 3, 10, 12, 0))
-    ev = evaluate_stage1(daily=daily, minutes15=m15, price=102.0, now=now, cfg=cfg)
+    ev = evaluate_stage1(daily=daily, minutes15=m15, now=now, cfg=cfg)
+    assert ev.get("skip_reason") is None
     assert ev["conditions"]["pct_in_band"] is True
     assert ev["today_volume"] is not None
     assert ev["volume_sma5"] is not None
+    # Baseline is full-day prior avg (1M); today cumulative from 15m is large → volume_ok.
     assert ev["conditions"]["volume_ok"] is True
+
+
+def test_stale_guards_flat_prev_close_and_duplicate_fingerprint():
+    from backend.services.momentx.filter import evaluate_stage1, metric_fingerprint
+
+    daily = [_bar(i - 210, 100.0, volume=1_000_000) for i in range(210)]
+    m15 = []
+    base = IST.localize(datetime(2026, 3, 5, 9, 15))
+    for i in range(120):
+        c = 100.0 + (i % 3) * 0.1
+        m15.append(
+            {
+                "timestamp": (base + timedelta(minutes=15 * i)).isoformat(),
+                "open": c,
+                "high": c + 1,
+                "low": c - 1,
+                "close": c,
+                "volume": 40_000,
+            }
+        )
+    # Today bars frozen at prev close 100 → pct 0.
+    today_base = IST.localize(datetime(2026, 3, 10, 9, 15))
+    for i in range(8):
+        m15.append(
+            {
+                "timestamp": (today_base + timedelta(minutes=15 * i)).isoformat(),
+                "open": 100.0,
+                "high": 100.5,
+                "low": 99.5,
+                "close": 100.0,
+                "volume": 10_000,
+            }
+        )
+    cfg = MomentXConfig(sma_period=200, minutes15_min_bars=50, adx_min=0.0, rsi_min=0.0, williams_min=-100.0)
+    now = IST.localize(datetime(2026, 3, 10, 11, 0))  # last closed = 10:45
+    ev = evaluate_stage1(daily=daily, minutes15=m15, now=now, cfg=cfg)
+    assert ev.get("skip_reason") == "stale_flat_prev_close"
+
+    # Non-flat bar, then duplicate fingerprint rejection.
+    m15[-1]["close"] = 101.5
+    m15[-1]["high"] = 102.0
+    now2 = IST.localize(datetime(2026, 3, 10, 11, 15))
+    m15.append(
+        {
+            "timestamp": IST.localize(datetime(2026, 3, 10, 11, 0)).isoformat(),
+            "open": 101.0,
+            "high": 102.0,
+            "low": 100.5,
+            "close": 101.5,
+            "volume": 12_000,
+        }
+    )
+    ev_ok = evaluate_stage1(daily=daily, minutes15=m15, now=now2, cfg=cfg, enforce_stale_guards=True)
+    assert ev_ok.get("skip_reason") is None
+    fp = ev_ok.get("fingerprint")
+    assert fp is not None
+    ev_dup = evaluate_stage1(
+        daily=daily,
+        minutes15=m15,
+        now=now2,
+        cfg=cfg,
+        prior_fingerprints={fp},
+    )
+    assert ev_dup.get("skip_reason") == "stale_duplicate_metrics"
+    assert metric_fingerprint(
+        price=ev_ok["price"], rsi=ev_ok["rsi"], adx=ev_ok["adx"], today_volume=ev_ok["today_volume"]
+    ) == fp
+
+
+def test_expected_closed_15m_start():
+    from backend.services.momentx.filter import expected_closed_15m_start
+
+    now = IST.localize(datetime(2026, 3, 10, 13, 45))
+    assert expected_closed_15m_start(now) == IST.localize(datetime(2026, 3, 10, 13, 30))
+    now2 = IST.localize(datetime(2026, 3, 10, 9, 30))
+    assert expected_closed_15m_start(now2) == IST.localize(datetime(2026, 3, 10, 9, 15))
 
 
 def test_compute_pnl_bearish_short():

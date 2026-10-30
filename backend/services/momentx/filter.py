@@ -3,15 +3,23 @@
 Supports bullish and bearish sides. Volume vs SMA(5) is always computed
 (``volume_ok``) but only required for ``qualified`` when ``require_volume``
 is True.
+
+Data quality: rejects stale / frozen bars (wrong last candle clock, flat
+pct vs prev close, volume regression, duplicate metric fingerprints).
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time as dt_time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from datetime import date, datetime, time as dt_time, timedelta
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import pytz
 
-from backend.services.momentx.candles import candle_date, candle_time, drop_forming_candle, splits_ohlcv
+from backend.services.momentx.candles import (
+    candle_date,
+    candle_time,
+    drop_forming_candle,
+    splits_ohlcv,
+)
 from backend.services.momentx.config import CONFIG, MomentXConfig
 from backend.services.momentx.indicators import sma, wilder_adx, wilder_rsi, williams_r
 
@@ -19,6 +27,9 @@ IST = pytz.timezone("Asia/Kolkata")
 
 SIDE_BULLISH = "bullish"
 SIDE_BEARISH = "bearish"
+
+# Metric fingerprint for duplicate / frozen-bar detection across clocks.
+Fingerprint = Tuple[float, float, float, int]
 
 
 def _completed_daily(daily: Sequence[Dict[str, Any]], today: date) -> List[Dict[str, Any]]:
@@ -31,85 +42,79 @@ def _completed_daily(daily: Sequence[Dict[str, Any]], today: date) -> List[Dict[
     return out
 
 
-def _today_volume(
-    daily: Sequence[Dict[str, Any]],
+def expected_closed_15m_start(now: datetime) -> datetime:
+    """Start timestamp of the latest 15m bar that has fully closed by ``now``.
+
+    Upstox bars are labeled by start; a bar starting at S closes at S+15m.
+    """
+    if now.tzinfo is None:
+        now = IST.localize(now)
+    else:
+        now = now.astimezone(IST)
+    # Latest start S with S + 15m <= now  ⇒  S <= now - 15m, floored to 15m grid.
+    closed_by = now - timedelta(minutes=15)
+    minute = (closed_by.minute // 15) * 15
+    return closed_by.replace(minute=minute, second=0, microsecond=0)
+
+
+def metric_fingerprint(
+    *,
+    price: Optional[float],
+    rsi: Optional[float],
+    adx: Optional[float],
+    today_volume: Optional[float],
+) -> Fingerprint:
+    return (
+        round(float(price or 0.0), 4),
+        round(float(rsi or 0.0), 2),
+        round(float(adx or 0.0), 2),
+        int(float(today_volume or 0.0)),
+    )
+
+
+def _today_volume_since_open(
     minutes15: Sequence[Dict[str, Any]],
     today: date,
     *,
     asof_time: Optional[dt_time],
-    time_adjusted: bool,
+    market_open: dt_time,
 ) -> float:
-    """Current-day cumulative volume.
-
-    Prefer sum of today's 15m bars (optionally truncated to asof_time). Fall back
-    to the partial daily candle for today when 15m volume is empty.
-    """
+    """Cumulative cash volume from session open through asof (numerator)."""
     total = 0.0
     for c in minutes15:
         d = candle_date(c)
         if d != today:
             continue
-        if time_adjusted and asof_time is not None:
-            t = candle_time(c)
-            if t is not None and t > asof_time:
-                continue
+        t = candle_time(c)
+        if t is not None and t < market_open:
+            continue
+        if asof_time is not None and t is not None and t > asof_time:
+            continue
         try:
             total += float(c.get("volume") or 0)
         except (TypeError, ValueError):
             continue
-    if total > 0:
-        return total
-    for c in daily:
-        if candle_date(c) == today:
-            try:
-                return float(c.get("volume") or 0)
-            except (TypeError, ValueError):
-                return 0.0
-    return 0.0
+    return total
 
 
-def _avg_prior_volume(
+def _avg_prior_full_day_volume(
     daily: Sequence[Dict[str, Any]],
-    minutes15: Sequence[Dict[str, Any]],
     today: date,
     *,
     n_days: int,
-    asof_time: Optional[dt_time],
-    time_adjusted: bool,
 ) -> Optional[float]:
+    """5-day average of full-day volume on prior completed sessions (Chartink-style)."""
     completed = _completed_daily(daily, today)
     if len(completed) < n_days:
         return None
     prior = completed[-n_days:]
-    if not time_adjusted:
-        vols = []
-        for c in prior:
-            try:
-                vols.append(float(c.get("volume") or 0))
-            except (TypeError, ValueError):
-                vols.append(0.0)
-        return sum(vols) / float(n_days)
-
-    # Time-adjusted: for each of the prior n days, sum 15m volume up to asof_time.
-    day_set = {candle_date(c) for c in prior}
-    by_day: Dict[date, float] = {d: 0.0 for d in day_set if d is not None}
-    for c in minutes15:
-        d = candle_date(c)
-        if d not in by_day:
-            continue
-        if asof_time is not None:
-            t = candle_time(c)
-            if t is not None and t > asof_time:
-                continue
+    vols: List[float] = []
+    for c in prior:
         try:
-            by_day[d] += float(c.get("volume") or 0)
+            vols.append(float(c.get("volume") or 0))
         except (TypeError, ValueError):
-            continue
-    if len(by_day) < n_days:
-        # Fall back to full-day average if 15m history is thin.
-        vols = [float(c.get("volume") or 0) for c in prior]
-        return sum(vols) / float(n_days)
-    return sum(by_day.values()) / float(len(by_day))
+            vols.append(0.0)
+    return sum(vols) / float(n_days)
 
 
 def _empty_result(*, side: str) -> Dict[str, Any]:
@@ -128,6 +133,9 @@ def _empty_result(*, side: str) -> Dict[str, Any]:
         "today_volume": None,
         "volume_sma5": None,
         "conditions": {},
+        "fingerprint": None,
+        "last_candle_ts": None,
+        "expected_candle_ts": None,
     }
 
 
@@ -194,20 +202,87 @@ def _finalize(
     return out
 
 
+def _stale_reason(
+    *,
+    m15: Sequence[Dict[str, Any]],
+    today: date,
+    now: datetime,
+    px: float,
+    prev_close: float,
+    pct: float,
+    rsi: Optional[float],
+    adx: Optional[float],
+    today_vol: float,
+    prior_fingerprints: Optional[Set[Fingerprint]],
+    prev_today_volume: Optional[float],
+) -> Optional[str]:
+    """Return a skip_reason if the bar looks stale / frozen."""
+    expected = expected_closed_15m_start(now)
+    last = m15[-1] if m15 else None
+    last_ts = None
+    if last is not None:
+        try:
+            from backend.services.upstox_service import _parse_ts_to_aware_ist
+
+            last_ts = _parse_ts_to_aware_ist(last.get("timestamp"))
+        except Exception:
+            last_ts = None
+    if last_ts is None:
+        return "stale_missing_candle"
+    last_ts = last_ts.astimezone(IST).replace(second=0, microsecond=0)
+    exp = expected.replace(second=0, microsecond=0)
+    if last_ts != exp:
+        return "stale_candle_clock"
+
+    # Flat day print equal to previous close — typical frozen quote at open.
+    if abs(float(pct)) < 1e-12 and abs(float(px) - float(prev_close)) < 1e-9:
+        return "stale_flat_prev_close"
+
+    # Session volume must not go backwards as clocks advance.
+    if prev_today_volume is not None and today_vol + 1e-9 < float(prev_today_volume):
+        return "stale_volume_regression"
+
+    # Latest 15m bar volume must not be below the prior bar's volume when the
+    # session print is otherwise frozen (common stale-feed pattern).
+    today_bars = [c for c in m15 if candle_date(c) == today]
+    if len(today_bars) >= 2:
+        try:
+            v_last = float(today_bars[-1].get("volume") or 0)
+            v_prev = float(today_bars[-2].get("volume") or 0)
+            c_last = float(today_bars[-1].get("close") or 0)
+            c_prev = float(today_bars[-2].get("close") or 0)
+            if v_last + 1e-9 < v_prev and abs(c_last - c_prev) < 1e-9:
+                return "stale_bar_volume_drop"
+        except (TypeError, ValueError):
+            pass
+
+    fp = metric_fingerprint(price=px, rsi=rsi, adx=adx, today_volume=today_vol)
+    if prior_fingerprints and fp in prior_fingerprints:
+        return "stale_duplicate_metrics"
+    return None
+
+
 def evaluate_stage1(
     *,
     daily: Sequence[Dict[str, Any]],
     minutes15: Sequence[Dict[str, Any]],
-    price: Optional[float] = None,
+    price: Optional[float] = None,  # ignored for live gates — cash 15m close only
     now: Optional[datetime] = None,
     cfg: Optional[MomentXConfig] = None,
     side: str = SIDE_BULLISH,
     require_volume: bool = True,
+    prior_fingerprints: Optional[Set[Fingerprint]] = None,
+    prev_today_volume: Optional[float] = None,
+    enforce_stale_guards: bool = True,
 ) -> Dict[str, Any]:
     """Return qualification result + per-condition values for one equity.
 
-    ``core_qualified`` ignores the volume gate. ``qualified`` also requires
-    ``volume_ok`` when ``require_volume`` is True.
+    Price / SMA200 / prev_close all come from the **cash equity** series:
+    SMA200 + prev_close from completed daily closes; price from the last
+    closed 15m candle close (never a futures tick).
+
+    Volume: numerator = session cumulative 15m volume since open; baseline =
+    average full-day volume over the prior ``volume_sma_days`` sessions.
     """
     cfg = cfg or CONFIG
     side_norm = SIDE_BEARISH if str(side).lower() == SIDE_BEARISH else SIDE_BULLISH
@@ -218,18 +293,27 @@ def evaluate_stage1(
         now = now.astimezone(IST)
     today = now.date()
     asof_time = now.time()
+    market_open = dt_time(int(cfg.market_open_hhmm[0]), int(cfg.market_open_hhmm[1]))
 
     daily_rows = list(daily or [])
     m15 = drop_forming_candle(minutes15 or [], 15, now=now)
     completed_daily = _completed_daily(daily_rows, today)
 
     result = _empty_result(side=side_norm)
+    expected = expected_closed_15m_start(now)
+    result["expected_candle_ts"] = expected.isoformat()
 
     if len(completed_daily) < cfg.sma_period:
         result["skip_reason"] = "insufficient_daily"
         return result
-    if len(m15) < max(cfg.minutes15_min_bars, cfg.rsi_period + 2, cfg.adx_period * 2):
+    # ADX/RSI need multi-session 15m history (not only today).
+    min_bars = max(cfg.minutes15_min_bars, cfg.rsi_period + 2, cfg.adx_period * 3)
+    if len(m15) < min_bars:
         result["skip_reason"] = "insufficient_15m"
+        return result
+    prior_session_bars = sum(1 for c in m15 if candle_date(c) is not None and candle_date(c) < today)
+    if prior_session_bars < cfg.adx_period * 2:
+        result["skip_reason"] = "insufficient_prior_15m"
         return result
 
     _, _, _, daily_closes, _ = splits_ohlcv(completed_daily)
@@ -240,27 +324,38 @@ def evaluate_stage1(
         return result
 
     _, highs, lows, closes, _ = splits_ohlcv(m15)
-    px = float(price) if price is not None else float(closes[-1])
+    # Always cash 15m close — never a futures LTP / tick override.
+    _ = price  # retained in signature for call-site compat; unused
+    px = float(closes[-1])
     pct = ((px - prev_close) / prev_close) * 100.0
     rsi = wilder_rsi(closes, cfg.rsi_period)
     wr = williams_r(highs, lows, closes, cfg.williams_period)
     adx = wilder_adx(highs, lows, closes, cfg.adx_period)
-    today_vol = _today_volume(
-        daily_rows,
+
+    today_vol = _today_volume_since_open(
         m15,
         today,
         asof_time=asof_time,
-        time_adjusted=cfg.time_adjusted_volume,
+        market_open=market_open,
     )
-    vol_sma = _avg_prior_volume(
+    # Chartink-style: full-day average of prior sessions (not time-of-day matched).
+    vol_sma = _avg_prior_full_day_volume(
         daily_rows,
-        m15,
         today,
         n_days=cfg.volume_sma_days,
-        asof_time=asof_time,
-        time_adjusted=cfg.time_adjusted_volume,
     )
 
+    last_ts_iso = None
+    try:
+        from backend.services.upstox_service import _parse_ts_to_aware_ist
+
+        ts = _parse_ts_to_aware_ist(m15[-1].get("timestamp")) if m15 else None
+        if ts is not None:
+            last_ts_iso = ts.astimezone(IST).isoformat()
+    except Exception:
+        last_ts_iso = None
+
+    fp = metric_fingerprint(price=px, rsi=rsi, adx=adx, today_volume=today_vol)
     metrics = {
         "price": px,
         "sma200": sma200,
@@ -271,7 +366,30 @@ def evaluate_stage1(
         "adx": adx,
         "today_volume": today_vol,
         "volume_sma5": vol_sma,
+        "fingerprint": fp,
+        "last_candle_ts": last_ts_iso,
+        "expected_candle_ts": expected.isoformat(),
     }
+
+    if enforce_stale_guards:
+        stale = _stale_reason(
+            m15=m15,
+            today=today,
+            now=now,
+            px=px,
+            prev_close=prev_close,
+            pct=pct,
+            rsi=rsi,
+            adx=adx,
+            today_vol=today_vol,
+            prior_fingerprints=prior_fingerprints,
+            prev_today_volume=prev_today_volume,
+        )
+        if stale:
+            result.update(metrics)
+            result["skip_reason"] = stale
+            result["conditions"] = {}
+            return result
 
     if side_norm == SIDE_BEARISH:
         conds = _bearish_conditions(
@@ -314,6 +432,9 @@ def evaluate_best_side(
     now: Optional[datetime] = None,
     cfg: Optional[MomentXConfig] = None,
     require_volume: bool = False,
+    prior_fingerprints: Optional[Set[Fingerprint]] = None,
+    prev_today_volume: Optional[float] = None,
+    enforce_stale_guards: bool = True,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """Evaluate bullish then bearish; return ``(side, result)`` for first core hit.
 
@@ -327,6 +448,9 @@ def evaluate_best_side(
         cfg=cfg,
         side=SIDE_BULLISH,
         require_volume=require_volume,
+        prior_fingerprints=prior_fingerprints,
+        prev_today_volume=prev_today_volume,
+        enforce_stale_guards=enforce_stale_guards,
     )
     if bull.get("skip_reason"):
         return None, bull
@@ -341,7 +465,14 @@ def evaluate_best_side(
         cfg=cfg,
         side=SIDE_BEARISH,
         require_volume=require_volume,
+        prior_fingerprints=prior_fingerprints,
+        prev_today_volume=prev_today_volume,
+        enforce_stale_guards=enforce_stale_guards,
     )
+    if bear.get("skip_reason"):
+        # Bull didn't core-qualify; bear failed data quality — surface bear skip.
+        if not bull.get("core_qualified"):
+            return None, bear
     if bear.get("core_qualified"):
         return SIDE_BEARISH, bear
     return None, bull

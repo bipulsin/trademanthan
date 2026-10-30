@@ -124,8 +124,13 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
                 daily = daily_by_ik.get(eq) or []
                 m15 = m15_by_ik.get(eq) or []
                 # Board membership uses core gates only; volume is applied via filters_ok.
+                # Price always from cash 15m close; stale bars are skipped.
                 side, ev = evaluate_best_side(
-                    daily=daily, minutes15=m15, now=now, require_volume=False
+                    daily=daily,
+                    minutes15=m15,
+                    now=now,
+                    require_volume=False,
+                    enforce_stale_guards=True,
                 )
                 if ev.get("skip_reason"):
                     skipped.append(f"{stock}:{ev['skip_reason']}")

@@ -76,8 +76,8 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_day_cov_date
 """
 
 
-# ruleset separates bullish-only history (v1) from bull+bear core scans (v2).
-BACKTEST_RULESET = "stage1_v2"
+# ruleset: v1 bull-only; v2 bull+bear; v3 + stale guards + full-day vol baseline.
+BACKTEST_RULESET = "stage1_v3"
 
 _ALTERS = (
     "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS first_filtered_at TIMESTAMPTZ",

@@ -18,9 +18,10 @@ class MomentXConfig:
     adx_period: int = 14
     adx_min: float = 30.0
     volume_sma_days: int = 5
-    # Compare today cumulative vol vs prior days. True = same clock time of day
-    # (fair intraday). False = full-day 5d average (rarely passes before close).
-    time_adjusted_volume: bool = True
+    # Legacy flag (UI alias). Baseline is always the 5-session *full-day* average
+    # of completed daily volumes (Chartink-style). Numerator remains session
+    # cumulative volume since market open through the as-of clock.
+    time_adjusted_volume: bool = False
 
     # --- Stage 1 bearish (equity, 15m scan) ---
     # Close/price above SMA200, day down ≥1%, oversold oscillators, same ADX floor.

@@ -123,17 +123,35 @@ def _find_first_qualify(
 
     Volume is recorded but not required for storage — the backtest page can
     filter on ``volume_ok`` via the shared volume-filter checkbox.
+    Stale / frozen bars (duplicate fingerprints, volume regression, wrong
+    candle clock) are skipped.
     """
     from backend.services.momentx.filter import evaluate_best_side
 
+    seen_fp = set()
+    prev_vol: Optional[float] = None
     for t in _session_eval_times(trade_date, asof_end, cfg):
         m15 = _slice_m15(m15_full, trade_date, t)
         try:
             side, ev = evaluate_best_side(
-                daily=daily, minutes15=m15, now=t, cfg=cfg, require_volume=False
+                daily=daily,
+                minutes15=m15,
+                now=t,
+                cfg=cfg,
+                require_volume=False,
+                prior_fingerprints=seen_fp,
+                prev_today_volume=prev_vol,
             )
         except Exception:
             continue
+        fp = ev.get("fingerprint")
+        if fp is not None:
+            seen_fp.add(fp)
+        if ev.get("today_volume") is not None:
+            try:
+                prev_vol = float(ev["today_volume"])
+            except (TypeError, ValueError):
+                pass
         if ev.get("skip_reason"):
             continue
         if side and ev.get("core_qualified"):

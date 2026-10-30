@@ -95,7 +95,14 @@ def wilder_adx(
     closes: Sequence[float],
     period: int = 14,
 ) -> Optional[float]:
-    """Wilder ADX of the last bar. Needs roughly 2*period bars of history."""
+    """Wilder ADX of the last bar (RMA / alpha = 1/period).
+
+    Seed ATR / +DM / −DM as the SMA of the first ``period`` true-range / DM
+    values, then smooth with Wilder's recursive mean
+    ``x := (x*(period-1) + sample) / period``. ADX itself is the same RMA of DX.
+    Matches TradingView ``ta.adx`` / pandas_ta when fed the same multi-session
+    15m OHLC history (callers must pass prior sessions, not today-only bars).
+    """
     p = int(period)
     n = len(closes)
     if p <= 0 or n < p * 2 or len(highs) != n or len(lows) != n:
@@ -117,11 +124,13 @@ def wilder_adx(
     if len(trs) < p:
         return None
 
+    # Seed = SMA of first period (Wilder / TV RMA convention).
     atr = sum(trs[:p]) / float(p)
     p_dm = sum(plus_dm[:p]) / float(p)
     m_dm = sum(minus_dm[:p]) / float(p)
 
     dx_list: List[float] = []
+
     def _dx(atr_v: float, pd: float, md: float) -> float:
         if atr_v <= 0:
             return 0.0
@@ -135,6 +144,7 @@ def wilder_adx(
     dx_list.append(_dx(atr, p_dm, m_dm))
 
     for i in range(p, len(trs)):
+        # alpha = 1/p  ⇔  x := (x*(p-1) + sample) / p
         atr = (atr * (p - 1) + trs[i]) / float(p)
         p_dm = (p_dm * (p - 1) + plus_dm[i]) / float(p)
         m_dm = (m_dm * (p - 1) + minus_dm[i]) / float(p)
