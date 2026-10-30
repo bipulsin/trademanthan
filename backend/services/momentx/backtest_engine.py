@@ -88,6 +88,49 @@ def _asof_dt(trade_date: date, hhmm: Tuple[int, int]) -> datetime:
     return IST.localize(datetime.combine(trade_date, dt_time(hhmm[0], hhmm[1], 0)))
 
 
+def _session_eval_times(
+    trade_date: date,
+    asof_end: datetime,
+    cfg: MomentXConfig,
+) -> List[datetime]:
+    """15m bar-close clocks from first Stage-1 scan through asof_end (inclusive)."""
+    first = cfg.first_15m_scan_hhmm
+    start = IST.localize(datetime.combine(trade_date, dt_time(int(first[0]), int(first[1]), 0)))
+    end = asof_end
+    if end.tzinfo is None:
+        end = IST.localize(end)
+    else:
+        end = end.astimezone(IST)
+    out: List[datetime] = []
+    t = start
+    while t <= end:
+        out.append(t)
+        t = t + timedelta(minutes=15)
+    return out
+
+
+def _find_first_qualify(
+    *,
+    daily: Sequence[Dict[str, Any]],
+    m15_full: Sequence[Dict[str, Any]],
+    trade_date: date,
+    asof_end: datetime,
+    cfg: MomentXConfig,
+) -> Tuple[Optional[datetime], Optional[Dict[str, Any]]]:
+    """Earliest session clock where Stage-1 passes; metrics are as-of that clock."""
+    for t in _session_eval_times(trade_date, asof_end, cfg):
+        m15 = _slice_m15(m15_full, trade_date, t)
+        try:
+            ev = evaluate_stage1(daily=daily, minutes15=m15, now=t, cfg=cfg)
+        except Exception:
+            continue
+        if ev.get("skip_reason"):
+            continue
+        if ev.get("qualified"):
+            return t, ev
+    return None, None
+
+
 def _slice_daily(rows: Sequence[Dict[str, Any]], trade_date: date) -> List[Dict[str, Any]]:
     out = []
     for c in rows or []:
@@ -102,7 +145,7 @@ def _slice_m15(
     trade_date: date,
     asof: datetime,
 ) -> List[Dict[str, Any]]:
-    """Bars on/before trade_date, and on trade_date only up to asof start time."""
+    """Bars on/before trade_date; on trade_date keep candle starts that have closed by asof."""
     out = []
     for c in rows or []:
         ts = None
@@ -337,13 +380,19 @@ def run_stage1_backtest(
                     stock = u["stock"]
                     eq = u["equity_instrument_key"]
                     daily = _slice_daily(daily_by_ik.get(eq) or [], trade_date)
-                    m15 = _slice_m15(m15_by_ik.get(eq) or [], trade_date, asof)
+                    m15_full = m15_by_ik.get(eq) or []
                     try:
-                        ev = evaluate_stage1(daily=daily, minutes15=m15, now=asof, cfg=cfg)
+                        first_at, ev = _find_first_qualify(
+                            daily=daily,
+                            m15_full=m15_full,
+                            trade_date=trade_date,
+                            asof_end=asof,
+                            cfg=cfg,
+                        )
                     except Exception as e:
                         logger.info("momentx bt eval error %s %s: %s", trade_date, stock, e)
                         continue
-                    if ev.get("skip_reason") or not ev.get("qualified"):
+                    if not first_at or not ev:
                         continue
                     day_rows.append(
                         {
@@ -360,8 +409,10 @@ def run_stage1_backtest(
                             "rsi": ev.get("rsi"),
                             "williams_r": ev.get("williams_r"),
                             "adx": ev.get("adx"),
+                            # Volume metrics at the first filter clock (not end-of-day).
                             "today_volume": ev.get("today_volume"),
                             "volume_sma5": ev.get("volume_sma5"),
+                            "first_filtered_at": first_at,
                             "conditions": ev.get("conditions") or {},
                             "asof_at": asof,
                         }

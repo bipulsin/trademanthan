@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS momentx_backtest_qualified (
     adx DOUBLE PRECISION,
     today_volume DOUBLE PRECISION,
     volume_sma5 DOUBLE PRECISION,
+    first_filtered_at TIMESTAMPTZ,
     conditions JSONB,
     asof_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -64,6 +65,11 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_runs_status
 """
 
 
+_ALTERS = (
+    "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS first_filtered_at TIMESTAMPTZ",
+)
+
+
 def ensure_backtest_schema() -> None:
     global _SCHEMA_READY
     if _SCHEMA_READY:
@@ -74,6 +80,8 @@ def ensure_backtest_schema() -> None:
             s = stmt.strip()
             if s:
                 db.execute(text(s))
+        for stmt in _ALTERS:
+            db.execute(text(stmt))
         db.commit()
         _SCHEMA_READY = True
     except Exception:
@@ -203,12 +211,13 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         run_id, trade_date, stock, equity_instrument_key,
                         future_symbol, future_instrument_key, lot_size,
                         price, sma200, prev_close, pct_change, rsi, williams_r, adx,
-                        today_volume, volume_sma5, conditions, asof_at, created_at
+                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at, created_at
                     ) VALUES (
                         :run_id, :trade_date, :stock, :equity_instrument_key,
                         :future_symbol, :future_instrument_key, :lot_size,
                         :price, :sma200, :prev_close, :pct_change, :rsi, :williams_r, :adx,
-                        :today_volume, :volume_sma5, CAST(:conditions AS JSONB), :asof_at, NOW()
+                        :today_volume, :volume_sma5, :first_filtered_at,
+                        CAST(:conditions AS JSONB), :asof_at, NOW()
                     )
                     ON CONFLICT (run_id, trade_date, stock) DO UPDATE SET
                         equity_instrument_key = EXCLUDED.equity_instrument_key,
@@ -224,6 +233,7 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         adx = EXCLUDED.adx,
                         today_volume = EXCLUDED.today_volume,
                         volume_sma5 = EXCLUDED.volume_sma5,
+                        first_filtered_at = EXCLUDED.first_filtered_at,
                         conditions = EXCLUDED.conditions,
                         asof_at = EXCLUDED.asof_at
                     """
@@ -245,6 +255,7 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                     "adx": r.get("adx"),
                     "today_volume": r.get("today_volume"),
                     "volume_sma5": r.get("volume_sma5"),
+                    "first_filtered_at": r.get("first_filtered_at"),
                     "conditions": json.dumps(r.get("conditions") or {}),
                     "asof_at": r.get("asof_at"),
                 },
@@ -376,10 +387,10 @@ def fetch_qualified(
                 SELECT id, run_id, trade_date, stock, equity_instrument_key,
                        future_symbol, future_instrument_key, lot_size,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
-                       today_volume, volume_sma5, conditions, asof_at
+                       today_volume, volume_sma5, first_filtered_at, conditions, asof_at
                 FROM momentx_backtest_qualified
                 {where}
-                ORDER BY trade_date ASC, stock ASC
+                ORDER BY trade_date ASC, first_filtered_at ASC NULLS LAST, stock ASC
                 """
             ),
             params,
@@ -392,6 +403,7 @@ def fetch_qualified(
             td = _iso(d.get("trade_date"))
             d["trade_date"] = td
             d["asof_at"] = _iso(d.get("asof_at"))
+            d["first_filtered_at"] = _iso(d.get("first_filtered_at"))
             cond = d.get("conditions")
             if isinstance(cond, str):
                 try:

@@ -38,6 +38,31 @@
     return Number(v).toFixed(d == null ? 2 : d);
   }
 
+  function fmtVol(v) {
+    if (v == null || v === "" || !Number.isFinite(Number(v))) return "—";
+    var n = Number(v);
+    if (n >= 1e7) return (n / 1e7).toFixed(2) + " Cr";
+    if (n >= 1e5) return (n / 1e5).toFixed(2) + " L";
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + " K";
+    return String(Math.round(n));
+  }
+
+  function fmtIstTime(iso) {
+    if (!iso) return "—";
+    try {
+      var d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    } catch (e) {
+      return "—";
+    }
+  }
+
   var pollTimer = null;
   var activeRunId = null;
 
@@ -57,6 +82,15 @@
           "</td>" +
           "<td>" +
           esc(r.future_symbol || "—") +
+          "</td>" +
+          "<td>" +
+          esc(fmtIstTime(r.first_filtered_at)) +
+          "</td>" +
+          "<td>" +
+          esc(fmtVol(r.today_volume)) +
+          "</td>" +
+          "<td>" +
+          esc(fmtVol(r.volume_sma5)) +
           "</td>" +
           "<td>" +
           esc(fmtNum(r.price)) +
@@ -95,10 +129,11 @@
       "</div>" +
       '<div class="mx-log-table-wrap"><table class="mx-log-table">' +
       "<thead><tr>" +
-      "<th>Stock</th><th>Future</th><th>Price</th><th>%Chg</th>" +
+      "<th>Stock</th><th>Future</th><th>1st filter</th><th>Day vol</th><th>Vol SMA5</th>" +
+      "<th>Price</th><th>%Chg</th>" +
       "<th>RSI</th><th>W%R</th><th>ADX</th><th>SMA200</th><th>Lot</th>" +
       "</tr></thead><tbody>" +
-      (body || '<tr><td colspan="9">No rows</td></tr>') +
+      (body || '<tr><td colspan="12">No rows</td></tr>') +
       "</tbody></table></div></section>"
     );
   }
