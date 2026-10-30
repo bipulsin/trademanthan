@@ -40,7 +40,12 @@ def sort_candles(candles: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
-def drop_forming_candle(candles: Sequence[Dict[str, Any]], interval_minutes: int) -> List[Dict[str, Any]]:
+def drop_forming_candle(
+    candles: Sequence[Dict[str, Any]],
+    interval_minutes: int,
+    *,
+    now: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
     """Drop the last bar if it has not yet closed (based on interval end)."""
     rows = sort_candles(candles)
     if not rows or interval_minutes <= 0:
@@ -53,8 +58,12 @@ def drop_forming_candle(candles: Sequence[Dict[str, Any]], interval_minutes: int
     from datetime import timedelta
 
     end = ts + timedelta(minutes=int(interval_minutes))
-    now = datetime.now(IST)
-    if end > now:
+    asof = now or datetime.now(IST)
+    if asof.tzinfo is None:
+        asof = IST.localize(asof)
+    else:
+        asof = asof.astimezone(IST)
+    if end > asof:
         return rows[:-1]
     return rows
 

@@ -126,7 +126,7 @@ def evaluate_stage1(
     asof_time = now.time()
 
     daily_rows = list(daily or [])
-    m15 = drop_forming_candle(minutes15 or [], 15)
+    m15 = drop_forming_candle(minutes15 or [], 15, now=now)
     completed_daily = _completed_daily(daily_rows, today)
 
     result: Dict[str, Any] = {

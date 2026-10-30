@@ -493,6 +493,33 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
   color: var(--muted);
 }
 
+.mx-lede {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  max-width: 52rem;
+}
+
+.mx-bt-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(18, 26, 23, 0.72);
+}
+
+.mx-bt-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.mx-bt-day { margin-bottom: 4px; }
+
 .mx-log-root { display: flex; flex-direction: column; gap: 22px; }
 
 .mx-log-day-head {

@@ -146,3 +146,62 @@ def chart_data(
         interval=interval,
         days_back=int(days_back),
     )
+
+
+class BacktestRunBody(BaseModel):
+    date_from: str = Field(..., min_length=8, description="YYYY-MM-DD")
+    date_to: str = Field(..., min_length=8, description="YYYY-MM-DD")
+    asof_hhmm: str = Field("14:45", description="IST as-of clock for Stage-1 eval")
+    replace_range: bool = Field(True, description="Clear overlapping qualified rows first")
+
+
+@router.post("/backtest/run")
+def backtest_run(body: BacktestRunBody, _user: User = Depends(_auth_user)) -> Dict[str, Any]:
+    """Queue a Stage-1 backtest for an arbitrary date/month range (background)."""
+    d0 = _parse_date(body.date_from)
+    d1 = _parse_date(body.date_to)
+    if not d0 or not d1:
+        return {"ok": False, "error": "invalid date_from/date_to"}
+    from backend.services.momentx.backtest_engine import start_backtest_async
+
+    return start_backtest_async(
+        date_from=d0,
+        date_to=d1,
+        asof_hhmm=body.asof_hhmm or "14:45",
+        replace_range=bool(body.replace_range),
+    )
+
+
+@router.get("/backtest/status")
+def backtest_status(
+    run_id: Optional[int] = Query(None),
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    from backend.services.momentx.backtest_engine import active_run_id
+    from backend.services.momentx.backtest_store import fetch_run, fetch_runs, latest_done_run_id
+
+    rid = run_id if run_id is not None else active_run_id() or latest_done_run_id()
+    run = fetch_run(int(rid)) if rid is not None else None
+    return {
+        "ok": True,
+        "active_run_id": active_run_id(),
+        "run": run,
+        "runs": fetch_runs(limit=10),
+    }
+
+
+@router.get("/backtest/results")
+def backtest_results(
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    run_id: Optional[int] = Query(None),
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Qualified stocks grouped by trading day (latest done run unless run_id set)."""
+    from backend.services.momentx.backtest_store import fetch_qualified
+
+    return fetch_qualified(
+        date_from=_parse_date(date_from),
+        date_to=_parse_date(date_to),
+        run_id=run_id,
+    )

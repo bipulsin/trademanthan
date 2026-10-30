@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|momentx|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|momentx|mxback|tradelog|kavach-bt-checkpoint|breakfast|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
     }
 
     getCurrentPage() {
@@ -64,6 +64,7 @@ class LeftMenu {
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
         if (path.includes('momentxlog')) return 'momentx';
+        if (path.includes('mxback') || path.includes('mXback')) return 'momentx';
         if (path.includes('momentx')) return 'momentx';
         if (path.includes('breakfast')) return 'breakfast';
         if (path.toLowerCase().includes('multilegoptions')) return 'multilegoptions';
