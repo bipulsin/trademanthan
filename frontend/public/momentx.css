@@ -209,6 +209,16 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
   color: #bbf7d0;
 }
 
+.mx-btn-icon {
+  padding: 7px 10px;
+  min-width: 38px;
+  justify-content: center;
+}
+.mx-btn-icon i {
+  margin: 0;
+  font-size: 1rem;
+}
+
 .mx-status {
   padding: 18px;
   border-radius: 12px;

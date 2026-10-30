@@ -189,9 +189,11 @@
     var btn = $("mxSoundBtn");
     if (!btn) return;
     btn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+    btn.title = soundOn ? "Sound on" : "Sound off";
+    btn.setAttribute("aria-label", soundOn ? "Sound on — click to mute" : "Sound off — click to enable");
     btn.innerHTML = soundOn
-      ? '<i class="fas fa-volume-up" aria-hidden="true"></i> Sound on'
-      : '<i class="fas fa-volume-mute" aria-hidden="true"></i> Sound off';
+      ? '<i class="fas fa-volume-high" aria-hidden="true"></i>'
+      : '<i class="fas fa-volume-xmark" aria-hidden="true"></i>';
   }
 
   function cardSide(card) {
