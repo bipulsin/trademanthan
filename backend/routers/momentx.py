@@ -152,12 +152,15 @@ class BacktestRunBody(BaseModel):
     date_from: str = Field(..., min_length=8, description="YYYY-MM-DD")
     date_to: str = Field(..., min_length=8, description="YYYY-MM-DD")
     asof_hhmm: str = Field("14:45", description="IST as-of clock for Stage-1 eval")
-    replace_range: bool = Field(True, description="Clear overlapping qualified rows first")
+    replace_range: bool = Field(
+        False,
+        description="If true, clear overlapping stored days and rescan; default append/reuse",
+    )
 
 
 @router.post("/backtest/run")
 def backtest_run(body: BacktestRunBody, _user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    """Queue a Stage-1 backtest for an arbitrary date/month range (background)."""
+    """Queue a Stage-1 backtest, or return cached=True when the range is already stored."""
     d0 = _parse_date(body.date_from)
     d1 = _parse_date(body.date_to)
     if not d0 or not d1:
@@ -170,6 +173,22 @@ def backtest_run(body: BacktestRunBody, _user: User = Depends(_auth_user)) -> Di
         asof_hhmm=body.asof_hhmm or "14:45",
         replace_range=bool(body.replace_range),
     )
+
+
+@router.get("/backtest/coverage")
+def backtest_coverage(
+    date_from: str = Query(..., min_length=8),
+    date_to: str = Query(..., min_length=8),
+    asof_hhmm: str = Query("14:45"),
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    d0 = _parse_date(date_from)
+    d1 = _parse_date(date_to)
+    if not d0 or not d1:
+        return {"ok": False, "error": "invalid date_from/date_to"}
+    from backend.services.momentx.backtest_store import coverage_report
+
+    return coverage_report(d0, d1, asof_hhmm=(asof_hhmm or "14:45")[:5])
 
 
 @router.get("/backtest/status")

@@ -62,6 +62,17 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_qual_trade_date
     ON momentx_backtest_qualified (trade_date);
 CREATE INDEX IF NOT EXISTS ix_mx_bt_runs_status
     ON momentx_backtest_runs (status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS momentx_backtest_day_coverage (
+    trade_date DATE NOT NULL,
+    asof_hhmm TEXT NOT NULL DEFAULT '14:45',
+    run_id BIGINT,
+    qualified_count INT NOT NULL DEFAULT 0,
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (trade_date, asof_hhmm)
+);
+CREATE INDEX IF NOT EXISTS ix_mx_bt_day_cov_date
+    ON momentx_backtest_day_coverage (trade_date);
 """
 
 
@@ -82,6 +93,24 @@ def ensure_backtest_schema() -> None:
                 db.execute(text(s))
         for stmt in _ALTERS:
             db.execute(text(stmt))
+        # Seed coverage from existing qualified rows so prior runs are reusable.
+        db.execute(
+            text(
+                """
+                INSERT INTO momentx_backtest_day_coverage
+                    (trade_date, asof_hhmm, run_id, qualified_count, scanned_at)
+                SELECT q.trade_date,
+                       COALESCE(r.asof_hhmm, '14:45') AS asof_hhmm,
+                       MAX(q.run_id) AS run_id,
+                       COUNT(*)::INT AS qualified_count,
+                       NOW() AS scanned_at
+                FROM momentx_backtest_qualified q
+                LEFT JOIN momentx_backtest_runs r ON r.id = q.run_id
+                GROUP BY q.trade_date, COALESCE(r.asof_hhmm, '14:45')
+                ON CONFLICT (trade_date, asof_hhmm) DO NOTHING
+                """
+            )
+        )
         db.commit()
         _SCHEMA_READY = True
     except Exception:
@@ -186,6 +215,15 @@ def delete_qualified_in_range(date_from: date, date_to: date) -> int:
             ),
             {"d0": date_from, "d1": date_to},
         )
+        db.execute(
+            text(
+                """
+                DELETE FROM momentx_backtest_day_coverage
+                WHERE trade_date BETWEEN :d0 AND :d1
+                """
+            ),
+            {"d0": date_from, "d1": date_to},
+        )
         db.commit()
         return int(res.rowcount or 0)
     except Exception:
@@ -194,6 +232,121 @@ def delete_qualified_in_range(date_from: date, date_to: date) -> int:
         return 0
     finally:
         db.close()
+
+
+def record_day_coverage(
+    *,
+    trade_date: date,
+    asof_hhmm: str,
+    run_id: int,
+    qualified_count: int,
+) -> None:
+    ensure_backtest_schema()
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO momentx_backtest_day_coverage
+                    (trade_date, asof_hhmm, run_id, qualified_count, scanned_at)
+                VALUES
+                    (:trade_date, :asof_hhmm, :run_id, :qualified_count, NOW())
+                ON CONFLICT (trade_date, asof_hhmm) DO UPDATE SET
+                    run_id = EXCLUDED.run_id,
+                    qualified_count = EXCLUDED.qualified_count,
+                    scanned_at = NOW()
+                """
+            ),
+            {
+                "trade_date": trade_date,
+                "asof_hhmm": asof_hhmm,
+                "run_id": run_id,
+                "qualified_count": int(qualified_count or 0),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("momentx backtest record_day_coverage failed")
+    finally:
+        db.close()
+
+
+def covered_trade_dates(
+    date_from: date,
+    date_to: date,
+    *,
+    asof_hhmm: str = "14:45",
+) -> List[date]:
+    ensure_backtest_schema()
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT trade_date FROM momentx_backtest_day_coverage
+                WHERE trade_date BETWEEN :d0 AND :d1
+                  AND asof_hhmm = :asof
+                ORDER BY trade_date
+                """
+            ),
+            {"d0": date_from, "d1": date_to, "asof": asof_hhmm},
+        ).fetchall()
+        out: List[date] = []
+        for r in rows:
+            d = r[0]
+            if isinstance(d, datetime):
+                out.append(d.date())
+            elif isinstance(d, date):
+                out.append(d)
+        return out
+    finally:
+        db.close()
+
+
+def _iter_sessions_local(date_from: date, date_to: date) -> List[date]:
+    """Weekend + holiday filter without importing the backtest engine (avoids cycles)."""
+    from datetime import timedelta
+
+    holidays: set = set()
+    try:
+        from backend.services.market_holiday import refresh_holiday_dates_from_db
+
+        holidays = refresh_holiday_dates_from_db() or set()
+    except Exception:
+        holidays = set()
+    out: List[date] = []
+    d = date_from
+    while d <= date_to:
+        if d.weekday() < 5 and d not in holidays:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def coverage_report(
+    date_from: date,
+    date_to: date,
+    *,
+    asof_hhmm: str = "14:45",
+    sessions: Optional[Sequence[date]] = None,
+) -> Dict[str, Any]:
+    """Which trading days in range are already stored vs still need a live scan."""
+    sess = list(sessions) if sessions is not None else _iter_sessions_local(date_from, date_to)
+    covered = set(covered_trade_dates(date_from, date_to, asof_hhmm=asof_hhmm))
+    missing = [d for d in sess if d not in covered]
+    return {
+        "ok": True,
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "asof_hhmm": asof_hhmm,
+        "trading_days": len(sess),
+        "covered_days": len(sess) - len(missing),
+        "missing_days": len(missing),
+        "complete": len(missing) == 0 and len(sess) > 0,
+        "missing": [d.isoformat() for d in missing],
+        "covered": [d.isoformat() for d in sess if d in covered],
+    }
 
 
 def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
@@ -363,27 +516,27 @@ def fetch_qualified(
     date_to: Optional[date] = None,
     run_id: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """Load qualified rows for a date window.
+
+    When ``run_id`` is omitted, merge across all runs (latest run wins per stock/day)
+    so appended storage can be reused without re-scanning.
+    """
     ensure_backtest_schema()
     rid = run_id
-    if rid is None:
-        rid = latest_done_run_id()
     db = SessionLocal()
     try:
-        clauses = []
         params: Dict[str, Any] = {}
         if rid is not None:
-            clauses.append("run_id = :run_id")
+            clauses = ["run_id = :run_id"]
             params["run_id"] = rid
-        if date_from is not None:
-            clauses.append("trade_date >= :d0")
-            params["d0"] = date_from
-        if date_to is not None:
-            clauses.append("trade_date <= :d1")
-            params["d1"] = date_to
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = db.execute(
-            text(
-                f"""
+            if date_from is not None:
+                clauses.append("trade_date >= :d0")
+                params["d0"] = date_from
+            if date_to is not None:
+                clauses.append("trade_date <= :d1")
+                params["d1"] = date_to
+            where = "WHERE " + " AND ".join(clauses)
+            sql = f"""
                 SELECT id, run_id, trade_date, stock, equity_instrument_key,
                        future_symbol, future_instrument_key, lot_size,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
@@ -391,10 +544,29 @@ def fetch_qualified(
                 FROM momentx_backtest_qualified
                 {where}
                 ORDER BY trade_date ASC, first_filtered_at ASC NULLS LAST, stock ASC
-                """
-            ),
-            params,
-        ).mappings().fetchall()
+            """
+        else:
+            # Append-friendly: one row per (trade_date, stock) from the newest run.
+            clauses = []
+            if date_from is not None:
+                clauses.append("trade_date >= :d0")
+                params["d0"] = date_from
+            if date_to is not None:
+                clauses.append("trade_date <= :d1")
+                params["d1"] = date_to
+            where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            sql = f"""
+                SELECT DISTINCT ON (trade_date, stock)
+                       id, run_id, trade_date, stock, equity_instrument_key,
+                       future_symbol, future_instrument_key, lot_size,
+                       price, sma200, prev_close, pct_change, rsi, williams_r, adx,
+                       today_volume, volume_sma5, first_filtered_at, conditions, asof_at
+                FROM momentx_backtest_qualified
+                {where}
+                ORDER BY trade_date ASC, stock ASC, run_id DESC,
+                         first_filtered_at ASC NULLS LAST
+            """
+        rows = db.execute(text(sql), params).mappings().fetchall()
 
         by_day: Dict[str, List[Dict[str, Any]]] = {}
         flat: List[Dict[str, Any]] = []
@@ -417,13 +589,21 @@ def fetch_qualified(
             {"trade_date": k, "count": len(v), "symbols": v}
             for k, v in by_day.items()
         ]
+        cov = None
+        if date_from is not None and date_to is not None and rid is None:
+            try:
+                cov = coverage_report(date_from, date_to)
+            except Exception:
+                cov = None
         return {
             "ok": True,
             "run_id": rid,
+            "from_storage": rid is None,
             "total": len(flat),
             "day_count": len(days),
             "days": days,
             "rows": flat,
+            "coverage": cov,
         }
     finally:
         db.close()

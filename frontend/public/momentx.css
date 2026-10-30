@@ -188,6 +188,21 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
 
 .mx-btn-primary:hover { background: #4fd48c; }
 
+.mx-btn:disabled,
+.mx-btn.is-disabled,
+.mx-btn-primary:disabled,
+.mx-btn-primary.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.35);
+}
+
+.mx-btn-primary:disabled:hover,
+.mx-btn-primary.is-disabled:hover {
+  background: var(--accent);
+}
+
 .mx-btn[aria-pressed="true"] {
   background: rgba(61, 186, 122, 0.16);
   border-color: rgba(61, 186, 122, 0.55);

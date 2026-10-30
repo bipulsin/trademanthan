@@ -65,6 +65,16 @@
 
   var pollTimer = null;
   var activeRunId = null;
+  var runBusy = false;
+
+  function setRunEnabled(on) {
+    var btn = $("mxBtRun");
+    if (!btn) return;
+    btn.disabled = !on;
+    btn.classList.toggle("is-disabled", !on);
+    btn.setAttribute("aria-disabled", on ? "false" : "true");
+    btn.title = on ? "Run backtest (reuses stored days)" : "Backtest running…";
+  }
 
   function setStatus(text) {
     var el = $("mxBtStatus");
@@ -151,14 +161,26 @@
     }
     empty.hidden = true;
     summary.hidden = false;
+    var cov = data.coverage;
+    var covNote = "";
+    if (cov) {
+      covNote =
+        " · stored " +
+        esc(String(cov.covered_days || 0)) +
+        "/" +
+        esc(String(cov.trading_days || 0)) +
+        " days";
+      if (cov.complete) covNote += " (complete)";
+    }
     summary.innerHTML =
-      "<strong>Run #" +
-      esc(data.run_id != null ? data.run_id : "—") +
+      "<strong>" +
+      (data.from_storage ? "Stored results" : "Run #" + esc(data.run_id != null ? data.run_id : "—")) +
       "</strong> · " +
       esc(String(data.day_count || days.length)) +
-      " trading days · " +
+      " days with hits · " +
       esc(String(data.total || 0)) +
-      " qualified rows";
+      " qualified rows" +
+      covNote;
     root.hidden = false;
     root.innerHTML = days.map(dayBlock).join("");
   }
@@ -168,20 +190,23 @@
     $("mxBtError").hidden = true;
     var from = $("mxBtFrom").value;
     var to = $("mxBtTo").value;
+    // Always load merged storage for the date window (no run_id) so appended
+    // history is reused. activeRunId is only for status polling.
     var q =
       "/api/momentx/backtest/results?date_from=" +
       encodeURIComponent(from) +
       "&date_to=" +
       encodeURIComponent(to);
-    if (activeRunId) q += "&run_id=" + encodeURIComponent(String(activeRunId));
     try {
       var res = await fetch(apiBase() + q, { headers: authHeaders() });
       var data = await res.json();
       if (!res.ok) throw new Error((data && data.detail) || res.statusText);
       renderResults(data);
+      if (!runBusy) setRunEnabled(true);
     } catch (err) {
       $("mxBtError").hidden = false;
       $("mxBtError").textContent = (err && err.message) || "Load failed";
+      if (!runBusy) setRunEnabled(true);
     } finally {
       $("mxBtLoading").hidden = true;
     }
@@ -194,10 +219,20 @@
       var res = await fetch(apiBase() + q, { headers: authHeaders() });
       var data = await res.json();
       var run = data && data.run;
-      if (data && data.active_run_id) activeRunId = data.active_run_id;
-      if (!run) {
+      if (data && data.active_run_id) {
+        activeRunId = data.active_run_id;
+        runBusy = true;
+        setRunEnabled(false);
+      }
+      if (!run && !(data && data.active_run_id)) {
         setStatus("idle");
+        runBusy = false;
+        setRunEnabled(true);
         return false;
+      }
+      if (!run) {
+        setStatus("running…");
+        return true;
       }
       var bits = [
         "#" + run.id,
@@ -208,17 +243,30 @@
       setStatus(bits.join(" · "));
       if (run.status === "done") {
         activeRunId = run.id;
+        runBusy = false;
         await loadResults();
+        setRunEnabled(true);
         return false;
       }
       if (run.status === "error") {
+        runBusy = false;
+        setRunEnabled(true);
         $("mxBtError").hidden = false;
         $("mxBtError").textContent = run.error || "Backtest failed";
         return false;
       }
-      return run.status === "running" || run.status === "queued";
+      if (run.status === "running" || run.status === "queued") {
+        runBusy = true;
+        setRunEnabled(false);
+        return true;
+      }
+      runBusy = false;
+      setRunEnabled(true);
+      return false;
     } catch (e) {
       setStatus("status check failed");
+      runBusy = false;
+      setRunEnabled(true);
       return false;
     }
   }
@@ -236,14 +284,18 @@
   }
 
   async function runBacktest() {
+    if (runBusy) return;
     $("mxBtError").hidden = true;
     var body = {
       date_from: $("mxBtFrom").value,
       date_to: $("mxBtTo").value,
       asof_hhmm: ($("mxBtAsof").value || "14:45").slice(0, 5),
-      replace_range: true,
+      // Append / reuse stored days — do not wipe prior ranges.
+      replace_range: false,
     };
-    setStatus("queueing…");
+    setStatus("checking storage…");
+    setRunEnabled(false);
+    runBusy = true;
     try {
       var res = await fetch(apiBase() + "/api/momentx/backtest/run", {
         method: "POST",
@@ -254,11 +306,24 @@
       if (!res.ok || !data.ok) {
         throw new Error((data && (data.error || data.detail)) || res.statusText);
       }
+      if (data.cached) {
+        setStatus("from storage (no rescan)");
+        runBusy = false;
+        await loadResults();
+        setRunEnabled(true);
+        return;
+      }
       activeRunId = data.run_id;
-      setStatus("queued #" + data.run_id);
+      var miss =
+        data.coverage && data.coverage.missing_days != null
+          ? " · missing " + data.coverage.missing_days + " days"
+          : "";
+      setStatus("queued #" + data.run_id + miss);
       startPolling();
       await pollStatus();
     } catch (err) {
+      runBusy = false;
+      setRunEnabled(true);
       $("mxBtError").hidden = false;
       $("mxBtError").textContent = (err && err.message) || "Run failed";
       setStatus("error");
@@ -267,11 +332,14 @@
 
   function bind() {
     $("mxBtRun").addEventListener("click", runBacktest);
-    $("mxBtReload").addEventListener("click", loadResults);
+    $("mxBtReload").addEventListener("click", function () {
+      loadResults();
+    });
   }
 
   document.addEventListener("DOMContentLoaded", function () {
     bind();
+    setRunEnabled(true);
     loadResults();
     pollStatus().then(function (keep) {
       if (keep) startPolling();

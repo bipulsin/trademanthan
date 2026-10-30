@@ -24,7 +24,11 @@ def main() -> int:
     p.add_argument("--from", dest="date_from", default="2026-08-01")
     p.add_argument("--to", dest="date_to", default="2026-09-20")
     p.add_argument("--asof", dest="asof_hhmm", default="14:45")
-    p.add_argument("--keep", action="store_true", help="Do not clear overlapping rows first")
+    p.add_argument(
+        "--replace",
+        action="store_true",
+        help="Clear overlapping stored days and rescan (default: append / skip covered days)",
+    )
     args = p.parse_args()
 
     d0 = date.fromisoformat(args.date_from[:10])
@@ -36,7 +40,7 @@ def main() -> int:
         date_from=d0,
         date_to=d1,
         asof_hhmm=args.asof_hhmm,
-        replace_range=not args.keep,
+        replace_range=bool(args.replace),
     )
     print(json.dumps(result, indent=2, default=str))
     return 0 if result.get("ok") else 1

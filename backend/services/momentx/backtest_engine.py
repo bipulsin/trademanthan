@@ -15,11 +15,14 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import pytz
 
 from backend.services.momentx.backtest_store import (
+    coverage_report,
+    covered_trade_dates,
     create_run,
     delete_qualified_in_range,
     fetch_run,
     insert_qualified_batch,
     mark_run,
+    record_day_coverage,
 )
 from backend.services.momentx.candles import candle_date, sort_candles
 from backend.services.momentx.config import CONFIG, MomentXConfig
@@ -252,15 +255,15 @@ def run_stage1_backtest(
     date_from: date,
     date_to: date,
     asof_hhmm: str = "14:45",
-    replace_range: bool = True,
+    replace_range: bool = False,
     run_id: Optional[int] = None,
     cfg: Optional[MomentXConfig] = None,
     max_workers: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Qualify Stage-1 symbols for each trading day in [date_from, date_to].
 
-    Results land in ``momentx_backtest_qualified`` (working table). Safe to re-run
-    later months/ranges — pass ``replace_range=True`` to clear overlapping days first.
+    Results append into ``momentx_backtest_qualified``. Days already covered for
+    the same asof clock are skipped unless ``replace_range=True``.
     """
     global _ACTIVE_RUN_ID
     cfg = cfg or CONFIG
@@ -311,6 +314,34 @@ def run_stage1_backtest(
         if replace_range:
             deleted = delete_qualified_in_range(date_from, date_to)
             logger.info("momentx bt cleared %s prior rows in %s..%s", deleted, date_from, date_to)
+        else:
+            already = set(covered_trade_dates(date_from, date_to, asof_hhmm=asof_label))
+            if already:
+                before = len(sessions)
+                sessions = [d for d in sessions if d not in already]
+                logger.info(
+                    "momentx bt run=%s skip %s covered days; %s remaining",
+                    run_id,
+                    before - len(sessions),
+                    len(sessions),
+                )
+            if not sessions:
+                mark_run(
+                    run_id,
+                    status="done",
+                    trading_days=0,
+                    qualified_rows=0,
+                    universe_size=0,
+                    finished=True,
+                )
+                return {
+                    "ok": True,
+                    "run_id": run_id,
+                    "cached": True,
+                    "trading_days": 0,
+                    "qualified_rows": 0,
+                    "skipped_covered": True,
+                }
 
         universe = load_momentx_universe()
         workers = min(max(1, int(max_workers or cfg.candle_workers)), 8)
@@ -419,6 +450,15 @@ def run_stage1_backtest(
                     )
                 inserted = insert_qualified_batch(run_id, day_rows)
                 total_qualified += inserted
+                try:
+                    record_day_coverage(
+                        trade_date=trade_date,
+                        asof_hhmm=asof_label,
+                        run_id=run_id,
+                        qualified_count=inserted,
+                    )
+                except Exception as e:
+                    logger.info("momentx bt coverage write failed %s: %s", trade_date, e)
                 day_summaries.append(
                     {"trade_date": trade_date.isoformat(), "qualified": inserted}
                 )
@@ -478,10 +518,25 @@ def start_backtest_async(
     date_from: date,
     date_to: date,
     asof_hhmm: str = "14:45",
-    replace_range: bool = True,
+    replace_range: bool = False,
 ) -> Dict[str, Any]:
-    """Create a run row and process in a daemon thread (API-friendly)."""
+    """Create a run row and process in a daemon thread (API-friendly).
+
+    If the requested range is already fully covered (append mode), returns
+    ``cached=True`` without starting a live scan.
+    """
     global _ACTIVE_RUN_ID
+    hhmm = _parse_hhmm(asof_hhmm, default=tuple(CONFIG.scan_cutoff_hhmm))  # type: ignore[arg-type]
+    asof_label = f"{hhmm[0]:02d}:{hhmm[1]:02d}"
+    cov = coverage_report(date_from, date_to, asof_hhmm=asof_label)
+    if not replace_range and cov.get("complete"):
+        return {
+            "ok": True,
+            "cached": True,
+            "queued": False,
+            "coverage": cov,
+            "message": "Range already in storage — displaying saved results",
+        }
     with _RUN_LOCK:
         if _ACTIVE_RUN_ID is not None:
             cur = fetch_run(_ACTIVE_RUN_ID)
@@ -489,12 +544,17 @@ def start_backtest_async(
                 "ok": False,
                 "error": "backtest already running",
                 "active_run": cur,
+                "coverage": cov,
             }
         run_id = create_run(
             date_from=date_from,
             date_to=date_to,
-            asof_hhmm=asof_hhmm,
-            params={"replace_range": replace_range, "async": True},
+            asof_hhmm=asof_label,
+            params={
+                "replace_range": replace_range,
+                "async": True,
+                "missing_days": cov.get("missing_days"),
+            },
         )
         _ACTIVE_RUN_ID = run_id
 
@@ -503,7 +563,7 @@ def start_backtest_async(
             run_stage1_backtest(
                 date_from=date_from,
                 date_to=date_to,
-                asof_hhmm=asof_hhmm,
+                asof_hhmm=asof_label,
                 replace_range=replace_range,
                 run_id=run_id,
             )
@@ -514,4 +574,10 @@ def start_backtest_async(
 
     t = threading.Thread(target=_worker, name=f"momentx-bt-{run_id}", daemon=True)
     t.start()
-    return {"ok": True, "queued": True, "run_id": run_id}
+    return {
+        "ok": True,
+        "queued": True,
+        "cached": False,
+        "run_id": run_id,
+        "coverage": cov,
+    }
