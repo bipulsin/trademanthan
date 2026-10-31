@@ -80,9 +80,11 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
 
         universe = load_momentx_universe()
         equity_keys = [u["equity_instrument_key"] for u in universe]
+        future_keys = [u["future_instrument_key"] for u in universe if u.get("future_instrument_key")]
         logger.info("momentx scan start universe=%s", len(universe))
 
         # Daily candles (process cache inside fetch_daily_cached) then 15m bars.
+        # Cash 15m → price / volume; futures 15m → RSI / Williams / ADX (Kavach parity).
         daily_by_ik: Dict[str, List[Dict[str, Any]]] = {}
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -102,14 +104,23 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
             CONFIG.minutes15_days_back,
             max_workers=CONFIG.candle_workers,
         )
+        m15_fut_by_ik = batch_fetch(
+            future_keys,
+            "minutes/15",
+            CONFIG.minutes15_days_back,
+            max_workers=CONFIG.candle_workers,
+        )
         daily_ok = sum(1 for v in daily_by_ik.values() if len(v) >= CONFIG.sma_period)
         m15_ok = sum(1 for v in m15_by_ik.values() if len(v) >= CONFIG.minutes15_min_bars)
+        m15_fut_ok = sum(1 for v in m15_fut_by_ik.values() if len(v) >= CONFIG.minutes15_min_bars)
         logger.info(
-            "momentx candles ready daily_ok=%s/%s m15_ok=%s/%s",
+            "momentx candles ready daily_ok=%s/%s m15_ok=%s/%s m15_fut_ok=%s/%s",
             daily_ok,
             len(equity_keys),
             m15_ok,
             len(equity_keys),
+            m15_fut_ok,
+            len(future_keys),
         )
 
         prev_by_stock = {
@@ -120,14 +131,17 @@ def run_stage1_scan(*, force: bool = False) -> Dict[str, Any]:
         for row in universe:
             stock = row["stock"]
             eq = row["equity_instrument_key"]
+            fut_ik = row.get("future_instrument_key") or ""
             try:
                 daily = daily_by_ik.get(eq) or []
                 m15 = m15_by_ik.get(eq) or []
+                m15_fut = m15_fut_by_ik.get(fut_ik) or []
                 # Board membership uses core gates only; volume is applied via filters_ok.
-                # Price always from cash 15m close; stale bars are skipped.
+                # Price/volume from cash 15m; RSI/Williams/ADX from futures 15m.
                 side, ev = evaluate_best_side(
                     daily=daily,
                     minutes15=m15,
+                    minutes15_oscillators=m15_fut,
                     now=now,
                     require_volume=False,
                     enforce_stale_guards=True,

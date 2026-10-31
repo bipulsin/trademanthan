@@ -118,6 +118,7 @@ def _find_first_qualify(
     trade_date: date,
     asof_end: datetime,
     cfg: MomentXConfig,
+    m15_osc_full: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Tuple[Optional[datetime], Optional[Dict[str, Any]]]:
     """Earliest session clock where bullish or bearish core Stage-1 passes.
 
@@ -125,6 +126,9 @@ def _find_first_qualify(
     filter on ``volume_ok`` via the shared volume-filter checkbox.
     Stale / frozen bars (duplicate fingerprints, volume regression, wrong
     candle clock) are skipped.
+
+    ``m15_osc_full`` is futures 15m history for RSI/Williams/ADX; when omitted,
+    oscillators use cash ``m15_full``.
     """
     from backend.services.momentx.filter import evaluate_best_side
 
@@ -132,10 +136,12 @@ def _find_first_qualify(
     prev_vol: Optional[float] = None
     for t in _session_eval_times(trade_date, asof_end, cfg):
         m15 = _slice_m15(m15_full, trade_date, t)
+        m15_osc = _slice_m15(m15_osc_full, trade_date, t) if m15_osc_full is not None else None
         try:
             side, ev = evaluate_best_side(
                 daily=daily,
                 minutes15=m15,
+                minutes15_oscillators=m15_osc,
                 now=t,
                 cfg=cfg,
                 require_volume=False,
@@ -416,6 +422,12 @@ def run_stage1_backtest(
                 fetch_from,
             )
             m15_by_ik: Dict[str, List[Dict[str, Any]]] = {}
+            m15_fut_by_ik: Dict[str, List[Dict[str, Any]]] = {}
+            future_keys = [
+                u["future_instrument_key"]
+                for u in universe
+                if u.get("future_instrument_key")
+            ]
 
             def _one_m15(ik: str) -> Tuple[str, List[Dict[str, Any]]]:
                 return ik, _fetch_m15_covering(ik, fetch_from, batch_end)
@@ -431,18 +443,32 @@ def run_stage1_backtest(
                         logger.info("momentx bt m15 fail %s: %s", ik, e)
                         m15_by_ik[ik] = []
 
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futs = {pool.submit(_one_m15, ik): ik for ik in future_keys}
+                for fut in as_completed(futs):
+                    ik = futs[fut]
+                    try:
+                        k, rows = fut.result()
+                        m15_fut_by_ik[k] = rows
+                    except Exception as e:
+                        logger.info("momentx bt m15 fut fail %s: %s", ik, e)
+                        m15_fut_by_ik[ik] = []
+
             for trade_date in batch_days:
                 asof = _asof_dt(trade_date, hhmm)
                 day_rows: List[Dict[str, Any]] = []
                 for u in universe:
                     stock = u["stock"]
                     eq = u["equity_instrument_key"]
+                    fut_ik = u.get("future_instrument_key") or ""
                     daily = _slice_daily(daily_by_ik.get(eq) or [], trade_date)
                     m15_full = m15_by_ik.get(eq) or []
+                    m15_osc_full = m15_fut_by_ik.get(fut_ik) or []
                     try:
                         first_at, ev = _find_first_qualify(
                             daily=daily,
                             m15_full=m15_full,
+                            m15_osc_full=m15_osc_full,
                             trade_date=trade_date,
                             asof_end=asof,
                             cfg=cfg,

@@ -100,8 +100,10 @@ def wilder_adx(
     Seed ATR / +DM / −DM as the SMA of the first ``period`` true-range / DM
     values, then smooth with Wilder's recursive mean
     ``x := (x*(period-1) + sample) / period``. ADX itself is the same RMA of DX.
-    Matches TradingView ``ta.adx`` / pandas_ta when fed the same multi-session
-    15m OHLC history (callers must pass prior sessions, not today-only bars).
+    Matches TradingView ``ta.dmi(len, len)`` / ``ta.adx`` / pandas_ta when fed
+    the same multi-session OHLC history (MomentX Stage-1 uses futures 15m so
+    values align with Kavach on the futures chart; callers must pass prior
+    sessions, not today-only bars).
     """
     p = int(period)
     n = len(closes)

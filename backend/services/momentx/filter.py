@@ -274,14 +274,20 @@ def evaluate_stage1(
     prior_fingerprints: Optional[Set[Fingerprint]] = None,
     prev_today_volume: Optional[float] = None,
     enforce_stale_guards: bool = True,
+    minutes15_oscillators: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return qualification result + per-condition values for one equity.
 
-    Price / SMA200 / prev_close all come from the **cash equity** series:
+    Price / SMA200 / prev_close / volume come from the **cash equity** series:
     SMA200 + prev_close from completed daily closes; price from the last
-    closed 15m candle close (never a futures tick).
+    closed cash 15m candle close (never a futures tick).
 
-    Volume: numerator = session cumulative 15m volume since open; baseline =
+    RSI / Williams %R / ADX come from ``minutes15_oscillators`` when provided
+    (live/backtest: current-month **futures** 15m OHLC — same series Kavach
+    ``ta.dmi`` uses on the futures chart). When omitted, oscillators fall back
+    to cash ``minutes15`` (unit tests / legacy callers).
+
+    Volume: numerator = session cumulative cash 15m volume since open; baseline =
     average full-day volume over the prior ``volume_sma_days`` sessions.
     """
     cfg = cfg or CONFIG
@@ -297,6 +303,9 @@ def evaluate_stage1(
 
     daily_rows = list(daily or [])
     m15 = drop_forming_candle(minutes15 or [], 15, now=now)
+    # Oscillators: futures 15m when supplied; else same cash series.
+    osc_src = minutes15_oscillators if minutes15_oscillators is not None else minutes15
+    m15_osc = drop_forming_candle(osc_src or [], 15, now=now)
     completed_daily = _completed_daily(daily_rows, today)
 
     result = _empty_result(side=side_norm)
@@ -311,7 +320,10 @@ def evaluate_stage1(
     if len(m15) < min_bars:
         result["skip_reason"] = "insufficient_15m"
         return result
-    prior_session_bars = sum(1 for c in m15 if candle_date(c) is not None and candle_date(c) < today)
+    if len(m15_osc) < min_bars:
+        result["skip_reason"] = "insufficient_15m_osc"
+        return result
+    prior_session_bars = sum(1 for c in m15_osc if candle_date(c) is not None and candle_date(c) < today)
     if prior_session_bars < cfg.adx_period * 2:
         result["skip_reason"] = "insufficient_prior_15m"
         return result
@@ -323,14 +335,17 @@ def evaluate_stage1(
         result["skip_reason"] = "sma_or_prev_close"
         return result
 
-    _, highs, lows, closes, _ = splits_ohlcv(m15)
+    _, _, _, closes, _ = splits_ohlcv(m15)
+    _, osc_highs, osc_lows, osc_closes, _ = splits_ohlcv(m15_osc)
     # Always cash 15m close — never a futures LTP / tick override.
     _ = price  # retained in signature for call-site compat; unused
     px = float(closes[-1])
     pct = ((px - prev_close) / prev_close) * 100.0
-    rsi = wilder_rsi(closes, cfg.rsi_period)
-    wr = williams_r(highs, lows, closes, cfg.williams_period)
-    adx = wilder_adx(highs, lows, closes, cfg.adx_period)
+    # Match TradingView Kavach on the futures chart: ta.dmi / RSI / Williams
+    # on the futures 15m series (not cash equity).
+    rsi = wilder_rsi(osc_closes, cfg.rsi_period)
+    wr = williams_r(osc_highs, osc_lows, osc_closes, cfg.williams_period)
+    adx = wilder_adx(osc_highs, osc_lows, osc_closes, cfg.adx_period)
 
     today_vol = _today_volume_since_open(
         m15,
@@ -435,6 +450,7 @@ def evaluate_best_side(
     prior_fingerprints: Optional[Set[Fingerprint]] = None,
     prev_today_volume: Optional[float] = None,
     enforce_stale_guards: bool = True,
+    minutes15_oscillators: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """Evaluate bullish then bearish; return ``(side, result)`` for first core hit.
 
@@ -451,6 +467,7 @@ def evaluate_best_side(
         prior_fingerprints=prior_fingerprints,
         prev_today_volume=prev_today_volume,
         enforce_stale_guards=enforce_stale_guards,
+        minutes15_oscillators=minutes15_oscillators,
     )
     if bull.get("skip_reason"):
         return None, bull
@@ -468,6 +485,7 @@ def evaluate_best_side(
         prior_fingerprints=prior_fingerprints,
         prev_today_volume=prev_today_volume,
         enforce_stale_guards=enforce_stale_guards,
+        minutes15_oscillators=minutes15_oscillators,
     )
     if bear.get("skip_reason"):
         # Bull didn't core-qualify; bear failed data quality — surface bear skip.

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytz
 
+from backend.services.momentx.candles import drop_forming_candle, splits_ohlcv
 from backend.services.momentx.config import MomentXConfig
 from backend.services.momentx.filter import evaluate_stage1
 from backend.services.momentx.indicators import (
@@ -80,6 +81,68 @@ def test_adx_trending():
     adx = wilder_adx(highs, lows, closes, 14)
     assert adx is not None
     assert adx > 20
+
+
+def test_stage1_oscillators_use_futures_series_not_cash():
+    """RSI/Williams/ADX from minutes15_oscillators; price from cash minutes15."""
+    daily = [_bar(i - 210, 100.0, volume=1_000_000) for i in range(210)]
+    # Cash: mild grind; futures: strong trend → higher ADX on osc series.
+    m15_cash = []
+    m15_fut = []
+    base = IST.localize(datetime(2026, 3, 5, 9, 15))
+    for i in range(120):
+        ts = (base + timedelta(minutes=15 * i)).isoformat()
+        cc = 101.0 + (i % 5) * 0.05
+        m15_cash.append(
+            {
+                "timestamp": ts,
+                "open": cc,
+                "high": cc + 0.3,
+                "low": cc - 0.3,
+                "close": cc,
+                "volume": 50_000,
+            }
+        )
+        fc = 100.0 + i * 0.8
+        m15_fut.append(
+            {
+                "timestamp": ts,
+                "open": fc - 0.2,
+                "high": fc + 1.0,
+                "low": fc - 1.0,
+                "close": fc,
+                "volume": 50_000,
+            }
+        )
+    cfg = MomentXConfig(
+        sma_period=200,
+        minutes15_min_bars=50,
+        adx_min=0.0,
+        rsi_min=0.0,
+        williams_min=-100.0,
+        pct_change_min=0.0,
+        pct_change_max=100.0,
+    )
+    now = IST.localize(datetime(2026, 3, 10, 12, 0))
+    cash_only = evaluate_stage1(
+        daily=daily, minutes15=m15_cash, now=now, cfg=cfg, enforce_stale_guards=False
+    )
+    with_fut = evaluate_stage1(
+        daily=daily,
+        minutes15=m15_cash,
+        minutes15_oscillators=m15_fut,
+        now=now,
+        cfg=cfg,
+        enforce_stale_guards=False,
+    )
+    assert cash_only.get("skip_reason") is None
+    assert with_fut.get("skip_reason") is None
+    assert with_fut["price"] == cash_only["price"]
+    assert with_fut["adx"] != cash_only["adx"]
+    assert with_fut["adx"] > cash_only["adx"]
+    # Futures ADX must match wilder_adx on the osc OHLC directly.
+    _, fh, fl, fc, _ = splits_ohlcv(drop_forming_candle(m15_fut, 15, now=now))
+    assert abs(float(with_fut["adx"]) - float(wilder_adx(fh, fl, fc, 14))) < 1e-9
 
 
 def test_order_emas_highest_to_lowest():

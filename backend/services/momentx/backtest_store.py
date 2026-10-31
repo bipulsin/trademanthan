@@ -76,8 +76,9 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_day_cov_date
 """
 
 
-# ruleset: v1 bull-only; v2 bull+bear; v3 + stale guards + full-day vol baseline.
-BACKTEST_RULESET = "stage1_v3"
+# ruleset: v1 bull-only; v2 bull+bear; v3 + stale guards + full-day vol baseline;
+# v4 + futures 15m oscillators (RSI/Williams/ADX) for Kavach/TV parity.
+BACKTEST_RULESET = "stage1_v4"
 
 _ALTERS = (
     "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS first_filtered_at TIMESTAMPTZ",
