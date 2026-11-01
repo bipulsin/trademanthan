@@ -38,6 +38,7 @@ import backend.routers.breakfast_strategy as breakfast_strategy
 import backend.routers.trap_ce_live_webhook as trap_ce_live_webhook
 import backend.routers.premium_futures_tv_webhook as premium_futures_tv_webhook
 import backend.routers.commodities_div_webhook as commodities_div_webhook
+import backend.routers.momentx_webhook as momentx_webhook
 import backend.routers.commodities_div as commodities_div
 import backend.routers.tarang as tarang
 import backend.routers.stock_option as stock_option
@@ -565,6 +566,7 @@ app.include_router(breakfast_strategy.router, prefix="")
 app.include_router(trap_ce_live_webhook.router)
 app.include_router(premium_futures_tv_webhook.router)
 app.include_router(commodities_div_webhook.router)
+app.include_router(momentx_webhook.router)
 app.include_router(commodities_div.router, prefix="/api/commodities-div")
 app.include_router(commodities_div.router, prefix="/commodities-div")
 app.include_router(tarang.router, prefix="/api/tarang")

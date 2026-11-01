@@ -11,6 +11,14 @@ from backend.services.momentx.status_rules import (
 )
 
 
+def _is_chartink_entry_gate(card: Dict[str, Any]) -> bool:
+    """ChartInk second entry gate — keep Active even if Stage-1 misses later."""
+    if str(card.get("entry_gate") or "").lower() == "chartink":
+        return True
+    s1 = card.get("stage1") if isinstance(card.get("stage1"), dict) else {}
+    return str(s1.get("source") or "").lower() == "chartink"
+
+
 def board_date_str(d: date) -> str:
     return d.isoformat()
 
@@ -41,8 +49,12 @@ def merge_day_cards(
             continue
         card = dict(prev)
         card["stock"] = key
-        # Core Stage-1 presence; volume gate applied from the new qualified card below.
-        card["filters_ok"] = key in qualified_keys
+        # ChartInk is a second entry gate — do not demote when Stage-1 misses.
+        if _is_chartink_entry_gate(card):
+            card["filters_ok"] = True
+        else:
+            # Core Stage-1 presence; volume gate applied from the new qualified card below.
+            card["filters_ok"] = key in qualified_keys
         by_stock[key] = card
 
     newly_filtered: List[Dict[str, Any]] = []
@@ -92,6 +104,11 @@ def merge_day_cards(
 
     for key, card in by_stock.items():
         if key in qualified_keys:
+            continue
+        if _is_chartink_entry_gate(card):
+            card["filters_ok"] = True
+            if not card.get("first_seen_at") and now_iso:
+                card["first_seen_at"] = now_iso
             continue
         s1 = stage1_by_stock.get(key)
         if s1:
