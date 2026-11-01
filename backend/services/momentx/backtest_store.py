@@ -81,14 +81,15 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_day_cov_date
 # v5 + informational RVOL / excursion columns (does not change Stage-1 gates).
 BACKTEST_RULESET = "stage1_v5"
 
+# DB column names are lowercase (Postgres folds unquoted identifiers).
 _RVOL_COLUMNS = (
     "rvol_cum",
     "rvol_slot",
-    "cum_vol_at_T",
+    "cum_vol_at_t",
     "baseline_cum_vol",
     "n_sessions_used",
-    "atr5_at_T",
-    "px_at_T",
+    "atr5_at_t",
+    "px_at_t",
     "ret_30m",
     "ret_60m",
     "ret_120m",
@@ -96,6 +97,13 @@ _RVOL_COLUMNS = (
     "mfe_atr",
     "mae_atr",
 )
+
+# API / CSV / UI keep the documented spellings with capital T.
+_RVOL_API_ALIASES = {
+    "cum_vol_at_t": "cum_vol_at_T",
+    "atr5_at_t": "atr5_at_T",
+    "px_at_t": "px_at_T",
+}
 
 _ALTERS = (
     "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS first_filtered_at TIMESTAMPTZ",
@@ -403,8 +411,8 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         future_symbol, future_instrument_key, lot_size, side,
                         price, sma200, prev_close, pct_change, rsi, williams_r, adx,
                         today_volume, volume_sma5, first_filtered_at, conditions, asof_at,
-                        rvol_cum, rvol_slot, cum_vol_at_T, baseline_cum_vol, n_sessions_used,
-                        atr5_at_T, px_at_T, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr,
+                        rvol_cum, rvol_slot, cum_vol_at_t, baseline_cum_vol, n_sessions_used,
+                        atr5_at_t, px_at_t, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr,
                         created_at
                     ) VALUES (
                         :run_id, :trade_date, :stock, :equity_instrument_key,
@@ -412,8 +420,8 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         :price, :sma200, :prev_close, :pct_change, :rsi, :williams_r, :adx,
                         :today_volume, :volume_sma5, :first_filtered_at,
                         CAST(:conditions AS JSONB), :asof_at,
-                        :rvol_cum, :rvol_slot, :cum_vol_at_T, :baseline_cum_vol, :n_sessions_used,
-                        :atr5_at_T, :px_at_T, :ret_30m, :ret_60m, :ret_120m, :eod_ret,
+                        :rvol_cum, :rvol_slot, :cum_vol_at_t, :baseline_cum_vol, :n_sessions_used,
+                        :atr5_at_t, :px_at_t, :ret_30m, :ret_60m, :ret_120m, :eod_ret,
                         :mfe_atr, :mae_atr,
                         NOW()
                     )
@@ -437,11 +445,11 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         asof_at = EXCLUDED.asof_at,
                         rvol_cum = EXCLUDED.rvol_cum,
                         rvol_slot = EXCLUDED.rvol_slot,
-                        cum_vol_at_T = EXCLUDED.cum_vol_at_T,
+                        cum_vol_at_t = EXCLUDED.cum_vol_at_t,
                         baseline_cum_vol = EXCLUDED.baseline_cum_vol,
                         n_sessions_used = EXCLUDED.n_sessions_used,
-                        atr5_at_T = EXCLUDED.atr5_at_T,
-                        px_at_T = EXCLUDED.px_at_T,
+                        atr5_at_t = EXCLUDED.atr5_at_t,
+                        px_at_t = EXCLUDED.px_at_t,
                         ret_30m = EXCLUDED.ret_30m,
                         ret_60m = EXCLUDED.ret_60m,
                         ret_120m = EXCLUDED.ret_120m,
@@ -475,11 +483,11 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                     "asof_at": r.get("asof_at"),
                     "rvol_cum": r.get("rvol_cum"),
                     "rvol_slot": r.get("rvol_slot"),
-                    "cum_vol_at_T": r.get("cum_vol_at_T"),
+                    "cum_vol_at_t": r.get("cum_vol_at_T", r.get("cum_vol_at_t")),
                     "baseline_cum_vol": r.get("baseline_cum_vol"),
                     "n_sessions_used": r.get("n_sessions_used"),
-                    "atr5_at_T": r.get("atr5_at_T"),
-                    "px_at_T": r.get("px_at_T"),
+                    "atr5_at_t": r.get("atr5_at_T", r.get("atr5_at_t")),
+                    "px_at_t": r.get("px_at_T", r.get("px_at_t")),
                     "ret_30m": r.get("ret_30m"),
                     "ret_60m": r.get("ret_60m"),
                     "ret_120m": r.get("ret_120m"),
@@ -527,11 +535,11 @@ def update_rvol_fields(rows: Sequence[Dict[str, Any]]) -> int:
                     UPDATE momentx_backtest_qualified SET
                         rvol_cum = :rvol_cum,
                         rvol_slot = :rvol_slot,
-                        cum_vol_at_T = :cum_vol_at_T,
+                        cum_vol_at_t = :cum_vol_at_t,
                         baseline_cum_vol = :baseline_cum_vol,
                         n_sessions_used = :n_sessions_used,
-                        atr5_at_T = :atr5_at_T,
-                        px_at_T = :px_at_T,
+                        atr5_at_t = :atr5_at_t,
+                        px_at_t = :px_at_t,
                         ret_30m = :ret_30m,
                         ret_60m = :ret_60m,
                         ret_120m = :ret_120m,
@@ -545,11 +553,11 @@ def update_rvol_fields(rows: Sequence[Dict[str, Any]]) -> int:
                     "id": int(rid),
                     "rvol_cum": r.get("rvol_cum"),
                     "rvol_slot": r.get("rvol_slot"),
-                    "cum_vol_at_T": r.get("cum_vol_at_T"),
+                    "cum_vol_at_t": r.get("cum_vol_at_T", r.get("cum_vol_at_t")),
                     "baseline_cum_vol": r.get("baseline_cum_vol"),
                     "n_sessions_used": r.get("n_sessions_used"),
-                    "atr5_at_T": r.get("atr5_at_T"),
-                    "px_at_T": r.get("px_at_T"),
+                    "atr5_at_t": r.get("atr5_at_T", r.get("atr5_at_t")),
+                    "px_at_t": r.get("px_at_T", r.get("px_at_t")),
                     "ret_30m": r.get("ret_30m"),
                     "ret_60m": r.get("ret_60m"),
                     "ret_120m": r.get("ret_120m"),
@@ -676,8 +684,8 @@ def fetch_qualified(
                        future_symbol, future_instrument_key, lot_size, side,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at,
-                       rvol_cum, rvol_slot, cum_vol_at_T, baseline_cum_vol, n_sessions_used,
-                       atr5_at_T, px_at_T, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr
+                       rvol_cum, rvol_slot, cum_vol_at_t, baseline_cum_vol, n_sessions_used,
+                       atr5_at_t, px_at_t, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr
                 FROM momentx_backtest_qualified
                 {where}
                 ORDER BY trade_date ASC, first_filtered_at ASC NULLS LAST, stock ASC
@@ -698,8 +706,8 @@ def fetch_qualified(
                        future_symbol, future_instrument_key, lot_size, side,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at,
-                       rvol_cum, rvol_slot, cum_vol_at_T, baseline_cum_vol, n_sessions_used,
-                       atr5_at_T, px_at_T, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr
+                       rvol_cum, rvol_slot, cum_vol_at_t, baseline_cum_vol, n_sessions_used,
+                       atr5_at_t, px_at_t, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr
                 FROM momentx_backtest_qualified
                 {where}
                 ORDER BY trade_date ASC, stock ASC, run_id DESC,
@@ -711,6 +719,9 @@ def fetch_qualified(
         flat: List[Dict[str, Any]] = []
         for r in rows:
             d = dict(r)
+            for db_key, api_key in _RVOL_API_ALIASES.items():
+                if db_key in d:
+                    d[api_key] = d.get(db_key)
             td = _iso(d.get("trade_date"))
             d["trade_date"] = td
             d["asof_at"] = _iso(d.get("asof_at"))
