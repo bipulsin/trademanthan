@@ -43,6 +43,49 @@ _M5_RVOL_LOOKBACK_CAL_DAYS = 21
 _RUN_LOCK = threading.Lock()
 _ACTIVE_RUN_ID: Optional[int] = None
 
+# Process-local historical candle cache for backtest fetches (keyed by ik/interval/window).
+# Survives across runs in the same process so re-runs of the same range skip Upstox.
+_HIST_CACHE: Dict[Tuple[str, str, str, int], List[Dict[str, Any]]] = {}
+_HIST_CACHE_LOCK = threading.Lock()
+_UPSTOX_TLS = threading.local()
+
+
+def _upstox_client():
+    """Reuse one UpstoxService per worker thread (avoids per-call construction)."""
+    from backend.config import settings
+    from backend.services.upstox_service import UpstoxService
+
+    client = getattr(_UPSTOX_TLS, "client", None)
+    if client is None:
+        client = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        _UPSTOX_TLS.client = client
+    return client
+
+
+def reclaim_orphaned_runs(*, reason: str = "worker lost (process restart)") -> int:
+    """Mark DB rows stuck in ``running`` when no in-memory worker owns them."""
+    n = 0
+    with _RUN_LOCK:
+        alive = _ACTIVE_RUN_ID
+    try:
+        for row in fetch_runs(limit=50):
+            if str(row.get("status") or "") != "running":
+                continue
+            rid = int(row["id"])
+            if alive is not None and rid == int(alive):
+                continue
+            mark_run(
+                rid,
+                status="error",
+                error=reason,
+                finished=True,
+            )
+            n += 1
+            logger.info("momentx bt reclaimed orphaned run=%s (%s)", rid, reason)
+    except Exception:
+        logger.exception("momentx bt orphan reclaim failed")
+    return n
+
 
 def iter_trading_days(d0: date, d1: date, holidays: Optional[set] = None) -> List[date]:
     hol = holidays if holidays is not None else _load_holidays(d0, d1)
@@ -217,20 +260,28 @@ def _fetch_candles_range(
     ik = (instrument_key or "").strip()
     if not ik:
         return []
+    cache_key = (ik, str(interval), range_end.isoformat(), int(days_back))
+    with _HIST_CACHE_LOCK:
+        hit = _HIST_CACHE.get(cache_key)
+        if hit is not None:
+            return hit
     try:
-        from backend.config import settings
         from backend.services.upstox_rate_limiter import scheduled_candle_worker
-        from backend.services.upstox_service import UpstoxService
 
-        up = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
         with scheduled_candle_worker():
-            raw = up.get_historical_candles_by_instrument_key(
+            raw = _upstox_client().get_historical_candles_by_instrument_key(
                 ik,
                 interval=interval,
                 days_back=int(days_back),
                 range_end_date=range_end,
             )
-        return sort_candles(raw or [])
+        rows = sort_candles(raw or [])
+        with _HIST_CACHE_LOCK:
+            # Cap growth; drop oldest-ish by clearing when oversized.
+            if len(_HIST_CACHE) > 8000:
+                _HIST_CACHE.clear()
+            _HIST_CACHE[cache_key] = rows
+        return rows
     except Exception as e:
         logger.info("momentx bt candle fail %s %s: %s", ik, interval, e)
         return []
@@ -360,11 +411,16 @@ def run_stage1_backtest(
     run_id: Optional[int] = None,
     cfg: Optional[MomentXConfig] = None,
     max_workers: Optional[int] = None,
+    include_rvol: bool = False,
 ) -> Dict[str, Any]:
     """Qualify Stage-1 symbols for each trading day in [date_from, date_to].
 
     Results append into ``momentx_backtest_qualified``. Days already covered for
     the same asof clock are skipped unless ``replace_range=True``.
+
+    RVOL/excursion columns are skipped by default (use ``Recompute RVOL`` or
+    ``include_rvol=True``) — they need a separate 5m futures fetch per symbol and
+    dominate wall-clock on short ranges.
     """
     global _ACTIVE_RUN_ID
     cfg = cfg or CONFIG
@@ -380,6 +436,7 @@ def run_stage1_backtest(
             asof_hhmm=asof_label,
             params={
                 "replace_range": replace_range,
+                "include_rvol": include_rvol,
                 "sma_period": cfg.sma_period,
                 "rsi_min": cfg.rsi_min,
                 "williams_min": cfg.williams_min,
@@ -398,6 +455,9 @@ def run_stage1_backtest(
 
     mark_run(run_id, status="running", started=True)
     started = time.monotonic()
+    from backend.services.upstox_rate_limiter import set_backtest_bulk_prefetch_mode
+
+    set_backtest_bulk_prefetch_mode(True)
     try:
         holidays = _load_holidays(date_from - timedelta(days=45), date_to)
         sessions = iter_trading_days(date_from, date_to, holidays)
@@ -500,46 +560,46 @@ def run_stage1_backtest(
             def _one_m15(ik: str) -> Tuple[str, List[Dict[str, Any]]]:
                 return ik, _fetch_m15_covering(ik, fetch_from, batch_end)
 
+            # Cash + futures 15m in one wave (rate limiter paces; less idle between phases).
+            equity_set = set(equity_keys)
+            future_set = set(future_keys)
+            m15_targets = list(dict.fromkeys([*equity_keys, *future_keys]))
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                futs = {pool.submit(_one_m15, ik): ik for ik in equity_keys}
+                futs = {pool.submit(_one_m15, ik): ik for ik in m15_targets}
                 for fut in as_completed(futs):
                     ik = futs[fut]
                     try:
                         k, rows = fut.result()
-                        m15_by_ik[k] = rows
                     except Exception as e:
                         logger.info("momentx bt m15 fail %s: %s", ik, e)
-                        m15_by_ik[ik] = []
-
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futs = {pool.submit(_one_m15, ik): ik for ik in future_keys}
-                for fut in as_completed(futs):
-                    ik = futs[fut]
-                    try:
-                        k, rows = fut.result()
+                        k, rows = ik, []
+                    if k in equity_set:
+                        m15_by_ik[k] = rows
+                    if k in future_set:
                         m15_fut_by_ik[k] = rows
-                    except Exception as e:
-                        logger.info("momentx bt m15 fut fail %s: %s", ik, e)
-                        m15_fut_by_ik[ik] = []
 
-            # Prefetch current-front 5m for RVOL (extra roll contracts load on demand).
-            m5_lookback = batch_start - timedelta(days=_M5_RVOL_LOOKBACK_CAL_DAYS)
-            rvol_cache = CandleCache()
-            fetch_5m = _make_m5_fetcher(batch_end, m5_lookback)
+            # RVOL is optional — Stage-1 qualify only needs daily + 15m.
+            rvol_cache: Optional[CandleCache] = None
+            fetch_5m = None
+            if include_rvol:
+                m5_lookback = batch_start - timedelta(days=_M5_RVOL_LOOKBACK_CAL_DAYS)
+                rvol_cache = CandleCache()
+                fetch_5m = _make_m5_fetcher(batch_end, m5_lookback)
 
-            def _one_m5(ik: str) -> Tuple[str, List[Dict[str, Any]]]:
-                return ik, _fetch_m5_covering(ik, m5_lookback, batch_end)
+                def _one_m5(ik: str) -> Tuple[str, List[Dict[str, Any]]]:
+                    return ik, _fetch_m5_covering(ik, m5_lookback, batch_end)
 
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futs = {pool.submit(_one_m5, ik): ik for ik in future_keys}
-                for fut in as_completed(futs):
-                    ik = futs[fut]
-                    try:
-                        k, rows = fut.result()
-                        rvol_cache.put(k, "minutes/5", rows)
-                    except Exception as e:
-                        logger.info("momentx bt m5 fut fail %s: %s", ik, e)
-                        rvol_cache.put(ik, "minutes/5", [])
+                # Only prefetch front keys; roll contracts still load on demand.
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futs = {pool.submit(_one_m5, ik): ik for ik in future_keys}
+                    for fut in as_completed(futs):
+                        ik = futs[fut]
+                        try:
+                            k, rows = fut.result()
+                            rvol_cache.put(k, "minutes/5", rows)
+                        except Exception as e:
+                            logger.info("momentx bt m5 fut fail %s: %s", ik, e)
+                            rvol_cache.put(ik, "minutes/5", [])
 
             for trade_date in batch_days:
                 asof = _asof_dt(trade_date, hhmm)
@@ -589,13 +649,14 @@ def run_stage1_backtest(
                             "asof_at": asof,
                         }
                     )
-                _attach_rvol_to_day_rows(
-                    day_rows,
-                    cache=rvol_cache,
-                    fetch_5m=fetch_5m,
-                    holidays=holidays,
-                    cfg=cfg,
-                )
+                if include_rvol and rvol_cache is not None and fetch_5m is not None:
+                    _attach_rvol_to_day_rows(
+                        day_rows,
+                        cache=rvol_cache,
+                        fetch_5m=fetch_5m,
+                        holidays=holidays,
+                        cfg=cfg,
+                    )
                 inserted = insert_qualified_batch(run_id, day_rows)
                 total_qualified += inserted
                 try:
@@ -656,6 +717,7 @@ def run_stage1_backtest(
         mark_run(run_id, status="error", error=str(e), finished=True)
         return {"ok": False, "run_id": run_id, "error": str(e)}
     finally:
+        set_backtest_bulk_prefetch_mode(False)
         with _RUN_LOCK:
             if _ACTIVE_RUN_ID == run_id:
                 _ACTIVE_RUN_ID = None
@@ -674,6 +736,7 @@ def start_backtest_async(
     ``cached=True`` without starting a live scan.
     """
     global _ACTIVE_RUN_ID
+    reclaim_orphaned_runs()
     hhmm = _parse_hhmm(asof_hhmm, default=tuple(CONFIG.scan_cutoff_hhmm))  # type: ignore[arg-type]
     asof_label = f"{hhmm[0]:02d}:{hhmm[1]:02d}"
     cov = coverage_report(date_from, date_to, asof_hhmm=asof_label)
@@ -701,6 +764,7 @@ def start_backtest_async(
             params={
                 "replace_range": replace_range,
                 "async": True,
+                "include_rvol": False,
                 "missing_days": cov.get("missing_days"),
             },
         )
@@ -714,6 +778,7 @@ def start_backtest_async(
                 asof_hhmm=asof_label,
                 replace_range=replace_range,
                 run_id=run_id,
+                include_rvol=False,
             )
         finally:
             with _RUN_LOCK:
@@ -728,6 +793,8 @@ def start_backtest_async(
         "cached": False,
         "run_id": run_id,
         "coverage": cov,
+        "include_rvol": False,
+        "message": "Stage-1 running; use Recompute RVOL after for volume metrics",
     }
 
 

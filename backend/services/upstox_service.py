@@ -1561,7 +1561,16 @@ class UpstoxService:
                 from_date = req_from_date
 
             candles: Optional[List[Dict]] = None
-            if use_v2:
+            # Historical / backtest windows (explicit range_end_date): use native V3
+            # minutes/5|/15|/30. The live V2 path downloads 1-minute bars and aggregates,
+            # which is far too heavy for multi-symbol range backtests (~15× payload).
+            historical_native = range_end_date is not None and iv in {
+                "minutes/5",
+                "minutes/10",
+                "minutes/15",
+                "minutes/30",
+            }
+            if use_v2 and not historical_native:
                 if iv == "minutes/5":
                     one = self._fetch_historical_v2_candles(instrument_key, "1minute", to_date, from_date)
                     candles = _aggregate_1m_to_n_minute(one, 5) if one else None

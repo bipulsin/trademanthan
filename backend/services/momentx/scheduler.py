@@ -225,6 +225,14 @@ def start_momentx_scheduler() -> None:
         ensure_momentx_tables()
     except Exception:
         logger.exception("momentx table ensure failed")
+    try:
+        from backend.services.momentx.backtest_engine import reclaim_orphaned_runs
+
+        n = reclaim_orphaned_runs(reason="worker lost (app restart)")
+        if n:
+            logger.info("momentx reclaimed %s orphaned backtest run(s) on startup", n)
+    except Exception:
+        logger.exception("momentx orphan backtest reclaim failed")
     # After deploy/restart, in-memory Ready is empty — kick a scan if session is open.
     try:
         from backend.services.momentx.status_rules import past_scan_cutoff

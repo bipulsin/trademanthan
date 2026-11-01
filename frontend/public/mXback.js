@@ -445,7 +445,12 @@
         data.coverage && data.coverage.missing_days != null
           ? " · missing " + data.coverage.missing_days + " days"
           : "";
-      setStatus("queued #" + data.run_id + miss);
+      setStatus(
+        "queued #" +
+          data.run_id +
+          miss +
+          " · Stage-1 (RVOL via Recompute after)"
+      );
       startPolling();
       await pollStatus();
     } catch (err) {
