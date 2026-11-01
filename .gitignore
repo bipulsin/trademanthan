@@ -55,6 +55,7 @@ dist/
 
 # ChartInk daily futures raw webhook dumps (on-disk before processing)
 inbox/chartink_daily_futures/
+inbox/chartink_momentx/
 
 # Data files
 *.csv
