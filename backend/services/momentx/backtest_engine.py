@@ -21,6 +21,7 @@ from backend.services.momentx.backtest_store import (
     delete_qualified_in_range,
     fetch_qualified,
     fetch_run,
+    fetch_runs,
     insert_qualified_batch,
     mark_run,
     record_day_coverage,
