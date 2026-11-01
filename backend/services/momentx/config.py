@@ -39,8 +39,8 @@ class MomentXConfig:
     minutes5_min_bars: int = 60
 
     # --- Stage 2 (futures, 5m) ---
+    # Display + trigger use EMA(5/15/50) only (no EMA(10)).
     ema_fast: int = 5
-    ema_cross: int = 10  # Active reactivation: EMA(5) cross above EMA(10)
     ema_mid: int = 15
     ema_slow: int = 50
     # Active → Locked after this many seconds continuously Active

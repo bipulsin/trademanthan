@@ -222,7 +222,11 @@
   }
 
   function emaStackHtml(card) {
-    var ordered = card.ema_ordered || [];
+    var ordered = (card.ema_ordered || []).filter(function (row) {
+      // EMA(5/15/50) only — drop legacy EMA(10) from older payloads.
+      var lab = String((row && row.label) || "");
+      return !/EMA\(10\)/.test(lab);
+    });
     if (!ordered.length) {
       ordered = [
         { label: "EMA(5)", value: card.ema5 },

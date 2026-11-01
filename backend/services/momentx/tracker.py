@@ -12,13 +12,11 @@ from backend.services.momentx import state as mx_state
 from backend.services.momentx.candles import batch_fetch, drop_forming_candle, splits_ohlcv
 from backend.services.momentx.config import CONFIG
 from backend.services.momentx.indicators import (
-    ema_cross_above_from_below,
     ema_last,
-    ema_series,
     is_ema_trigger,
     order_emas_by_value,
 )
-from backend.services.momentx.status_rules import apply_status_to_card, past_scan_cutoff
+from backend.services.momentx.status_rules import past_scan_cutoff
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -59,15 +57,11 @@ def refresh_emas(*, force: bool = False) -> Dict[str, Any]:
                     logger.info("momentx ema skip %s: insufficient 5m (%s)", stock, len(closed))
                     continue
                 _, _, _, closes, _ = splits_ohlcv(closed)
-                e5_series = ema_series(closes, CONFIG.ema_fast)
-                e10_series = ema_series(closes, CONFIG.ema_cross)
-                e5 = e5_series[-1] if e5_series else None
-                e10 = e10_series[-1] if e10_series else None
+                e5 = ema_last(closes, CONFIG.ema_fast)
                 e15 = ema_last(closes, CONFIG.ema_mid)
                 e50 = ema_last(closes, CONFIG.ema_slow)
                 trigger = is_ema_trigger(e5, e15, e50)
                 prev_trigger = bool(card.get("trigger"))
-                crossed = ema_cross_above_from_below(e5_series, e10_series)
                 ordered = [
                     {"label": lab, "value": val}
                     for lab, val in order_emas_by_value(
@@ -77,29 +71,17 @@ def refresh_emas(*, force: bool = False) -> Dict[str, Any]:
                         slow=CONFIG.ema_slow,
                     )
                 ]
-                if e10 is not None:
-                    ordered.append({"label": f"EMA({CONFIG.ema_cross})", "value": float(e10)})
-                    ordered.sort(key=lambda r: float(r["value"]), reverse=True)
                 patch: Dict[str, Any] = {
                     "ema5": e5,
-                    "ema10": e10,
                     "ema15": e15,
                     "ema50": e50,
                     "ema_ordered": ordered,
                     "ema_at": now.isoformat(),
                     "trigger": trigger,
-                    "ema5_cross_ema10": crossed,
                 }
-                if crossed:
-                    # Apply Active reactivation onto a copy then copy status fields into patch.
-                    tmp = dict(card)
-                    tmp.update(patch)
-                    apply_status_to_card(tmp, now=now, ema_cross_activate=True)
-                    patch["status"] = tmp.get("status")
-                    patch["active"] = tmp.get("active")
-                    patch["active_since"] = tmp.get("active_since")
-                    patch["first_active_at"] = tmp.get("first_active_at")
-                    patch["filters_ok"] = tmp.get("filters_ok", True)
+                # Drop legacy EMA(10) fields from older in-memory cards.
+                patch["ema10"] = None
+                patch["ema5_cross_ema10"] = False
                 if trigger and not prev_trigger:
                     patch["trigger_since"] = now.isoformat()
                     patch["trigger_event"] = True
@@ -127,7 +109,6 @@ def refresh_emas(*, force: bool = False) -> Dict[str, Any]:
         summary = {
             "ok": True,
             "updated": len(updates),
-            "cross_activations": sum(1 for u in updates.values() if u.get("ema5_cross_ema10")),
             "duration_sec": round(duration, 2),
         }
         logger.info("momentx ema refresh %s", summary)

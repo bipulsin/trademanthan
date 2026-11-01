@@ -86,10 +86,13 @@ def apply_status_to_card(
 
     Priority:
     1. After lock-all time → Locked
-    2. EMA(5)×EMA(10) cross up → Active
-    3. Stage-1 filters failing → Filters Off
+    2. Optional reactivation flag (``ema_cross_activate``) → Active
+    3. Stage-1 / ChartInk filters failing → Filters Off
     4. Active longer than lock window → Locked
     5. filters ok + not locked → Active (including first appear)
+
+    Note: MomentX no longer computes EMA(10); reactivation is not driven by
+    an EMA(5)×EMA(10) cross.
     """
     now = _aware(now)
     filters_ok = bool(card.get("filters_ok", card.get("active", False)))

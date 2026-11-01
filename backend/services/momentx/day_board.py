@@ -78,7 +78,6 @@ def merge_day_cards(
             "ltp_at",
             "ltp_dir",
             "ema5",
-            "ema10",
             "ema15",
             "ema50",
             "ema_ordered",
