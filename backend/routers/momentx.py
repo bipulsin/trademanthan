@@ -244,3 +244,41 @@ def backtest_results(
         date_to=_parse_date(date_to),
         run_id=run_id,
     )
+
+
+@router.post("/backtest/recompute-rvol")
+def backtest_recompute_rvol(
+    body: BacktestRunBody,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Fill informational RVOL columns on stored rows (does not re-run Stage-1 gates)."""
+    d0 = _parse_date(body.date_from)
+    d1 = _parse_date(body.date_to)
+    if not d0 or not d1:
+        return {"ok": False, "error": "invalid date_from/date_to"}
+    from backend.services.momentx.backtest_engine import recompute_rvol_for_range
+
+    return recompute_rvol_for_range(date_from=d0, date_to=d1)
+
+
+@router.get("/backtest/export.csv")
+def backtest_export_csv(
+    date_from: str = Query(..., min_length=8),
+    date_to: str = Query(..., min_length=8),
+    volume_filter: bool = Query(False, description="If true, keep only volume_ok rows"),
+    _user: User = Depends(_auth_user),
+):
+    """Download Stage-1 backtest qualified rows as CSV (includes RVOL columns)."""
+    d0 = _parse_date(date_from)
+    d1 = _parse_date(date_to)
+    if not d0 or not d1:
+        return Response(content="invalid date_from/date_to\n", media_type="text/plain", status_code=400)
+    from backend.services.momentx.backtest_engine import results_to_csv_text
+
+    text = results_to_csv_text(date_from=d0, date_to=d1, volume_filter=bool(volume_filter))
+    fname = f"momentx_backtest_{d0.isoformat()}_{d1.isoformat()}.csv"
+    return Response(
+        content=text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )

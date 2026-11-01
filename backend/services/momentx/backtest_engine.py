@@ -19,13 +19,16 @@ from backend.services.momentx.backtest_store import (
     covered_trade_dates,
     create_run,
     delete_qualified_in_range,
+    fetch_qualified,
     fetch_run,
     insert_qualified_batch,
     mark_run,
     record_day_coverage,
+    update_rvol_fields,
 )
 from backend.services.momentx.candles import candle_date, sort_candles
 from backend.services.momentx.config import CONFIG, MomentXConfig
+from backend.services.momentx.rvol import CandleCache, enrich_rvol_for_row
 from backend.services.momentx.universe import load_momentx_universe
 
 logger = logging.getLogger(__name__)
@@ -34,6 +37,8 @@ IST = pytz.timezone("Asia/Kolkata")
 # Upstox minutes/15 historical span ~1 month — fetch in overlapping windows.
 _M15_WINDOW_DAYS = 28
 _M15_LOOKBACK_CAL_DAYS = 14  # warm-up for RSI/ADX/volume SMA ahead of batch start
+# 5m RVOL baseline needs prior sessions + ATR warm-up.
+_M5_RVOL_LOOKBACK_CAL_DAYS = 21
 
 _RUN_LOCK = threading.Lock()
 _ACTIVE_RUN_ID: Optional[int] = None
@@ -258,6 +263,69 @@ def _fetch_m15_covering(instrument_key: str, d0: date, d1: date) -> List[Dict[st
     return sort_candles(list(merged.values()))
 
 
+def _fetch_m5_covering(instrument_key: str, d0: date, d1: date) -> List[Dict[str, Any]]:
+    """Fetch 5m bars covering [d0, d1] (Upstox window ~1 month; single or overlapped)."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    cursor_end = d1
+    floor = d0
+    guard = 0
+    while cursor_end >= floor and guard < 24:
+        guard += 1
+        days_back = min(_M15_WINDOW_DAYS, (cursor_end - floor).days + 1)
+        days_back = max(days_back, 1)
+        chunk = _fetch_candles_range(
+            instrument_key,
+            "minutes/5",
+            range_end=cursor_end,
+            days_back=days_back,
+        )
+        for c in chunk:
+            ts = str(c.get("timestamp") or "")
+            if ts:
+                merged[ts] = c
+        cursor_end = cursor_end - timedelta(days=max(1, days_back - 2))
+        if not chunk and cursor_end < floor:
+            break
+    return sort_candles(list(merged.values()))
+
+
+def _make_m5_fetcher(range_end: date, lookback_start: date):
+    """Return a cache fetcher (ik, interval) -> bars for RVOL enrichment."""
+
+    def _fetch(ik: str, interval: str) -> List[Dict[str, Any]]:
+        if "5" in str(interval):
+            return _fetch_m5_covering(ik, lookback_start, range_end)
+        return _fetch_m15_covering(ik, lookback_start, range_end)
+
+    return _fetch
+
+
+def _attach_rvol_to_day_rows(
+    day_rows: List[Dict[str, Any]],
+    *,
+    cache: CandleCache,
+    fetch_5m,
+    holidays: set,
+    cfg: MomentXConfig,
+) -> None:
+    for row in day_rows:
+        try:
+            enrich_rvol_for_row(
+                row,
+                cache=cache,
+                fetch_5m=fetch_5m,
+                holidays=holidays,
+                rvol_sessions=int(getattr(cfg, "rvol_sessions", 5) or 5),
+            )
+        except Exception as e:
+            logger.info(
+                "momentx bt rvol enrich fail %s %s: %s",
+                row.get("trade_date"),
+                row.get("stock"),
+                e,
+            )
+
+
 def _batch_windows(days: Sequence[date], max_span_days: int = 18) -> List[Tuple[date, date, List[date]]]:
     """Split trading days into batches whose calendar span fits Upstox m15 windows."""
     if not days:
@@ -331,7 +399,7 @@ def run_stage1_backtest(
     mark_run(run_id, status="running", started=True)
     started = time.monotonic()
     try:
-        holidays = _load_holidays(date_from, date_to)
+        holidays = _load_holidays(date_from - timedelta(days=45), date_to)
         sessions = iter_trading_days(date_from, date_to, holidays)
         if not sessions:
             mark_run(
@@ -454,6 +522,25 @@ def run_stage1_backtest(
                         logger.info("momentx bt m15 fut fail %s: %s", ik, e)
                         m15_fut_by_ik[ik] = []
 
+            # Prefetch current-front 5m for RVOL (extra roll contracts load on demand).
+            m5_lookback = batch_start - timedelta(days=_M5_RVOL_LOOKBACK_CAL_DAYS)
+            rvol_cache = CandleCache()
+            fetch_5m = _make_m5_fetcher(batch_end, m5_lookback)
+
+            def _one_m5(ik: str) -> Tuple[str, List[Dict[str, Any]]]:
+                return ik, _fetch_m5_covering(ik, m5_lookback, batch_end)
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futs = {pool.submit(_one_m5, ik): ik for ik in future_keys}
+                for fut in as_completed(futs):
+                    ik = futs[fut]
+                    try:
+                        k, rows = fut.result()
+                        rvol_cache.put(k, "minutes/5", rows)
+                    except Exception as e:
+                        logger.info("momentx bt m5 fut fail %s: %s", ik, e)
+                        rvol_cache.put(ik, "minutes/5", [])
+
             for trade_date in batch_days:
                 asof = _asof_dt(trade_date, hhmm)
                 day_rows: List[Dict[str, Any]] = []
@@ -502,6 +589,13 @@ def run_stage1_backtest(
                             "asof_at": asof,
                         }
                     )
+                _attach_rvol_to_day_rows(
+                    day_rows,
+                    cache=rvol_cache,
+                    fetch_5m=fetch_5m,
+                    holidays=holidays,
+                    cfg=cfg,
+                )
                 inserted = insert_qualified_batch(run_id, day_rows)
                 total_qualified += inserted
                 try:
@@ -635,3 +729,134 @@ def start_backtest_async(
         "run_id": run_id,
         "coverage": cov,
     }
+
+
+def recompute_rvol_for_range(
+    *,
+    date_from: date,
+    date_to: date,
+    cfg: Optional[MomentXConfig] = None,
+) -> Dict[str, Any]:
+    """Fill RVOL columns on stored qualified rows without re-running Stage-1 gates."""
+    cfg = cfg or CONFIG
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+    holidays = _load_holidays(date_from - timedelta(days=30), date_to)
+    payload = fetch_qualified(date_from=date_from, date_to=date_to)
+    rows = list(payload.get("rows") or [])
+    if not rows:
+        return {"ok": True, "updated": 0, "total": 0}
+
+    lookback = date_from - timedelta(days=_M5_RVOL_LOOKBACK_CAL_DAYS)
+    cache = CandleCache()
+    fetch_5m = _make_m5_fetcher(date_to, lookback)
+
+    # Prefetch distinct front keys.
+    front_keys = sorted(
+        {
+            str(r.get("future_instrument_key") or "").strip()
+            for r in rows
+            if r.get("future_instrument_key")
+        }
+    )
+    workers = min(max(1, int(cfg.candle_workers)), 8)
+
+    def _one(ik: str) -> Tuple[str, List[Dict[str, Any]]]:
+        return ik, _fetch_m5_covering(ik, lookback, date_to)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_one, ik): ik for ik in front_keys}
+        for fut in as_completed(futs):
+            ik = futs[fut]
+            try:
+                k, bars = fut.result()
+                cache.put(k, "minutes/5", bars)
+            except Exception as e:
+                logger.info("momentx rvol recompute m5 fail %s: %s", ik, e)
+                cache.put(ik, "minutes/5", [])
+
+    enriched: List[Dict[str, Any]] = []
+    for r in rows:
+        # parse trade_date back to date for enrich
+        td = r.get("trade_date")
+        if isinstance(td, str):
+            try:
+                r = dict(r)
+                r["trade_date"] = date.fromisoformat(td[:10])
+            except ValueError:
+                pass
+        enrich_rvol_for_row(
+            r,
+            cache=cache,
+            fetch_5m=fetch_5m,
+            holidays=holidays,
+            rvol_sessions=int(getattr(cfg, "rvol_sessions", 5) or 5),
+        )
+        enriched.append(r)
+
+    updated = update_rvol_fields(enriched)
+    return {"ok": True, "updated": updated, "total": len(rows)}
+
+
+_CSV_COLUMNS = [
+    "trade_date",
+    "stock",
+    "side",
+    "future_symbol",
+    "first_filtered_at",
+    "today_volume",
+    "volume_sma5",
+    "price",
+    "pct_change",
+    "rsi",
+    "williams_r",
+    "adx",
+    "sma200",
+    "lot_size",
+    "volume_ok",
+    "rvol_cum",
+    "rvol_slot",
+    "cum_vol_at_T",
+    "baseline_cum_vol",
+    "n_sessions_used",
+    "atr5_at_T",
+    "px_at_T",
+    "ret_30m",
+    "ret_60m",
+    "ret_120m",
+    "eod_ret",
+    "mfe_atr",
+    "mae_atr",
+]
+
+
+def results_to_csv_text(
+    *,
+    date_from: date,
+    date_to: date,
+    volume_filter: bool = False,
+) -> str:
+    """Build CSV text for stored backtest rows (volume filter optional)."""
+    import csv
+    import io
+
+    payload = fetch_qualified(date_from=date_from, date_to=date_to)
+    rows = list(payload.get("rows") or [])
+    if volume_filter:
+        filtered = []
+        for r in rows:
+            vok = r.get("volume_ok")
+            if vok is None:
+                conds = r.get("conditions") or {}
+                vok = conds.get("volume_ok") if isinstance(conds, dict) else None
+            if vok is None or bool(vok):
+                filtered.append(r)
+        rows = filtered
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for r in rows:
+        out = {k: r.get(k) for k in _CSV_COLUMNS}
+        writer.writerow(out)
+    return buf.getvalue()

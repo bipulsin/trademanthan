@@ -47,6 +47,17 @@
     return String(Math.round(n));
   }
 
+  function fmtRvol(v) {
+    if (v == null || v === "" || !Number.isFinite(Number(v))) return "—";
+    return Number(v).toFixed(2);
+  }
+
+  function dash(v, fmt) {
+    if (v == null || v === "") return "—";
+    if (typeof fmt === "function") return fmt(v);
+    return fmtNum(v);
+  }
+
   function fmtIstTime(iso) {
     if (!iso) return "—";
     try {
@@ -140,6 +151,45 @@
           esc(fmtVol(r.volume_sma5)) +
           "</td>" +
           "<td>" +
+          esc(dash(r.rvol_cum, fmtRvol)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.rvol_slot, fmtRvol)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.cum_vol_at_T, fmtVol)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.baseline_cum_vol, fmtVol)) +
+          "</td>" +
+          "<td>" +
+          esc(r.n_sessions_used != null ? String(r.n_sessions_used) : "—") +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.atr5_at_T, function (v) { return fmtNum(v, 2); })) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.px_at_T)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.ret_30m)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.ret_60m)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.ret_120m)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.eod_ret)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.mfe_atr)) +
+          "</td>" +
+          "<td>" +
+          esc(dash(r.mae_atr)) +
+          "</td>" +
+          "<td>" +
           esc(fmtNum(r.price)) +
           "</td>" +
           "<td>" +
@@ -183,10 +233,13 @@
       '<div class="mx-log-table-wrap"><table class="mx-log-table">' +
       "<thead><tr>" +
       "<th>Stock</th><th>Side</th><th>Future</th><th>1st filter</th><th>Day vol</th><th>Vol SMA5</th>" +
+      "<th>RVOL cum</th><th>RVOL slot</th><th>Cum@T</th><th>Base cum</th><th>N sess</th>" +
+      "<th>ATR5</th><th>Px@T</th><th>Ret30m</th><th>Ret60m</th><th>Ret120m</th><th>EOD%</th>" +
+      "<th>MFE·ATR</th><th>MAE·ATR</th>" +
       "<th>Price</th><th>%Chg</th>" +
       "<th>RSI</th><th>W%R</th><th>ADX</th><th>SMA200</th><th>Lot</th>" +
       "</tr></thead><tbody>" +
-      (body || '<tr><td colspan="13">No rows</td></tr>') +
+      (body || '<tr><td colspan="26">No rows</td></tr>') +
       "</tbody></table></div></section>"
     );
   }
@@ -404,11 +457,74 @@
     }
   }
 
+  async function recomputeRvol() {
+    var from = $("mxBtFrom").value;
+    var to = $("mxBtTo").value;
+    setStatus("recomputing RVOL…");
+    try {
+      var res = await fetch(apiBase() + "/api/momentx/backtest/recompute-rvol", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ date_from: from, date_to: to, asof_hhmm: "14:45" }),
+      });
+      var data = await res.json();
+      if (!res.ok || (data && data.ok === false)) {
+        throw new Error((data && (data.error || data.detail)) || res.statusText);
+      }
+      setStatus("RVOL updated " + (data.updated || 0) + "/" + (data.total || 0));
+      await loadResults();
+    } catch (err) {
+      $("mxBtError").hidden = false;
+      $("mxBtError").textContent = (err && err.message) || "RVOL recompute failed";
+      setStatus("error");
+    }
+  }
+
+  function exportCsv() {
+    var from = $("mxBtFrom").value;
+    var to = $("mxBtTo").value;
+    var q =
+      "/api/momentx/backtest/export.csv?date_from=" +
+      encodeURIComponent(from) +
+      "&date_to=" +
+      encodeURIComponent(to) +
+      "&volume_filter=" +
+      (volFilterOn() ? "true" : "false");
+    var url = apiBase() + q;
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "momentx_backtest_" + from + "_" + to + ".csv";
+    // Auth via fetch blob so Bearer token is sent.
+    fetch(url, { headers: authHeaders() })
+      .then(function (res) {
+        if (!res.ok) throw new Error("CSV export failed (" + res.status + ")");
+        return res.blob();
+      })
+      .then(function (blob) {
+        var obj = URL.createObjectURL(blob);
+        a.href = obj;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () {
+          URL.revokeObjectURL(obj);
+        }, 2000);
+      })
+      .catch(function (err) {
+        $("mxBtError").hidden = false;
+        $("mxBtError").textContent = (err && err.message) || "CSV export failed";
+      });
+  }
+
   function bind() {
     $("mxBtRun").addEventListener("click", runBacktest);
     $("mxBtReload").addEventListener("click", function () {
       loadResults();
     });
+    var recomputeBtn = $("mxBtRecomputeRvol");
+    if (recomputeBtn) recomputeBtn.addEventListener("click", recomputeRvol);
+    var exportBtn = $("mxBtExportCsv");
+    if (exportBtn) exportBtn.addEventListener("click", exportCsv);
     var volEl = $("mxBtVolFilter");
     if (volEl) {
       try {

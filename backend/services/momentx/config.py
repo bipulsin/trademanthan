@@ -22,6 +22,8 @@ class MomentXConfig:
     # of completed daily volumes (Chartink-style). Numerator remains session
     # cumulative volume since market open through the as-of clock.
     time_adjusted_volume: bool = False
+    # Backtest-only informational RVOL: mean of prior N sessions' cum volume to T.
+    rvol_sessions: int = 5
 
     # --- Stage 1 bearish (equity, 15m scan) ---
     # Close/price above SMA200, day down ≥1%, oversold oscillators, same ADX floor.

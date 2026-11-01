@@ -77,13 +77,37 @@ CREATE INDEX IF NOT EXISTS ix_mx_bt_day_cov_date
 
 
 # ruleset: v1 bull-only; v2 bull+bear; v3 + stale guards + full-day vol baseline;
-# v4 + futures 15m oscillators (RSI/Williams/ADX) for Kavach/TV parity.
-BACKTEST_RULESET = "stage1_v4"
+# v4 + futures 15m oscillators (RSI/Williams/ADX) for Kavach/TV parity;
+# v5 + informational RVOL / excursion columns (does not change Stage-1 gates).
+BACKTEST_RULESET = "stage1_v5"
+
+_RVOL_COLUMNS = (
+    "rvol_cum",
+    "rvol_slot",
+    "cum_vol_at_T",
+    "baseline_cum_vol",
+    "n_sessions_used",
+    "atr5_at_T",
+    "px_at_T",
+    "ret_30m",
+    "ret_60m",
+    "ret_120m",
+    "eod_ret",
+    "mfe_atr",
+    "mae_atr",
+)
 
 _ALTERS = (
     "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS first_filtered_at TIMESTAMPTZ",
     "ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS side TEXT NOT NULL DEFAULT 'bullish'",
     "ALTER TABLE momentx_backtest_day_coverage ADD COLUMN IF NOT EXISTS ruleset TEXT NOT NULL DEFAULT 'stage1_v1'",
+) + tuple(
+    (
+        f"ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS {col} INT"
+        if col == "n_sessions_used"
+        else f"ALTER TABLE momentx_backtest_qualified ADD COLUMN IF NOT EXISTS {col} DOUBLE PRECISION"
+    )
+    for col in _RVOL_COLUMNS
 )
 
 
@@ -378,13 +402,20 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         run_id, trade_date, stock, equity_instrument_key,
                         future_symbol, future_instrument_key, lot_size, side,
                         price, sma200, prev_close, pct_change, rsi, williams_r, adx,
-                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at, created_at
+                        today_volume, volume_sma5, first_filtered_at, conditions, asof_at,
+                        rvol_cum, rvol_slot, cum_vol_at_T, baseline_cum_vol, n_sessions_used,
+                        atr5_at_T, px_at_T, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr,
+                        created_at
                     ) VALUES (
                         :run_id, :trade_date, :stock, :equity_instrument_key,
                         :future_symbol, :future_instrument_key, :lot_size, :side,
                         :price, :sma200, :prev_close, :pct_change, :rsi, :williams_r, :adx,
                         :today_volume, :volume_sma5, :first_filtered_at,
-                        CAST(:conditions AS JSONB), :asof_at, NOW()
+                        CAST(:conditions AS JSONB), :asof_at,
+                        :rvol_cum, :rvol_slot, :cum_vol_at_T, :baseline_cum_vol, :n_sessions_used,
+                        :atr5_at_T, :px_at_T, :ret_30m, :ret_60m, :ret_120m, :eod_ret,
+                        :mfe_atr, :mae_atr,
+                        NOW()
                     )
                     ON CONFLICT (run_id, trade_date, stock) DO UPDATE SET
                         equity_instrument_key = EXCLUDED.equity_instrument_key,
@@ -403,7 +434,20 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                         volume_sma5 = EXCLUDED.volume_sma5,
                         first_filtered_at = EXCLUDED.first_filtered_at,
                         conditions = EXCLUDED.conditions,
-                        asof_at = EXCLUDED.asof_at
+                        asof_at = EXCLUDED.asof_at,
+                        rvol_cum = EXCLUDED.rvol_cum,
+                        rvol_slot = EXCLUDED.rvol_slot,
+                        cum_vol_at_T = EXCLUDED.cum_vol_at_T,
+                        baseline_cum_vol = EXCLUDED.baseline_cum_vol,
+                        n_sessions_used = EXCLUDED.n_sessions_used,
+                        atr5_at_T = EXCLUDED.atr5_at_T,
+                        px_at_T = EXCLUDED.px_at_T,
+                        ret_30m = EXCLUDED.ret_30m,
+                        ret_60m = EXCLUDED.ret_60m,
+                        ret_120m = EXCLUDED.ret_120m,
+                        eod_ret = EXCLUDED.eod_ret,
+                        mfe_atr = EXCLUDED.mfe_atr,
+                        mae_atr = EXCLUDED.mae_atr
                     """
                 ),
                 {
@@ -429,6 +473,19 @@ def insert_qualified_batch(run_id: int, rows: Sequence[Dict[str, Any]]) -> int:
                     "first_filtered_at": r.get("first_filtered_at"),
                     "conditions": json.dumps(r.get("conditions") or {}),
                     "asof_at": r.get("asof_at"),
+                    "rvol_cum": r.get("rvol_cum"),
+                    "rvol_slot": r.get("rvol_slot"),
+                    "cum_vol_at_T": r.get("cum_vol_at_T"),
+                    "baseline_cum_vol": r.get("baseline_cum_vol"),
+                    "n_sessions_used": r.get("n_sessions_used"),
+                    "atr5_at_T": r.get("atr5_at_T"),
+                    "px_at_T": r.get("px_at_T"),
+                    "ret_30m": r.get("ret_30m"),
+                    "ret_60m": r.get("ret_60m"),
+                    "ret_120m": r.get("ret_120m"),
+                    "eod_ret": r.get("eod_ret"),
+                    "mfe_atr": r.get("mfe_atr"),
+                    "mae_atr": r.get("mae_atr"),
                 },
             )
             n += 1
@@ -450,6 +507,66 @@ def _iso(v: Any) -> Optional[str]:
     if isinstance(v, date):
         return v.isoformat()
     return str(v)
+
+
+def update_rvol_fields(rows: Sequence[Dict[str, Any]]) -> int:
+    """Patch RVOL columns on existing qualified rows by primary key ``id``."""
+    if not rows:
+        return 0
+    ensure_backtest_schema()
+    db = SessionLocal()
+    n = 0
+    try:
+        for r in rows:
+            rid = r.get("id")
+            if rid is None:
+                continue
+            db.execute(
+                text(
+                    """
+                    UPDATE momentx_backtest_qualified SET
+                        rvol_cum = :rvol_cum,
+                        rvol_slot = :rvol_slot,
+                        cum_vol_at_T = :cum_vol_at_T,
+                        baseline_cum_vol = :baseline_cum_vol,
+                        n_sessions_used = :n_sessions_used,
+                        atr5_at_T = :atr5_at_T,
+                        px_at_T = :px_at_T,
+                        ret_30m = :ret_30m,
+                        ret_60m = :ret_60m,
+                        ret_120m = :ret_120m,
+                        eod_ret = :eod_ret,
+                        mfe_atr = :mfe_atr,
+                        mae_atr = :mae_atr
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "id": int(rid),
+                    "rvol_cum": r.get("rvol_cum"),
+                    "rvol_slot": r.get("rvol_slot"),
+                    "cum_vol_at_T": r.get("cum_vol_at_T"),
+                    "baseline_cum_vol": r.get("baseline_cum_vol"),
+                    "n_sessions_used": r.get("n_sessions_used"),
+                    "atr5_at_T": r.get("atr5_at_T"),
+                    "px_at_T": r.get("px_at_T"),
+                    "ret_30m": r.get("ret_30m"),
+                    "ret_60m": r.get("ret_60m"),
+                    "ret_120m": r.get("ret_120m"),
+                    "eod_ret": r.get("eod_ret"),
+                    "mfe_atr": r.get("mfe_atr"),
+                    "mae_atr": r.get("mae_atr"),
+                },
+            )
+            n += 1
+        db.commit()
+        return n
+    except Exception:
+        db.rollback()
+        logger.exception("momentx backtest update_rvol_fields failed")
+        raise
+    finally:
+        db.close()
 
 
 def fetch_runs(limit: int = 20) -> List[Dict[str, Any]]:
@@ -558,7 +675,9 @@ def fetch_qualified(
                 SELECT id, run_id, trade_date, stock, equity_instrument_key,
                        future_symbol, future_instrument_key, lot_size, side,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
-                       today_volume, volume_sma5, first_filtered_at, conditions, asof_at
+                       today_volume, volume_sma5, first_filtered_at, conditions, asof_at,
+                       rvol_cum, rvol_slot, cum_vol_at_T, baseline_cum_vol, n_sessions_used,
+                       atr5_at_T, px_at_T, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr
                 FROM momentx_backtest_qualified
                 {where}
                 ORDER BY trade_date ASC, first_filtered_at ASC NULLS LAST, stock ASC
@@ -578,7 +697,9 @@ def fetch_qualified(
                        id, run_id, trade_date, stock, equity_instrument_key,
                        future_symbol, future_instrument_key, lot_size, side,
                        price, sma200, prev_close, pct_change, rsi, williams_r, adx,
-                       today_volume, volume_sma5, first_filtered_at, conditions, asof_at
+                       today_volume, volume_sma5, first_filtered_at, conditions, asof_at,
+                       rvol_cum, rvol_slot, cum_vol_at_T, baseline_cum_vol, n_sessions_used,
+                       atr5_at_T, px_at_T, ret_30m, ret_60m, ret_120m, eod_ret, mfe_atr, mae_atr
                 FROM momentx_backtest_qualified
                 {where}
                 ORDER BY trade_date ASC, stock ASC, run_id DESC,
