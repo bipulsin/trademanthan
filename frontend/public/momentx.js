@@ -254,6 +254,21 @@
     );
   }
 
+  function sectorBadgeHtml(card) {
+    var raw = (card && (card.sector_badge_display || card.sector_badge)) || "";
+    if (!raw) return "";
+    var text = String(raw);
+    var kind = /^W/i.test(text) ? "weak" : "strong";
+    var title = (card && card.nifty_sector_label)
+      ? ("Sector: " + card.nifty_sector_label + (card.sector_star ? " · top within sector" : ""))
+      : "Sector strength";
+    return (
+      '<span class="mx-sector-badge is-' + kind + '" title="' + esc(title) + '">' +
+      esc(text) +
+      "</span>"
+    );
+  }
+
   function cardHtml(card) {
     var stock = card.stock || "—";
     var status = cardStatus(card);
@@ -278,12 +293,13 @@
       card.lot_size != null && card.lot_size !== ""
         ? '<span class="mx-lot">Lot ' + esc(fmtNum(card.lot_size, 0)) + "</span>"
         : '<span class="mx-lot">Lot —</span>';
+    var sectorBadge = sectorBadgeHtml(card);
     return (
       '<article class="' + cls + '" data-stock="' + esc(stock) + '" data-status="' + esc(status) + '" data-side="' + esc(side) + '">' +
       '<div class="mx-card-top">' +
         "<div><button type=\"button\" class=\"mx-sym-link mx-symbol\" data-act=\"chart\">" +
           esc(card.future_symbol || stock) + "</button>" +
-        '<div class="mx-lot-row">' + lot + sidePill + pill + "</div>" +
+        '<div class="mx-lot-row">' + lot + sidePill + sectorBadge + pill + "</div>" +
         "</div>" +
         '<div class="mx-ltp ' + esc(dir) + '">' + esc(fmtNum(card.ltp)) + "</div>" +
       "</div>" +

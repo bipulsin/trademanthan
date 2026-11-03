@@ -633,3 +633,28 @@ def build_sector_stock_detail(sector_label: str, mode: str) -> Dict[str, Any]:
         "fo_only": bool(fo_rows),
         "stocks": pick,
     }
+
+
+_SECTOR_STOCK_DETAIL_TTL_CACHE: Dict[Tuple[str, str], Tuple[float, Dict[str, Any]]] = {}
+_DEFAULT_SECTOR_STOCK_DETAIL_TTL_SEC = 90.0
+
+
+def get_sector_stock_detail_cached(sector_label: str, mode: str = "gainers") -> Dict[str, Any]:
+    """Short-TTL cache around ``build_sector_stock_detail`` (Yahoo-heavy)."""
+    label = (sector_label or "").strip()
+    m = (mode or "gainers").strip().lower()
+    if m not in ("gainers", "losers"):
+        m = "gainers"
+    try:
+        ttl = float(os.getenv("SECTOR_STOCK_DETAIL_CACHE_TTL_SEC", "") or _DEFAULT_SECTOR_STOCK_DETAIL_TTL_SEC)
+    except (TypeError, ValueError):
+        ttl = _DEFAULT_SECTOR_STOCK_DETAIL_TTL_SEC
+    ttl = max(15.0, min(ttl, 300.0))
+    key = (label, m)
+    now_m = time.monotonic()
+    ent = _SECTOR_STOCK_DETAIL_TTL_CACHE.get(key)
+    if ent is not None and (now_m - ent[0]) < ttl:
+        return ent[1]
+    data = build_sector_stock_detail(label, m)
+    _SECTOR_STOCK_DETAIL_TTL_CACHE[key] = (now_m, data)
+    return data

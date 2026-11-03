@@ -301,6 +301,32 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
   background: #fca5a5;
 }
 
+/* Sector strength: S1–S3 orange, W1–W3 red (filled circles; * = top within sector). */
+.mx-sector-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.55rem;
+  height: 1.55rem;
+  padding: 0 0.28rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-family: var(--font-mono);
+  line-height: 1;
+  vertical-align: middle;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.mx-sector-badge.is-strong {
+  color: #1a0a00;
+  background: #ff7a1a;
+}
+.mx-sector-badge.is-weak {
+  color: #fff7f7;
+  background: #e11d48;
+}
+
 .mx-card.is-bullish {
   border-color: rgba(61, 186, 122, 0.45);
   background: linear-gradient(165deg, rgba(34, 197, 94, 0.08), var(--card) 48%);

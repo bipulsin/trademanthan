@@ -54,6 +54,9 @@ _ALTERS = [
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS pnl DOUBLE PRECISION",
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS side TEXT NOT NULL DEFAULT 'bullish'",
+    "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS nifty_sector_label TEXT",
+    "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS sector_badge TEXT",
+    "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS sector_star BOOLEAN NOT NULL DEFAULT FALSE",
 ]
 
 _BOARD_DDL = """
@@ -268,6 +271,13 @@ def record_filtered_symbols(
     if not rows:
         return 0
     filtered_at = _aware(filtered_at)
+    badge_by: Dict[str, Dict[str, Any]] = {}
+    try:
+        from backend.services.momentx.sector_badges import badges_for_symbols
+
+        badge_by = badges_for_symbols(str(c.get("stock") or "") for c in rows)
+    except Exception:
+        logger.exception("momentx sector badges for filtered symbols failed")
     db = SessionLocal()
     inserted = 0
     try:
@@ -283,18 +293,27 @@ def record_filtered_symbols(
             side = str(c.get("side") or (c.get("stage1") or {}).get("side") or "bullish").lower()
             if side not in ("bullish", "bearish"):
                 side = "bullish"
+            binfo = badge_by.get(stock) or {}
+            sector_label = binfo.get("nifty_sector_label") or c.get("nifty_sector_label")
+            sector_badge = binfo.get("sector_badge") or c.get("sector_badge")
+            sector_star = bool(binfo.get("sector_star") if binfo else c.get("sector_star"))
             db.execute(
                 text(
                     """
                     INSERT INTO momentx_filtered_symbols
-                        (trade_date, stock, future_symbol, future_instrument_key, lot_size, side, filtered_at, updated_at)
+                        (trade_date, stock, future_symbol, future_instrument_key, lot_size, side,
+                         nifty_sector_label, sector_badge, sector_star, filtered_at, updated_at)
                     VALUES
-                        (:trade_date, :stock, :future_symbol, :future_instrument_key, :lot_size, :side, :filtered_at, NOW())
+                        (:trade_date, :stock, :future_symbol, :future_instrument_key, :lot_size, :side,
+                         :nifty_sector_label, :sector_badge, :sector_star, :filtered_at, NOW())
                     ON CONFLICT (trade_date, stock) DO UPDATE SET
                         future_symbol = COALESCE(EXCLUDED.future_symbol, momentx_filtered_symbols.future_symbol),
                         future_instrument_key = COALESCE(EXCLUDED.future_instrument_key, momentx_filtered_symbols.future_instrument_key),
                         lot_size = COALESCE(EXCLUDED.lot_size, momentx_filtered_symbols.lot_size),
                         side = EXCLUDED.side,
+                        nifty_sector_label = COALESCE(EXCLUDED.nifty_sector_label, momentx_filtered_symbols.nifty_sector_label),
+                        sector_badge = COALESCE(EXCLUDED.sector_badge, momentx_filtered_symbols.sector_badge),
+                        sector_star = EXCLUDED.sector_star OR momentx_filtered_symbols.sector_star,
                         filtered_at = LEAST(momentx_filtered_symbols.filtered_at, EXCLUDED.filtered_at),
                         updated_at = NOW()
                     """
@@ -306,6 +325,9 @@ def record_filtered_symbols(
                     "future_instrument_key": (c.get("future_instrument_key") or None),
                     "lot_size": lot_i,
                     "side": side,
+                    "nifty_sector_label": sector_label,
+                    "sector_badge": sector_badge,
+                    "sector_star": sector_star,
                     "filtered_at": filtered_at,
                 },
             )
@@ -549,6 +571,11 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
             return _aware(v).isoformat()
         return str(v)
 
+    badge = r.get("sector_badge")
+    star = bool(r.get("sector_star"))
+    display = None
+    if badge:
+        display = f"{badge}*" if star else str(badge)
     return {
         "id": int(r["id"]),
         "trade_date": str(r["trade_date"]),
@@ -557,6 +584,10 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         "future_symbol": r["future_symbol"],
         "future_instrument_key": r["future_instrument_key"],
         "lot_size": r["lot_size"],
+        "nifty_sector_label": r.get("nifty_sector_label"),
+        "sector_badge": badge,
+        "sector_star": star,
+        "sector_badge_display": display,
         "filtered_at": iso(r["filtered_at"]),
         "first_active_at": iso(r["first_active_at"]),
         "first_active_ltp": r["first_active_ltp"],
@@ -591,6 +622,7 @@ def fetch_log(
             text(
                 f"""
                 SELECT id, trade_date, stock, side, future_symbol, future_instrument_key, lot_size,
+                       nifty_sector_label, sector_badge, sector_star,
                        filtered_at, first_active_at, first_active_ltp, last_active_at,
                        traded_at, entry_price, entry_time, exit_price, exit_time, pnl
                 FROM momentx_filtered_symbols
@@ -600,10 +632,24 @@ def fetch_log(
             ),
             params,
         ).mappings().all()
+        # Live-refresh badges for rows still missing a stored sector_badge (older rows / today).
+        try:
+            from backend.services.momentx.sector_badges import badges_for_symbols
+
+            need = [str(r["stock"]) for r in rows if not r.get("sector_badge")]
+            live = badges_for_symbols(need) if need else {}
+        except Exception:
+            live = {}
         by_date: Dict[str, List[Dict[str, Any]]] = {}
         for r in rows:
-            d = str(r["trade_date"])
-            by_date.setdefault(d, []).append(_row_to_dict(r))
+            d = dict(r)
+            if not d.get("sector_badge"):
+                info = live.get(str(d.get("stock") or "").strip().upper()) or {}
+                if info:
+                    d["nifty_sector_label"] = info.get("nifty_sector_label")
+                    d["sector_badge"] = info.get("sector_badge")
+                    d["sector_star"] = bool(info.get("sector_star"))
+            by_date.setdefault(str(r["trade_date"]), []).append(_row_to_dict(d))
         groups = []
         for d, items in by_date.items():
             pnls = [x["pnl"] for x in items if x.get("pnl") is not None]

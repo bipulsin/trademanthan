@@ -95,6 +95,21 @@
     $("mxLogTo").value = today;
   }
 
+  function sectorBadgeHtml(r) {
+    var raw = (r && (r.sector_badge_display || r.sector_badge)) || "";
+    if (!raw) return "";
+    var text = String(raw);
+    var kind = /^W/i.test(text) ? "weak" : "strong";
+    var title = (r && r.nifty_sector_label)
+      ? ("Sector: " + r.nifty_sector_label + (r.sector_star ? " · top within sector" : ""))
+      : "Sector strength";
+    return (
+      ' <span class="mx-sector-badge is-' + kind + '" title="' + esc(title) + '">' +
+      esc(text) +
+      "</span>"
+    );
+  }
+
   function rowHtml(r) {
     var name = r.future_symbol || r.stock || "—";
     var traded = !!r.traded_at;
@@ -105,7 +120,8 @@
       "<tr data-id=\"" + esc(r.id) + "\" class=\"mx-bt-row-" + side + "\">" +
       "<td><button type=\"button\" class=\"mx-sym-link\" data-act=\"chart\" " +
         "data-ik=\"" + esc(r.future_instrument_key || "") + "\" " +
-        "data-sym=\"" + esc(name) + "\">" + esc(name) + "</button></td>" +
+        "data-sym=\"" + esc(name) + "\">" + esc(name) + "</button>" +
+        sectorBadgeHtml(r) + "</td>" +
       "<td class=\"" + sideCls + "\">" + esc(sideLabel) + "</td>" +
       "<td>" + esc(fmtHm(r.filtered_at)) + "</td>" +
       "<td>" + esc(fmtHm(r.first_active_at)) + "</td>" +

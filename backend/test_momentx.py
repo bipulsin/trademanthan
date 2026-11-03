@@ -158,6 +158,46 @@ def test_ema_trigger_condition():
     assert is_ema_trigger(None, 10.0, 9.0) is False
 
 
+def test_sector_badges_strong_weak_and_star(monkeypatch):
+    from backend.services.momentx import sector_badges as sb
+
+    monkeypatch.setattr(
+        sb,
+        "get_sector_movers_cached",
+        lambda top_n=3: {
+            "gainers": [{"sector": "Nifty IT"}, {"sector": "Nifty Bank"}, {"sector": "Nifty Auto"}],
+            "losers": [{"sector": "Nifty Metal"}, {"sector": "Nifty Pharma"}, {"sector": "Nifty Realty"}],
+        },
+    )
+    monkeypatch.setattr(
+        sb,
+        "nifty_sector_label_for_nse_equity",
+        lambda sym: {
+            "INFY": "Nifty IT",
+            "TATASTEEL": "Nifty Metal",
+            "RELIANCE": "Nifty Energy",
+        }.get(str(sym).upper()),
+    )
+
+    def _detail(label, mode="gainers"):
+        if label == "Nifty IT" and mode == "gainers":
+            return {"stocks": [{"symbol": "INFY"}, {"symbol": "TCS"}, {"symbol": "WIPRO"}]}
+        if label == "Nifty Metal" and mode == "losers":
+            return {"stocks": [{"symbol": "HINDALCO"}, {"symbol": "JSWSTEEL"}, {"symbol": "VEDL"}]}
+        return {"stocks": []}
+
+    monkeypatch.setattr(sb, "get_sector_stock_detail_cached", _detail)
+
+    out = sb.badges_for_symbols(["INFY", "TATASTEEL", "RELIANCE"])
+    assert out["INFY"]["sector_badge"] == "S1"
+    assert out["INFY"]["sector_star"] is True
+    assert out["INFY"]["sector_badge_display"] == "S1*"
+    assert out["TATASTEEL"]["sector_badge"] == "W1"
+    assert out["TATASTEEL"]["sector_star"] is False
+    assert out["TATASTEEL"]["sector_badge_display"] == "W1"
+    assert "RELIANCE" not in out
+
+
 def test_ema_fresh_cross_trigger():
     from backend.services.momentx.indicators import is_ema_fresh_cross_trigger
 
