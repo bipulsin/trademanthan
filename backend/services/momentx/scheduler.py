@@ -230,6 +230,20 @@ def start_momentx_scheduler() -> None:
     except Exception:
         logger.exception("momentx table ensure failed")
     try:
+        from backend.services.momentx.state import restore_day_board_from_snapshot
+
+        n = restore_day_board_from_snapshot()
+        if n:
+            logger.info("momentx restored %s cards from day-board snapshot", n)
+            try:
+                from backend.services.momentx.ws_ltp import sync_momentx_subscriptions
+
+                sync_momentx_subscriptions(force=True)
+            except Exception:
+                logger.exception("momentx ws sync after board restore failed")
+    except Exception:
+        logger.exception("momentx day-board restore failed")
+    try:
         from backend.services.momentx.backtest_engine import reclaim_orphaned_runs
 
         n = reclaim_orphaned_runs(reason="worker lost (app restart)")

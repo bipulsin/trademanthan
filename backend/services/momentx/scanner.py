@@ -18,9 +18,18 @@ from backend.services.momentx.universe import load_momentx_universe
 
 
 def _filters_ok_for_card(stage1: Dict[str, Any], *, volume_filter: bool) -> bool:
-    """Core Stage-1 gates always required; volume optional via desk toggle."""
+    """Core Stage-1 gates always required; volume optional via desk toggle.
+
+    ChartInk second-entry-gate cards always pass (volume toggle does not demote).
+    """
     conds = (stage1 or {}).get("conditions") or {}
-    core = {k: bool(v) for k, v in conds.items() if k != "volume_ok"}
+    if conds.get("chartink_gate") or str((stage1 or {}).get("source") or "").lower() == "chartink":
+        return True
+    core = {
+        k: bool(v)
+        for k, v in conds.items()
+        if k not in ("volume_ok", "chartink_gate")
+    }
     if not core or not all(core.values()):
         return False
     if not volume_filter:

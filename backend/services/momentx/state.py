@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import copy
+import logging
 import threading
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 import pytz
 
+logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 _LOCK = threading.RLock()
 
@@ -60,15 +62,51 @@ def set_last_error(error: Optional[str]) -> None:
         _STATE["last_error"] = error
 
 
+def _persist_board_unlocked() -> None:
+    """Best-effort DB snapshot of today's board (caller holds ``_LOCK``)."""
+    board_date = _STATE.get("board_date")
+    if not board_date:
+        return
+    try:
+        from backend.services.momentx.persistence import save_day_board_snapshot
+
+        d = date.fromisoformat(str(board_date)[:10])
+        save_day_board_snapshot(
+            board_date=d,
+            cards=list(_STATE.get("ready") or []),
+            meta={
+                "scan_at": _STATE.get("scan_at"),
+                "ema_at": _STATE.get("ema_at"),
+                "universe_size": _STATE.get("universe_size"),
+                "volume_filter_enabled": _STATE.get("volume_filter_enabled"),
+                "market_status": _STATE.get("market_status"),
+            },
+        )
+    except Exception:
+        logger.exception("momentx persist day board failed")
+
+
 def clear_day_board(*, reason: Optional[str] = None) -> None:
     """Drop all Ready cards (new IST trading day / market open)."""
+    cleared_date: Optional[str] = None
     with _LOCK:
+        cleared_date = _STATE.get("board_date")
         _STATE["ready"] = []
         _STATE["qualified_count"] = 0
         _STATE["day_count"] = 0
         _STATE["board_date"] = None
         if reason:
             _STATE["last_error"] = None
+    try:
+        from backend.services.momentx.persistence import clear_day_board_snapshot
+
+        if cleared_date:
+            clear_day_board_snapshot(date.fromisoformat(str(cleared_date)[:10]))
+        else:
+            # 09:00 wipe before board_date is set — clear today's snapshot.
+            clear_day_board_snapshot(datetime.now(IST).date())
+    except Exception:
+        logger.exception("momentx clear day board snapshot failed")
 
 
 def ensure_board_date(today_iso: str) -> bool:
@@ -80,10 +118,19 @@ def ensure_board_date(today_iso: str) -> bool:
             _STATE["qualified_count"] = 0
             _STATE["day_count"] = 0
             _STATE["board_date"] = today_iso
-            return True
-        if not prev:
-            _STATE["board_date"] = today_iso
-        return False
+            cleared = True
+        else:
+            cleared = False
+            if not prev:
+                _STATE["board_date"] = today_iso
+    if cleared and prev:
+        try:
+            from backend.services.momentx.persistence import clear_day_board_snapshot
+
+            clear_day_board_snapshot(date.fromisoformat(str(prev)[:10]))
+        except Exception:
+            logger.exception("momentx clear prior day snapshot failed")
+    return cleared
 
 
 def replace_ready(
@@ -111,6 +158,7 @@ def replace_ready(
             _STATE["scan_at"] = scan_at
         else:
             _STATE["scan_at"] = _now_iso()
+        _persist_board_unlocked()
 
 
 def set_ready_cards(cards: List[Dict[str, Any]]) -> None:
@@ -120,6 +168,47 @@ def set_ready_cards(cards: List[Dict[str, Any]]) -> None:
         _STATE["ready"] = ready
         _STATE["qualified_count"] = sum(1 for c in ready if str(c.get("status") or "") == "active")
         _STATE["day_count"] = len(ready)
+        if not _STATE.get("board_date"):
+            _STATE["board_date"] = datetime.now(IST).date().isoformat()
+        _persist_board_unlocked()
+
+
+def restore_day_board_from_snapshot() -> int:
+    """Load today's persisted board into memory (startup / after deploy). Returns card count."""
+    today = datetime.now(IST).date()
+    try:
+        from backend.services.momentx.persistence import load_day_board_snapshot
+
+        snap = load_day_board_snapshot(today)
+    except Exception:
+        logger.exception("momentx restore snapshot load failed")
+        return 0
+    if not snap:
+        return 0
+    cards = list(snap.get("cards") or [])
+    meta = snap.get("meta") or {}
+    with _LOCK:
+        if _STATE.get("ready"):
+            # Live memory already has cards — don't clobber (e.g. webhook raced startup).
+            return len(_STATE["ready"])
+        _STATE["ready"] = cards
+        _STATE["board_date"] = today.isoformat()
+        _STATE["day_count"] = len(cards)
+        _STATE["qualified_count"] = sum(
+            1 for c in cards if str(c.get("status") or "") == "active"
+        )
+        if meta.get("scan_at"):
+            _STATE["scan_at"] = meta.get("scan_at")
+        if meta.get("ema_at"):
+            _STATE["ema_at"] = meta.get("ema_at")
+        if meta.get("universe_size") is not None:
+            _STATE["universe_size"] = meta.get("universe_size")
+        if meta.get("volume_filter_enabled") is not None:
+            _STATE["volume_filter_enabled"] = bool(meta.get("volume_filter_enabled"))
+        if meta.get("market_status"):
+            _STATE["market_status"] = meta.get("market_status")
+    logger.info("momentx restored %s day-board cards for %s", len(cards), today.isoformat())
+    return len(cards)
 
 
 def update_ema_fields(updates: Dict[str, Dict[str, Any]], *, ema_at: Optional[str] = None) -> None:
@@ -133,6 +222,8 @@ def update_ema_fields(updates: Dict[str, Dict[str, Any]], *, ema_at: Optional[st
                 continue
             card.update(patch)
         _STATE["ema_at"] = ema_at or _now_iso()
+        if updates:
+            _persist_board_unlocked()
 
 
 def update_ltp(future_key: str, ltp: float) -> None:

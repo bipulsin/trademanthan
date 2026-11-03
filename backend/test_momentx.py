@@ -467,6 +467,49 @@ def test_merge_day_cards_keeps_inactive_and_sorts_active_first():
     assert [c["stock"] for c in out] == ["BBB", "CCC", "AAA"]
 
 
+def test_merge_preserves_chartink_gate_when_stage1_also_qualifies():
+    from backend.services.momentx.day_board import merge_day_cards
+
+    prev = [
+        {
+            "stock": "INFY",
+            "entry_gate": "chartink",
+            "chartink": {"alert_name": "Bull"},
+            "status": "active",
+            "filters_ok": True,
+            "first_seen_at": "t0",
+            "stage1": {"source": "chartink", "conditions": {"chartink_gate": True}},
+        }
+    ]
+    qualified = [
+        {
+            "stock": "INFY",
+            "filters_ok": True,
+            "side": "bullish",
+            "stage1": {"source": "scan", "conditions": {"pct_in_band": True, "volume_ok": True}},
+        }
+    ]
+    now = IST.localize(datetime(2026, 3, 10, 12, 0))
+    out, _ = merge_day_cards(prev_cards=prev, qualified_cards=qualified, now=now)
+    card = out[0]
+    assert card["entry_gate"] == "chartink"
+    assert card["chartink"]["alert_name"] == "Bull"
+    assert card["stage1"]["source"] == "chartink"
+    assert card["filters_ok"] is True
+    assert card["status"] == "active"
+
+
+def test_filters_ok_chartink_ignores_volume_toggle():
+    from backend.services.momentx.scanner import _filters_ok_for_card
+
+    s1 = {
+        "source": "chartink",
+        "conditions": {"chartink_gate": True, "volume_ok": False, "pct_in_band": False},
+    }
+    assert _filters_ok_for_card(s1, volume_filter=True) is True
+    assert _filters_ok_for_card(s1, volume_filter=False) is True
+
+
 def test_ema_cross_above_from_below():
     from backend.services.momentx.indicators import ema_cross_above_from_below
 

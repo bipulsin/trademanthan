@@ -56,6 +56,15 @@ _ALTERS = [
     "ALTER TABLE momentx_filtered_symbols ADD COLUMN IF NOT EXISTS side TEXT NOT NULL DEFAULT 'bullish'",
 ]
 
+_BOARD_DDL = """
+CREATE TABLE IF NOT EXISTS momentx_day_board_snapshot (
+    board_date DATE PRIMARY KEY,
+    cards_json TEXT NOT NULL,
+    meta_json TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
 
 def _aware(dt: Optional[datetime] = None) -> datetime:
     t = dt or datetime.now(IST)
@@ -114,6 +123,10 @@ def ensure_momentx_tables() -> None:
             s = stmt.strip()
             if s:
                 db.execute(text(s))
+        for stmt in _BOARD_DDL.strip().split(";"):
+            s = stmt.strip()
+            if s:
+                db.execute(text(s))
         for alt in _ALTERS:
             try:
                 db.execute(text(alt))
@@ -150,6 +163,96 @@ def ensure_momentx_tables() -> None:
         db.rollback()
         logger.exception("momentx ensure tables failed")
         raise
+    finally:
+        db.close()
+
+
+def save_day_board_snapshot(
+    *,
+    board_date: date,
+    cards: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Persist today's Ready board so deploys/restarts keep cards for the session."""
+    import json
+
+    ensure_momentx_tables()
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO momentx_day_board_snapshot (board_date, cards_json, meta_json, updated_at)
+                VALUES (:board_date, :cards_json, :meta_json, NOW())
+                ON CONFLICT (board_date) DO UPDATE SET
+                    cards_json = EXCLUDED.cards_json,
+                    meta_json = EXCLUDED.meta_json,
+                    updated_at = NOW()
+                """
+            ),
+            {
+                "board_date": board_date,
+                "cards_json": json.dumps(cards or []),
+                "meta_json": json.dumps(meta or {}),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("momentx save_day_board_snapshot failed")
+    finally:
+        db.close()
+
+
+def load_day_board_snapshot(board_date: date) -> Optional[Dict[str, Any]]:
+    """Return ``{cards, meta}`` for ``board_date``, or None."""
+    import json
+
+    ensure_momentx_tables()
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT cards_json, meta_json
+                FROM momentx_day_board_snapshot
+                WHERE board_date = :board_date
+                """
+            ),
+            {"board_date": board_date},
+        ).mappings().fetchone()
+        if not row:
+            return None
+        cards = json.loads(row["cards_json"] or "[]")
+        meta = json.loads(row["meta_json"] or "{}")
+        if not isinstance(cards, list):
+            cards = []
+        if not isinstance(meta, dict):
+            meta = {}
+        return {"cards": cards, "meta": meta}
+    except Exception:
+        logger.exception("momentx load_day_board_snapshot failed")
+        return None
+    finally:
+        db.close()
+
+
+def clear_day_board_snapshot(board_date: Optional[date] = None) -> None:
+    """Drop snapshot for one day (or all rows when ``board_date`` is None)."""
+    ensure_momentx_tables()
+    db = SessionLocal()
+    try:
+        if board_date is None:
+            db.execute(text("DELETE FROM momentx_day_board_snapshot"))
+        else:
+            db.execute(
+                text("DELETE FROM momentx_day_board_snapshot WHERE board_date = :d"),
+                {"d": board_date},
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("momentx clear_day_board_snapshot failed")
     finally:
         db.close()
 

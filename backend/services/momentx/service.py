@@ -15,6 +15,14 @@ def apply_volume_filter_to_board(*, enabled: Optional[bool] = None) -> List[Dict
     out: List[Dict[str, Any]] = []
     for c in cards:
         card = dict(c)
+        # ChartInk second gate stays Active for the whole trading day.
+        if str(card.get("entry_gate") or "").lower() == "chartink" or (
+            isinstance(card.get("stage1"), dict)
+            and str((card.get("stage1") or {}).get("source") or "").lower() == "chartink"
+        ):
+            card["filters_ok"] = True
+            out.append(card)
+            continue
         s1 = card.get("stage1") or {}
         # Cards on the board already passed core gates when first filtered.
         # If stage1 missing, keep prior filters_ok.

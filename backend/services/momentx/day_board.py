@@ -64,6 +64,7 @@ def merge_day_cards(
             continue
         prev = by_stock.get(key) or {}
         was_new = key not in prev_keys
+        was_chartink = _is_chartink_entry_gate(prev)
         card = dict(qc)
         card["stock"] = key
         # Honour volume-filter toggle from scanner (`filters_ok` already set).
@@ -89,9 +90,23 @@ def merge_day_cards(
             "active_since",
             "status",
             "side",
+            "entry_gate",
+            "chartink",
         ):
             if card.get(fld) is None and prev.get(fld) is not None:
                 card[fld] = prev.get(fld)
+        # Never drop ChartInk entry-gate identity when Stage-1 also qualifies.
+        if was_chartink:
+            card["entry_gate"] = prev.get("entry_gate") or "chartink"
+            if prev.get("chartink") is not None:
+                card["chartink"] = prev.get("chartink")
+            s1 = dict(card.get("stage1") or {})
+            s1["source"] = "chartink"
+            conds = dict(s1.get("conditions") or {})
+            conds["chartink_gate"] = True
+            s1["conditions"] = conds
+            card["stage1"] = s1
+            card["filters_ok"] = True
         # First board appearance (core gates) — even if volume currently disables Active.
         re_filtered = str(prev.get("status") or "") == "filters_off" and card["filters_ok"]
         if was_new or re_filtered:
@@ -105,6 +120,7 @@ def merge_day_cards(
         if key in qualified_keys:
             continue
         if _is_chartink_entry_gate(card):
+            # ChartInk second gate: stay on the day board Active/filters_ok all session.
             card["filters_ok"] = True
             if not card.get("first_seen_at") and now_iso:
                 card["first_seen_at"] = now_iso
@@ -116,6 +132,7 @@ def merge_day_cards(
                 card["side"] = s1.get("side")
             if s1.get("volume_ok") is not None:
                 card["volume_ok"] = bool(s1.get("volume_ok"))
+        # Stay on the day board for the IST session; demote Active → Filters Off only.
         card["filters_ok"] = False
         if not card.get("first_seen_at") and now_iso:
             card["first_seen_at"] = now_iso
