@@ -254,6 +254,38 @@
     );
   }
 
+  function badgeSortRank(card) {
+    var raw = String((card && (card.sector_badge || card.sector_badge_display)) || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\*$/, "");
+    var order = { S1: 0, S2: 1, S3: 2, W1: 3, W2: 4, W3: 5 };
+    return order.hasOwnProperty(raw) ? order[raw] : 99;
+  }
+
+  function firstActiveMs(card) {
+    var iso = card && card.first_active_at;
+    if (!iso) return 0;
+    var t = Date.parse(iso);
+    return Number.isFinite(t) ? t : 0;
+  }
+
+  /** Take Trade → S1…W3 badge → 1st Activ newest first. */
+  function sortReadyCards(cards) {
+    return (cards || []).slice().sort(function (a, b) {
+      var aTrade = cardStatus(a) === "active" && a.trigger ? 0 : 1;
+      var bTrade = cardStatus(b) === "active" && b.trigger ? 0 : 1;
+      if (aTrade !== bTrade) return aTrade - bTrade;
+      var aBadge = badgeSortRank(a);
+      var bBadge = badgeSortRank(b);
+      if (aBadge !== bBadge) return aBadge - bBadge;
+      var aT = firstActiveMs(a);
+      var bT = firstActiveMs(b);
+      if (aT !== bT) return bT - aT;
+      return String(a.stock || "").localeCompare(String(b.stock || ""));
+    });
+  }
+
   function sectorBadgeHtml(card) {
     var raw = (card && (card.sector_badge_display || card.sector_badge)) || "";
     if (!raw) return "";
@@ -340,7 +372,7 @@
       volFilterOn = !!data.volume_filter_enabled;
       syncVolFilterUi();
     }
-    var ready = (data && data.ready) || [];
+    var ready = sortReadyCards((data && data.ready) || []);
     var activeN = ready.filter(function (c) { return cardStatus(c) === "active"; }).length;
     var dayN = ready.length;
     $("mxCount").textContent =

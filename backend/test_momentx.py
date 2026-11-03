@@ -158,6 +158,20 @@ def test_ema_trigger_condition():
     assert is_ema_trigger(None, 10.0, 9.0) is False
 
 
+def test_sort_ready_cards_trade_badge_then_first_active():
+    from backend.services.momentx.sector_badges import sort_ready_cards
+
+    cards = [
+        {"stock": "C", "status": "active", "trigger": False, "sector_badge": "S1", "first_active_at": "2026-03-10T10:00:00+05:30"},
+        {"stock": "A", "status": "active", "trigger": True, "sector_badge": "W1", "first_active_at": "2026-03-10T09:00:00+05:30"},
+        {"stock": "B", "status": "active", "trigger": True, "sector_badge": "S2", "first_active_at": "2026-03-10T11:00:00+05:30"},
+        {"stock": "D", "status": "locked", "trigger": False, "sector_badge": "S1", "first_active_at": "2026-03-10T12:00:00+05:30"},
+        {"stock": "E", "status": "active", "trigger": False, "first_active_at": "2026-03-10T13:00:00+05:30"},
+    ]
+    out = sort_ready_cards(cards)
+    assert [c["stock"] for c in out] == ["B", "A", "C", "E", "D"]
+
+
 def test_sector_badges_strong_weak_and_star(monkeypatch):
     from backend.services.momentx import sector_badges as sb
 

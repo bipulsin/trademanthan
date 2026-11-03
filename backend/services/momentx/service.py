@@ -71,13 +71,13 @@ def get_ready_payload(*, ensure: bool = True) -> Dict[str, Any]:
     snap = mx_state.snapshot()
     cards: List[Dict[str, Any]] = list(snap.get("ready") or [])
     try:
-        from backend.services.momentx.sector_badges import apply_badges_to_cards
+        from backend.services.momentx.sector_badges import apply_badges_to_cards, sort_ready_cards
 
-        cards = apply_badges_to_cards(cards)
+        cards = sort_ready_cards(apply_badges_to_cards(cards))
     except Exception:
         import logging
 
-        logging.getLogger(__name__).exception("momentx sector badge enrich failed")
+        logging.getLogger(__name__).exception("momentx sector badge enrich/sort failed")
     return {
         "ok": True,
         "scan_at": snap.get("scan_at"),

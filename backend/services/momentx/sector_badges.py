@@ -118,3 +118,51 @@ def apply_badges_to_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def badge_for_stock(stock: str) -> Optional[Dict[str, Any]]:
     info = badges_for_symbols([stock]).get(str(stock or "").strip().upper())
     return info
+
+
+_BADGE_RANK = {
+    "S1": 0,
+    "S2": 1,
+    "S3": 2,
+    "W1": 3,
+    "W2": 4,
+    "W3": 5,
+}
+
+
+def _badge_sort_key(card: Dict[str, Any]) -> int:
+    raw = str(card.get("sector_badge") or card.get("sector_badge_display") or "").strip().upper()
+    # Strip trailing star from display form.
+    if raw.endswith("*"):
+        raw = raw[:-1]
+    return _BADGE_RANK.get(raw, 99)
+
+
+def _first_active_sort_key(card: Dict[str, Any]) -> float:
+    """Epoch seconds for first_active_at; missing → 0 so they sort last when descending."""
+    raw = card.get("first_active_at")
+    if not raw:
+        return 0.0
+    try:
+        from datetime import datetime
+
+        s = str(raw).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        return float(dt.timestamp())
+    except Exception:
+        return 0.0
+
+
+def sort_ready_cards(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Desk order: Take Trade → sector badge (S1…W3) → 1st Activ newest first."""
+    def key(c: Dict[str, Any]) -> tuple:
+        status = str(c.get("status") or "").lower()
+        can_trade = 0 if (status == "active" and bool(c.get("trigger"))) else 1
+        return (
+            can_trade,
+            _badge_sort_key(c),
+            -_first_active_sort_key(c),
+            str(c.get("stock") or ""),
+        )
+
+    return sorted(list(cards or []), key=key)
