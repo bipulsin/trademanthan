@@ -169,7 +169,8 @@ def test_sort_ready_cards_trade_badge_then_first_active():
         {"stock": "E", "status": "active", "trigger": False, "first_active_at": "2026-03-10T13:00:00+05:30"},
     ]
     out = sort_ready_cards(cards)
-    assert [c["stock"] for c in out] == ["B", "A", "C", "E", "D"]
+    # Trade (S2 then W1) → non-trade by badge (S1 newest first) → no badge
+    assert [c["stock"] for c in out] == ["B", "A", "D", "C", "E"]
 
 
 def test_sector_badges_strong_weak_and_star(monkeypatch):
