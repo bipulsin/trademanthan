@@ -129,18 +129,22 @@ def _run_ema() -> None:
         logger.exception("momentx scheduled ema failed")
 
 
-def _run_daily_cache_refresh() -> None:
-    if should_skip_scheduled_market_jobs_ist():
-        return
+def _run_daily_board_reset() -> None:
+    """09:00 IST every calendar day: wipe Ready cards + daily candle cache."""
     try:
-        from backend.services.momentx.candles import clear_daily_cache
         from backend.services.momentx import state as mx_state
+        from backend.services.momentx.candles import clear_daily_cache
+        from backend.services.momentx.ws_ltp import sync_momentx_subscriptions
 
         clear_daily_cache()
-        mx_state.clear_day_board(reason="market_open")
-        logger.info("momentx daily candle cache + day board cleared at market open")
+        mx_state.clear_day_board(reason="daily_0900")
+        try:
+            sync_momentx_subscriptions(force=True)
+        except Exception:
+            logger.exception("momentx ws sync after 09:00 clear failed")
+        logger.info("momentx day board cleared at 09:00 IST")
     except Exception:
-        logger.exception("momentx daily cache refresh failed")
+        logger.exception("momentx daily board reset failed")
 
 
 def _run_ws_sync() -> None:
@@ -183,12 +187,12 @@ def start_momentx_scheduler() -> None:
         coalesce=True,
         misfire_grace_time=60,
     )
-    # Daily cache clear at market open
+    # Wipe Ready cards + cache every day at 09:00 IST (before session scans).
     sched.add_job(
-        _run_daily_cache_refresh,
-        CronTrigger(hour=9, minute=15, timezone="Asia/Kolkata"),
-        id="momentx_daily_cache",
-        name="MomentX daily cache refresh",
+        _run_daily_board_reset,
+        CronTrigger(hour=9, minute=0, timezone="Asia/Kolkata"),
+        id="momentx_daily_board_reset",
+        name="MomentX daily board clear 09:00",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

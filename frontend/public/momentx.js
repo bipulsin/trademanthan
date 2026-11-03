@@ -416,6 +416,50 @@
     pollTimer = setTimeout(loadReady, ms);
   }
 
+  /** Milliseconds until the next 09:00 Asia/Kolkata wall clock. */
+  function msUntilNextIst0900() {
+    var parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+    var get = function (type) {
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i].type === type) return Number(parts[i].value);
+      }
+      return 0;
+    };
+    var y = get("year");
+    var mo = get("month");
+    var d = get("day");
+    var h = get("hour");
+    var mi = get("minute");
+    var s = get("second");
+    // Approximate IST as UTC+5:30 for scheduling the reload.
+    var nowUtcMs = Date.UTC(y, mo - 1, d, h, mi, s) - (5.5 * 60 * 60 * 1000);
+    var targetUtcMs = Date.UTC(y, mo - 1, d, 9, 0, 0) - (5.5 * 60 * 60 * 1000);
+    if (targetUtcMs <= nowUtcMs) {
+      targetUtcMs += 24 * 60 * 60 * 1000;
+    }
+    return Math.max(1000, targetUtcMs - nowUtcMs);
+  }
+
+  function scheduleDailyPageReload() {
+    var ms = msUntilNextIst0900();
+    setTimeout(function () {
+      try {
+        window.location.reload();
+      } catch (e) {
+        scheduleDailyPageReload();
+      }
+    }, ms);
+  }
+
   function openTradeModal(card) {
     pendingTrade = card;
     var side = cardSide(card);
@@ -556,5 +600,6 @@
   document.addEventListener("DOMContentLoaded", function () {
     bind();
     loadReady();
+    scheduleDailyPageReload();
   });
 })();
