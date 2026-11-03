@@ -158,6 +158,36 @@ def test_ema_trigger_condition():
     assert is_ema_trigger(None, 10.0, 9.0) is False
 
 
+def test_ema_fresh_cross_trigger():
+    from backend.services.momentx.indicators import is_ema_fresh_cross_trigger
+
+    # prev-to-last: 5 < 15; last: 5 <= 15; current: 5 > 15 and 5 > 50
+    assert is_ema_fresh_cross_trigger(
+        [1.0, 2.0, 4.0],
+        [3.0, 3.0, 3.0],
+        [0.5, 0.5, 2.0],
+    ) is True
+    # last already above mid — not fresh
+    assert is_ema_fresh_cross_trigger(
+        [1.0, 3.5, 4.0],
+        [3.0, 3.0, 3.0],
+        [0.5, 0.5, 2.0],
+    ) is False
+    # prev-to-last not strictly below
+    assert is_ema_fresh_cross_trigger(
+        [3.0, 2.0, 4.0],
+        [3.0, 3.0, 3.0],
+        [0.5, 0.5, 2.0],
+    ) is False
+    # current above mid but not above slow
+    assert is_ema_fresh_cross_trigger(
+        [1.0, 2.0, 4.0],
+        [3.0, 3.0, 3.0],
+        [0.5, 0.5, 5.0],
+    ) is False
+    assert is_ema_fresh_cross_trigger([1.0, 2.0], [3.0, 3.0], [1.0, 1.0]) is False
+
+
 def _bar(day_offset: int, close: float, volume: float = 1_000_000, *, minute: int = 0):
     ts = IST.localize(datetime(2026, 3, 10, 9, 15) + timedelta(days=day_offset, minutes=minute))
     return {

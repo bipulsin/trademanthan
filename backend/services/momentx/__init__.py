@@ -7,7 +7,8 @@ Rules (Stage 1 — all must pass):
   ADX(14) Wilder / ta.dmi(14,14) > 30.
 
 Stage 2 (Ready stocks' current-month future):
-  EMA(5/15/50) on closed 5m candles; trigger when EMA5 > EMA15 and EMA5 > EMA50.
+  EMA(5/15/50) on closed 5m candles. Take Trade triggers only on a fresh cross:
+  prev-to-last EMA5 < EMA15, last EMA5 <= EMA15, current EMA5 > EMA15 and EMA5 > EMA50.
 
 Config lives in ``momentx.config.CONFIG``. Schedulers skip weekends/holidays via
 ``should_skip_scheduled_market_jobs_ist``. Live LTP uses the shared Upstox feed

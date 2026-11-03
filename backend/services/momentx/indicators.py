@@ -208,10 +208,36 @@ def is_ema_trigger(
     ema15: Optional[float],
     ema50: Optional[float],
 ) -> bool:
-    """True when EMA(fast) is strictly above both mid and slow."""
+    """Legacy last-bar stack check: EMA(fast) strictly above mid and slow."""
     if ema5 is None or ema15 is None or ema50 is None:
         return False
     return float(ema5) > float(ema15) and float(ema5) > float(ema50)
+
+
+def is_ema_fresh_cross_trigger(
+    ema5_series: Sequence[float],
+    ema15_series: Sequence[float],
+    ema50_series: Sequence[float],
+) -> bool:
+    """Fresh EMA(5)×EMA(15) cross up with EMA(5) above EMA(50) on the current bar.
+
+    On closed 5m bars (newest last):
+      - previous-to-last: EMA(5) < EMA(15)
+      - last:             EMA(5) <= EMA(15)
+      - current:          EMA(5) > EMA(15) and EMA(5) > EMA(50)
+    """
+    if len(ema5_series) < 3 or len(ema15_series) < 3 or len(ema50_series) < 3:
+        return False
+    e5_pp, e15_pp = float(ema5_series[-3]), float(ema15_series[-3])
+    e5_p, e15_p = float(ema5_series[-2]), float(ema15_series[-2])
+    e5_c = float(ema5_series[-1])
+    e15_c = float(ema15_series[-1])
+    e50_c = float(ema50_series[-1])
+    if not (e5_pp < e15_pp):
+        return False
+    if not (e5_p <= e15_p):
+        return False
+    return e5_c > e15_c and e5_c > e50_c
 
 
 def ema_cross_above_from_below(

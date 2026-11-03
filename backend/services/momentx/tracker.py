@@ -12,8 +12,8 @@ from backend.services.momentx import state as mx_state
 from backend.services.momentx.candles import batch_fetch, drop_forming_candle, splits_ohlcv
 from backend.services.momentx.config import CONFIG
 from backend.services.momentx.indicators import (
-    ema_last,
-    is_ema_trigger,
+    ema_series,
+    is_ema_fresh_cross_trigger,
     order_emas_by_value,
 )
 from backend.services.momentx.status_rules import past_scan_cutoff
@@ -57,10 +57,14 @@ def refresh_emas(*, force: bool = False) -> Dict[str, Any]:
                     logger.info("momentx ema skip %s: insufficient 5m (%s)", stock, len(closed))
                     continue
                 _, _, _, closes, _ = splits_ohlcv(closed)
-                e5 = ema_last(closes, CONFIG.ema_fast)
-                e15 = ema_last(closes, CONFIG.ema_mid)
-                e50 = ema_last(closes, CONFIG.ema_slow)
-                trigger = is_ema_trigger(e5, e15, e50)
+                e5_series = ema_series(closes, CONFIG.ema_fast)
+                e15_series = ema_series(closes, CONFIG.ema_mid)
+                e50_series = ema_series(closes, CONFIG.ema_slow)
+                e5 = e5_series[-1] if e5_series else None
+                e15 = e15_series[-1] if e15_series else None
+                e50 = e50_series[-1] if e50_series else None
+                # Take Trade only on a fresh EMA(5)×EMA(15) cross with EMA(5) > EMA(50).
+                trigger = is_ema_fresh_cross_trigger(e5_series, e15_series, e50_series)
                 prev_trigger = bool(card.get("trigger"))
                 ordered = [
                     {"label": lab, "value": val}
