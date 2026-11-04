@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS multi_leg_trades (
     id UUID PRIMARY KEY,
     trade_type TEXT NOT NULL
-        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'LADDER', 'UNCLASSIFIED')),
+        CHECK (trade_type IN ('STRADDLE', 'SHORT_STRANGLE', 'IRON_FLY', 'IRON_CONDOR', 'LADDER', 'UNCLASSIFIED')),
     instrument TEXT NOT NULL,
     spot_price_entry NUMERIC(18, 4) NOT NULL,
     entry_date DATE NOT NULL,

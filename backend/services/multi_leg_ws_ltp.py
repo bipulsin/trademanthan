@@ -57,12 +57,17 @@ def sync_subscriptions(*, force: bool = False) -> Dict[str, Any]:
         logger.info("multi_leg_ws_ltp: list rows failed: %s", exc)
         return {"ok": False, "error": str(exc)[:200]}
 
+    from backend.services.multi_leg_crypto import is_delta_option_key
+
     mapping: Dict[str, List[str]] = {}
     keys: List[str] = []
     seen = set()
     for row in rows:
         raw = str(row.get("instrument_key") or "").strip()
         if not raw:
+            continue
+        # Crypto legs mark via Delta REST on /quotes — not the Upstox feed.
+        if is_delta_option_key(raw):
             continue
         ik = _normalize_ik(raw)
         mapping.setdefault(ik, []).append(str(row["leg_id"]))

@@ -2,10 +2,10 @@
 (function () {
   "use strict";
 
-  var MIN_LEGS = { STRADDLE: 2, IRON_FLY: 4, IRON_CONDOR: 4, LADDER: 1 };
+  var MIN_LEGS = { STRADDLE: 2, SHORT_STRANGLE: 2, IRON_FLY: 4, IRON_CONDOR: 4, LADDER: 1 };
   var LADDER_EXIT_MIN = 4;
   var LADDER_EXIT_MAX = 6;
-  var instruments = { indices: [], equities: [], commodities: [] };
+  var instruments = { indices: [], crypto: [], equities: [], commodities: [] };
   var activeTrades = [];
   var ladderTrades = [];
   var orphanLegs = [];
@@ -211,7 +211,14 @@
   }
 
   function typeLabel(t) {
-    return { STRADDLE: "Straddle", IRON_FLY: "Iron Fly", IRON_CONDOR: "Iron Condor", LADDER: "Ladder", UNCLASSIFIED: "Unclassified" }[t] || t;
+    return {
+      STRADDLE: "Straddle",
+      SHORT_STRANGLE: "Short Strangle",
+      IRON_FLY: "Iron Fly",
+      IRON_CONDOR: "Iron Condor",
+      LADDER: "Ladder",
+      UNCLASSIFIED: "Unclassified",
+    }[t] || t;
   }
 
   function legTypeLabel(qualifier) {
@@ -282,8 +289,20 @@
     return Number(n).toFixed(2);
   }
 
+  function normalizeTradeType(t) {
+    return String((t && t.trade_type != null ? t.trade_type : t) || "")
+      .toUpperCase()
+      .replace(/[\s-]/g, "_");
+  }
+
   function isStraddle(t) {
-    return String((t && t.trade_type) || "").toUpperCase().replace(/[\s-]/g, "_") === "STRADDLE";
+    return normalizeTradeType(t) === "STRADDLE";
+  }
+
+  /** Straddle and Short Strangle share LTP-ratio UI and 3× adjustment alerts. */
+  function isRatioTrade(t) {
+    var kind = normalizeTradeType(t);
+    return kind === "STRADDLE" || kind === "SHORT_STRANGLE";
   }
 
   function legIsExited(leg) {
@@ -336,7 +355,7 @@
         { qualifier: "WING", option_type: "PE" },
       ];
     }
-    if (kind === "STRADDLE") {
+    if (kind === "STRADDLE" || kind === "SHORT_STRANGLE") {
       return [
         { qualifier: "MAIN", option_type: "CE" },
         { qualifier: "MAIN", option_type: "PE" },
@@ -1318,7 +1337,7 @@
       var open = !!expandedTrades[t.id];
       var legs = (t.legs || []).map(function (leg) {
         if (isLadderType(t.trade_type)) return ladderReportLeg(leg);
-        if (isStraddle(t) && legIsExited(leg)) {
+        if (isRatioTrade(t) && legIsExited(leg)) {
           return '<div class="mlo-leg-ro mlo-leg-exited">' +
             '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
             '<span data-label="Side">' + esc(leg.side) + "</span>" +
@@ -1349,7 +1368,7 @@
         ? '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>Exit / LTP</span><span>Time</span><span>Leg P&L</span></div>'
         : '<div class="mlo-leg-ro mlo-leg-head"><span>Leg type</span><span>Side</span><span>CE/PE</span><span>Strike</span><span>Entry</span><span>LTP</span><span>Delta</span><span>Leg P&L</span></div>';
       var ratioField = "";
-      if (isStraddle(t)) {
+      if (isRatioTrade(t)) {
         var hot = t.ltp_ratio != null && Number(t.ltp_ratio) >= 3;
         ratioField = rowField(
           "LTP Ratio",
@@ -1436,7 +1455,7 @@
           '</td><td class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</td></tr>";
       }).join("");
       var phone = (t.legs || []).map(function (leg) {
-        if (isStraddle(t) && legIsExited(leg)) return exitedStraddlePhone(leg);
+        if (isRatioTrade(t) && legIsExited(leg)) return exitedStraddlePhone(leg);
         return activeLegPhone(leg);
       }).join("");
       var entryLabel = formatHumanDateTime(tradeEntryStamp(t));
@@ -1624,6 +1643,7 @@
       }).join("");
     }
     var html = group("Index", instruments.indices || []) +
+      group("Crypto", instruments.crypto || []) +
       group("Equity", instruments.equities || []) +
       group("MCX", instruments.commodities || []);
     list.innerHTML = html || '<div class="mlo-combo-group">No match</div>';
@@ -1634,10 +1654,12 @@
     try {
       var data = await api("/instruments");
       instruments.indices = data.indices || [];
+      instruments.crypto = data.crypto || [];
       instruments.equities = data.equities || [];
       instruments.commodities = data.commodities || [];
     } catch (e) {
       instruments.indices = ["NIFTY", "BANKNIFTY", "SENSEX"];
+      instruments.crypto = ["BITCOIN", "ETHEREUM"];
     }
   }
 
@@ -2087,11 +2109,11 @@
       if (!t || (t.status && t.status !== "ACTIVE")) return;
       var id = t.id || ((t.trade_type || "") + ":" + (t.instrument || ""));
       var pairKey = (t.ltp_ratio_ce_leg_id || "") + "+" + (t.ltp_ratio_pe_leg_id || "");
-      var adjKey = isStraddle(t) ? (id + ":adj:" + pairKey) : (id + ":adj");
+      var adjKey = isRatioTrade(t) ? (id + ":adj:" + pairKey) : (id + ":adj");
       var exitKey = id + ":exit";
       seen[adjKey] = true;
       seen[exitKey] = true;
-      if (isStraddle(t) && t.adjustment_alert) straddleAdj = true;
+      if (isRatioTrade(t) && t.adjustment_alert) straddleAdj = true;
       var nifty = isNiftyInstrument(t);
       if (nifty && t.adjustment_alert) niftyAdj = true;
       if (nifty && t.exit_adjustment_alert) niftyExit = true;
@@ -2100,7 +2122,7 @@
         !!t.adjustment_alert,
         t.adjustment_message || "Adjustment",
         "adjustment.mp3",
-        isStraddle(t),
+        isRatioTrade(t),
         nifty
       );
       considerAlert(exitKey, !!t.exit_adjustment_alert, "Exit Adjustment", "adjustment_exit.mp3", false, nifty);

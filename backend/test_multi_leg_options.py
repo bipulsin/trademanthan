@@ -35,11 +35,14 @@ from backend.services.multi_leg_options import (
 
 def test_min_legs_straddle_iron_fly_condor():
     assert_min_legs("STRADDLE", 2)
+    assert_min_legs("SHORT_STRANGLE", 2)
     assert_min_legs("IRON_FLY", 4)
     assert_min_legs("IRON_CONDOR", 4)
     assert_min_legs("IRON_CONDOR", 6)
     with pytest.raises(MultiLegValidationError, match="at least 2"):
         assert_min_legs("STRADDLE", 1)
+    with pytest.raises(MultiLegValidationError, match="at least 2"):
+        assert_min_legs("SHORT_STRANGLE", 1)
     with pytest.raises(MultiLegValidationError, match="at least 4"):
         assert_min_legs("IRON_FLY", 3)
     with pytest.raises(MultiLegValidationError, match="at least 4"):
@@ -361,6 +364,7 @@ def test_default_qualifier_iron_fly_and_straddle():
         {"qualifier": "MAIN", "option_type": "PE"},
     ]
     assert len(straddle) == 2
+    assert default_leg_slots("SHORT_STRANGLE") == straddle
     assert default_leg_slots("UNCLASSIFIED") == []
 
 
@@ -456,6 +460,24 @@ def test_straddle_ltp_ratio_threshold_and_pair_rules():
     assert annotated[0]["adjustment_message"] == "Adjustment on Straddle"
     assert annotated[0]["adjustment_ticker_text"] == "Adjustment"
     assert annotated[0]["adj_alert_first_date"] == "2026-10-06"
+
+    short_strangle = annotate_adjustment_alerts(
+        [{
+            "status": "ACTIVE",
+            "trade_type": "SHORT_STRANGLE",
+            "instrument": "BITCOIN",
+            "legs": [
+                _ratio_leg("CE", "MAIN", 90.0, "2026-10-04T09:20:00+05:30", leg_id="btc-ce"),
+                _ratio_leg("PE", "MAIN", 30.0, "2026-10-04T09:20:00+05:30", leg_id="btc-pe"),
+            ],
+        }],
+        spots={},
+        today=date(2026, 10, 6),
+        persist=False,
+    )
+    assert short_strangle[0]["ltp_ratio"] == 3.0
+    assert short_strangle[0]["adjustment_alert"] is True
+    assert short_strangle[0]["adjustment_message"] == "Adjustment on Short Strangle"
 
 
 def test_adjustment_alert_24h_first_trigger_window():

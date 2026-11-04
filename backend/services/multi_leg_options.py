@@ -1,4 +1,4 @@
-"""Manual multi-leg options journal (Straddle, Iron Fly, Iron Condor, Ladder).
+"""Manual multi-leg options journal (Straddle, Short Strangle, Iron Fly, Iron Condor, Ladder).
 
 PnL sign
 --------
@@ -36,30 +36,49 @@ import pytz
 from sqlalchemy import text
 
 from backend.database import SessionLocal, engine
+from backend.services.multi_leg_crypto import (
+    CRYPTO_INSTRUMENTS,
+    crypto_spot_ltps,
+    fetch_crypto_deltas,
+    fetch_crypto_ltps,
+    is_crypto_instrument,
+    listed_crypto_expiries,
+    resolve_crypto_option_contract,
+    split_upstox_and_delta_keys,
+)
 from backend.services.upstox_service import NSE_KNOWN_HOLIDAYS
 
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
 
-TRADE_TYPES = ("STRADDLE", "IRON_FLY", "IRON_CONDOR", "LADDER")
+TRADE_TYPES = ("STRADDLE", "SHORT_STRANGLE", "IRON_FLY", "IRON_CONDOR", "LADDER")
 # UNCLASSIFIED is written by Upstox sync (and kept on edit). Manual create still
 # goes through assert_min_legs, which only accepts TRADE_TYPES.
 ACCEPTED_TRADE_TYPES = TRADE_TYPES + ("UNCLASSIFIED",)
 # Ladder is one or more legs. It does not use the paired CE/PE template.
-MIN_LEGS = {"STRADDLE": 2, "IRON_FLY": 4, "IRON_CONDOR": 4, "LADDER": 1}
+MIN_LEGS = {
+    "STRADDLE": 2,
+    "SHORT_STRANGLE": 2,
+    "IRON_FLY": 4,
+    "IRON_CONDOR": 4,
+    "LADDER": 1,
+}
 SIDES = ("BUY", "SELL")
 OPTION_TYPES = ("CE", "PE")
 QUALIFIERS = ("MAIN", "WING", "ADJ", "EXIT")
 # Spot must clear the green-zone strike by this many points before an adjustment alert.
 GREEN_ZONE_BUFFER = 50
-# Straddle LTP skew: max(CE, PE) / min(CE, PE) on the latest active Main/Adj pair.
+# Straddle / Short Strangle LTP skew: max(CE, PE) / min(CE, PE) on the latest active Main/Adj pair.
 STRADDLE_LTP_RATIO_THRESHOLD = 3.0
+# Types that use the CE/PE premium ratio adjustment alert (same 3× threshold).
+LTP_RATIO_TRADE_TYPES = ("STRADDLE", "SHORT_STRANGLE")
 # Adjustment / exit-adj banner, sound, and ticker line stay live this long after first fire.
 ALERT_ACTIVE_WINDOW = timedelta(hours=24)
 STATUSES = ("ACTIVE", "CLOSED")
 _COMPACT_TYPES = {
     "STRADDLE": "Straddle",
+    "SHORT_STRANGLE": "ShortStrangle",
     "IRON_FLY": "IronFly",
     "IRON_CONDOR": "IronCondor",
     "LADDER": "Ladder",
@@ -130,7 +149,13 @@ def _normalize_trade_type(trade_type: Any) -> str:
         return "IRON_FLY"
     if kind == "IRONCONDOR":
         return "IRON_CONDOR"
+    if kind == "SHORTSTRANGLE":
+        return "SHORT_STRANGLE"
     return kind
+
+
+def uses_ltp_ratio(trade_type: Any) -> bool:
+    return _normalize_trade_type(trade_type) in LTP_RATIO_TRADE_TYPES
 
 
 def compact_trade_type(trade_type: Any) -> str:
@@ -153,7 +178,7 @@ def default_leg_slots(trade_type: Any) -> List[Dict[str, str]]:
             {"qualifier": "WING", "option_type": "CE"},
             {"qualifier": "WING", "option_type": "PE"},
         ]
-    if kind == "STRADDLE":
+    if kind in ("STRADDLE", "SHORT_STRANGLE"):
         return [
             {"qualifier": "MAIN", "option_type": "CE"},
             {"qualifier": "MAIN", "option_type": "PE"},
@@ -418,6 +443,8 @@ def _persist_alert_first_dates(
 def _trade_needs_spot(trade: Dict[str, Any]) -> bool:
     if str(trade.get("status") or "ACTIVE").strip().upper() != "ACTIVE":
         return False
+    if is_crypto_instrument(trade.get("instrument")):
+        return True
     if _as_float(trade.get("green_zone_ce")) is not None or _as_float(trade.get("green_zone_pe")) is not None:
         return True
     for leg in trade.get("legs") or []:
@@ -430,7 +457,7 @@ def assert_min_legs(trade_type: str, leg_count: int) -> None:
     kind = _normalize_trade_type(trade_type)
     if kind not in MIN_LEGS:
         raise MultiLegValidationError(
-            "trade_type must be STRADDLE, IRON_FLY, IRON_CONDOR, or LADDER"
+            "trade_type must be STRADDLE, SHORT_STRANGLE, IRON_FLY, IRON_CONDOR, or LADDER"
         )
     need = MIN_LEGS[kind]
     n = int(leg_count)
@@ -960,13 +987,28 @@ def suggested_expiry(entry: date, instrument: str, *, as_of: Optional[date] = No
     that month is under 40 DTE, the next month is tried, then the one after,
     until DTE is at least 40.
 
-    MCX walks upcoming listed option expiries and takes the soonest with DTE
-    of at least 40. If the master has none that far, the last-Thursday monthly
-    fallback is stepped the same way.
+    MCX and crypto (Bitcoin / Ethereum via Delta India) walk upcoming listed
+    option expiries and take the soonest with DTE of at least 40. If none that
+    far exist, MCX steps the last-Thursday monthly fallback; crypto falls back
+    to the farthest listed expiry on or after entry (else today + 40).
     """
     if not isinstance(entry, date):
         raise MultiLegValidationError("entry date is required")
     today = as_of if isinstance(as_of, date) and not isinstance(as_of, datetime) else datetime.now(IST).date()
+    if is_crypto_instrument(instrument):
+        floor = entry if entry > today else today
+        try:
+            listed = listed_crypto_expiries(instrument, on_or_after=floor)
+        except Exception:
+            logger.info("multi_leg crypto expiry lookup failed for %s", instrument)
+            listed = []
+        for exp in listed:
+            dte = dte_days(exp, today)
+            if dte is not None and dte >= MIN_SUGGESTED_DTE:
+                return exp
+        if listed:
+            return listed[-1]
+        return today + timedelta(days=MIN_SUGGESTED_DTE)
     if is_mcx_instrument(instrument):
         floor = entry if entry > today else today
         try:
@@ -997,6 +1039,11 @@ def resolve_option_contract(
     exp = expiry if isinstance(expiry, date) and not isinstance(expiry, datetime) else _parse_date(expiry)
     if not sym or right not in OPTION_TYPES or strike_f is None or exp is None:
         raise MultiLegValidationError("leg needs instrument, strike, CE/PE, and expiry")
+    if is_crypto_instrument(sym):
+        try:
+            return resolve_crypto_option_contract(sym, strike_f, right, exp)
+        except ValueError as exc:
+            raise MultiLegValidationError(str(exc)) from exc
     want_prefix = segment_prefix(sym)
     matches: List[Dict[str, Any]] = []
     lot_fallback: Optional[int] = None
@@ -1132,7 +1179,10 @@ def resolve_future_instrument_key(
     A NIFTY trade expiring 2026-10-27 uses the NIFTY future whose expiry falls
     in October 2026 (exact date when one is listed). Option keys are never
     returned. None means the collapsed row should show a dash, not an option LTP.
+    Crypto underlyings have no Upstox future; spot comes from Delta separately.
     """
+    if is_crypto_instrument(instrument):
+        return None
     exp = expiry if isinstance(expiry, date) and not isinstance(expiry, datetime) else _parse_date(expiry)
     names = underlying_candidates(instrument)
     if not names or exp is None:
@@ -1181,7 +1231,7 @@ def _upstox():
     return ux
 
 
-def _fetch_deltas(keys: Sequence[str]) -> Dict[str, Optional[float]]:
+def _fetch_upstox_deltas(keys: Sequence[str]) -> Dict[str, Optional[float]]:
     """Upstox v3 option-greek. Missing delta stays None (no second model)."""
     from urllib.parse import quote
 
@@ -1224,30 +1274,58 @@ def _fetch_ltps(keys: Sequence[str]) -> Dict[str, Optional[float]]:
     out: Dict[str, Optional[float]] = {k: None for k in clean}
     if not clean:
         return out
-    try:
-        ux = _upstox()
-        batch = ux.get_market_quotes_batch_by_keys(list(clean)) or {}
-    except Exception as exc:
-        logger.info("multi_leg quote batch failed: %s", exc)
-        return out
-    for ik in clean:
-        px = batch.get(ik)
-        if px is None:
-            px = batch.get(ik.replace("|", ":")) or batch.get(ik.replace(":", "|"))
+    upstox_keys, delta_keys = split_upstox_and_delta_keys(clean)
+    if upstox_keys:
         try:
-            val = float(px) if px is not None else None
-        except (TypeError, ValueError):
-            val = None
-        if val is not None and val > 0:
-            out[ik] = val
+            ux = _upstox()
+            batch = ux.get_market_quotes_batch_by_keys(list(upstox_keys)) or {}
+        except Exception as exc:
+            logger.info("multi_leg quote batch failed: %s", exc)
+            batch = {}
+        for ik in upstox_keys:
+            px = batch.get(ik)
+            if px is None:
+                px = batch.get(ik.replace("|", ":")) or batch.get(ik.replace(":", "|"))
+            try:
+                val = float(px) if px is not None else None
+            except (TypeError, ValueError):
+                val = None
+            if val is not None and val > 0:
+                out[ik] = val
+    if delta_keys:
+        try:
+            marks = fetch_crypto_ltps(delta_keys)
+        except Exception as exc:
+            logger.info("multi_leg delta quote batch failed: %s", exc)
+            marks = {}
+        for ik in delta_keys:
+            val = marks.get(ik)
+            if val is not None and val > 0:
+                out[ik] = val
+    return out
+
+
+def _fetch_deltas(keys: Sequence[str]) -> Dict[str, Optional[float]]:
+    clean = [k for k in keys if (k or "").strip()]
+    out: Dict[str, Optional[float]] = {k: None for k in clean}
+    if not clean:
+        return out
+    upstox_keys, delta_keys = split_upstox_and_delta_keys(clean)
+    if upstox_keys:
+        out.update(_fetch_upstox_deltas(upstox_keys))
+    if delta_keys:
+        try:
+            out.update(fetch_crypto_deltas(delta_keys))
+        except Exception as exc:
+            logger.info("multi_leg delta greek batch failed: %s", exc)
     return out
 
 
 def underlying_spot_ltps(instruments: Iterable[str]) -> Dict[str, Optional[float]]:
-    """Index spot LTP from the same Upstox batch quote path as option premiums.
+    """Index / crypto spot LTP for adjustment and payoff.
 
-    NIFTY, BANKNIFTY, and SENSEX use the keys already used when sync stores spot.
-    Other underlyings stay None (this path has no equity/MCX spot key).
+    NIFTY, BANKNIFTY, and SENSEX use Upstox. BITCOIN / ETHEREUM use Delta India
+    public tickers. Other underlyings stay None.
     """
     from backend.services.upstox_service import UpstoxService
 
@@ -1257,9 +1335,14 @@ def underlying_spot_ltps(instruments: Iterable[str]) -> Dict[str, Optional[float
         "SENSEX": "BSE_INDEX|SENSEX",
     }
     wanted: List[str] = []
+    crypto_wanted: List[str] = []
     for name in instruments:
         token = str(name or "").strip().upper()
-        if token and token not in wanted:
+        if not token or token in wanted or token in crypto_wanted:
+            continue
+        if is_crypto_instrument(token):
+            crypto_wanted.append(token)
+        else:
             wanted.append(token)
     keys = [key_by_name[name] for name in wanted if name in key_by_name]
     quotes = _fetch_ltps(keys) if keys else {}
@@ -1267,6 +1350,13 @@ def underlying_spot_ltps(instruments: Iterable[str]) -> Dict[str, Optional[float
     for name in wanted:
         ik = key_by_name.get(name)
         out[name] = quotes.get(ik) if ik else None
+    if crypto_wanted:
+        try:
+            out.update(crypto_spot_ltps(crypto_wanted))
+        except Exception:
+            logger.info("multi_leg crypto spot quote failed", exc_info=True)
+            for name in crypto_wanted:
+                out.setdefault(name, None)
     return out
 
 
@@ -1311,13 +1401,14 @@ def annotate_adjustment_alerts(
         spot = _as_float(fetched.get(name)) if active else None
         legs = trade.get("legs") or []
         kind = _normalize_trade_type(trade.get("trade_type"))
-        ratio = straddle_ltp_ratio(legs) if kind == "STRADDLE" else None
-        ce_leg = straddle_ratio_leg(legs, "CE") if kind == "STRADDLE" else None
-        pe_leg = straddle_ratio_leg(legs, "PE") if kind == "STRADDLE" else None
+        ratio_trade = uses_ltp_ratio(kind)
+        ratio = straddle_ltp_ratio(legs) if ratio_trade else None
+        ce_leg = straddle_ratio_leg(legs, "CE") if ratio_trade else None
+        pe_leg = straddle_ratio_leg(legs, "PE") if ratio_trade else None
         trade["ltp_ratio"] = ratio
         trade["ltp_ratio_ce_leg_id"] = str(ce_leg["id"]) if ce_leg and ce_leg.get("id") else None
         trade["ltp_ratio_pe_leg_id"] = str(pe_leg["id"]) if pe_leg and pe_leg.get("id") else None
-        if kind == "STRADDLE":
+        if ratio_trade:
             raw_adj = bool(active and straddle_adjustment_due(legs))
         else:
             raw_adj = bool(
@@ -1349,8 +1440,9 @@ def annotate_adjustment_alerts(
             tid = str(trade.get("id") or "").strip()
             if tid:
                 trigger_updates.append((tid, adj_at, exit_at))
-        if kind == "STRADDLE":
-            trade["adjustment_message"] = "Adjustment on Straddle" if show_adj else ""
+        if ratio_trade:
+            label = "Short Strangle" if kind == "SHORT_STRANGLE" else "Straddle"
+            trade["adjustment_message"] = f"Adjustment on {label}" if show_adj else ""
             trade["adjustment_ticker_text"] = "Adjustment" if show_adj else ""
         else:
             trade["adjustment_message"] = (
@@ -1513,7 +1605,7 @@ def _ensure_upstox_sync_schema(conn) -> None:
         """
         ALTER TABLE multi_leg_trades
         ADD CONSTRAINT multi_leg_trades_trade_type_check
-        CHECK (trade_type IN ('STRADDLE', 'IRON_FLY', 'IRON_CONDOR', 'LADDER', 'UNCLASSIFIED'))
+        CHECK (trade_type IN ('STRADDLE', 'SHORT_STRANGLE', 'IRON_FLY', 'IRON_CONDOR', 'LADDER', 'UNCLASSIFIED'))
         """
     ))
 
@@ -1615,10 +1707,11 @@ def list_instruments() -> Dict[str, Any]:
     finally:
         db.close()
     commodities = mcx_underlyings()
-    skip = set(INDEX_INSTRUMENTS) | set(commodities)
+    skip = set(INDEX_INSTRUMENTS) | set(commodities) | set(CRYPTO_INSTRUMENTS)
     equities = [s for s in equities if s not in skip]
     return {
         "indices": list(INDEX_INSTRUMENTS),
+        "crypto": list(CRYPTO_INSTRUMENTS),
         "equities": equities,
         "commodities": commodities,
     }
@@ -1743,7 +1836,7 @@ def _header_from_body(body: Dict[str, Any]) -> Dict[str, Any]:
     kind = _normalize_trade_type(body.get("trade_type"))
     if kind not in ACCEPTED_TRADE_TYPES:
         raise MultiLegValidationError(
-            "trade_type must be STRADDLE, IRON_FLY, IRON_CONDOR, or LADDER"
+            "trade_type must be STRADDLE, SHORT_STRANGLE, IRON_FLY, IRON_CONDOR, or LADDER"
         )
     instrument = str(body.get("instrument") or "").strip().upper()
     if not instrument:

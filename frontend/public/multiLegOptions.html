@@ -36,7 +36,7 @@
                         <h1 class="settings-title so-page-title">
                             <i class="fas fa-sitemap" aria-hidden="true"></i> Multi-Leg Options
                         </h1>
-                        <p class="settings-subtitle so-subtitle-oneline">Manual journal for Straddle, Iron Fly, Iron Condor, and Ladder. Live P&amp;L only.</p>
+                        <p class="settings-subtitle so-subtitle-oneline">Manual journal for Straddle, Short Strangle, Iron Fly, Iron Condor, and Ladder. Live P&amp;L only.</p>
                     </div>
                     <div class="so-header-aside">
                         <div class="mlo-header-actions">
@@ -47,7 +47,7 @@
                 </div>
                 <div class="settings-content">
                 <p class="mlo-banner so-note" id="mloBanner" hidden></p>
-                <p class="mlo-adj-banner" id="mloAdjBanner" hidden>Adjustment on Straddle</p>
+                <p class="mlo-adj-banner" id="mloAdjBanner" hidden>Adjustment on Straddle / Short Strangle</p>
                 <p class="mlo-sync-banner" id="mloSyncBanner" hidden></p>
                 <nav class="bf-tabs" aria-label="Multi-leg views">
                     <button type="button" class="bf-tab active" data-tab="active">Active</button>
@@ -69,6 +69,7 @@
                             <select id="mloFType">
                                 <option value="">Any</option>
                                 <option value="STRADDLE">Straddle</option>
+                                <option value="SHORT_STRANGLE">Short Strangle</option>
                                 <option value="IRON_FLY">Iron Fly</option>
                                 <option value="IRON_CONDOR">Iron Condor</option>
                                 <option value="UNCLASSIFIED">Unclassified</option>
@@ -120,6 +121,7 @@
                     <label>Type
                         <select id="mloType" required>
                             <option value="STRADDLE">Straddle</option>
+                            <option value="SHORT_STRANGLE">Short Strangle</option>
                             <option value="IRON_FLY">Iron Fly</option>
                             <option value="IRON_CONDOR">Iron Condor</option>
                             <option value="LADDER">Ladder</option>
@@ -127,7 +129,7 @@
                     </label>
                     <label class="mlo-combo-label">Instrument
                         <div class="mlo-combo">
-                            <input id="mloInstrument" type="text" placeholder="Search NIFTY, stock, MCX…" autocomplete="off" required />
+                            <input id="mloInstrument" type="text" placeholder="Search NIFTY, Bitcoin, stock, MCX…" autocomplete="off" required />
                             <div class="mlo-combo-list" id="mloInstrumentList" hidden></div>
                         </div>
                     </label>
@@ -188,6 +190,6 @@
     <script src="left-menu.js?v=3.52"></script>
     <script src="multiLegPayoff.js?v=4"></script>
     <script src="ladderReportGroups.js?v=1"></script>
-    <script src="multiLegOptions.js?v=22"></script>
+    <script src="multiLegOptions.js?v=23"></script>
 </body>
 </html>

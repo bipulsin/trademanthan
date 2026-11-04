@@ -179,17 +179,44 @@ def fetch_public_tickers(
 def fetch_option_marks(symbols: List[str]) -> Dict[str, float]:
     """Mark price for the specific open short symbols only."""
     marks: Dict[str, float] = {}
+    for symbol, quote in fetch_option_quotes(symbols).items():
+        mark = quote.get("mark")
+        if mark is not None:
+            marks[symbol] = float(mark)
+    return marks
+
+
+def fetch_option_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Public mark/close and delta for specific option symbols. No API key required."""
+    out: Dict[str, Dict[str, Any]] = {}
     for symbol in symbols:
         sym = (symbol or "").strip()
-        if not sym or sym in marks:
+        if not sym or sym in out:
             continue
         ticker = _public_get(f"/v2/tickers/{sym}")
+        if not ticker:
+            continue
         raw = ticker.get("mark_price")
         if raw is None:
             raw = ticker.get("close")
+        mark: Optional[float] = None
         try:
             if raw is not None:
-                marks[sym] = float(raw)
+                mark = float(raw)
         except (TypeError, ValueError):
-            continue
-    return marks
+            mark = None
+        delta: Optional[float] = None
+        greeks = ticker.get("greeks") if isinstance(ticker.get("greeks"), dict) else {}
+        try:
+            if greeks.get("delta") is not None:
+                delta = float(greeks["delta"])
+        except (TypeError, ValueError):
+            delta = None
+        spot: Optional[float] = None
+        try:
+            if ticker.get("spot_price") is not None:
+                spot = float(ticker["spot_price"])
+        except (TypeError, ValueError):
+            spot = None
+        out[sym] = {"mark": mark, "delta": delta, "spot": spot}
+    return out
