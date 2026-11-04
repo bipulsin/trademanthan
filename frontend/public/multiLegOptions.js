@@ -83,6 +83,29 @@
     }).format(Number(n));
   }
 
+  function money(n, instrument) {
+    if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
+    if (isCryptoInstrument(instrument)) {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 2,
+      }).format(Number(n));
+    }
+    return inr(n);
+  }
+
+  function priceText(n, instrument) {
+    if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
+    if (isCryptoInstrument(instrument)) {
+      return "$" + Number(n).toLocaleString("en-US", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 4,
+      });
+    }
+    return String(n);
+  }
+
   function zoneNum(n) {
     if (n == null || n === "" || Number.isNaN(Number(n))) return "—";
     var num = Number(n);
@@ -238,6 +261,48 @@
     if (!(n > 0)) return null;
     var per = cryptoQtyPerLot(instrument);
     return per != null ? n * per : n;
+  }
+
+  function formSizeUnit() {
+    var el = $("mloQtyUnit");
+    return el && el.value === "qty" ? "qty" : "lots";
+  }
+
+  function unitsPerLot(instrument, row) {
+    if (isCryptoInstrument(instrument)) return cryptoQtyPerLot(instrument) || 0.001;
+    var fromRow = row && Number(row.dataset.contractLot);
+    if (fromRow > 0) return fromRow;
+    return 1;
+  }
+
+  /** API lot_size: crypto = Delta lots; equity/index/MCX = contract units. */
+  function canonicalFromSizeInput(display, instrument, row, unit) {
+    var n = Number(display);
+    if (!(n > 0) || Number.isNaN(n)) return null;
+    unit = unit || formSizeUnit();
+    if (isCryptoInstrument(instrument)) {
+      var per = cryptoQtyPerLot(instrument) || 0.001;
+      var lots = unit === "qty" ? n / per : n;
+      return Math.max(1, Math.round(lots));
+    }
+    var upl = unitsPerLot(instrument, row);
+    return unit === "lots" ? n * upl : n;
+  }
+
+  function sizeInputFromCanonical(canonical, instrument, row, unit) {
+    var n = Number(canonical);
+    if (!(n > 0) || Number.isNaN(n)) return "";
+    unit = unit || formSizeUnit();
+    if (isCryptoInstrument(instrument)) {
+      var per = cryptoQtyPerLot(instrument) || 0.001;
+      return unit === "qty" ? String(Number((n * per).toFixed(6))) : String(n);
+    }
+    var upl = unitsPerLot(instrument, row);
+    if (unit === "lots") {
+      var lots = n / upl;
+      return Math.abs(lots - Math.round(lots)) < 1e-6 ? String(Math.round(lots)) : String(Number(lots.toFixed(4)));
+    }
+    return String(n);
   }
 
   function legTypeLabel(qualifier) {
@@ -509,6 +574,7 @@
 
   function ladderAnchorFromForm() {
     var rows = $("mloLegs").querySelectorAll(".mlo-leg");
+    var inst = String($("mloInstrument").value || "").trim().toUpperCase();
     var first = null;
     for (var i = 0; i < rows.length; i++) {
       if (rowIsBlankExitSlot(rows[i])) continue;
@@ -519,10 +585,13 @@
       var rightEl = rows[i].querySelector('[data-f="option_type"]');
       var strikeEl = rows[i].querySelector('[data-f="strike_price"]');
       var entry = entryEl && String(entryEl.value).trim() !== "" ? Number(entryEl.value) : null;
+      var qty = lotEl && String(lotEl.value).trim() !== ""
+        ? (canonicalFromSizeInput(lotEl.value, inst, rows[i]) || 0)
+        : 0;
       var found = {
         side: sideEl ? String(sideEl.value).toUpperCase() : "",
         entry: entry,
-        qty: lotEl && String(lotEl.value).trim() !== "" ? Number(lotEl.value) : 0,
+        qty: qty,
         ltp: rows[i].dataset.ltp != null && rows[i].dataset.ltp !== "" ? Number(rows[i].dataset.ltp) : null,
         option_type: rightEl ? rightEl.value : "",
         strike_price: strikeEl && strikeEl.value !== "" ? Number(strikeEl.value) : null,
@@ -535,6 +604,7 @@
 
   function refreshLadderRowPnls() {
     if (!$("mloType") || !isLadderType($("mloType").value)) return;
+    var inst = String($("mloInstrument").value || "").trim().toUpperCase();
     var anchor = ladderAnchorFromForm();
     $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
       var pnlEl = row.querySelector("[data-ladder-pnl]");
@@ -548,15 +618,18 @@
       var pxEl = row.querySelector('[data-f="exit_price"]');
       var lotEl = row.querySelector('[data-f="lot_size"]');
       var px = pxEl ? pxEl.value.trim() : "";
-      var qty = lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0;
+      var qty = lotEl && lotEl.value.trim() !== ""
+        ? (canonicalFromSizeInput(lotEl.value, inst, row) || 0)
+        : 0;
       var pnl = px === "" || !anchor ? null : ladderSignedPnl(anchor.side, anchor.entry, px, qty);
       pnlEl.hidden = false;
-      pnlEl.textContent = inr(pnl);
+      pnlEl.textContent = money(pnl, inst);
       pnlEl.className = "mlo-leg-realized " + pnlClass(pnl);
     });
   }
 
   function ladderFormLivePnl() {
+    var inst = String($("mloInstrument").value || "").trim().toUpperCase();
     var anchor = ladderAnchorFromForm();
     if (!anchor || anchor.entry == null) return null;
     var filled = 0;
@@ -567,7 +640,9 @@
       var pxEl = row.querySelector('[data-f="exit_price"]');
       var lotEl = row.querySelector('[data-f="lot_size"]');
       if (!pxEl || pxEl.value.trim() === "") return;
-      var qty = lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0;
+      var qty = lotEl && lotEl.value.trim() !== ""
+        ? (canonicalFromSizeInput(lotEl.value, inst, row) || 0)
+        : 0;
       var pnl = ladderSignedPnl(anchor.side, anchor.entry, pxEl.value, qty);
       if (pnl == null) return;
       total += pnl;
@@ -746,7 +821,8 @@
       exit = '<input data-f="exit_price" type="hidden" value="' + esc(leg.exit_price) + '">' +
         '<input data-f="exit_date" type="hidden" value="' + esc(doneDate) + '">' +
         '<input data-f="exit_clock" type="hidden" value="' + esc(doneText) + '">' +
-        '<span class="mlo-leg-realized ' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>";
+        '<span class="mlo-leg-realized ' + pnlClass(leg.leg_pnl) + '">' +
+          esc(money(leg.leg_pnl, $("mloInstrument").value)) + "</span>";
     }
     var exitBtn = (!ladder && !exitMode && !exited)
       ? '<button type="button" class="mlo-icon-btn mlo-leg-exit-btn" aria-label="Exit leg"><i class="fas fa-right-from-bracket" aria-hidden="true"></i></button>'
@@ -760,7 +836,7 @@
       dateField("leg_expiry_date", "", "Expiry") +
       '<input data-f="entry_price" type="number" min="0" step="0.01" placeholder="Entry price" aria-label="Entry price" required>' +
       ladderExitPx +
-      '<input data-f="lot_size" type="number" min="1" step="1" placeholder="Lots" aria-label="Lots">' +
+      '<input data-f="lot_size" type="number" min="0" step="any" placeholder="Lots" aria-label="Lots">' +
       '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
       ladderExitClock +
       exit +
@@ -787,11 +863,17 @@
     wrap.querySelector('[data-f="entry_price"]').value = entryValue;
     if (leg && leg.ltp != null && leg.ltp !== "") wrap.dataset.ltp = String(leg.ltp);
     var lotInp = wrap.querySelector('[data-f="lot_size"]');
-    refreshLotFieldHint(lotInp);
+    var instName = String($("mloInstrument").value || "").trim().toUpperCase();
     if (leg && leg.lot_size) {
-      lotInp.value = String(leg.lot_size);
+      wrap.dataset.canonicalLot = String(leg.lot_size);
+      wrap.dataset.lotSize = String(leg.lot_size);
+      if (isCryptoInstrument(instName)) {
+        wrap.dataset.contractLot = String(cryptoQtyPerLot(instName));
+      }
+      lotInp.value = sizeInputFromCanonical(leg.lot_size, instName, wrap);
       lotInp.dataset.auto = "1";
     }
+    refreshLotFieldHint(lotInp);
     lotInp.addEventListener("input", function () { lotInp.dataset.auto = ""; });
     wrap.querySelectorAll("input[data-ph]").forEach(bindDateField);
     wrap.querySelectorAll('[data-f="entry_clock"], [data-f="exit_clock"]').forEach(bindClockField);
@@ -824,6 +906,7 @@
       panel.hidden = true;
       panel.innerHTML =
         '<input data-panel="exit_price" type="number" min="0" step="0.01" placeholder="Exit price" aria-label="Exit price">' +
+        '<input data-panel="exit_date" type="date" aria-label="Exit date" value="' + esc(todayISO()) + '">' +
         '<input data-panel="exit_clock" type="text" placeholder="Time" aria-label="Exit time" value="' + esc(DEFAULT_CLOCK) + '">' +
         '<button type="button" class="mlo-btn so-modal-btn primary mlo-leg-exit-submit">Submit</button>';
       panel.querySelector('[data-panel="exit_clock"]').addEventListener("blur", function () {
@@ -847,11 +930,13 @@
       return;
     }
     var pxEl = panel.querySelector('[data-panel="exit_price"]');
+    var dayEl = panel.querySelector('[data-panel="exit_date"]');
     var clockEl = panel.querySelector('[data-panel="exit_clock"]');
     var px = pxEl ? pxEl.value.trim() : "";
+    var day = dayEl ? dayEl.value.trim() : "";
     var clock = clockEl ? clockEl.value.trim() : "";
-    if (px === "" || Number(px) < 0 || !parseClock(clock)) {
-      showFormError("Exit needs a price and a time like 03:10 PM");
+    if (px === "" || Number(px) < 0 || !day || !parseClock(clock)) {
+      showFormError("Exit needs a price, date, and time like 03:10 PM");
       return;
     }
     var clockErr = legClockError();
@@ -887,7 +972,7 @@
       wrap.appendChild(hiddenClock);
     }
     hiddenPx.value = px;
-    hiddenDay.value = todayISO();
+    hiddenDay.value = day;
     hiddenClock.value = normalizeClock(clock) || clock;
     showFormError("");
     try {
@@ -965,7 +1050,11 @@
         leg_expiry_date: val("leg_expiry_date"),
       };
       var lotRaw = val("lot_size").trim();
-      if (lotRaw !== "" && !Number.isNaN(Number(lotRaw))) leg.lot_size = Number(lotRaw);
+      if (lotRaw !== "" && !Number.isNaN(Number(lotRaw))) {
+        var inst = String($("mloInstrument").value || "").trim().toUpperCase();
+        var canonical = canonicalFromSizeInput(lotRaw, inst, row);
+        if (canonical != null) leg.lot_size = canonical;
+      }
       if (row.dataset.id) leg.id = row.dataset.id;
       if (ladder && role === "EXIT") {
         // The price and clock on an Exit row are the exit. There is no second entry.
@@ -1283,8 +1372,8 @@
       cards + "</section>";
   }
 
-  function pnlSpan(n) {
-    return '<span class="' + pnlClass(n) + '">' + esc(inr(n)) + "</span>";
+  function pnlSpan(n, instrument) {
+    return '<span class="' + pnlClass(n) + '">' + esc(money(n, instrument)) + "</span>";
   }
 
   function legPhoneBlock(lines) {
@@ -1293,81 +1382,96 @@
     }).join("") + "</div>";
   }
 
-  function legTitleLine(leg) {
-    return esc(legTypeLabel(leg.qualifier)) + " · " + esc(leg.side) + " " +
-      esc(leg.option_type) + " " + esc(leg.strike_price);
+  function sizeLabel(leg, instrument) {
+    var lots = Number(leg && leg.lot_size);
+    if (!(lots > 0)) return "";
+    if (isCryptoInstrument(instrument)) {
+      var qty = leg.qty != null ? Number(leg.qty) : lots * (cryptoQtyPerLot(instrument) || 0.001);
+      return lots + " lots · " + Number(qty) + " qty";
+    }
+    return lots + " units";
   }
 
-  function activeLegPhone(leg) {
+  function legTitleLine(leg, instrument) {
+    var size = sizeLabel(leg, instrument);
+    return esc(legTypeLabel(leg.qualifier)) + " · " + esc(leg.side) + " " +
+      esc(leg.option_type) + " " + esc(leg.strike_price) +
+      (size ? " · " + esc(size) : "");
+  }
+
+  function activeLegPhone(leg, instrument) {
     var mark = leg.exited ? leg.exit_price : leg.ltp;
     var delta = leg.delta == null || leg.delta === "" ? "—" : Number(leg.delta).toFixed(4);
     return legPhoneBlock([
-      legTitleLine(leg),
-      esc(leg.entry_price) + " → " + esc(mark == null ? "—" : mark) + " · Δ " + esc(delta) + " · " + pnlSpan(leg.leg_pnl),
+      legTitleLine(leg, instrument),
+      esc(priceText(leg.entry_price, instrument)) + " → " + esc(priceText(mark, instrument)) +
+        " · Δ " + esc(delta) + " · " + pnlSpan(leg.leg_pnl, instrument),
     ]);
   }
 
-  function exitedStraddlePhone(leg) {
+  function exitedStraddlePhone(leg, instrument) {
     return legPhoneBlock([
-      legTitleLine(leg),
-      esc(leg.entry_price) + " → ExP-" + esc(leg.exit_price) + " · ExT-" +
-        esc(exitClockText(leg.exit_time)) + " · " + pnlSpan(leg.leg_pnl),
+      legTitleLine(leg, instrument),
+      esc(priceText(leg.entry_price, instrument)) + " → ExP-" + esc(priceText(leg.exit_price, instrument)) +
+        " · ExT-" + esc(exitClockText(leg.exit_time)) + " · " + pnlSpan(leg.leg_pnl, instrument),
     ]);
   }
 
-  function ladderLegPhone(leg) {
+  function ladderLegPhone(leg, instrument) {
     var role = String(leg.qualifier || "").toUpperCase();
     var parts = [
       esc(legTypeLabel(leg.qualifier)),
       esc(leg.side) + " " + esc(leg.option_type) + " " + esc(leg.strike_price),
-      esc(leg.entry_price == null ? "—" : leg.entry_price),
+      esc(sizeLabel(leg, instrument) || "—"),
+      esc(priceText(leg.entry_price, instrument)),
     ];
     if (role === "EXIT") {
-      parts.push(esc(leg.exit_price == null ? "—" : leg.exit_price));
+      parts.push(esc(priceText(leg.exit_price, instrument)));
     } else {
-      parts.push(esc(leg.ltp == null ? "—" : leg.ltp));
+      parts.push(esc(priceText(leg.ltp, instrument)));
       if (leg.delta != null && leg.delta !== "") parts.push("Δ " + esc(Number(leg.delta).toFixed(4)));
     }
-    return legPhoneBlock([parts.join(" · ") + " · " + pnlSpan(leg.leg_pnl)]);
+    return legPhoneBlock([parts.join(" · ") + " · " + pnlSpan(leg.leg_pnl, instrument)]);
   }
 
-  function ladderReportLeg(leg) {
+  function ladderReportLeg(leg, instrument) {
     var role = String(leg.qualifier || "").toUpperCase();
-    var pnl = '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>";
+    var pnl = '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(money(leg.leg_pnl, instrument)) + "</span>";
     var common = '<div class="mlo-leg-ro">' +
       '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
       '<span data-label="Side">' + esc(leg.side) + "</span>" +
       '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
       '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
-      '<span data-label="Entry">' + esc(leg.entry_price == null ? "—" : leg.entry_price) + "</span>";
-    var phone = ladderLegPhone(leg);
+      '<span data-label="Entry">' + esc(priceText(leg.entry_price, instrument)) + "</span>";
+    var phone = ladderLegPhone(leg, instrument);
     if (role === "EXIT") {
       return common +
-        '<span data-label="Exit">' + esc(leg.exit_price == null ? "—" : leg.exit_price) + "</span>" +
+        '<span data-label="Exit">' + esc(priceText(leg.exit_price, instrument)) + "</span>" +
         '<span data-label="Exit time">' + esc(exitClockText(leg.exit_time) || "—") + "</span>" +
         pnl + phone + "</div>";
     }
     return common +
-      '<span data-label="LTP">' + esc(leg.ltp == null ? "—" : leg.ltp) + "</span>" +
+      '<span data-label="LTP">' + esc(priceText(leg.ltp, instrument)) + "</span>" +
       '<span data-label="Delta">' + (leg.delta == null ? "—" : esc(Number(leg.delta).toFixed(4))) + "</span>" +
       pnl + phone + "</div>";
   }
 
   function tradeCard(t) {
       var open = !!expandedTrades[t.id];
+      var inst = t.instrument;
       var legs = (t.legs || []).map(function (leg) {
-        if (isLadderType(t.trade_type)) return ladderReportLeg(leg);
+        if (isLadderType(t.trade_type)) return ladderReportLeg(leg, inst);
         if (isRatioTrade(t) && legIsExited(leg)) {
           return '<div class="mlo-leg-ro mlo-leg-exited">' +
             '<span data-label="Leg type">' + esc(legTypeLabel(leg.qualifier)) + "</span>" +
             '<span data-label="Side">' + esc(leg.side) + "</span>" +
             '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
             '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
-            '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
-            '<span data-label="LTP">ExP-' + esc(leg.exit_price) + "</span>" +
+            '<span data-label="Entry">' + esc(priceText(leg.entry_price, inst)) + "</span>" +
+            '<span data-label="LTP">ExP-' + esc(priceText(leg.exit_price, inst)) + "</span>" +
             '<span data-label="Delta">ExT-' + esc(exitClockText(leg.exit_time)) + "</span>" +
-            '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
-            exitedStraddlePhone(leg) +
+            '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(money(leg.leg_pnl, inst)) + "</span>" +
+            exitedStraddlePhone(leg, inst) +
             "</div>";
         }
         var mark = leg.exited ? leg.exit_price : leg.ltp;
@@ -1377,11 +1481,11 @@
           '<span data-label="Side">' + esc(leg.side) + "</span>" +
           '<span data-label="Type">' + esc(leg.option_type) + "</span>" +
           '<span data-label="Strike">' + esc(leg.strike_price) + "</span>" +
-          '<span data-label="Entry">' + esc(leg.entry_price) + "</span>" +
-          '<span data-label="' + markLabel + '">' + esc(mark == null ? "—" : mark) + "</span>" +
+          '<span data-label="Entry">' + esc(priceText(leg.entry_price, inst)) + "</span>" +
+          '<span data-label="' + markLabel + '">' + esc(priceText(mark, inst)) + "</span>" +
           '<span data-label="Delta">' + (leg.delta == null ? "—" : esc(Number(leg.delta).toFixed(4))) + "</span>" +
-          '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</span>" +
-          activeLegPhone(leg) +
+          '<span data-label="P&L" class="' + pnlClass(leg.leg_pnl) + '">' + esc(money(leg.leg_pnl, inst)) + "</span>" +
+          activeLegPhone(leg, inst) +
           "</div>";
       }).join("");
       var head = isLadderType(t.trade_type)
@@ -1412,7 +1516,7 @@
             rowField("Future LTP", futureLtpText(t.future_ltp), "", "mlo-row-future") +
             rowField("Green zone", greenZoneText(t), "mlo-row-zone", "mlo-row-green") +
           "</span>" +
-          rowField("P&L", inr(t.total_pnl), pnlClass(t.total_pnl), "mlo-row-pnl") +
+          rowField("P&L", money(t.total_pnl, inst), pnlClass(t.total_pnl), "mlo-row-pnl") +
           '<span class="mlo-row-actions">' +
             iconButton("edit", "Edit", "fa-pen") +
             iconButton("delete", "Delete", "fa-trash") +
@@ -1468,15 +1572,16 @@
       return;
     }
     body.innerHTML = rows.map(function (t, idx) {
+      var inst = t.instrument;
       var legs = (t.legs || []).map(function (leg) {
         var mark = leg.exited ? leg.exit_price : leg.ltp;
         return "<tr><td>" + esc(leg.side) + "</td><td>" + esc(leg.option_type) + "</td><td>" + esc(leg.strike_price) +
-          "</td><td>" + esc(leg.entry_price) + "</td><td>" + esc(mark == null ? "—" : mark) +
-          '</td><td class="' + pnlClass(leg.leg_pnl) + '">' + esc(inr(leg.leg_pnl)) + "</td></tr>";
+          "</td><td>" + esc(priceText(leg.entry_price, inst)) + "</td><td>" + esc(priceText(mark, inst)) +
+          '</td><td class="' + pnlClass(leg.leg_pnl) + '">' + esc(money(leg.leg_pnl, inst)) + "</td></tr>";
       }).join("");
       var phone = (t.legs || []).map(function (leg) {
-        if (isRatioTrade(t) && legIsExited(leg)) return exitedStraddlePhone(leg);
-        return activeLegPhone(leg);
+        if (isRatioTrade(t) && legIsExited(leg)) return exitedStraddlePhone(leg, inst);
+        return activeLegPhone(leg, inst);
       }).join("");
       var entryLabel = formatHumanDateTime(tradeEntryStamp(t));
       var exitLabel = formatHumanDateTime(t.exit_date);
@@ -1490,7 +1595,7 @@
         '<td data-label="Contract expiry">' + esc(t.expiry_date) + "</td>" +
         '<td data-label="Entry date">' + esc(entryLabel) + "</td>" +
         '<td data-label="Exit date">' + esc(exitLabel) + "</td>" +
-        '<td class="mlo-row-pnl ' + pnlClass(t.total_pnl) + '">' + esc(inr(t.total_pnl)) + "</td></tr>" +
+        '<td class="mlo-row-pnl ' + pnlClass(t.total_pnl) + '">' + esc(money(t.total_pnl, inst)) + "</td></tr>" +
         '<tr class="mlo-legs-detail" data-detail="' + idx + '" hidden><td colspan="5">' +
         '<div class="mlo-report-legs-phone">' + phone + "</div>" +
         '<table class="mlo-table mlo-report-leg-table"><thead><tr>' +
@@ -1750,6 +1855,21 @@
     expiryTouched = false;
     loadExpiry();
   });
+  (function bindQtyUnit() {
+    var el = $("mloQtyUnit");
+    if (!el) return;
+    try {
+      var saved = localStorage.getItem("mlo_qty_unit");
+      if (saved === "qty" || saved === "lots") el.value = saved;
+    } catch (e) { /* ignore */ }
+    var prev = el.value;
+    el.addEventListener("change", function () {
+      var next = el.value === "qty" ? "qty" : "lots";
+      onQtyUnitChange(prev === "qty" ? "qty" : "lots", next);
+      prev = next;
+      try { localStorage.setItem("mlo_qty_unit", next); } catch (err) { /* ignore */ }
+    });
+  })();
   document.addEventListener("click", function (ev) {
     if (ev.target.closest(".mlo-combo")) return;
     $("mloInstrumentList").hidden = true;
@@ -2251,6 +2371,34 @@
     return [inst, strike, right, expiry].join("|");
   }
 
+  function applyContractLotToRow(row, contractLot, inst) {
+    if (!(contractLot > 0) || !row) return;
+    var lotField = row.querySelector('[data-f="lot_size"]');
+    if (isCryptoInstrument(inst)) {
+      row.dataset.contractLot = String(cryptoQtyPerLot(inst) || contractLot);
+      if (lotField && lotField.value === "" && lotField.dataset.auto !== "") {
+        row.dataset.canonicalLot = "1";
+        row.dataset.lotSize = "1";
+        lotField.value = sizeInputFromCanonical(1, inst, row);
+        lotField.dataset.auto = "1";
+      } else if (lotField && row.dataset.canonicalLot) {
+        lotField.value = sizeInputFromCanonical(row.dataset.canonicalLot, inst, row);
+      }
+      refreshLotFieldHint(lotField);
+      return;
+    }
+    row.dataset.contractLot = String(contractLot);
+    if (lotField && lotField.value === "" && lotField.dataset.auto !== "") {
+      row.dataset.canonicalLot = String(contractLot);
+      row.dataset.lotSize = String(contractLot);
+      lotField.value = sizeInputFromCanonical(contractLot, inst, row);
+      lotField.dataset.auto = "1";
+    } else if (lotField && row.dataset.canonicalLot) {
+      lotField.value = sizeInputFromCanonical(row.dataset.canonicalLot, inst, row);
+    }
+    refreshLotFieldHint(lotField);
+  }
+
   function ensureFormLots() {
     var inst = $("mloInstrument").value.trim().toUpperCase();
     $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
@@ -2263,20 +2411,17 @@
       var lotField = row.querySelector('[data-f="lot_size"]');
       if (row.dataset.lotKey && row.dataset.lotKey !== key) {
         row.dataset.lotSize = "";
+        row.dataset.canonicalLot = "";
         delete row.dataset.lotKey;
         if (lotField && lotField.dataset.auto === "1") lotField.value = "";
       }
       if (lotCache[key]) {
-        row.dataset.lotSize = String(lotCache[key]);
         row.dataset.lotKey = key;
-        if (lotField && lotField.value === "" && lotField.dataset.auto !== "") {
-          lotField.value = String(lotCache[key]);
-          lotField.dataset.auto = "1";
-        }
+        applyContractLotToRow(row, lotCache[key], inst);
         return;
       }
       if (row.dataset.lotSize && !row.dataset.lotKey) {
-        lotCache[key] = Number(row.dataset.lotSize);
+        lotCache[key] = Number(row.dataset.contractLot || row.dataset.lotSize);
         row.dataset.lotKey = key;
         return;
       }
@@ -2294,13 +2439,8 @@
           lotCache[key] = lot;
           delete lotMiss[key];
           if (row.dataset.lotKey === key || !row.dataset.lotKey) {
-            row.dataset.lotSize = String(lot);
             row.dataset.lotKey = key;
-            var field = row.querySelector('[data-f="lot_size"]');
-            if (field && field.value === "" && field.dataset.auto !== "") {
-              field.value = String(lot);
-              field.dataset.auto = "1";
-            }
+            applyContractLotToRow(row, lot, inst);
           }
         } else {
           lotMiss[key] = true;
@@ -2317,21 +2457,67 @@
 
   function refreshLotFieldHint(lotInp) {
     if (!lotInp) return;
+    var row = lotInp.closest(".mlo-leg");
     var inst = String($("mloInstrument").value || "").trim().toUpperCase();
+    var unit = formSizeUnit();
     var per = cryptoQtyPerLot(inst);
-    if (per != null) {
-      lotInp.placeholder = "Lots";
-      lotInp.title = "1 lot = " + per + " " + (inst === "BITCOIN" ? "BTC" : "ETH") + " qty";
-      lotInp.setAttribute("aria-label", "Lots (" + lotInp.title + ")");
+    if (unit === "qty") {
+      lotInp.placeholder = "Qty";
+      lotInp.step = per != null ? String(per) : "1";
+      lotInp.min = per != null ? String(per) : "1";
+      lotInp.title = per != null
+        ? ("Underlying qty · 1 lot = " + per + " " + (inst === "BITCOIN" ? "BTC" : "ETH"))
+        : "Contract units (lot size × lots)";
+      lotInp.setAttribute("aria-label", "Qty");
     } else {
       lotInp.placeholder = "Lots";
-      lotInp.title = "";
+      lotInp.step = "1";
+      lotInp.min = "1";
+      lotInp.title = per != null
+        ? ("1 lot = " + per + " " + (inst === "BITCOIN" ? "BTC" : "ETH") + " qty")
+        : (row && Number(row.dataset.contractLot) > 0
+          ? ("1 lot = " + row.dataset.contractLot + " units")
+          : "Number of lots");
       lotInp.setAttribute("aria-label", "Lots");
     }
   }
 
   function refreshAllLotHints() {
     $("mloLegs").querySelectorAll('[data-f="lot_size"]').forEach(refreshLotFieldHint);
+    refreshMoneyPlaceholders();
+  }
+
+  function refreshMoneyPlaceholders() {
+    var crypto = isCryptoInstrument($("mloInstrument").value);
+    var spot = $("mloSpot");
+    var maxP = $("mloMaxProfit");
+    if (spot) spot.placeholder = crypto ? "Spot $" : "Spot";
+    if (maxP) maxP.placeholder = crypto ? "Max profit $" : "";
+    $("mloLegs").querySelectorAll('[data-f="entry_price"]').forEach(function (inp) {
+      inp.placeholder = crypto ? "Entry $" : "Entry price";
+    });
+    $("mloLegs").querySelectorAll('[data-f="exit_price"], [data-panel="exit_price"]').forEach(function (inp) {
+      inp.placeholder = crypto ? "Exit $" : "Exit price";
+    });
+  }
+
+  function onQtyUnitChange(prevUnit, nextUnit) {
+    var inst = String($("mloInstrument").value || "").trim().toUpperCase();
+    $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
+      var lotInp = row.querySelector('[data-f="lot_size"]');
+      if (!lotInp || lotInp.value.trim() === "") {
+        refreshLotFieldHint(lotInp);
+        return;
+      }
+      var canonical = canonicalFromSizeInput(lotInp.value, inst, row, prevUnit);
+      if (canonical != null) {
+        row.dataset.canonicalLot = String(canonical);
+        row.dataset.lotSize = String(canonical);
+        lotInp.value = sizeInputFromCanonical(canonical, inst, row, nextUnit);
+      }
+      refreshLotFieldHint(lotInp);
+    });
+    scheduleModalPayoff();
   }
 
   function formPayoffLegs() {
@@ -2355,15 +2541,17 @@
         var lotEl = row.querySelector('[data-f="lot_size"]');
         var clockEl = row.querySelector('[data-f="exit_clock"]');
         if (!pxEl || pxEl.value.trim() === "") return;
-        var exitLots = lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0;
+        var exitCanonical = lotEl && lotEl.value.trim() !== ""
+          ? canonicalFromSizeInput(lotEl.value, instrument, row)
+          : 0;
         built.push({
           qualifier: "EXIT",
           side: "SELL",
           option_type: anchor.option_type,
           strike_price: anchor.strike_price,
           entry_price: anchor.entry,
-          lot_size: exitLots,
-          qty: effectiveLegQty(instrument, exitLots),
+          lot_size: exitCanonical,
+          qty: effectiveLegQty(instrument, exitCanonical),
           exit_price: Number(pxEl.value),
           exit_time: clockEl && parseClock(clockEl.value) ? "set" : null,
         });
@@ -2382,7 +2570,9 @@
       var lotField = row.querySelector('[data-f="lot_size"]');
       var typedLot = val("lot_size").trim();
       var cleared = !!(lotField && lotField.dataset.auto === "" && typedLot === "");
-      var lot = typedLot !== "" ? Number(typedLot) : (cleared ? NaN : Number(row.dataset.lotSize));
+      var lot = typedLot !== ""
+        ? canonicalFromSizeInput(typedLot, instrument, row)
+        : (cleared ? NaN : Number(row.dataset.canonicalLot || row.dataset.lotSize));
       return {
         side: val("side"),
         option_type: val("option_type"),

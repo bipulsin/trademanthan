@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=19" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=20" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -155,6 +155,12 @@
                 </div>
                 <div class="mlo-legs-head">
                     <h3>Legs</h3>
+                    <label class="mlo-qty-unit-label">Size as
+                        <select id="mloQtyUnit" aria-label="Size unit">
+                            <option value="lots">Lots</option>
+                            <option value="qty">Qty</option>
+                        </select>
+                    </label>
                     <button type="button" class="mlo-btn so-modal-btn secondary" id="mloAddLeg">Add Leg</button>
                 </div>
                 <div id="mloLegs"></div>
@@ -190,6 +196,6 @@
     <script src="left-menu.js?v=3.52"></script>
     <script src="multiLegPayoff.js?v=5"></script>
     <script src="ladderReportGroups.js?v=1"></script>
-    <script src="multiLegOptions.js?v=24"></script>
+    <script src="multiLegOptions.js?v=25"></script>
 </body>
 </html>

@@ -391,7 +391,28 @@ body.mlo-page .right-panel {
 }
 
 .mlo-leg-exit-panel input[data-panel="exit_price"] { width: 100px; }
+.mlo-leg-exit-panel input[data-panel="exit_date"] { width: 132px; }
 .mlo-leg-exit-panel input[data-panel="exit_clock"] { width: 100px; }
+
+.mlo-qty-unit-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    margin-right: 8px;
+    font-size: 0.78rem;
+    color: var(--muted);
+}
+
+.mlo-qty-unit-label select {
+    background: var(--bg1, #0e1613);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    height: 30px;
+    padding: 0 8px;
+    font: 500 0.78rem var(--font-mono);
+}
 
 .mlo-leg-exit-panel .mlo-leg-exit-submit {
     height: 30px;
