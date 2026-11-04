@@ -74,7 +74,13 @@ def normalize_legs(legs: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         right = _option_type(raw.get("option_type"))
         strike = _as_float(raw.get("strike_price") if raw.get("strike_price") is not None else raw.get("strike"))
         entry = _as_float(raw.get("entry_price") if raw.get("entry_price") is not None else raw.get("entry"))
-        lot = _as_float(raw.get("lot_size") if raw.get("lot_size") is not None else raw.get("lot"))
+        # Prefer effective qty (crypto lots × contract size) when the journal
+        # already computed it; otherwise fall back to lot_size.
+        lot = _as_float(
+            raw.get("qty")
+            if raw.get("qty") is not None
+            else (raw.get("lot_size") if raw.get("lot_size") is not None else raw.get("lot"))
+        )
         if direction is None or right is None or strike is None or strike <= 0:
             continue
         if entry is None or entry < 0 or lot is None or lot <= 0:

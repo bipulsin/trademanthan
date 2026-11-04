@@ -2,8 +2,9 @@
  *
  *   CE intrinsic = max(0, S - strike)
  *   PE intrinsic = max(0, strike - S)
- *   Open leg: (intrinsic - entry) * lot_size * (+1 BUY, -1 SELL)
- *   Exited leg (exit price and exit time both set): flat (exit_price - entry) * lot * sign
+ *   Open leg: (intrinsic - entry) * qty * (+1 BUY, -1 SELL)
+ *   Exited leg (exit price and exit time both set): flat (exit_price - entry) * qty * sign
+ *   qty prefers leg.qty (crypto: lots × contract size) then lot_size.
  *   Net credit is positive when premium is received.
  */
 (function (global) {
@@ -37,7 +38,7 @@
       var direction = side === "BUY" ? 1 : side === "SELL" ? -1 : 0;
       var strike = num(raw.strike_price != null ? raw.strike_price : raw.strike);
       var entry = num(raw.entry_price != null ? raw.entry_price : raw.entry);
-      var lot = num(raw.lot_size != null ? raw.lot_size : raw.lot);
+      var lot = num(raw.qty != null ? raw.qty : (raw.lot_size != null ? raw.lot_size : raw.lot));
       if (!direction || (right !== "CE" && right !== "PE")) return;
       if (strike == null || strike <= 0 || entry == null || entry < 0 || lot == null || lot <= 0) return;
       out.push({

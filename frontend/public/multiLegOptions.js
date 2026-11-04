@@ -6,6 +6,7 @@
   var LADDER_EXIT_MIN = 4;
   var LADDER_EXIT_MAX = 6;
   var instruments = { indices: [], crypto: [], equities: [], commodities: [] };
+  var CRYPTO_LOT_QTY = { BITCOIN: 0.001, ETHEREUM: 0.01 };
   var activeTrades = [];
   var ladderTrades = [];
   var orphanLegs = [];
@@ -219,6 +220,24 @@
       LADDER: "Ladder",
       UNCLASSIFIED: "Unclassified",
     }[t] || t;
+  }
+
+  function isCryptoInstrument(name) {
+    return !!CRYPTO_LOT_QTY[String(name || "").trim().toUpperCase()];
+  }
+
+  function cryptoQtyPerLot(name) {
+    return CRYPTO_LOT_QTY[String(name || "").trim().toUpperCase()] || null;
+  }
+
+  function effectiveLegQty(instrument, lots, fallbackQty) {
+    if (fallbackQty != null && fallbackQty !== "" && !Number.isNaN(Number(fallbackQty)) && Number(fallbackQty) > 0) {
+      return Number(fallbackQty);
+    }
+    var n = Number(lots);
+    if (!(n > 0)) return null;
+    var per = cryptoQtyPerLot(instrument);
+    return per != null ? n * per : n;
   }
 
   function legTypeLabel(qualifier) {
@@ -741,7 +760,7 @@
       dateField("leg_expiry_date", "", "Expiry") +
       '<input data-f="entry_price" type="number" min="0" step="0.01" placeholder="Entry price" aria-label="Entry price" required>' +
       ladderExitPx +
-      '<input data-f="lot_size" type="number" min="1" step="1" placeholder="Lot" aria-label="Lot size">' +
+      '<input data-f="lot_size" type="number" min="1" step="1" placeholder="Lots" aria-label="Lots">' +
       '<input data-f="entry_clock" type="text" placeholder="Time" aria-label="Time" value="' + esc(entryText) + '" required>' +
       ladderExitClock +
       exit +
@@ -768,6 +787,7 @@
     wrap.querySelector('[data-f="entry_price"]').value = entryValue;
     if (leg && leg.ltp != null && leg.ltp !== "") wrap.dataset.ltp = String(leg.ltp);
     var lotInp = wrap.querySelector('[data-f="lot_size"]');
+    refreshLotFieldHint(lotInp);
     if (leg && leg.lot_size) {
       lotInp.value = String(leg.lot_size);
       lotInp.dataset.auto = "1";
@@ -1713,6 +1733,7 @@
   $("mloInstrument").addEventListener("focus", function () { fillCombo(this.value); });
   $("mloInstrument").addEventListener("input", function () {
     fillCombo(this.value);
+    refreshAllLotHints();
     scheduleModalPayoff();
     if (mode !== "new") return;
     expiryTouched = false;
@@ -1723,6 +1744,7 @@
     if (!btn) return;
     $("mloInstrument").value = btn.getAttribute("data-sym");
     $("mloInstrumentList").hidden = true;
+    refreshAllLotHints();
     scheduleModalPayoff();
     if (mode !== "new") return;
     expiryTouched = false;
@@ -2293,7 +2315,27 @@
     });
   }
 
+  function refreshLotFieldHint(lotInp) {
+    if (!lotInp) return;
+    var inst = String($("mloInstrument").value || "").trim().toUpperCase();
+    var per = cryptoQtyPerLot(inst);
+    if (per != null) {
+      lotInp.placeholder = "Lots";
+      lotInp.title = "1 lot = " + per + " " + (inst === "BITCOIN" ? "BTC" : "ETH") + " qty";
+      lotInp.setAttribute("aria-label", "Lots (" + lotInp.title + ")");
+    } else {
+      lotInp.placeholder = "Lots";
+      lotInp.title = "";
+      lotInp.setAttribute("aria-label", "Lots");
+    }
+  }
+
+  function refreshAllLotHints() {
+    $("mloLegs").querySelectorAll('[data-f="lot_size"]').forEach(refreshLotFieldHint);
+  }
+
   function formPayoffLegs() {
+    var instrument = String($("mloInstrument").value || "").trim().toUpperCase();
     if (isLadderType($("mloType").value)) {
       var anchor = ladderAnchorFromForm();
       if (!anchor) return [];
@@ -2304,6 +2346,7 @@
         strike_price: anchor.strike_price,
         entry_price: anchor.entry,
         lot_size: anchor.qty,
+        qty: effectiveLegQty(instrument, anchor.qty),
         ltp: anchor.ltp,
       }];
       $("mloLegs").querySelectorAll(".mlo-leg").forEach(function (row) {
@@ -2312,13 +2355,15 @@
         var lotEl = row.querySelector('[data-f="lot_size"]');
         var clockEl = row.querySelector('[data-f="exit_clock"]');
         if (!pxEl || pxEl.value.trim() === "") return;
+        var exitLots = lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0;
         built.push({
           qualifier: "EXIT",
           side: "SELL",
           option_type: anchor.option_type,
           strike_price: anchor.strike_price,
           entry_price: anchor.entry,
-          lot_size: lotEl && lotEl.value.trim() !== "" ? Number(lotEl.value) : 0,
+          lot_size: exitLots,
+          qty: effectiveLegQty(instrument, exitLots),
           exit_price: Number(pxEl.value),
           exit_time: clockEl && parseClock(clockEl.value) ? "set" : null,
         });
@@ -2344,6 +2389,7 @@
         strike_price: val("strike_price") === "" ? null : Number(val("strike_price")),
         entry_price: val("entry_price") === "" ? null : Number(val("entry_price")),
         lot_size: lot,
+        qty: effectiveLegQty(instrument, lot),
         exit_price: exited ? Number(exitPx) : null,
         exit_time: exited ? "set" : null,
       };

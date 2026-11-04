@@ -4,11 +4,15 @@ PnL sign
 --------
 direction_sign is +1 for BUY and -1 for SELL.
 
-    leg_pnl = (exit_or_ltp - entry_price) * direction_sign * lot_size
+    leg_pnl = (exit_or_ltp - entry_price) * direction_sign * qty
 
-A long option profits when the premium rises: (ltp - entry) * lot.
-A short option profits when the premium falls: (entry - ltp) * lot,
+A long option profits when the premium rises: (ltp - entry) * qty.
+A short option profits when the premium falls: (entry - ltp) * qty,
 which is the same formula with direction_sign = -1.
+
+For index/equity/MCX, qty is the integer lot_size. For crypto (Bitcoin /
+Ethereum), lot_size is Delta lots and qty = lots × contract size
+(0.001 BTC / 0.01 ETH).
 
 Trade PnL is the sum of leg PnLs. A leg with both exit_price and exit_time
 is marked at the exit price. Other legs stay marked to LTP. Saving a partial
@@ -38,7 +42,9 @@ from sqlalchemy import text
 from backend.database import SessionLocal, engine
 from backend.services.multi_leg_crypto import (
     CRYPTO_INSTRUMENTS,
+    contract_qty_per_lot,
     crypto_spot_ltps,
+    effective_position_qty,
     fetch_crypto_deltas,
     fetch_crypto_ltps,
     is_crypto_instrument,
@@ -126,14 +132,20 @@ def leg_pnl(
     entry_price: Any,
     mark: Any,
     lot_size: Any,
+    *,
+    instrument: Any = None,
 ) -> Optional[float]:
-    """(mark - entry) × direction_sign × lot. None when the mark is missing."""
+    """(mark - entry) × direction_sign × qty. None when the mark is missing.
+
+    ``lot_size`` is the journal lots field. Crypto converts lots to underlying
+    qty (Bitcoin 1 lot = 0.001); other underlyings use the integer lot count.
+    """
     entry = _as_float(entry_price)
     px = _as_float(mark)
-    lot = _as_int(lot_size)
-    if entry is None or px is None or lot is None or lot <= 0:
+    qty = effective_position_qty(instrument, lot_size)
+    if entry is None or px is None or qty is None or qty <= 0:
         return None
-    return (px - entry) * direction_sign(side) * lot
+    return (px - entry) * direction_sign(side) * qty
 
 
 def trade_pnl(leg_pnls: Iterable[Optional[float]]) -> Optional[float]:
@@ -551,8 +563,14 @@ def mark_price(leg: Dict[str, Any]) -> Optional[float]:
     return _as_float(leg.get("ltp"))
 
 
-def leg_pnl_from_row(leg: Dict[str, Any]) -> Optional[float]:
-    return leg_pnl(leg.get("side"), leg.get("entry_price"), mark_price(leg), leg.get("lot_size"))
+def leg_pnl_from_row(leg: Dict[str, Any], *, instrument: Any = None) -> Optional[float]:
+    return leg_pnl(
+        leg.get("side"),
+        leg.get("entry_price"),
+        mark_price(leg),
+        leg.get("lot_size"),
+        instrument=instrument if instrument is not None else leg.get("instrument"),
+    )
 
 
 def ladder_anchor_leg(legs: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1804,9 +1822,9 @@ def _normalize_leg_input(
         key = str(raw.get("instrument_key") or "").strip() or None
         if not lot or lot <= 0 or not key:
             raise
-    # Ladder quantities are the lots the user entered. Other types keep the
-    # contract lot from the instrument master.
-    if preserve_lot and client_lot and client_lot > 0:
+    # Ladder and crypto: lot_size is the lots the user entered. Equity/index
+    # keep the contract lot from the instrument master.
+    if (preserve_lot or is_crypto_instrument(instrument)) and client_lot and client_lot > 0:
         lot = client_lot
     ltp = _as_float(raw.get("ltp"))
     delta = _as_float(raw.get("delta"))
@@ -1827,8 +1845,10 @@ def _normalize_leg_input(
         "lot_size": int(lot),
         "instrument_key": key,
         "upstox_order_id": order_id,
+        "instrument": str(instrument or "").strip().upper() or None,
     }
-    leg["leg_pnl"] = leg_pnl_from_row(leg)
+    leg["qty"] = effective_position_qty(instrument, lot)
+    leg["leg_pnl"] = leg_pnl_from_row(leg, instrument=instrument)
     return leg
 
 
@@ -1918,7 +1938,10 @@ def _load_trade_rows(db, trade_id: Optional[str] = None, where_sql: str = "", pa
     return [_public_trade(grouped[tid]["header"], grouped[tid]["legs"]) for tid in order]
 
 
-def _public_leg(row: Dict[str, Any]) -> Dict[str, Any]:
+def _public_leg(row: Dict[str, Any], *, instrument: Any = None) -> Dict[str, Any]:
+    inst = instrument if instrument is not None else row.get("instrument")
+    lot = _as_int(row.get("lot_size"))
+    qty = effective_position_qty(inst, lot)
     leg = {
         "id": str(row.get("leg_id") or row.get("id")),
         "qualifier": (
@@ -1936,11 +1959,14 @@ def _public_leg(row: Dict[str, Any]) -> Dict[str, Any]:
         "exit_time": _iso_dt(row.get("exit_time")),
         "ltp": _as_float(row.get("ltp")),
         "delta": _as_float(row.get("delta")),
-        "lot_size": _as_int(row.get("lot_size")),
+        "lot_size": lot,
+        "qty": qty,
         "instrument_key": row.get("instrument_key"),
         "upstox_order_id": (str(row.get("upstox_order_id")).strip() if row.get("upstox_order_id") else None) or None,
     }
-    pnl = leg_pnl_from_row(leg)
+    if inst is not None:
+        leg["instrument"] = str(inst).strip().upper() or None
+    pnl = leg_pnl_from_row(leg, instrument=inst)
     leg["leg_pnl"] = pnl
     leg["exited"] = leg_is_exited(leg)
     leg["direction_sign"] = direction_sign(leg["side"]) if leg.get("side") in SIDES else None
@@ -1948,7 +1974,8 @@ def _public_leg(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    public_legs = [_public_leg(l) for l in legs]
+    instrument = header.get("instrument")
+    public_legs = [_public_leg(l, instrument=instrument) for l in legs]
     if _normalize_trade_type(header.get("trade_type")) == "LADDER":
         # Recompute from the main entry. Stored main-leg exits and exit-leg
         # entries from the old screen are not used for display or PnL.
@@ -1956,11 +1983,13 @@ def _public_trade(header: Dict[str, Any], legs: Sequence[Dict[str, Any]]) -> Dic
     total = trade_pnl(l.get("leg_pnl") for l in public_legs)
     expiry = _parse_date(header.get("expiry_date"))
     entry = _parse_date(header.get("entry_date"))
+    per_lot = contract_qty_per_lot(instrument)
     return {
         "id": str(header.get("trade_id") or header.get("id")),
         "trade_no": _as_int(header.get("trade_no")),
         "trade_type": header.get("trade_type"),
         "instrument": header.get("instrument"),
+        "contract_qty_per_lot": per_lot,
         "spot_price_entry": _as_float(header.get("spot_price_entry")),
         "entry_date": entry.isoformat() if entry else None,
         "expiry_date": expiry.isoformat() if expiry else None,
@@ -2446,6 +2475,7 @@ def refresh_active_quotes() -> Dict[str, Any]:
             ladder_trades.append(trade)
         for leg in trade.get("legs") or []:
             leg["_ladder"] = is_ladder
+            leg["_instrument"] = trade.get("instrument")
             # An EXIT row is an exit fill, not a position to mark against its own price.
             if is_ladder and _qualifier_token(leg) == "EXIT":
                 continue
@@ -2514,7 +2544,13 @@ def refresh_active_quotes() -> Dict[str, Any]:
                 if use_delta is not None:
                     leg["delta"] = use_delta
                 continue
-            pnl = leg_pnl(leg.get("side"), leg.get("entry_price"), use_ltp, leg.get("lot_size"))
+            pnl = leg_pnl(
+                leg.get("side"),
+                leg.get("entry_price"),
+                use_ltp,
+                leg.get("lot_size"),
+                instrument=leg.get("_instrument") or leg.get("instrument"),
+            )
             db.execute(
                 text(
                     """

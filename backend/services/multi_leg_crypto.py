@@ -16,7 +16,31 @@ logger = logging.getLogger(__name__)
 CRYPTO_INSTRUMENTS = ("BITCOIN", "ETHEREUM")
 CRYPTO_TO_DELTA = {"BITCOIN": "BTC", "ETHEREUM": "ETH"}
 DELTA_TO_CRYPTO = {v: k for k, v in CRYPTO_TO_DELTA.items()}
+# Journal lot_size is Delta "lots"; PnL uses underlying qty = lots × contract size.
+CRYPTO_LOT_CONTRACT_QTY = {"BITCOIN": 0.001, "ETHEREUM": 0.01}
 DEFAULT_CRYPTO_LOT = 1
+
+
+def contract_qty_per_lot(instrument: Any) -> Optional[float]:
+    """Underlying qty for one filled lot (BTC 0.001, ETH 0.01)."""
+    return CRYPTO_LOT_CONTRACT_QTY.get(str(instrument or "").strip().upper())
+
+
+def effective_position_qty(instrument: Any, lot_size: Any) -> Optional[float]:
+    """Lots × contract size for crypto; otherwise integer lot count."""
+    try:
+        lots = float(lot_size)
+    except (TypeError, ValueError):
+        return None
+    if lots != lots or lots <= 0:
+        return None
+    per = contract_qty_per_lot(instrument)
+    if per is not None:
+        return lots * per
+    # Equity / index / MCX keep whole-lot sizing.
+    if abs(lots - round(lots)) > 1e-9:
+        return None
+    return float(int(round(lots)))
 
 _TICKER_LOCK = threading.Lock()
 _TICKER_CACHE: Dict[str, Any] = {"by_und": {}, "loaded_at": 0.0}

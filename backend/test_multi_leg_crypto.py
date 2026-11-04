@@ -3,12 +3,14 @@ from datetime import date
 
 from backend.services.multi_leg_crypto import (
     constructed_crypto_option_key,
+    effective_position_qty,
     is_crypto_instrument,
     is_delta_option_key,
     parse_crypto_option_key,
     resolve_crypto_option_contract,
     split_upstox_and_delta_keys,
 )
+from backend.services.multi_leg_options import leg_pnl
 
 
 def test_crypto_instrument_and_symbol_roundtrip():
@@ -43,3 +45,13 @@ def test_split_upstox_and_delta_keys():
     )
     assert upstox == ["NSE_FO|NIFTY26NOV25000CE", "BSE_FO|SENSEX26NOV80000PE"]
     assert delta == ["C-BTC-99000-271126"]
+
+
+def test_crypto_lot_to_qty_and_pnl():
+    assert effective_position_qty("BITCOIN", 1) == 0.001
+    assert effective_position_qty("BITCOIN", 10) == 0.01
+    assert effective_position_qty("ETHEREUM", 2) == 0.02
+    assert effective_position_qty("NIFTY", 50) == 50.0
+    # 10 BTC lots short: premium drops 100 → profit 100 * 0.01 = 1
+    assert leg_pnl("SELL", 500, 400, 10, instrument="BITCOIN") == 1.0
+    assert leg_pnl("SELL", 500, 400, 10, instrument="NIFTY") == 1000.0
