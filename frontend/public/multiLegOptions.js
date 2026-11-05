@@ -874,7 +874,15 @@
       lotInp.dataset.auto = "1";
     }
     refreshLotFieldHint(lotInp);
-    lotInp.addEventListener("input", function () { lotInp.dataset.auto = ""; });
+    lotInp.addEventListener("input", function () {
+      lotInp.dataset.auto = "";
+      var inst = String($("mloInstrument").value || "").trim().toUpperCase();
+      var canonical = canonicalFromSizeInput(lotInp.value, inst, wrap);
+      if (canonical != null) {
+        wrap.dataset.canonicalLot = String(canonical);
+        wrap.dataset.lotSize = String(canonical);
+      }
+    });
     wrap.querySelectorAll("input[data-ph]").forEach(bindDateField);
     wrap.querySelectorAll('[data-f="entry_clock"], [data-f="exit_clock"]').forEach(bindClockField);
     if (leg && leg.lot_size) wrap.dataset.lotSize = String(leg.lot_size);
@@ -2381,8 +2389,18 @@
         row.dataset.lotSize = "1";
         lotField.value = sizeInputFromCanonical(1, inst, row);
         lotField.dataset.auto = "1";
-      } else if (lotField && row.dataset.canonicalLot) {
-        lotField.value = sizeInputFromCanonical(row.dataset.canonicalLot, inst, row);
+      }
+      refreshLotFieldHint(lotField);
+      return;
+    }
+    var known = Number(row.dataset.contractLot);
+    if (lotField && lotField.dataset.auto === "" && lotField.value.trim() !== "" && !(known > 0)) {
+      var typedLots = Number(lotField.value);
+      row.dataset.contractLot = String(contractLot);
+      if (formSizeUnit() === "lots" && typedLots > 0) {
+        var units = typedLots * contractLot;
+        row.dataset.canonicalLot = String(units);
+        row.dataset.lotSize = String(units);
       }
       refreshLotFieldHint(lotField);
       return;
@@ -2393,8 +2411,6 @@
       row.dataset.lotSize = String(contractLot);
       lotField.value = sizeInputFromCanonical(contractLot, inst, row);
       lotField.dataset.auto = "1";
-    } else if (lotField && row.dataset.canonicalLot) {
-      lotField.value = sizeInputFromCanonical(row.dataset.canonicalLot, inst, row);
     }
     refreshLotFieldHint(lotField);
   }
