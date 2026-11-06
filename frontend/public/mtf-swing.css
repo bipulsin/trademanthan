@@ -1,0 +1,47 @@
+/* MTF Swing page. Uses stock-options tokens for the shell. */
+.ms-wrap { max-width: 1440px; margin: 0 auto; padding: 0 0.5rem 2.5rem; }
+.ms-status { color: var(--muted, #8fa398); min-height: 1.2rem; margin: 0.25rem 0 0.75rem; }
+.ms-tf { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.ms-tf button, .ms-btn {
+  border: 1px solid var(--line, rgba(180,210,190,0.2));
+  background: var(--card-inner, #121a17);
+  color: var(--text, #e7f0ea);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+  font: inherit;
+}
+.ms-tf button.on { background: var(--accent, #3dba7a); color: #062214; border-color: transparent; font-weight: 700; }
+.ms-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.65rem; margin-bottom: 1rem; }
+.ms-card { background: var(--card, rgba(22,34,29,0.92)); border: 1px solid var(--line, rgba(180,210,190,0.14)); border-radius: 10px; padding: 0.75rem 0.85rem; }
+.ms-card h3 { margin: 0 0 0.25rem; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted, #8fa398); font-weight: 600; }
+.ms-card .val { font-family: var(--font-mono, ui-monospace, monospace); font-size: 1.15rem; font-weight: 650; }
+.ms-section { margin: 1.1rem 0; }
+.ms-section h2 { margin: 0 0 0.45rem; font-size: 1rem; }
+.ms-table-wrap { overflow-x: auto; border: 1px solid var(--line, rgba(180,210,190,0.14)); border-radius: 10px; }
+table.ms { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+table.ms th, table.ms td { padding: 0.4rem 0.55rem; border-bottom: 1px solid var(--line, rgba(180,210,190,0.12)); text-align: left; white-space: nowrap; }
+table.ms th { position: sticky; top: 0; background: #101815; color: var(--muted, #8fa398); cursor: pointer; }
+.pos { color: #3dba7a; }
+.neg { color: #e06b6b; }
+.ms-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem; }
+.ms-chart { background: var(--card, rgba(22,34,29,0.92)); border: 1px solid var(--line, rgba(180,210,190,0.14)); border-radius: 10px; padding: 0.65rem 0.75rem 0.85rem; min-height: 180px; }
+.ms-chart h3 { margin: 0 0 0.35rem; font-size: 0.85rem; color: var(--muted, #8fa398); }
+.ms-legend { display: flex; gap: 0.75rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--muted, #8fa398); margin-top: 0.35rem; }
+.ms-legend i { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 2px; margin-right: 0.25rem; }
+.ms-filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin-bottom: 0.6rem; }
+.ms-filters label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.72rem; color: var(--muted, #8fa398); }
+.ms-filters input, .ms-filters select {
+  background: var(--card-inner, #121a17);
+  color: var(--text, #e7f0ea);
+  border: 1px solid var(--line, rgba(180,210,190,0.2));
+  border-radius: 6px;
+  padding: 0.35rem 0.45rem;
+  min-width: 8rem;
+}
+.ms-pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.55rem; flex-wrap: wrap; }
+.ms-note { color: var(--muted, #8fa398); font-size: 0.8rem; }
+@media (max-width: 720px) {
+  .ms-card .val { font-size: 1rem; }
+  table.ms { font-size: 0.75rem; }
+}

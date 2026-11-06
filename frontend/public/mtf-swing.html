@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <title>MTF Swing · TradeWithCTO</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+    <script src="auth-check.js?v=1"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <link rel="stylesheet" href="settings.css?v=2" />
+    <link rel="stylesheet" href="left-menu.css?v=3.48" />
+    <link rel="stylesheet" href="theme.css?v=1.4" />
+    <link rel="stylesheet" href="stockOptions.css?v=28" />
+    <link rel="stylesheet" href="mtf-swing.css?v=1" />
+</head>
+<body class="stock-options-page theme-page left-menu-web-hamburger" data-theme="dark">
+    <div class="mobile-title-bar">
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+        <div class="mobile-title-content">
+            <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
+            <h1 class="mobile-title">MTF Swing</h1>
+        </div>
+    </div>
+    <div class="app-container app-with-left-menu">
+        <div id="left-menu-container"></div>
+        <main class="right-panel main-content-area">
+            <div class="settings-header">
+                <div class="settings-title-section">
+                    <h1 class="settings-title"><i class="fas fa-layer-group"></i> MTF Swing</h1>
+                    <p class="settings-subtitle">Weekly futures swing screen · 15m and 60m · 1 Nov 2025 – 31 Oct 2026 · 1 lot</p>
+                </div>
+            </div>
+            <div class="ms-wrap">
+                <div class="ms-tf" role="tablist">
+                    <button type="button" data-tf="60m">60m</button>
+                    <button type="button" data-tf="15m">15m</button>
+                    <button type="button" data-tf="all">All</button>
+                </div>
+                <p class="ms-status" id="msStatus">Loading…</p>
+                <div class="ms-cards" id="msCards"></div>
+                <section class="ms-section">
+                    <h2>Month-wise</h2>
+                    <p class="ms-note">Closed trades only. OPEN rows stay in the blotter and are left out of these totals. Drawdown resets each month.</p>
+                    <div class="ms-table-wrap">
+                        <table class="ms">
+                            <thead>
+                                <tr>
+                                    <th>Month</th><th>Trades</th><th>Net P&L</th><th>Avg P&L</th><th>Max profit</th><th>Max loss</th><th>Max DD</th><th>Profitable</th><th>Losing</th><th>Win rate</th>
+                                </tr>
+                            </thead>
+                            <tbody id="msMonths"></tbody>
+                        </table>
+                    </div>
+                </section>
+                <section class="ms-section">
+                    <h2>Charts</h2>
+                    <div class="ms-charts">
+                        <div class="ms-chart"><h3>Month P&L</h3><div id="chartMonth"></div></div>
+                        <div class="ms-chart"><h3>Equity (solid) and drawdown (dashed)</h3><div id="chartEquity"></div></div>
+                        <div class="ms-chart"><h3>Exit reason</h3><div id="chartReasons"></div></div>
+                        <div class="ms-chart"><h3>Long vs short</h3><div id="chartSides"></div></div>
+                    </div>
+                </section>
+                <section class="ms-section">
+                    <h2>Trade records</h2>
+                    <div class="ms-filters">
+                        <label>Symbol <input id="fSymbol" type="search" placeholder="RELIANCE" /></label>
+                        <label>Month <select id="fMonth"><option value="">All months</option></select></label>
+                        <label>Side
+                            <select id="fSide">
+                                <option value="">All</option>
+                                <option value="LONG">Long</option>
+                                <option value="SHORT">Short</option>
+                            </select>
+                        </label>
+                        <label>Exit
+                            <select id="fReason">
+                                <option value="">All</option>
+                                <option value="SL">SL</option>
+                                <option value="T1">T1</option>
+                                <option value="TIME">TIME</option>
+                                <option value="OPEN">OPEN</option>
+                            </select>
+                        </label>
+                        <button type="button" class="ms-btn" id="msDownload">Download CSV</button>
+                    </div>
+                    <div class="ms-table-wrap">
+                        <table class="ms" id="msTradeTable">
+                            <thead>
+                                <tr>
+                                    <th data-key="symbol">Symbol</th>
+                                    <th data-key="timeframe">TF</th>
+                                    <th data-key="month">Month</th>
+                                    <th data-key="side">Side</th>
+                                    <th data-key="entry_type">Entry</th>
+                                    <th data-key="entry_time">Entry time</th>
+                                    <th data-key="entry_price">Entry</th>
+                                    <th data-key="exit_time">Exit time</th>
+                                    <th data-key="exit_price">Exit</th>
+                                    <th data-key="exit_reason">Reason</th>
+                                    <th data-key="sessions_held">Sessions</th>
+                                    <th data-key="net_pnl">Net P&L</th>
+                                    <th data-key="r_multiple">R</th>
+                                </tr>
+                            </thead>
+                            <tbody id="msTrades"></tbody>
+                        </table>
+                    </div>
+                    <div class="ms-pager">
+                        <button type="button" class="ms-btn" id="msPrev">Prev</button>
+                        <span id="msPage"></span>
+                        <button type="button" class="ms-btn" id="msNext">Next</button>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="left-menu.js?v=3.55"></script>
+    <script src="mtf-swing.js?v=1"></script>
+</body>
+</html>

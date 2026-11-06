@@ -13,7 +13,7 @@ let isAuthenticating = false;
 let hasRedirected = false;
 let isAuthenticated = false;
 
-const MENU_HTML_PATH = 'left-menu.html?v=3.53';
+const MENU_HTML_PATH = 'left-menu.html?v=3.55';
 const DISCLAIMER_SCRIPT_PATH = 'disclaimer.js?v=1.1';
 const NOTIFY_TRADE_CHANNEL_SCRIPT = 'notify-trade-channel.js?v=3';
 const LEFT_MENU_VISIBILITY_STORAGE_KEY = 'tradentical_left_menu_visibility';
@@ -35,7 +35,7 @@ class LeftMenu {
 
     isThemePage() {
         const path = window.location.pathname;
-        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|momentx|mxback|tradelog|kavach-bt-checkpoint|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang/.test(path);
+        return /desktop|dashboard|cargpt|broker|strategy|reports|settings|carsetup|arbitrage|pivot-breakout|intraoption|stockOptions|stockoptions|multiLegOptions|multilegoptions|smartfuture|vajrafutures|dailyfutures|volumemismatchfutures|admintwc|kavachIgnitionDiag|rs-journey|future_screener|future-screener|momentx|mxback|tradelog|kavach-bt-checkpoint|commDiv|commdiv|havwap|divtest|analysis|iron-condor|dailyRSchecklist|tarang|mtf-swing|mtfswing/.test(path);
     }
 
     getCurrentPage() {
@@ -63,6 +63,7 @@ class LeftMenu {
         if (path.includes('kavachIgnitionDiag')) return 'kavachIgnitionDiag';
         if (path.includes('rs-journey')) return 'rs-journey';
         if (path.includes('future_screener') || path.includes('future-screener')) return 'future_screener';
+        if (path.includes('mtf-swing') || path.includes('mtfswing')) return 'mtf-swing';
         if (path.includes('momentxlog')) return 'momentx';
         if (path.includes('mxback') || path.includes('mXback')) return 'momentx';
         if (path.includes('momentx')) return 'momentx';
@@ -127,6 +128,7 @@ class LeftMenu {
                     currentPath.includes('intraoption') || currentPath.includes('smartfuture') ||
                     currentPath.includes('dailyfutures') ||
                     currentPath.includes('volumemismatchfutures') ||
+                    currentPath.includes('mtf-swing') ||
                     currentPath.includes('admintwc');
                 if (!hasRedirected && isProtectedPage) {
                     hasRedirected = true;
@@ -476,6 +478,10 @@ class LeftMenu {
                 <li class="nav-item" data-page="momentx.html">
                     <a class="nav-item-link" href="momentx.html"><i class="fas fa-bolt" style="color:#3dba7a;"></i>
                     <span>MomentX</span></a>
+                </li>
+                <li class="nav-item" data-page="mtf-swing.html">
+                    <a class="nav-item-link" href="mtf-swing.html"><i class="fas fa-layer-group" style="color:#7dd3fc;"></i>
+                    <span>MTF Swing</span></a>
                 </li>
                 <li class="nav-item" data-page="havwap.html">
                     <a class="nav-item-link" href="havwap.html"><i class="fas fa-chart-area" style="color:#34d399;"></i>
@@ -1032,6 +1038,7 @@ class LeftMenu {
             'kavach-bt-checkpoint': 'Kavach BT Checkpoint',
             future_screener: 'Future Screener',
             momentx: 'MomentX',
+            'mtf-swing': 'MTF Swing',
             commdiv: 'Commodities Div',
             dailyRSchecklist: 'TWCTO Kavach',
             settings: 'Settings',
@@ -1152,6 +1159,7 @@ class LeftMenu {
             case 'admin': return 'admintwc.html';
             case 'future_screener': return 'future_screener.html';
             case 'momentx': return 'momentx.html';
+            case 'mtf-swing': return 'mtf-swing.html';
             case 'commdiv': return 'commDiv.html';
             case 'multilegoptions': return 'multiLegOptions.html';
             case 'havwap': return 'havwap.html';

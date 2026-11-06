@@ -1,0 +1,42 @@
+# MTF Swing
+
+Weekly swing screen on continuous NSE futures, executed independently on 15-minute and 60-minute bars. One lot per trade. Research backtest for 1 Nov 2025 through 31 Oct 2026.
+
+The page at `/mtf-swing.html` reads `data/mtf_swing/trades.csv` through `GET /api/mtf-swing/results`. It does not embed trades.
+
+## Resume
+
+From the repo root (Upstox credentials and `arbitrage_master` required):
+
+```bash
+python3 scripts/run_mtf_swing_backtest.py
+python3 scripts/run_mtf_swing_backtest.py --timeframe 60m
+python3 scripts/run_mtf_swing_backtest.py --symbol RELIANCE --timeframe 15m
+```
+
+Each finished month and timeframe is stored in `data/mtf_swing/progress.json` and skipped on the next run. Carried state (open trade, pending or limit setup, next-week watchlist) is in `data/mtf_swing/state_15m.json` and `state_60m.json`. Trades append to `data/mtf_swing/trades.csv`. Cancelled and discarded setups append to `data/mtf_swing/discards.csv`. A re-run does not rewrite a row that is already there. The unique trade key is `symbol + timeframe + side + entry timestamp` (`trade_id`).
+
+Candle responses are cached under `data/mtf_swing/cache/` (not committed).
+
+## Assumptions
+
+- Calendar weeks are ISO weeks (Monday start) in Asia/Kolkata. Screening runs on the last trading session of the week. A Friday holiday means Thursday is that session. A week with no sessions is not a W1. W2 is the previous ISO week; if that week has no bars the screen is discarded as `NO_W2` rather than skipping back to an older week.
+- Long and short inequalities are strict where the spec uses `<` or `>`, and inclusive where it uses `<=` or `>=`. The two sides cannot both match.
+- The sweep timestamp is the last bar inside W1 that prints the extreme (lowest low / highest high).
+- A swing high is a bar whose high is strictly above the previous and next bar. It is not usable until that next bar exists. At the Friday screen, only swings confirmed inside W1 are used. The same rule applies to swing lows.
+- The 0.3% cluster compares the most recent swing with the single swing before it, using `|a-b| / min(|a|,|b|)`. On a tie at the boundary the more extreme price wins (higher high, lower low). Only that pair is clustered, not a longer chain.
+- Reference levels are computed on a Panama back-adjust of W1+W2 so a roll inside the two weeks is not a weekly high, low, or swing. The last W1 bar stays on its raw contract price, and SL / trigger / T1 are in that basis.
+- While a trade or resting order is open, a contract roll shifts entry, SL, T1, trigger, and limit by `new_open - previous_close`. The roll gap is therefore not a stop or target fill. Fills after the roll are on the new contract's raw prices plus that shift, so point P&L matches the continuous series.
+- The active contract is the front month through its expiry (last Tuesday, or the previous session if that Tuesday is a weekend or an `NSE_KNOWN_HOLIDAYS` date). The runner asks Upstox for that expired future (`/v2/expired-instruments/future/contract`) and then loads candles with the existing `UpstoxService` historical call, falling back to `/v2/expired-instruments/historical-candle`. The encoded key `NSE_FO|{SYMBOL}{YY}{MMM}FUT` is only the fallback. 60-minute expired history is built by pairing 30-minute candles, because that expired endpoint has 30-minute bars and not 60-minute bars. Lot size is the contract's lot when Upstox returns one, otherwise the current instrument-master lot. A roll keeps the entry lot for rupee P&L.
+- A breakout or breakdown is the bar close. The limit or next-open order starts on the following bar. A limit that is still working on the last bar of the watchlist week is cancelled (`WEEK_EXPIRED`). A next-open armed on that last bar is allowed to fill the next session, which can be Monday, because that is the configured entry rather than a new signal. If that fill is skipped, the screen taken on Friday becomes the new week's watchlist.
+- `rr >= 1` enters at the breakout close or the next bar's open (`entry_timing`, default `next_open`). Otherwise the limit is `(T1 + SL) / 2`.
+- Before entry, long cancels on `low < SL` or `high >= T1`. Short cancels on `high > SL` or `low <= T1`.
+- Same bar touching SL and T1 exits at SL. A gap through SL or T1 (open already beyond the level) exits at the open.
+- The entry session counts as session 1 of 10. TIME exits at the close of the 10th session if SL and T1 have not been touched. An entry at the close is not stopped out on that same bar. An entry at the open can be.
+- One open position or pending setup per symbol. State is carried across month boundaries. The trade's `month` is the entry month.
+- Still open after 31 Oct 2026: the last batch loads about three extra weeks and keeps managing the position for up to 10 sessions. If it is still open, the row is `exit_reason=OPEN` with blank P&L. OPEN rows are listed and excluded from closed-trade cards, month totals, and profit factor.
+- Quantity is 1 lot. Lot size comes from the existing futures instrument master. If the expired contract is absent, P&L uses lot size 0 and is logged.
+- Brokerage, charges, and slippage default to 0. Slippage worsens entry and exit by `slippage_points` inside gross P&L. The `charges` column is brokerage plus other charges, in INR per round turn. `r_multiple` uses unsipped prices against the original risk `(entry - SL)` so a stop at SL is -1 when there is no gap.
+- 15m and 60m do not share state.
+- The live ticker algo list is only for desks with a live snapshot (Stock Options, Kavach, and the others already registered there). MTF Swing is a backtest page, same as HA-VWAP, and is not added to that ticker list.
+- Weeks that fail the price pattern are not written to the discard file. `NO_SWING`, `LEVELS_ILLOGICAL`, `NO_W2`, cancellations, and cutoff drops are.

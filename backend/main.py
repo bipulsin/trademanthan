@@ -44,6 +44,7 @@ import backend.routers.stock_option as stock_option
 import backend.routers.crypto_options_report as crypto_options_report
 import backend.routers.multi_leg_options as multi_leg_options
 import backend.routers.momentx as momentx
+import backend.routers.mtf_swing as mtf_swing
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -523,6 +524,8 @@ app.include_router(multi_leg_options.router)
 app.include_router(multi_leg_options.router, prefix="/api")
 app.include_router(momentx.router, prefix="/api")
 app.include_router(momentx.router, prefix="")
+app.include_router(mtf_swing.router, prefix="/api")
+app.include_router(mtf_swing.router, prefix="")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")

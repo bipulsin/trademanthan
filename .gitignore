@@ -81,6 +81,14 @@ data/ha_vwap/cache/
 data/ha_vwap/cache/**
 !data/ha_vwap/
 !data/ha_vwap/signals.csv
+!data/mtf_swing/
+!data/mtf_swing/trades.csv
+!data/mtf_swing/discards.csv
+data/mtf_swing/cache/
+data/mtf_swing/cache/**
+data/mtf_swing/progress.json
+data/mtf_swing/state_*.json
+data/mtf_swing/*.tmp
 
 
 # Local DB exports (keep exports/ via .gitkeep)
