@@ -22,7 +22,7 @@ from backend.services.mtf_swing.data import (
     data_dir,
     discards_path,
     known_holidays,
-    load_universe_symbols,
+    load_universe,
     lot_size_for,
     progress_path,
     state_path,
@@ -69,13 +69,23 @@ def run_backtest(
 ) -> Dict[str, Any]:
     """Run missing month/timeframe batches. Safe to call again after a stop."""
     hol = known_holidays()
-    names = [s.strip().upper() for s in (symbols or load_universe_symbols()) if s and str(s).strip()]
-    if not names:
+    universe = load_universe()
+    if symbols:
+        wanted = {s.strip().upper() for s in symbols if s and str(s).strip()}
+        universe = [row for row in universe if row["symbol"] in wanted]
+    if not universe:
         raise RuntimeError("arbitrage_master returned no symbols")
     client = upstox if upstox is not None else _upstox()
     progress = _load_json(progress_path(), {"completed": []})
     done = set(progress.get("completed") or [])
-    summary = {"symbols": len(names), "completed_now": [], "skipped": [], "trades_appended": 0, "discards_appended": 0}
+    summary = {
+        "symbols": len(universe),
+        "completed_now": [],
+        "skipped": [],
+        "trades_appended": 0,
+        "discards_appended": 0,
+        "failed": [],
+    }
     run_ts = datetime.now(IST).isoformat()
     months = month_windows()
 
@@ -97,14 +107,23 @@ def run_backtest(
                 "mtf_swing %s %s symbols=%s window=%s..%s",
                 tf,
                 label,
-                len(names),
+                len(universe),
                 fetch_start,
                 fetch_end,
             )
             screened = candidates = setups = entries = exits = 0
-            for symbol in names:
+            for row in universe:
+                symbol = row["symbol"]
                 try:
-                    bars, lots = stitch_symbol_bars(client, symbol, fetch_start, fetch_end, tf, hol)
+                    bars, lots = stitch_symbol_bars(
+                        client,
+                        symbol,
+                        fetch_start,
+                        fetch_end,
+                        tf,
+                        hol,
+                        underlying_key=row.get("underlying_key") or "",
+                    )
                 except Exception as exc:
                     logger.warning("mtf_swing fetch %s %s failed: %s", symbol, label, exc)
                     continue
@@ -146,6 +165,10 @@ def run_backtest(
                     n_ds,
                     lot,
                 )
+            if screened == 0:
+                logger.error("mtf_swing %s had no candles; leaving the month incomplete", token)
+                summary["failed"].append(token)
+                continue
             state["symbols"] = sym_state
             _save_json(state_path(tf), state)
             done.add(token)

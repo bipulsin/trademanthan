@@ -62,8 +62,12 @@ def known_holidays() -> set:
     return out
 
 
-def load_universe_symbols() -> List[str]:
-    """Every symbol in arbitrage_master, including index rows when present."""
+def load_universe() -> List[Dict[str, str]]:
+    """Every arbitrage_master symbol and its underlying instrument key.
+
+    The underlying key (``NSE_EQ|ISIN`` or ``NSE_INDEX|...``) is what Upstox
+    expects when resolving an expired future contract.
+    """
     from sqlalchemy import text
 
     from backend.database import SessionLocal
@@ -73,16 +77,28 @@ def load_universe_symbols() -> List[str]:
         rows = db.execute(
             text(
                 """
-                SELECT DISTINCT UPPER(TRIM(stock)) AS symbol
+                SELECT UPPER(TRIM(stock)) AS symbol,
+                       MAX(NULLIF(TRIM(stock_instrument_key), '')) AS underlying_key
                 FROM arbitrage_master
                 WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                GROUP BY UPPER(TRIM(stock))
                 ORDER BY 1
                 """
             )
         ).fetchall()
     finally:
         db.close()
-    return [str(r[0]).strip().upper() for r in rows if r and str(r[0] or "").strip()]
+    out: List[Dict[str, str]] = []
+    for row in rows:
+        sym = str(row[0] or "").strip().upper()
+        if not sym:
+            continue
+        out.append({"symbol": sym, "underlying_key": str(row[1] or "").strip()})
+    return out
+
+
+def load_universe_symbols() -> List[str]:
+    return [row["symbol"] for row in load_universe()]
 
 
 def monthly_expiry(year: int, month: int, holidays: set) -> date:
@@ -234,44 +250,84 @@ def _payload_rows(data: Any) -> List[Dict[str, Any]]:
     return _candles_rows_to_structured(candles)
 
 
-def resolve_expired_future(upstox: Any, symbol: str, expiry: date) -> Dict[str, Any]:
-    """Instrument key and lot size for one expired monthly future, via UpstoxService."""
-    fallback = {
-        "instrument_key": future_instrument_key(symbol, expiry),
-        "lot_size": 0,
-        "expiry": expiry.isoformat(),
-    }
-    for underlying in (f"NSE_FO|{symbol.upper()}", f"NSE_EQ|{symbol.upper()}"):
-        try:
-            data = upstox.make_api_request(
-                _EXPIRED_FUTURE,
-                params={"instrument_key": underlying, "expiry_date": expiry.isoformat()},
-                timeout=20,
-                max_retries=2,
-            )
-        except Exception as exc:
-            logger.info("mtf_swing expired contract %s %s: %s", symbol, expiry, exc)
+def contract_from_response(data: Any, expiry: date) -> Optional[Dict[str, Any]]:
+    """Pull instrument key and lot size from an expired-future contract payload."""
+    rows: List[Any] = []
+    if isinstance(data, dict):
+        body = data.get("data")
+        if isinstance(body, list):
+            rows = body
+        elif isinstance(body, dict):
+            rows = [body]
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-        rows = []
-        if isinstance(data, dict):
-            body = data.get("data")
-            if isinstance(body, list):
-                rows = body
-            elif isinstance(body, dict):
-                rows = [body]
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            key = str(row.get("instrument_key") or row.get("instrument_token") or "").strip()
-            if not key:
-                continue
-            lot = row.get("lot_size") or row.get("minimum_lot") or row.get("freeze_quantity")
-            try:
-                lot_n = int(lot or 0)
-            except (TypeError, ValueError):
-                lot_n = 0
-            return {"instrument_key": key, "lot_size": lot_n, "expiry": expiry.isoformat()}
-    return fallback
+        key = str(row.get("instrument_key") or "").strip()
+        if key.count("|") < 2:
+            continue
+        lot = row.get("lot_size") or row.get("minimum_lot")
+        try:
+            lot_n = int(float(lot or 0))
+        except (TypeError, ValueError):
+            lot_n = 0
+        return {"instrument_key": key, "lot_size": lot_n, "expiry": expiry.isoformat()}
+    return None
+
+
+def _contract_cache() -> Dict[str, Any]:
+    path = data_dir() / "cache" / "contracts.json"
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _remember_contract(symbol: str, expiry: date, payload: Dict[str, Any]) -> None:
+    path = data_dir() / "cache" / "contracts.json"
+    cur = _contract_cache()
+    cur[f"{symbol.upper()}|{expiry.isoformat()}"] = payload
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cur), encoding="utf-8")
+
+
+def resolve_expired_future(
+    upstox: Any,
+    symbol: str,
+    expiry: date,
+    underlying_key: str,
+) -> Dict[str, Any]:
+    """Instrument key and lot size for one monthly future.
+
+    Upstox expired contracts use ``NSE_FO|{token}|dd-mm-yyyy``, resolved from
+    the equity or index underlying key on ``arbitrage_master``.
+    """
+    cached = _contract_cache().get(f"{symbol.upper()}|{expiry.isoformat()}")
+    if isinstance(cached, dict) and cached.get("instrument_key"):
+        return cached
+    empty = {"instrument_key": "", "lot_size": 0, "expiry": expiry.isoformat()}
+    underlying = (underlying_key or "").strip()
+    if not underlying:
+        logger.info("mtf_swing %s has no underlying key; skipping %s", symbol, expiry)
+        return empty
+    try:
+        data = upstox.make_api_request(
+            _EXPIRED_FUTURE,
+            params={"instrument_key": underlying, "expiry_date": expiry.isoformat()},
+            timeout=20,
+            max_retries=2,
+        )
+    except Exception as exc:
+        logger.info("mtf_swing expired contract %s %s: %s", symbol, expiry, exc)
+        return empty
+    found = contract_from_response(data, expiry)
+    if not found:
+        logger.info("mtf_swing no expired future %s %s via %s", symbol, expiry, underlying)
+        return empty
+    _remember_contract(symbol, expiry, found)
+    return found
 
 
 def _fetch_expired_rows(upstox: Any, instrument_key: str, interval: str, start: date, end: date) -> List[Dict[str, Any]]:
@@ -372,11 +428,18 @@ def fetch_contract_bars(
             return _rows_to_bars(payload, instrument_key)
         except Exception as exc:
             logger.info("mtf_swing cache miss %s: %s", cache.name, exc)
-    ordered = _fetch_regular_rows(upstox, instrument_key, start, end, timeframe)
+    # Expired keys look like NSE_FO|49078|25-11-2025 and are served by the
+    # expired-candle API. The live historical API rejects that shape.
+    expired_key = instrument_key.count("|") >= 2
     aggregated = False
-    if not ordered:
+    if expired_key:
         ordered = _fetch_expired_chunked(upstox, instrument_key, start, end, timeframe)
         aggregated = timeframe == "60m"
+    else:
+        ordered = _fetch_regular_rows(upstox, instrument_key, start, end, timeframe)
+        if not ordered:
+            ordered = _fetch_expired_chunked(upstox, instrument_key, start, end, timeframe)
+            aggregated = timeframe == "60m"
     if not ordered:
         return []
     bars = _rows_to_bars(ordered, instrument_key)
@@ -408,6 +471,7 @@ def stitch_symbol_bars(
     end: date,
     timeframe: str,
     holidays: set,
+    underlying_key: str = "",
 ) -> tuple:
     """Raw front-month bars plus lot size by contract key.
 
@@ -418,8 +482,10 @@ def stitch_symbol_bars(
     lots: Dict[str, int] = {}
     for contract in contracts_covering(symbol, start, end, holidays):
         expiry = date.fromisoformat(contract["expiry"])
-        resolved = resolve_expired_future(upstox, symbol, expiry)
-        key = str(resolved.get("instrument_key") or contract["instrument_key"])
+        resolved = resolve_expired_future(upstox, symbol, expiry, underlying_key)
+        key = str(resolved.get("instrument_key") or "")
+        if not key:
+            continue
         lot = int(resolved.get("lot_size") or 0)
         if lot <= 0:
             lot = lot_size_for(symbol, key)

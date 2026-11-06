@@ -505,6 +505,27 @@ def test_csv_idempotent_append_does_not_touch_prior_bytes(tmp_path: Path):
     assert dash_open["charts"]["sides"]["LONG"] == 2
 
 
+def test_expired_contract_payload_uses_dated_key_and_lot():
+    from datetime import date as d
+
+    from backend.services.mtf_swing.data import contract_from_response
+
+    payload = {
+        "status": "success",
+        "data": [
+            {
+                "instrument_key": "NSE_FO|49078|25-11-2025",
+                "lot_size": 500,
+                "trading_symbol": "RELIANCE FUT 25 NOV 25",
+            }
+        ],
+    }
+    found = contract_from_response(payload, d(2025, 11, 25))
+    assert found["instrument_key"] == "NSE_FO|49078|25-11-2025"
+    assert found["lot_size"] == 500
+    assert contract_from_response({"status": "success", "data": [{"instrument_key": "NSE_FO|RELIANCE25NOVFUT"}]}, d(2025, 11, 25)) is None
+
+
 def test_30m_pairs_into_60m_without_crossing_sessions():
     from backend.services.mtf_swing.data import aggregate_30m_to_60m
 
