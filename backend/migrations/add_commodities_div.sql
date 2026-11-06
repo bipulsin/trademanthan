@@ -1,4 +1,4 @@
--- Commodities Div — isolated tables (do not reuse Kavach/Breakfast/Trap-CE).
+-- Commodities Div — isolated tables (do not reuse Kavach or Trap-CE).
 
 CREATE TABLE IF NOT EXISTS commodities_div_symbol_map (
     id BIGSERIAL PRIMARY KEY,

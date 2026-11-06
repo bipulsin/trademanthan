@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot Analysis snapshot (equity OHLC from Upstox). Rate-limited; skips Breakfast exclusivity unless --force.
+"""One-shot Analysis snapshot (equity OHLC from Upstox). Rate-limited.
 
   PYTHONPATH=. python scripts/run_analysis_snapshot.py
   PYTHONPATH=. python scripts/run_analysis_snapshot.py --force

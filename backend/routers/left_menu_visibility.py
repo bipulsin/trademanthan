@@ -54,7 +54,6 @@ MENU_ITEMS: List[Dict[str, str]] = [
     {"key": "tradelog.html", "label": "Trade Log"},
     {"key": "future_screener.html", "label": "Future Screener"},
     {"key": "momentx.html", "label": "MomentX"},
-    {"key": "breakfast.html", "label": "Breakfast Strategy"},
     {"key": "havwap.html", "label": "HA-VWAP Backtest"},
     {"key": "analysis.html", "label": "Analysis"},
     {"key": "settings.html", "label": "Settings"},

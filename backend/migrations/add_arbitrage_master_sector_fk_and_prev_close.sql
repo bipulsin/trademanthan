@@ -1,5 +1,5 @@
 -- 3a: sector_instrument_key FK to nifty_benchmark_reference
--- 3b: Stock prev-session close columns (filled by breakfast prev-close job)
+-- 3b: Stock prev-session close columns on arbitrage_master
 -- sector_index column retained for soak / dual-read (Phase 4 drop later)
 
 ALTER TABLE arbitrage_master

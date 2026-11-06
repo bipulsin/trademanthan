@@ -122,7 +122,6 @@ def test_snapshot_open_trades_all_day_signals_follow_window(monkeypatch):
     )
     monkeypatch.setattr(tl, "_kavach_trades", lambda: [tl._row("kavach", "TCS", pnl=None, label="OPEN")])
     monkeypatch.setattr(tl, "_kavach_ready", lambda: [])
-    monkeypatch.setattr(tl, "_breakfast_signals", lambda: [])
     monkeypatch.setattr(
         tl,
         "_premium",

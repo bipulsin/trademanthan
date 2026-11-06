@@ -4,8 +4,7 @@ Reuses ``upstox_market_feed`` (no second connection). Sidecar provider
 ``commodities_div_in_trade`` is merged into every subscribe so Rocket / market_data
 replace-mode restarts do not drop commodity keys.
 
-Breakfast exclusivity: ``set_feed_provider_keys`` / sync skip non-owner starts during
-09:10–lock/09:25. REST ``refresh_in_trade_ltp`` remains the fallback.
+REST ``refresh_in_trade_ltp`` remains the fallback when the shared feed is down.
 """
 from __future__ import annotations
 
@@ -158,14 +157,6 @@ def sync_in_trade_subscriptions(*, force: bool = False) -> Dict[str, Any]:
 
     if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
         return {"ok": True, "skipped": "feed_disabled"}
-
-    try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("commodities_div_ws_ltp_sync"):
-            return {"ok": True, "skipped": "breakfast_exclusivity"}
-    except Exception as e:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
 
     try:
         rows = list_in_trade_ltp_rows()

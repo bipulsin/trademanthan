@@ -4,9 +4,7 @@ Reuses ``upstox_market_feed`` (no second connection). Sidecar provider
 ``stock_option_executed`` is merged into every subscribe so Rocket / market_data
 replace-mode restarts do not drop option keys.
 
-Breakfast exclusivity: ``set_feed_provider_keys`` / ``ensure_market_feed_running``
-skip non-owner starts during 09:10–lock/09:25. Scheduler only runs WS sync from
-**09:30 IST** (after Breakfast) through the cash session. The 2h
+Scheduler runs WS sync from **09:30 IST** through the cash session. The 2h
 ``refresh_executed_ltps`` REST path remains the fallback.
 """
 from __future__ import annotations
@@ -133,14 +131,6 @@ def sync_executed_option_subscriptions(*, force: bool = False) -> Dict[str, Any]
 
     if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
         return {"ok": True, "skipped": "feed_disabled"}
-
-    try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("stock_option_ws_ltp_sync"):
-            return {"ok": True, "skipped": "breakfast_exclusivity"}
-    except Exception as e:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
 
     try:
         from backend.services.stock_option_signals import ensure_executed_option_instrument_keys

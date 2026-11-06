@@ -61,13 +61,6 @@ def _rest_ltp_refresh() -> None:
     if not within_mcx_ltp_session():
         return
     try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("commodities_div_rest_ltp"):
-            return
-    except Exception as e:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
-    try:
         from backend.services.commodities_div.ltp_sidecar import refresh_in_trade_ltp
 
         out = refresh_in_trade_ltp()
@@ -95,7 +88,7 @@ def start_commodities_div_ltp_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-    # After Breakfast window: sync WS provider every minute during MCX hours.
+    # Sync WS provider every minute during MCX hours.
     sch.add_job(
         _ws_ltp_sync,
         CronTrigger(

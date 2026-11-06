@@ -6472,7 +6472,7 @@ def smart_futures_run_picker_now(
 async def oi_heatmap_refresh_now(
     force_off_cycle: bool = Query(
         False,
-        description="Bypass overnight/weekend freeze; still respects Breakfast exclusivity.",
+        description="Bypass overnight/weekend freeze.",
     ),
 ):
     """
@@ -6580,8 +6580,7 @@ async def dashboard_oi_heatmap_live(
     """
     Live current-month stock futures from ``arbitrage_master`` (Upstox REST).
     Refreshed every 30 minutes 09:00–16:00 IST on NSE sessions; after 16:00 the last
-    snapshot stays frozen until the next trading day 09:00. Breakfast exclusivity
-    (09:10–lock or 09:25) defers overlapping fetches.
+    snapshot stays frozen until the next trading day 09:00.
     """
     no_cache = {
         "Cache-Control": "no-store, no-cache, must-revalidate, private",

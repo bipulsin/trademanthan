@@ -251,15 +251,6 @@ def run_analysis_snapshot_job(
     force: bool = False,
     refresh_weekly: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    from backend.services.breakfast_upstox_gate import (
-        breakfast_exclusivity_active,
-        defer_job_for_breakfast_exclusivity,
-    )
-
-    if not force and breakfast_exclusivity_active():
-        defer_job_for_breakfast_exclusivity("analysis_symbol_snapshot")
-        return {"ok": False, "skipped": "breakfast_exclusivity", "trigger": trigger}
-
     if refresh_weekly is None:
         refresh_weekly = should_refresh_weekly()
 
@@ -303,16 +294,6 @@ def run_analysis_snapshot_job(
             prior_map = _load_prior_weekly(db, [u["symbol"] for u in universe])
         upsert = _UPSERT_FULL if refresh_weekly else _UPSERT_DAILY
         for n, meta in enumerate(universe):
-            if not force and breakfast_exclusivity_active():
-                defer_job_for_breakfast_exclusivity("analysis_symbol_snapshot")
-                db.commit()
-                return {
-                    "ok": False,
-                    "skipped": "breakfast_exclusivity_mid_run",
-                    "trigger": trigger,
-                    "succeeded": succeeded,
-                    "partial": True,
-                }
             ik = meta.get("stock_ikey") or ""
             try:
                 daily = _fetch_candles(upstox, ik, "days/1", _DAILY_DAYS_BACK) if ik else []

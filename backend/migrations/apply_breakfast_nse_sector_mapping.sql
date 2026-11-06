@@ -1,4 +1,4 @@
--- Breakfast / NSE heatmap alignment: arbitrage_master sector_index fixes.
+-- Shared arbitrage_master sector_index fixes (NSE index alignment).
 -- Idempotent updates; safe to re-run.
 
 -- Pharma F&O names → Healthcare index only (Nifty Pharma index not used for stock tagging).
@@ -34,7 +34,7 @@ SET sector_index = 'NSE_INDEX|Nifty IT',
     sector = 'IT'
 WHERE UPPER(TRIM(stock)) = 'WIPRO';
 
--- Clear orphan Nifty Pharma index tags (index not in Breakfast universe).
+-- Clear orphan Nifty Pharma index tags.
 UPDATE arbitrage_master
 SET sector_index = 'NSE_INDEX|NIFTY HEALTHCARE',
     sector = 'HEALTHCARE'
@@ -52,7 +52,7 @@ SET sector_index = 'NSE_INDEX|Nifty Serv Sector',
     sector = 'SERVICES'
 WHERE UPPER(TRIM(stock)) IN ('BHARTIARTL', 'INDIGO', 'INDHOTEL', 'SWIGGY');
 
--- Brokers / AMC → Nifty Financial Services (Breakfast universe).
+-- Brokers / AMC → Nifty Financial Services.
 UPDATE arbitrage_master
 SET sector_index = 'NSE_INDEX|Nifty Fin Service',
     sector = 'FINANCIALS'

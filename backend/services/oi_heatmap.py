@@ -583,13 +583,6 @@ def maybe_sync_refresh_heatmap_after_open(reason: str = "get_live") -> None:
         return
     if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
         return
-    try:
-        from backend.services.breakfast_upstox_gate import breakfast_exclusivity_active
-
-        if breakfast_exclusivity_active(now):
-            return
-    except Exception:
-        pass
     global _last_api_refresh_attempt_mono
     with _api_refresh_lock:
         tmono = time.monotonic()
@@ -1039,8 +1032,7 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
     Fetch batch quotes for universe keys, sort by |oi_change|, update memory cache + DB.
 
     Scheduler / GET paths keep overnight freeze. ``force_off_cycle=True`` still fetches
-    latest available Upstox quotes (weekend / after 16:00) but still respects Breakfast
-    exclusivity and does not start a WebSocket.
+    latest available Upstox quotes (weekend / after 16:00) and does not start a WebSocket.
     """
     global _rows_cache, _cache_updated_at_mono, _cache_updated_at_iso, _last_error, _underlying_rank, _cache_source
 
@@ -1048,14 +1040,6 @@ def refresh_oi_heatmap_live(*, force_off_cycle: bool = False) -> Dict[str, Any]:
         return {"success": False, "skipped": "OI_HEATMAP_LIVE_ENABLED false"}
     if not force_off_cycle and is_oi_heatmap_overnight_freeze():
         return {"success": False, "skipped": "overnight_freeze"}
-
-    try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("smart_future_oi_heatmap_live"):
-            return {"success": False, "skipped": "breakfast_exclusivity"}
-    except Exception as e:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
 
     keys = ensure_daily_universe_cached()
     if not keys:
@@ -1447,13 +1431,6 @@ def maybe_trigger_refresh_if_empty() -> None:
         return
     if is_oi_heatmap_overnight_freeze():
         return
-    try:
-        from backend.services.breakfast_upstox_gate import breakfast_exclusivity_active
-
-        if breakfast_exclusivity_active():
-            return
-    except Exception:
-        pass
     with _api_refresh_lock:
         now = time.monotonic()
         if now - _last_api_refresh_attempt_mono < 120.0:
@@ -1643,7 +1620,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force-off-cycle",
         action="store_true",
-        help="Bypass overnight/weekend freeze (still Breakfast-gated)",
+        help="Bypass overnight/weekend freeze",
     )
     args = parser.parse_args()
     print(_json.dumps(refresh_oi_heatmap_live(force_off_cycle=args.force_off_cycle), default=str))

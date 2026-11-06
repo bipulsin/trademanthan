@@ -26,7 +26,6 @@ ALGOS = (
     "stock_options",
     "multi_leg_options",
     "kavach",
-    "breakfast",
     "premium_futures",
     "tarang",
 )
@@ -35,7 +34,6 @@ ALGO_LABELS = {
     "stock_options": "Stock Options",
     "multi_leg_options": "Multi-Leg Options",
     "kavach": "Kavach",
-    "breakfast": "Breakfast",
     "premium_futures": "Premium Futures",
     "tarang": "Kosmic Tarang",
 }
@@ -49,7 +47,7 @@ NSE_SIGNAL_OPEN_MIN = 9 * 60 + 15
 NSE_SIGNAL_CLOSE_MIN = 15 * 60 + 30
 MCX_SIGNAL_OPEN_MIN = 9 * 60
 MCX_SIGNAL_CLOSE_MIN = 23 * 60 + 30
-NSE_SIGNAL_ALGOS = frozenset({"stock_options", "premium_futures", "kavach", "breakfast"})
+NSE_SIGNAL_ALGOS = frozenset({"stock_options", "premium_futures", "kavach"})
 MCX_SIGNAL_ALGOS = frozenset({"commdiv"})
 _BLANK_SYMBOLS = {"", "—", "-", "–"}
 
@@ -521,26 +519,6 @@ def _kavach_ready() -> List[Dict[str, Any]]:
         db.close()
 
 
-def _breakfast_signals() -> List[Dict[str, Any]]:
-    from backend.services.breakfast_strategy.live import build_live_state
-
-    state = build_live_state() or {}
-    if str(state.get("phase") or "") not in ("locked", "frozen"):
-        return []
-    out = []
-    for sector in state.get("sectors") or []:
-        direction = sector.get("direction") or ""
-        for stk in sector.get("stocks") or []:
-            sym = stk.get("display_symbol") or stk.get("symbol")
-            if not sym:
-                continue
-            label = stk.get("rank_label") or "Frozen"
-            if direction:
-                label = f"{label} · {direction}"
-            out.append(_row("breakfast", str(sym), label=str(label)))
-    return out
-
-
 def _premium(user_id: int) -> tuple:
     from backend.database import SessionLocal
 
@@ -757,8 +735,6 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
     if algos.get("kavach"):
         jobs.append(("kavach_trades", TICKER_REFRESH_SEC, _kavach_trades, []))
         jobs.append(("kavach_ready", TICKER_REFRESH_SEC, _kavach_ready, []))
-    if algos.get("breakfast"):
-        jobs.append(("breakfast", TICKER_REFRESH_SEC, _breakfast_signals, []))
     if algos.get("premium_futures"):
         jobs.append((f"premium:{user_id}", TICKER_REFRESH_SEC, lambda: _premium(user_id), ([], [])))
     if algos.get("tarang"):
@@ -777,8 +753,6 @@ def build_snapshot(db: Session, user_id: int) -> Dict[str, Any]:
     if algos.get("kavach"):
         trades.extend(got.get("kavach_trades") or [])
         signals.extend(got.get("kavach_ready") or [])
-    if algos.get("breakfast"):
-        signals.extend(got.get("breakfast") or [])
     if algos.get("premium_futures"):
         pf_t, pf_s = got.get(f"premium:{user_id}") or ([], [])
         trades.extend(pf_t)

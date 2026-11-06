@@ -12,7 +12,7 @@ Contract rollover (Active / Radar-with-contract → arbitrage_master currmth):
 Executed / Completed (Trade report) are never updated.
 
 Also keeps Executed option instrument keys on the shared Upstox WS (1m sync from
-09:30 IST after Breakfast) so sell/buy LTPs update live; 2h
+09:30 IST) so sell/buy LTPs update live; 2h
 ``refresh_executed_ltps`` remains the REST fallback.
 
 EMA non-update guardrails:
@@ -50,7 +50,7 @@ from backend.services.stock_option_signals import (
 logger = logging.getLogger(__name__)
 
 IST = pytz.timezone("Asia/Kolkata")
-# After Breakfast exclusivity (ends by lock or 09:25); user-facing live LTP from 09:30.
+# User-facing live LTP from 09:30 IST.
 WS_LTP_SESSION_START = dt_time(9, 30)
 WS_LTP_SESSION_END = dt_time(15, 35)
 EMA_RETRY_DELAY = timedelta(minutes=10)
@@ -240,7 +240,7 @@ def start_stock_option_scheduler() -> None:
     except Exception:
         logger.exception("stock_option index Radar seed on start failed")
     try:
-        left = run_left_arbitrage_master_cleanup(skip_breakfast_defer=True)
+        left = run_left_arbitrage_master_cleanup()
         logger.info("stock_option left_master cleanup on start: %s", left)
     except Exception:
         logger.exception("stock_option left_master cleanup on start failed")
@@ -289,7 +289,7 @@ def start_stock_option_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-    # Live Executed option LTPs via shared Upstox WS from 09:30 IST (after Breakfast).
+    # Live Executed option LTPs via shared Upstox WS from 09:30 IST.
     sch.add_job(
         _ws_ltp_sync,
         CronTrigger(

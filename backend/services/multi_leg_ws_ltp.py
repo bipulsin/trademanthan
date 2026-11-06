@@ -42,14 +42,6 @@ def sync_subscriptions(*, force: bool = False) -> Dict[str, Any]:
         return {"ok": True, "skipped": "feed_disabled"}
 
     try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("multi_leg_ws_ltp_sync"):
-            return {"ok": True, "skipped": "breakfast_exclusivity"}
-    except Exception as exc:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", exc)
-
-    try:
         from backend.services.multi_leg_options import active_open_leg_keys
 
         rows = active_open_leg_keys()

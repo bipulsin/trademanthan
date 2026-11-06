@@ -18,14 +18,6 @@ def sync_momentx_subscriptions(*, force: bool = False) -> Dict[str, Any]:
     if not getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True):
         return {"ok": True, "skipped": "feed_disabled"}
 
-    try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("momentx_ws_ltp_sync"):
-            return {"ok": True, "skipped": "breakfast_exclusivity"}
-    except Exception as e:
-        logger.exception("momentx ws: breakfast check failed: %s", e)
-
     keys = mx_state.ready_future_keys()
     try:
         from backend.services.upstox_market_feed import set_feed_provider_keys

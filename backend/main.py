@@ -34,7 +34,6 @@ import backend.routers.volume_mismatch_futures as volume_mismatch_futures
 import backend.routers.volume_mismatch_backtest as volume_mismatch_backtest
 import backend.routers.open_low_15m_backtest as open_low_15m_backtest
 import backend.routers.ha_vwap as ha_vwap
-import backend.routers.breakfast_strategy as breakfast_strategy
 import backend.routers.trap_ce_live_webhook as trap_ce_live_webhook
 import backend.routers.premium_futures_tv_webhook as premium_futures_tv_webhook
 import backend.routers.commodities_div_webhook as commodities_div_webhook
@@ -74,18 +73,6 @@ from backend.services.smart_future_algo import start_smart_future_algo, stop_sma
 from backend.services.arbitrage_daily_setup_scheduler import (
     start_arbitrage_daily_setup_scheduler,
     stop_arbitrage_daily_setup_scheduler,
-)
-from backend.services.breakfast_strategy.live_scheduler import (
-    start_breakfast_live_scheduler,
-    stop_breakfast_live_scheduler,
-)
-from backend.services.breakfast_prev_close_scheduler import (
-    start_breakfast_prev_close_scheduler,
-    stop_breakfast_prev_close_scheduler,
-)
-from backend.services.breakfast_monitor import (
-    start_breakfast_monitor_scheduler,
-    stop_breakfast_monitor_scheduler,
 )
 from backend.services.chartink_df_webhook_inbox_scheduler import (
     start_chartink_df_webhook_inbox_scheduler,
@@ -224,30 +211,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Arbitrage Daily Setup Scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without arbitrage scheduler")
-
-        try:
-            logger.info("Starting Breakfast live scheduler (9:16–9:19 ticks, 9:20:05 freeze)...")
-            start_breakfast_live_scheduler()
-            logger.info("✅ Breakfast live scheduler: STARTED")
-        except Exception as e:
-            logger.error(f"❌ Breakfast live scheduler: FAILED - {e}", exc_info=True)
-            logger.warning("⚠️ Continuing without breakfast live scheduler")
-
-        try:
-            logger.info("Starting Breakfast prev-close scheduler (16:00, 16:30, 09:05 IST)...")
-            start_breakfast_prev_close_scheduler()
-            logger.info("✅ Breakfast prev-close scheduler: STARTED")
-        except Exception as e:
-            logger.error(f"❌ Breakfast prev-close scheduler: FAILED - {e}", exc_info=True)
-            logger.warning("⚠️ Continuing without breakfast prev-close scheduler")
-
-        try:
-            logger.info("Starting Breakfast monitor (09:00 preflight + 09:25 report Telegram)...")
-            start_breakfast_monitor_scheduler()
-            logger.info("✅ Breakfast monitor scheduler: STARTED")
-        except Exception as e:
-            logger.error(f"❌ Breakfast monitor scheduler: FAILED - {e}", exc_info=True)
-            logger.warning("⚠️ Continuing without breakfast monitor scheduler")
 
         try:
             logger.info("Starting ChartInk Daily Futures webhook inbox cleanup scheduler...")
@@ -420,24 +383,6 @@ async def lifespan(app: FastAPI):
         logger.error(f"⚠️ Error stopping Arbitrage Daily Setup Scheduler: {e}", exc_info=True)
 
     try:
-        stop_breakfast_live_scheduler()
-        logger.info("✅ Breakfast live scheduler stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping Breakfast live scheduler: {e}", exc_info=True)
-
-    try:
-        stop_breakfast_prev_close_scheduler()
-        logger.info("✅ Breakfast prev-close scheduler stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping Breakfast prev-close scheduler: {e}", exc_info=True)
-
-    try:
-        stop_breakfast_monitor_scheduler()
-        logger.info("✅ Breakfast monitor scheduler stopped")
-    except Exception as e:
-        logger.error(f"⚠️ Error stopping Breakfast monitor scheduler: {e}", exc_info=True)
-
-    try:
         stop_chartink_df_webhook_inbox_scheduler()
         logger.info("✅ ChartInk DF inbox cleanup scheduler stopped")
     except Exception as e:
@@ -562,7 +507,6 @@ app.include_router(volume_mismatch_backtest.router, prefix="")
 app.include_router(open_low_15m_backtest.router, prefix="/api")
 app.include_router(open_low_15m_backtest.router, prefix="")
 app.include_router(ha_vwap.router)
-app.include_router(breakfast_strategy.router, prefix="")
 app.include_router(trap_ce_live_webhook.router)
 app.include_router(premium_futures_tv_webhook.router)
 app.include_router(commodities_div_webhook.router)

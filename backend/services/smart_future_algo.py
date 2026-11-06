@@ -11,7 +11,7 @@ Consolidates all scan algorithm schedulers into a single controller:
 - Fin sentiment (weekdays 9:17–13:17 IST, 15 min): NSE corporate announcements + FinBERT for arbitrage_master, store in stock_fin_sentiment (NSE date window: last-run→now; 09:17 only uses today IST)
 - Smart Futures CMS picker (weekdays every 15 min 9:30–15:00 IST): arbitrage_master current-month futures → smart_futures_daily
 - Pre-market F&O watchlist (weekdays 9:10 IST default, PREMKET_RUN_TIME): ~203 equities → Top N in premarket_watchlist (same scoring as test_premkt_scanner / premarket_scoring)
-- Live OI heatmap (weekdays, every 30 min 09:00–16:00 IST): arbitrage_master current-month FUT, Upstox REST only (no extra WS); Breakfast exclusivity defers overlap; 16:00 snapshot frozen overnight; HTF-OI once at 16:05 IST from daily FUT candles
+- Live OI heatmap (weekdays, every 30 min 09:00–16:00 IST): arbitrage_master current-month FUT, Upstox REST only (no extra WS); 16:00 snapshot frozen overnight; HTF-OI once at 16:05 IST from daily FUT candles
 
 Interval-driven jobs only run real work between 08:30 and 21:00 IST (see scheduler_window).
 Exception: 8:10 AM Telegram ping (before 8:30).
@@ -28,7 +28,7 @@ import threading
 import time
 import requests
 from pathlib import Path
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, time as dt_time
 from typing import List, Tuple
 import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -227,13 +227,6 @@ def run_smart_future_vwap_update_gated() -> None:
     t = now.time()
     if t < dt_time(9, 15) or t > dt_time(15, 35):
         return
-    try:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("smart_future_vwap_update_every5"):
-            return
-    except Exception as e:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
     try:
         from backend.database import get_db_pool_stats
 
@@ -651,13 +644,6 @@ class SmartFutureAlgoScheduler:
                 if not is_market_hours:
                     logger.debug(f"⏰ Market closed ({now.strftime('%H:%M:%S IST')}) - skipping Index Price Check")
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("smart_future_index_price_check"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 
                 logger.info("🔧 Triggering Index Price Check job (every 5 minutes)...")
                 try:
@@ -686,13 +672,6 @@ class SmartFutureAlgoScheduler:
                 t = now.time()
                 if t < dt_time(9, 15) or t > dt_time(15, 35):
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("centralized_market_data_10m"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 logger.info(
                     "🔧 Triggering centralized curr-month market data refresh (REST candles)..."
                 )
@@ -754,13 +733,6 @@ class SmartFutureAlgoScheduler:
                 if t < dt_time(9, 15) or t > dt_time(15, 35):
                     return
                 logger.info("🔧 Triggering stock/next-month WS LTP refresh...")
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("stock_next_ws_ltp_30m"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 try:
                     from backend.services.market_data.scheduler import run_stock_next_ws_ltp_job
 
@@ -892,13 +864,6 @@ class SmartFutureAlgoScheduler:
             def run_index_price_9_15():
                 if _skip_ist_non_trading_job("index price 9:15"):
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("smart_future_index_price_9_15"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 logger.info("🔧 Triggering Index Price at 9:15 AM (Market Open) job...")
                 try:
                     index_price_scheduler.fetch_and_store_index_prices()
@@ -945,13 +910,6 @@ class SmartFutureAlgoScheduler:
                     return
                 if _skip_ist_non_trading_job("entry slip monitor"):
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("smart_future_entry_slip_monitor"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 logger.info("🔧 Triggering Entry Slip Monitor job (every 15 minutes)...")
                 try:
                     result = run_entry_slip_monitor()
@@ -1032,13 +990,6 @@ class SmartFutureAlgoScheduler:
                 ist = pytz.timezone("Asia/Kolkata")
                 if _skip_ist_non_trading_job("pre-market watchlist", datetime.now(ist)):
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("smart_future_premarket_watchlist"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 logger.info("🔧 Pre-market F&O watchlist job (Top 200 → Top %s)...", getattr(settings, "PREMKET_TOP_N", 10))
                 try:
                     out = run_premarket_watchlist_job_with_lock()
@@ -1106,26 +1057,6 @@ class SmartFutureAlgoScheduler:
                 logger.info("⏭️ Pre-market watchlist not scheduled (PREMKET_ENABLED=false)")
 
             # Live OI heatmap — arbitrage_master currmth FUT, 30 min 09:00–16:00 IST Mon–Fri
-            def _schedule_oi_heatmap_breakfast_retry():
-                ist = pytz.timezone("Asia/Kolkata")
-                run_at = datetime.now(ist) + timedelta(seconds=45)
-                if run_at.hour > 9 or (run_at.hour == 9 and run_at.minute > 26):
-                    return
-                try:
-                    self.scheduler.add_job(
-                        run_oi_heatmap_tick,
-                        trigger="date",
-                        run_date=run_at,
-                        id="smart_future_oi_heatmap_live_deferred",
-                        name="OI heatmap deferred after Breakfast exclusivity",
-                        replace_existing=True,
-                        max_instances=1,
-                        misfire_grace_time=120,
-                    )
-                    logger.info("OI heatmap: scheduled Breakfast-gate retry at %s", run_at.isoformat())
-                except Exception as e:
-                    logger.warning("OI heatmap: could not schedule Breakfast retry: %s", e)
-
             def run_oi_heatmap_tick():
                 if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
                     return
@@ -1144,9 +1075,7 @@ class SmartFutureAlgoScheduler:
                 if h == 16 and m > 0:
                     return
                 try:
-                    result = refresh_oi_heatmap_live()
-                    if isinstance(result, dict) and result.get("skipped") == "breakfast_exclusivity":
-                        _schedule_oi_heatmap_breakfast_retry()
+                    refresh_oi_heatmap_live()
                 except Exception as e:
                     logger.error("❌ OI heatmap refresh failed: %s", e, exc_info=True)
 
@@ -1165,10 +1094,7 @@ class SmartFutureAlgoScheduler:
                 misfire_grace_time=300,
                 coalesce=True,
             )
-            logger.info(
-                "✅ Scheduled: OI heatmap every 30 min 09:00–16:00 IST "
-                "(Breakfast exclusivity defers 09:30 until lock or 09:25)"
-            )
+            logger.info("✅ Scheduled: OI heatmap every 30 min 09:00–16:00 IST")
 
             def run_oi_heatmap_htf_eod():
                 if not getattr(settings, "OI_HEATMAP_LIVE_ENABLED", True):
@@ -1236,13 +1162,6 @@ class SmartFutureAlgoScheduler:
                     return  # before 09:20
                 if h > 15 or (h == 15 and m > 15):
                     return  # after 15:15
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("relative_strength_scanner_10m"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 try:
                     from backend.services.relative_strength_scanner import (
                         run_relative_strength_scan,
@@ -1448,13 +1367,6 @@ class SmartFutureAlgoScheduler:
                 if _skip_ist_non_trading_job("Universe VWAP slope scan", now):
                     return
                 try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("kavach_universe_vwap_scan_5m"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
-                try:
                     from backend.services.kavach_universe_vwap_scan import (
                         run_live_universe_vwap_scan,
                     )
@@ -1500,13 +1412,6 @@ class SmartFutureAlgoScheduler:
                 if now.hour >= 15 and now.minute > 26:
                     return
                 try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("garuda_screener_10m"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
-                try:
                     from backend.services.garuda_screener.job import run_live_garuda_screener
 
                     out = run_live_garuda_screener()
@@ -1548,13 +1453,6 @@ class SmartFutureAlgoScheduler:
                     return
                 if now.hour >= 15 and now.minute > 20:
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("kavach_expansion_watch_shadow"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 try:
                     from backend.services.rs_expansion_watch import (
                         run_expansion_watch_shadow_scan,
@@ -1672,13 +1570,6 @@ class SmartFutureAlgoScheduler:
                 if _skip_ist_non_trading_job("Volume Mismatch monitor", datetime.now(ist)):
                     return
                 try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("volume_mismatch_monitor_5m"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
-                try:
                     from backend.services.volume_mismatch.job import run_volume_mismatch_monitor_job
 
                     run_volume_mismatch_monitor_job()
@@ -1704,13 +1595,6 @@ class SmartFutureAlgoScheduler:
                     return
                 if _skip_ist_non_trading_job("CAR NIFTY200 update"):
                     return
-                try:
-                    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-                    if defer_job_for_breakfast_exclusivity("smart_future_car_nifty200_update"):
-                        return
-                except Exception as e:
-                    logger.exception("breakfast_exclusivity: check_failed error=%s", e)
                 logger.info("🔧 Triggering CAR NIFTY200 Update job...")
                 try:
                     run_car_nifty200_update_job()

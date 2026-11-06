@@ -81,15 +81,15 @@ def test_925_skips_when_morning_already_ok(mock_run, _ok, _skip):
 @patch("backend.services.arbitrage_daily_setup_scheduler.should_skip_scheduled_market_jobs_ist", return_value=False)
 @patch("backend.services.arbitrage_daily_setup_scheduler.run_arbitrage_daily_setup")
 @patch("backend.services.arbitrage_daily_setup_scheduler._set_morning_910_state")
-def test_910_exclusivity_skip_does_not_mark_failed(mock_set, mock_run, _skip):
+def test_910_failure_marks_morning_not_ok(mock_set, mock_run, _skip):
     mock_run.return_value = {
         "success": False,
         "skipped": True,
-        "reason": "breakfast_exclusivity",
+        "reason": "error",
     }
     sched = ArbitrageDailySetupScheduler()
     sched._run_morning_910()
-    mock_set.assert_not_called()
+    mock_set.assert_called_once_with(False)
 
 
 def test_scheduler_registers_925_job():

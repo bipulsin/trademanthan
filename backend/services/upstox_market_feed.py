@@ -780,19 +780,6 @@ def _thread_main(batches: List[List[str]]) -> None:
         logger.error("upstox_market_feed: thread fatal: %s", e, exc_info=True)
 
 
-def _exclusivity_blocks_feed_start() -> bool:
-    try:
-        from backend.services.breakfast_upstox_gate import (
-            breakfast_exclusivity_active,
-            breakfast_priority_owner_active,
-        )
-
-        return bool(breakfast_exclusivity_active() and not breakfast_priority_owner_active())
-    except Exception as e:
-        logger.exception("breakfast_exclusivity: check_failed error=%s", e)
-        return False
-
-
 def _provider_key_set() -> set:
     out: set = set()
     for keys in _PROVIDER_KEYS.values():
@@ -841,7 +828,6 @@ def set_feed_provider_keys(name: str, instrument_keys: List[str]) -> None:
 
     Empty ``instrument_keys`` removes the provider (unsubscribe on next rebuild).
     Survives replace-mode ``ensure_market_feed_running`` from Rocket / market_data.
-    Respects Breakfast exclusivity the same way as ``ensure_market_feed_running``.
     """
     global _PROVIDER_KEYS
 
@@ -849,14 +835,6 @@ def set_feed_provider_keys(name: str, instrument_keys: List[str]) -> None:
         return
     pname = (name or "").strip()
     if not pname:
-        return
-
-    if _exclusivity_blocks_feed_start():
-        logger.info(
-            "breakfast_exclusivity: skipped set_feed_provider_keys name=%s incoming_keys=%s",
-            pname,
-            len(instrument_keys or []),
-        )
         return
 
     keys = tuple(
@@ -899,8 +877,8 @@ def ensure_market_feed_running(
     No-op when UPSTOX_MARKET_FEED_ENABLED is false or list empty.
 
     union=True merges ``instrument_keys`` into the live *base* set without dropping
-    existing base keys (Breakfast 9:15 index confirm). Replace (union=False) is
-    unchanged for callers that pass a full universe.
+    existing base keys. Replace (union=False) is unchanged for callers that pass
+    a full universe.
 
     Named providers (``set_feed_provider_keys``) are always re-merged so sidecar
     consumers are not wiped by replace-mode callers.
@@ -911,15 +889,6 @@ def ensure_market_feed_running(
         return
     keys = [_normalize_ik(k) for k in instrument_keys if (k or "").strip()]
     if not keys:
-        return
-
-    if _exclusivity_blocks_feed_start():
-        logger.info(
-            "breakfast_exclusivity: skipped ensure_market_feed_running "
-            "union=%s incoming_keys=%s",
-            union,
-            len(keys),
-        )
         return
 
     if union and _BASE_KEYS_SIG:
@@ -979,47 +948,6 @@ def get_ws_quote_for_instrument(instrument_key: str) -> Optional[Dict[str, Any]]
             "oi_change": row.get("oi_change", 0),
             "age_sec": round(age, 2),
         }
-
-
-def get_ws_1m_bars_for_session(instrument_key: str, session_date: date) -> List[Dict[str, Any]]:
-    """In-memory WS 1m bars for instrument on session_date (09:00–10:00 IST)."""
-    ik = _normalize_ik(instrument_key)
-    day_prefix = session_date.isoformat()
-    out: List[Dict[str, Any]] = []
-    with _CANDLE_LOCK:
-        for (k_ik, minute_iso), c in _WS_1M_STATE.items():
-            if k_ik != ik or not minute_iso.startswith(day_prefix):
-                continue
-            try:
-                dt = datetime.fromisoformat(minute_iso)
-                if dt.tzinfo is None:
-                    dt = IST.localize(dt)
-                else:
-                    dt = dt.astimezone(IST)
-            except (TypeError, ValueError):
-                continue
-            if not (dt_time(9, 0) <= dt.time() <= dt_time(10, 0)):
-                continue
-            out.append(
-                {
-                    "timestamp": minute_iso,
-                    "open": float(c["open"]),
-                    "high": float(c["high"]),
-                    "low": float(c["low"]),
-                    "close": float(c["close"]),
-                    "volume": float(c.get("volume") or 0),
-                }
-            )
-    out.sort(key=lambda x: x.get("timestamp") or "")
-    return out
-
-
-def get_ws_forming_5m_bar(instrument_key: str, session_date: date) -> Optional[Dict[str, Any]]:
-    """Aggregate 09:15–09:20 5m from WS 1m cache when available."""
-    from backend.services.breakfast_strategy.candles import aggregate_1m_to_session_5m
-
-    bars_1m = get_ws_1m_bars_for_session(instrument_key, session_date)
-    return aggregate_1m_to_session_5m(bars_1m, session_date)
 
 
 def feed_status() -> Dict[str, Any]:

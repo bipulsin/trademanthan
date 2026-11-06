@@ -28,7 +28,7 @@ def _tick() -> None:
 
 
 def start_arbitrage_volatility_grade_scheduler() -> None:
-    """17:00 IST Fridays — after cash close; Breakfast exclusivity is morning-only."""
+    """17:00 IST Fridays — after cash close."""
     global _scheduler
     if _scheduler is not None:
         return

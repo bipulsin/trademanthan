@@ -1,6 +1,6 @@
 -- Align arbitrage_master.sector with sector_instrument_key / sector_index.
 -- Short label = drop NSE_INDEX| and Nifty/NIFTY prefix (Fin Service exact).
--- Idempotent. Breakfast ranking uses sector_index keys, not this string.
+-- Idempotent. Sector label is derived from sector_index / sector_instrument_key.
 
 UPDATE arbitrage_master
 SET sector = CASE COALESCE(NULLIF(TRIM(sector_instrument_key), ''), TRIM(sector_index))

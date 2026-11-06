@@ -1,5 +1,5 @@
 -- 3a: Permanent sector/index registry + daily prev-close slot
--- 17 standing rows: 16 Breakfast sectors + NIFTY50
+-- 17 standing rows: 16 Nifty sector indices + NIFTY50
 
 CREATE TABLE IF NOT EXISTS nifty_benchmark_reference (
     instrument_key              TEXT PRIMARY KEY,
@@ -21,7 +21,7 @@ CREATE INDEX IF NOT EXISTS ix_nbr_prev_close_for_date
     ON nifty_benchmark_reference (prev_session_close_for_date DESC);
 
 COMMENT ON TABLE nifty_benchmark_reference IS
-    'Standing registry of Breakfast sector indices (16) + NIFTY50. prev_session_close* updated daily by breakfast prev-close job.';
+    'Standing registry of Nifty sector indices + NIFTY50. Referenced by arbitrage_master.sector_instrument_key.';
 
 INSERT INTO nifty_benchmark_reference
     (instrument_key, display_label, benchmark_kind, breakfast_sort_order)

@@ -1145,7 +1145,6 @@ def test_left_arbitrage_master_cleanup_drops_radar_active_keeps_executed(monkeyp
     monkeypatch.setattr(sos, "SessionLocal", lambda: _FakeDb())
     out = sos.run_left_arbitrage_master_cleanup(
         datetime(2026, 9, 21, 12, 0),
-        skip_breakfast_defer=True,
     )
     assert out["ok"] is True
     assert out["dropped"] == 2

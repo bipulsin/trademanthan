@@ -8,7 +8,7 @@
 -- After this SQL, refresh EQ/FUT keys via metadata roll:
 --   PYTHONPATH=. python backend/scripts/upsert_nifty_banknifty_arbitrage_master.py
 --
--- Stock-FUT consumers (Breakfast / OI / Smart / Vajra / HA VWAP) exclude these
+-- Stock-FUT consumers (OI / Smart / Vajra / HA VWAP) exclude these
 -- symbols via INDEX_FUT_UNDERLYINGS — see backend/services/arbitrage_universe.py.
 -- Idempotent. Wrapped in a transaction.
 

@@ -3393,11 +3393,6 @@ def run_wr_radar_scan(now: Optional[datetime] = None) -> Dict[str, Any]:
     EMA pass.
     """
     ensure_stock_option_tables()
-    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-    if defer_job_for_breakfast_exclusivity("stock_option_wr_scan"):
-        return {"ok": True, "skipped": "breakfast_exclusivity"}
-
     now_naive = now_ist_second() if now is None else naive_ist(now)
     clear_tick_wr_bars_cache()
     scanned = inserted = ignored = discarded = failed = 0
@@ -3478,11 +3473,6 @@ def run_radar_eod_cleanup(now: Optional[datetime] = None) -> Dict[str, Any]:
     WR < -95 → DELETE so the symbol is free for a future scan.
     """
     ensure_stock_option_tables()
-    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-    if defer_job_for_breakfast_exclusivity("stock_option_radar_eod"):
-        return {"ok": True, "skipped": "breakfast_exclusivity"}
-
     now_naive = now_ist_second() if now is None else naive_ist(now)
     db = SessionLocal()
     try:
@@ -3566,8 +3556,6 @@ def run_radar_eod_cleanup(now: Optional[datetime] = None) -> Dict[str, Any]:
 
 def run_left_arbitrage_master_cleanup(
     now: Optional[datetime] = None,
-    *,
-    skip_breakfast_defer: bool = False,
 ) -> Dict[str, Any]:
     """Soft-delete Radar/Active rows whose symbol left arbitrage_master.
 
@@ -3578,12 +3566,6 @@ def run_left_arbitrage_master_cleanup(
     sell+buy costs).
     """
     ensure_stock_option_tables()
-    if not skip_breakfast_defer:
-        from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-        if defer_job_for_breakfast_exclusivity("stock_option_left_master"):
-            return {"ok": True, "skipped": "breakfast_exclusivity"}
-
     now_naive = now_ist_second() if now is None else naive_ist(now)
     db = SessionLocal()
     try:
@@ -3701,12 +3683,6 @@ def run_ema_tick(
     Active no longer auto-promotes to Executed after 72h.
     """
     ensure_stock_option_tables()
-    from backend.services.breakfast_upstox_gate import defer_job_for_breakfast_exclusivity
-
-    job_label = "stock_option_ema_retry" if only_fetch_failed else "stock_option_ema"
-    if defer_job_for_breakfast_exclusivity(job_label):
-        return {"ok": True, "skipped": "breakfast_exclusivity", "retry": only_fetch_failed}
-
     now_naive = now_ist_second() if now is None else naive_ist(now)
     seeded = 0
     expired = 0
