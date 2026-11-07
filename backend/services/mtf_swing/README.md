@@ -4,7 +4,7 @@ Weekly swing screen on continuous NSE futures, executed independently on 15-minu
 
 The page at `/mtf-swing.html` reads `data/mtf_swing/trades.csv` through `GET /api/mtf-swing/results`. It does not embed trades. The **v2 Experiment** tab reads `data/mtf_swing_v2/` through `GET /api/mtf-swing/v2/results`.
 
-v2 defaults (`variant=auto`) pick **`all` only when that tag covers the full Nov'25–Oct'26 window**; otherwise **`v1_equivalent`** (where the continuous full-period book lives). The legacy June+Oct `variant=all` pilot remains selectable but is labeled as a partial-month pilot; like-for-like v1 comparison clips to months the selected variant actually has.
+v2 defaults (`variant=auto`) pick **`all` (v2 experiment / all filters) only when that tag covers the full Nov'25–Oct'26 window**; otherwise **`v1_equivalent` (validation / v1 flags)**. The UI labels those two tags explicitly so the Experiment tab does not silently look like experimental rules while showing the validation baseline. Legacy June+Oct `variant=all` pilot remains selectable as a partial-month pilot; like-for-like v1 comparison clips to months the selected variant actually has.
 
 ## Resume (v1)
 
@@ -53,13 +53,16 @@ Outputs: `trades.csv`, `discards.csv`, `regime_log.csv`, `coverage_log.csv`, `va
 
 ### Idempotency / pilot June+Oct rows
 
-Progress tokens are `v2:cont:{variant}:{tf}:{YYYY-MM}` so legacy flat pilot tokens (`v2:all:…`) do not mark continuous months complete. Trade IDs append `|{variant}`; append-only skips duplicates. The June+Oct pilot wrote `variant=all` with **flat** month starts (71 trades). A full-period continuous `all` run can share some entry-time keys with those rows — archive the pilot first:
+Progress tokens are `v2:cont:{variant}:{tf}:{YYYY-MM}` so legacy flat pilot tokens (`v2:all:…`) do not mark continuous months complete. Trade IDs append `|{variant}`; append-only skips duplicates. The June+Oct pilot wrote `variant=all` with **flat** month starts (71 trades). A full-period continuous `all` run can share entry-time keys with those rows — **remove** flat `all` trade/discard rows before the continuous run (keep `v1_equivalent` untouched), otherwise idempotent append would skip continuous Jun/Oct results.
 
 ```bash
-# on paperclip, inside the data volume
-cp trades.csv trades_pilot_jun_oct_flat.csv
-# optionally truncate trades/discards for a clean continuous book, or leave
-# pilot rows (they remain distinguishable by entry paths / months only).
+# on paperclip, inside data/mtf_swing_v2/
+# 1) Archive already at trades_pilot_jun_oct_flat.csv (or refresh a dated copy)
+# 2) Strip variant=all from live trades.csv + discards.csv; reset state_*_all.json
+# 3) Start continuous all (does NOT wipe v1_equivalent):
+flock -n /tmp/mtf_swing_v2.lock -c \
+  'python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \
+     --timeframes 60m,15m --variants all'
 ```
 
 Prefer flocked runs: `flock -n /tmp/mtf_swing_v2.lock -c 'python3 scripts/run_mtf_swing_backtest.py --v2 …'`.

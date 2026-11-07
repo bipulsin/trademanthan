@@ -54,6 +54,29 @@ table.ms th { position: sticky; top: 0; background: #101815; color: var(--muted,
 }
 .ms-pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.55rem; flex-wrap: wrap; }
 .ms-note { color: var(--muted, #8fa398); font-size: 0.8rem; }
+.ms-banner {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid rgba(212, 168, 75, 0.45);
+  background: rgba(212, 168, 75, 0.12);
+  color: #f0e0b8;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.ms-banner[hidden] { display: none !important; }
+.ms-banner button {
+  margin-left: 0.55rem;
+  border: 1px solid rgba(212, 168, 75, 0.55);
+  background: rgba(30, 40, 28, 0.85);
+  color: #f5e6c0;
+  border-radius: 6px;
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.ms-banner button:hover { background: rgba(50, 70, 45, 0.95); }
 tr.ms-worse { background: rgba(224, 107, 107, 0.12); }
 @media (max-width: 720px) {
   .ms-card .val { font-size: 1rem; }

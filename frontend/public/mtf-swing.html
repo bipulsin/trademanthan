@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="mtf-swing.css?v=2" />
+    <link rel="stylesheet" href="mtf-swing.css?v=3" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -142,6 +142,7 @@
                             </select>
                         </label>
                     </div>
+                    <div class="ms-banner" id="msV2Banner" hidden></div>
                     <p class="ms-status" id="msV2Status">Loading v2…</p>
                     <p class="ms-note" id="msV2Scope"></p>
                     <div class="ms-cards" id="msV2Cards"></div>
@@ -152,7 +153,7 @@
                     </section>
                     <section class="ms-section">
                         <h2>Like-for-like v1 vs selected variant</h2>
-                        <p class="ms-note">Same months + TF as the selected variant’s available scope; closed vs closed. Win-rate delta in percentage points (pp). Default variant is full-period data (<code>v1_equivalent</code> until a full-period <code>all</code> run exists). Pilot <code>all</code> is June+Oct only.</p>
+                        <p class="ms-note">Same months + TF as the selected variant’s available scope; closed vs closed. Win-rate delta in percentage points (pp). <strong>validation (v1 flags)</strong> = flags off (should match v1). <strong>v2 experiment (all filters)</strong> = regime + pivot SL + TP 1.5R/no time exit + min RR 1.3. Default switches to the experiment once a full-period <code>all</code> run exists; until then the validation baseline is shown with a banner.</p>
                         <div class="ms-table-wrap">
                             <table class="ms">
                                 <thead>
@@ -288,6 +289,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.55"></script>
-    <script src="mtf-swing.js?v=4"></script>
+    <script src="mtf-swing.js?v=5"></script>
 </body>
 </html>

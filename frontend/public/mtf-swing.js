@@ -267,19 +267,29 @@
         if (requested === "auto") replaceParams({ variant: data.variant });
       }
       fillV2Selectors(data);
+      renderV2Banner(data);
       renderV2();
       var n = v2.trades.length;
+      var tag = data.variant || v2.variant;
+      var label =
+        tag === "v1_equivalent"
+          ? "validation (v1 flags)"
+          : tag === "all"
+            ? "v2 experiment (all filters)"
+            : tag;
       var hint = "";
-      if (data.variant === "all") {
-        var cov = (data.variant_coverage && data.variant_coverage.all) || {};
-        if (cov.month_count && cov.month_count < 12) {
-          hint = " · variant=all is the June+Oct pilot — switch to v1_equivalent for full Nov'25–Oct'26";
+      if (tag === "all") {
+        var covAll = (data.variant_coverage && data.variant_coverage.all) || {};
+        if (covAll.month_count && covAll.month_count < 12 && !covAll.full_period) {
+          hint = " · June+Oct pilot only (full-period experiment still running or not started)";
         }
+      } else if (tag === "v1_equivalent") {
+        hint = " · flags off — matches v1; not the experimental filter set";
       }
       setV2Status(
         n
-          ? n + " v2 rows · variant=" + (data.variant || v2.variant) + hint
-          : "No v2 rows for this filter. Try variant v1_equivalent or Full period."
+          ? n + " rows · " + label + hint
+          : "No v2 rows for this filter. Try validation (v1 flags) or Full period."
       );
     } catch (err) {
       setV2Status("Could not load v2. " + err.message);
@@ -540,6 +550,59 @@
       legend.appendChild(item);
     });
     host.appendChild(legend);
+  }
+
+  function renderV2Banner(data) {
+    var el = document.getElementById("msV2Banner");
+    if (!el) return;
+    var cov = (data && data.variant_coverage) || {};
+    var allInfo = cov.all || {};
+    var fullAll = !!allInfo.full_period;
+    var tag = (data && data.variant) || v2.variant;
+    var pilotAll = !fullAll && (allInfo.month_count || 0) > 0;
+
+    if (fullAll) {
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+
+    if (tag === "v1_equivalent" || tag === "auto") {
+      el.hidden = false;
+      el.innerHTML =
+        "Full-period experiment (variant=all) not run yet — showing <strong>validation baseline</strong> (v1 flags off). " +
+        (pilotAll
+          ? "A June+Oct pilot of the experiment exists. "
+          : "Experimental criteria (regime, pivot SL, TP 1.5R/no time exit, min RR 1.3) are not applied in this view. ") +
+        '<button type="button" id="msV2SwitchAll">Show v2 experiment' +
+        (pilotAll ? " (pilot Jun+Oct)" : "") +
+        "</button>";
+      var btn = document.getElementById("msV2SwitchAll");
+      if (btn) {
+        btn.addEventListener("click", function () {
+          setV2Variant("all");
+        });
+      }
+      return;
+    }
+
+    if (tag === "all" && pilotAll) {
+      el.hidden = false;
+      el.innerHTML =
+        "Showing <strong>v2 experiment</strong> pilot months only (not full Nov'25–Oct'26). " +
+        "Full-period continuous <code>all</code> is not complete yet — month-wise deltas vs v1 apply only where pilot data exists. " +
+        '<button type="button" id="msV2SwitchVal">Back to validation baseline</button>';
+      var btn2 = document.getElementById("msV2SwitchVal");
+      if (btn2) {
+        btn2.addEventListener("click", function () {
+          setV2Variant("v1_equivalent");
+        });
+      }
+      return;
+    }
+
+    el.hidden = true;
+    el.innerHTML = "";
   }
 
   function renderV2() {

@@ -239,13 +239,30 @@ def v2_results(
         info = cov.get(tag) or {}
         n = int(info.get("trades") or 0)
         mc = int(info.get("month_count") or 0)
+        # Human-readable names so Experiment tab never looks like raw CSV tags.
+        pretty = {
+            "v1_equivalent": "validation (v1 flags)",
+            "all": "v2 experiment (all filters)",
+            "regime_only": "regime only",
+            "sl_only": "pivot SL only",
+            "tp_only": "TP 1.5R / no time exit",
+            "rr_only": "min RR 1.3 only",
+            "all_except_regime": "all except regime",
+            "all_except_sl": "all except pivot SL",
+            "all_except_tp": "all except TP rule",
+            "all_except_rr": "all except min RR",
+        }.get(tag, tag)
         if not n:
-            return tag
-        if info.get("full_period"):
-            return f"{tag} ({n} · full)"
+            return pretty
+        if tag == "all" and info.get("full_period"):
+            return f"{pretty} ({n} · full period)"
         if tag == "all" and mc and mc < 12:
-            return f"{tag} ({n} · pilot {mc} mo)"
-        return f"{tag} ({n} · {mc} mo)"
+            return f"{pretty} ({n} · pilot {mc} mo only)"
+        if tag == "v1_equivalent" and info.get("full_period"):
+            return f"{pretty} ({n} · full period)"
+        if info.get("full_period"):
+            return f"{pretty} ({n} · full)"
+        return f"{pretty} ({n} · {mc} mo)"
 
     variant_options = (
         [{"value": "any", "label": "Any variant"}]
