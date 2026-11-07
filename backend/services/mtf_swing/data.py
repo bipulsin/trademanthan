@@ -27,6 +27,9 @@ _EXPIRED_CANDLE = (
     "{key}/{interval}/{to_date}/{from_date}"
 )
 _EXPIRED_FUTURE = "https://api.upstox.com/v2/expired-instruments/future/contract"
+# Official Upstox docs list 1minute / 30minute / day / week / month for expired
+# candles; 15minute and 5minute also work in practice. 15m falls back to
+# 1minute + aggregate when a chunk returns empty (rate limit / transient miss).
 _EXPIRED_INTERVAL = {"15m": "15minute", "60m": "30minute"}
 
 
@@ -338,7 +341,7 @@ def _fetch_expired_rows(upstox: Any, instrument_key: str, interval: str, start: 
         from_date=start.isoformat(),
     )
     try:
-        data = upstox.make_api_request(url, method="GET", timeout=30, max_retries=2)
+        data = upstox.make_api_request(url, method="GET", timeout=30, max_retries=5)
     except Exception as exc:
         logger.info("mtf_swing expired candles %s: %s", instrument_key, exc)
         return []
@@ -396,14 +399,33 @@ def _fetch_regular_rows(upstox: Any, instrument_key: str, start: date, end: date
     return _dedupe_rows(rows, start, end)
 
 
+def _aggregate_expired_1m_to_15m(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from backend.services.upstox_service import _aggregate_1m_to_n_minute
+
+    return _aggregate_1m_to_n_minute(list(rows), 15)
+
+
 def _fetch_expired_chunked(upstox: Any, instrument_key: str, start: date, end: date, timeframe: str) -> List[Dict[str, Any]]:
     interval = _EXPIRED_INTERVAL.get(timeframe, "15minute")
+    # 1-minute expired history is capped near ~1 month; keep 15m chunks short.
     span = 28 if timeframe == "15m" else 80
     rows: List[Dict[str, Any]] = []
     cursor = start
     while cursor <= end:
         chunk_end = min(end, cursor + timedelta(days=span))
-        rows.extend(_fetch_expired_rows(upstox, instrument_key, interval, cursor, chunk_end))
+        chunk = _fetch_expired_rows(upstox, instrument_key, interval, cursor, chunk_end)
+        if not chunk and timeframe == "15m":
+            raw_1m = _fetch_expired_rows(upstox, instrument_key, "1minute", cursor, chunk_end)
+            if raw_1m:
+                chunk = _aggregate_expired_1m_to_15m(raw_1m)
+                logger.info(
+                    "mtf_swing 15m fallback 1minute→15m %s %s..%s bars=%s",
+                    instrument_key,
+                    cursor,
+                    chunk_end,
+                    len(chunk),
+                )
+        rows.extend(chunk)
         cursor = chunk_end + timedelta(days=1)
     return _dedupe_rows(rows, start, end)
 

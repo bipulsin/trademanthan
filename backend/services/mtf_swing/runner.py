@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -126,10 +127,15 @@ def run_backtest(
                     )
                 except Exception as exc:
                     logger.warning("mtf_swing fetch %s %s failed: %s", symbol, label, exc)
+                    time.sleep(0.25)
                     continue
                 if not bars:
                     logger.info("mtf_swing %s %s no candles", symbol, label)
+                    time.sleep(0.15)
                     continue
+                # Light pacing so a full universe pass does not trip Upstox 429s
+                # immediately after a heavy 60m run (which left 15m with empty months).
+                time.sleep(0.05)
                 lot = lot_size_for(symbol, bars[-1].contract) or next(iter(lots.values()), 0)
                 trades, discards, new_state = run_symbol(
                     bars,
@@ -174,6 +180,7 @@ def run_backtest(
             done.add(token)
             progress["completed"] = sorted(done)
             progress["updated"] = run_ts
+            progress.pop("note", None)
             _save_json(progress_path(), progress)
             summary["completed_now"].append(token)
             logger.info(
