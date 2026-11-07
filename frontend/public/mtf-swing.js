@@ -17,13 +17,13 @@
     "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10",
   ];
   var V2_VARIANTS = [
-    "all", "v1_equivalent", "regime_only", "sl_only", "tp_only", "rr_only",
+    "v1_equivalent", "all", "regime_only", "sl_only", "tp_only", "rr_only",
     "any", "all_except_regime", "all_except_sl", "all_except_tp", "all_except_rr",
   ];
   var v2 = {
     tf: "all",
     month: "all",
-    variant: "all",
+    variant: "auto",
     trades: [],
     summary: null,
     months: [],
@@ -35,6 +35,7 @@
     robustness: {},
     ablation: [],
     scope: "",
+    default_variant: "v1_equivalent",
     sortKey: "entry_time",
     sortDir: -1,
     page: 1,
@@ -110,8 +111,9 @@
   }
 
   function qsV2Variant() {
-    var v = qs().get("variant") || "all";
-    if (V2_VARIANTS.indexOf(v) === -1) v = "all";
+    var v = qs().get("variant");
+    if (!v || v === "auto" || v === "default") return "auto";
+    if (V2_VARIANTS.indexOf(v) === -1) return "auto";
     return v;
   }
 
@@ -183,6 +185,7 @@
     var variants = (data && data.variant_options) || V2_VARIANTS.map(function (v) {
       return { value: v, label: v };
     });
+    if (data && data.default_variant) v2.default_variant = data.default_variant;
     if (monthSel) {
       monthSel.innerHTML = months.map(function (o) {
         return '<option value="' + o.value + '">' + (o.label || o.value) + "</option>";
@@ -193,6 +196,7 @@
       varSel.innerHTML = variants.map(function (o) {
         return '<option value="' + o.value + '">' + (o.label || o.value) + "</option>";
       }).join("");
+      // Resolved variant from API (auto → v1_equivalent / full-period all).
       varSel.value = v2.variant;
     }
   }
@@ -231,6 +235,7 @@
   async function loadV2() {
     setV2Status("Loading v2 experiment…");
     try {
+      var requested = v2.variant || "auto";
       var url =
         apiBase() +
         "/api/mtf-swing/v2/results?timeframe=" +
@@ -238,7 +243,7 @@
         "&month=" +
         encodeURIComponent(v2.month) +
         "&variant=" +
-        encodeURIComponent(v2.variant);
+        encodeURIComponent(requested);
       var res = await fetch(url, {
         headers: { Authorization: "Bearer " + token() },
         cache: "no-store",
@@ -256,10 +261,26 @@
       v2.robustness = data.robustness || {};
       v2.ablation = data.ablation || [];
       v2.scope = data.scope || (data.comparison && data.comparison.scope) || "";
+      // Pin resolved variant so selectors / CSV download match the loaded view.
+      if (data.variant) {
+        v2.variant = data.variant;
+        if (requested === "auto") replaceParams({ variant: data.variant });
+      }
       fillV2Selectors(data);
       renderV2();
       var n = v2.trades.length;
-      setV2Status(n ? n + " v2 rows from " + (data.csv || "CSV") : "No v2 rows yet. Run the v2 backtest.");
+      var hint = "";
+      if (data.variant === "all") {
+        var cov = (data.variant_coverage && data.variant_coverage.all) || {};
+        if (cov.month_count && cov.month_count < 12) {
+          hint = " · variant=all is the June+Oct pilot — switch to v1_equivalent for full Nov'25–Oct'26";
+        }
+      }
+      setV2Status(
+        n
+          ? n + " v2 rows · variant=" + (data.variant || v2.variant) + hint
+          : "No v2 rows for this filter. Try variant v1_equivalent or Full period."
+      );
     } catch (err) {
       setV2Status("Could not load v2. " + err.message);
     }

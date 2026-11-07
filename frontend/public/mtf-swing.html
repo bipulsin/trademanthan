@@ -138,7 +138,7 @@
                         </label>
                         <label>Variant
                             <select id="v2VariantSelect">
-                                <option value="all">all</option>
+                                <option value="v1_equivalent">v1_equivalent</option>
                             </select>
                         </label>
                     </div>
@@ -152,7 +152,7 @@
                     </section>
                     <section class="ms-section">
                         <h2>Like-for-like v1 vs selected variant</h2>
-                        <p class="ms-note">Same months + TF; closed vs closed. Win-rate delta in percentage points (pp).</p>
+                        <p class="ms-note">Same months + TF as the selected variant’s available scope; closed vs closed. Win-rate delta in percentage points (pp). Default variant is full-period data (<code>v1_equivalent</code> until a full-period <code>all</code> run exists). Pilot <code>all</code> is June+Oct only.</p>
                         <div class="ms-table-wrap">
                             <table class="ms">
                                 <thead>
@@ -288,6 +288,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.55"></script>
-    <script src="mtf-swing.js?v=3"></script>
+    <script src="mtf-swing.js?v=4"></script>
 </body>
 </html>

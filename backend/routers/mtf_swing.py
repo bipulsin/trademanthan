@@ -25,7 +25,15 @@ from backend.services.mtf_swing.data import (
     trades_path_v2,
     variant_summary_path,
 )
-from backend.services.mtf_swing.metrics import ablation_table, build_dashboard, build_v2_dashboard, compare_v1_equivalent
+from backend.services.mtf_swing.metrics import (
+    ablation_table,
+    build_dashboard,
+    build_v2_dashboard,
+    compare_v1_equivalent,
+    months_present,
+    pick_default_variant,
+    variant_coverage,
+)
 
 router = APIRouter(prefix="/mtf-swing", tags=["mtf-swing"])
 
@@ -168,7 +176,7 @@ def results(
 def v2_results(
     timeframe: str = Query("all", pattern="^(60m|15m|all)$"),
     month: str = Query("all"),
-    variant: str = Query("all"),
+    variant: str = Query("auto"),
     _: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
     month_n = _normalize_month(month)
@@ -180,12 +188,19 @@ def v2_results(
     discards = read_rows(disc_path) if disc_path else []
     v1_path = find_trades_csv()
     v1_rows = read_rows(v1_path) if v1_path else []
+    cov = variant_coverage(rows, timeframe=timeframe)
+    default_variant = pick_default_variant(rows, timeframe=timeframe)
+    raw_variant = (variant or "auto").strip().lower()
+    if raw_variant in ("auto", "default", ""):
+        variant_n = default_variant
+    else:
+        variant_n = raw_variant
     dash = build_v2_dashboard(
         rows,
         discards,
         timeframe=timeframe,
         month=month_n,
-        variant=variant,
+        variant=variant_n,
         v1_trades=v1_rows,
     )
     ablation = ablation_table(rows)
@@ -200,21 +215,53 @@ def v2_results(
             filtered = [r for r in filtered if r.get("month") == month_n]
         ablation = filtered or ablation
     regime_path = regime_log_path()
-    month_options = [{"value": "all", "label": "Full"}] + [
-        {"value": lab, "label": lab} for _, _, lab in month_windows()
+    # Month dropdown counts for the *selected* variant (zeros = no rows yet).
+    selected_months = {
+        m.get("month"): int(m.get("trades") or 0) for m in (dash.get("months") or [])
+    }
+    present = months_present(rows, timeframe=timeframe, variant=variant_n)
+    full_n = sum(selected_months.get(lab, 0) for _, _, lab in month_windows())
+    month_options = [
+        {
+            "value": "all",
+            "label": f"Full ({full_n} trades · {len(present)} mo)"
+            if present
+            else "Full",
+        }
+    ] + [
+        {
+            "value": lab,
+            "label": f"{lab} ({selected_months.get(lab, 0)})",
+        }
+        for _, _, lab in month_windows()
     ]
+    def _variant_label(tag: str) -> str:
+        info = cov.get(tag) or {}
+        n = int(info.get("trades") or 0)
+        mc = int(info.get("month_count") or 0)
+        if not n:
+            return tag
+        if info.get("full_period"):
+            return f"{tag} ({n} · full)"
+        if tag == "all" and mc and mc < 12:
+            return f"{tag} ({n} · pilot {mc} mo)"
+        return f"{tag} ({n} · {mc} mo)"
+
     variant_options = (
         [{"value": "any", "label": "Any variant"}]
-        + [{"value": v, "label": v} for v in ABLATION_VARIANTS]
-        + [{"value": v, "label": v} for v in LEAVE_ONE_OUT_VARIANTS]
+        + [{"value": v, "label": _variant_label(v)} for v in ABLATION_VARIANTS]
+        + [{"value": v, "label": _variant_label(v)} for v in LEAVE_ONE_OUT_VARIANTS]
     )
     return {
         "ok": True,
         "csv": str(path or ""),
         "timeframe": timeframe,
         "month": month_n,
-        "variant": variant,
+        "variant": variant_n,
+        "default_variant": default_variant,
+        "variant_coverage": cov,
         "scope": dash.get("scope"),
+        "scope_months": dash.get("scope_months") or [],
         "trades": dash["trades"],
         "summary": dash["summary"],
         "months": dash["months"],
@@ -280,7 +327,7 @@ def download_trades(
 def download_trades_v2(
     timeframe: str = Query("all", pattern="^(60m|15m|all)$"),
     month: str = Query("all"),
-    variant: str = Query("all"),
+    variant: str = Query("auto"),
     _: User = Depends(_auth_user),
 ) -> PlainTextResponse:
     month_n = _normalize_month(month)
@@ -290,12 +337,17 @@ def download_trades_v2(
     if path is None:
         raise HTTPException(status_code=404, detail="MTF Swing v2 trades CSV not written yet")
     rows = read_rows(path)
+    raw_variant = (variant or "auto").strip().lower()
+    if raw_variant in ("auto", "default", ""):
+        variant_n = pick_default_variant(rows, timeframe=timeframe)
+    else:
+        variant_n = raw_variant
     if timeframe != "all":
         rows = [r for r in rows if r.get("timeframe") == timeframe]
     if month_n != "all":
         rows = [r for r in rows if r.get("month") == month_n]
-    if variant and variant not in (_VARIANT_ANY, "*", "all_variants"):
-        rows = [r for r in rows if r.get("variant") == variant]
+    if variant_n and variant_n not in (_VARIANT_ANY, "*", "all_variants"):
+        rows = [r for r in rows if r.get("variant") == variant_n]
     buf = io.StringIO()
     if rows:
         writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))

@@ -4,6 +4,8 @@ Weekly swing screen on continuous NSE futures, executed independently on 15-minu
 
 The page at `/mtf-swing.html` reads `data/mtf_swing/trades.csv` through `GET /api/mtf-swing/results`. It does not embed trades. The **v2 Experiment** tab reads `data/mtf_swing_v2/` through `GET /api/mtf-swing/v2/results`.
 
+v2 defaults (`variant=auto`) pick **`all` only when that tag covers the full Nov'25–Oct'26 window**; otherwise **`v1_equivalent`** (where the continuous full-period book lives). The legacy June+Oct `variant=all` pilot remains selectable but is labeled as a partial-month pilot; like-for-like v1 comparison clips to months the selected variant actually has.
+
 ## Resume (v1)
 
 From the repo root (Upstox credentials and `arbitrage_master` required):

@@ -25,6 +25,7 @@ from backend.services.mtf_swing.metrics import (
     build_v2_dashboard,
     compare_v1_equivalent,
     core_trade_signature,
+    pick_default_variant,
     robustness_block,
 )
 from backend.services.mtf_swing.regime import (
@@ -448,7 +449,7 @@ def test_v2_dashboard_aggregates_match_csv_and_exclude_open():
             "mtm_price": "110",
         },
     ]
-    dash = build_v2_dashboard(rows, timeframe="60m", month="2026-06")
+    dash = build_v2_dashboard(rows, timeframe="60m", month="2026-06", variant="all")
     assert dash["summary"]["trades"] == 2
     assert dash["summary"]["net_pnl"] == 60
     assert dash["summary"]["open_trades"] == 1
@@ -563,6 +564,30 @@ def test_v1_equivalent_matches_plain_v1_signatures():
     assert t_v1[0]["net_pnl"] == t_v2[0]["net_pnl"]
 
 
+def test_pick_default_variant_prefers_full_period_over_pilot_all():
+    pilot = [
+        {"variant": "all", "month": "2026-06", "timeframe": "60m"},
+        {"variant": "all", "month": "2026-10", "timeframe": "60m"},
+    ]
+    full_v1e = [
+        {"variant": "v1_equivalent", "month": f"2026-{m:02d}", "timeframe": "60m"}
+        for m in range(1, 11)
+    ] + [
+        {"variant": "v1_equivalent", "month": "2025-11", "timeframe": "60m"},
+        {"variant": "v1_equivalent", "month": "2025-12", "timeframe": "60m"},
+    ]
+    assert pick_default_variant(pilot + full_v1e) == "v1_equivalent"
+    full_all = [
+        {"variant": "all", "month": lab, "timeframe": "60m"}
+        for lab in (
+            "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04",
+            "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10",
+        )
+    ]
+    assert pick_default_variant(full_all + full_v1e) == "all"
+    assert pick_default_variant([]) == "v1_equivalent"
+
+
 def test_like_for_like_dashboard_scopes_months_and_wr_pp():
     v1 = [
         {"trade_id": "A", "timeframe": "60m", "month": "2026-06", "symbol": "A", "side": "LONG",
@@ -584,10 +609,14 @@ def test_like_for_like_dashboard_scopes_months_and_wr_pp():
     assert dash["comparison"]["v1"]["trades"] == 1
     assert dash["comparison"]["v2"]["trades"] == 1
     assert dash["comparison"]["delta_pp"]["win_rate"] is not None
-    # Full scope must not silently drop to June+Oct only.
+    # Full month table stays 12 rows; headline like-for-like clips to months the variant has.
     full = build_v2_dashboard(v2, timeframe="60m", month="all", variant="all", v1_trades=v1)
     assert len(full["month_compare"]) == 12
     assert any(m["month"] == "2026-07" for m in full["month_compare"])
+    assert full["scope_months"] == ["2026-06"]
+    # v1 July must not inflate the headline comparison when variant=all only has June.
+    assert full["comparison"]["v1"]["trades"] == 1
+    assert full["comparison"]["v2"]["trades"] == 1
 
 
 def test_concentration_exposure_and_ablation_baseline():

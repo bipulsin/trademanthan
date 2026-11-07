@@ -183,6 +183,68 @@ def filter_rows(
     return out
 
 
+def months_present(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    timeframe: str = "all",
+    variant: str = "any",
+) -> List[str]:
+    """Ordered experiment months that have at least one row for the filter."""
+    view = filter_rows(rows, timeframe=timeframe, month="all", variant=variant)
+    have = {str(r.get("month") or "") for r in view if r.get("month")}
+    return [lab for _, _, lab in month_windows() if lab in have]
+
+
+def variant_coverage(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    timeframe: str = "all",
+) -> Dict[str, Dict[str, Any]]:
+    """Per-variant row counts and month lists (for selectors / default pick)."""
+    full = {lab for _, _, lab in month_windows()}
+    by_variant: Dict[str, List[Dict[str, Any]]] = {}
+    for r in filter_rows(rows, timeframe=timeframe, month="all", variant="any"):
+        tag = str(r.get("variant") or "")
+        if not tag:
+            continue
+        by_variant.setdefault(tag, []).append(r)
+    out: Dict[str, Dict[str, Any]] = {}
+    for tag, group in by_variant.items():
+        months = months_present(group, timeframe="all", variant="any")
+        out[tag] = {
+            "trades": len(group),
+            "months": months,
+            "month_count": len(months),
+            "full_period": set(months) >= full,
+        }
+    return out
+
+
+def pick_default_variant(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    timeframe: str = "all",
+) -> str:
+    """Prefer full-feature ``all`` when it covers the experiment window; else ``v1_equivalent``.
+
+    Pilot ``all`` runs (June+Oct only) must not become the page default while
+    ``v1_equivalent`` holds the full Nov'25–Oct'26 book.
+    """
+    cov = variant_coverage(rows, timeframe=timeframe)
+    all_info = cov.get("all") or {}
+    if all_info.get("full_period"):
+        return "all"
+    if cov.get("v1_equivalent"):
+        return "v1_equivalent"
+    if all_info.get("month_count"):
+        # Sparse pilot only — still prefer v1_equivalent when absent above.
+        # Fall through to richest remaining tag.
+        pass
+    if not cov:
+        return "v1_equivalent"
+    return max(cov.items(), key=lambda kv: (kv[1]["month_count"], kv[1]["trades"], kv[0]))[0]
+
+
 def build_funnel(discards: Sequence[Dict[str, Any]], trades: Sequence[Dict[str, Any]]) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     for d in discards:
@@ -354,49 +416,77 @@ def build_v2_dashboard(
     *,
     timeframe: str = "all",
     month: str = "all",
-    variant: str = "all",
+    variant: str = "v1_equivalent",
     v1_trades: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """v2 Experiment dashboard with like-for-like v1 comparison.
 
     Like-for-like: same timeframe, same month scope, closed-trade metrics.
     OPEN counts / MTM are reported separately and do not enter closed P&L.
+
+    When ``month`` is Full and the selected variant only covers a subset of
+    experiment months (e.g. pilot ``all`` = Jun+Oct), v1 comparison is clipped
+    to those months so totals stay like-for-like.
     """
     view = filter_rows(trades, timeframe=timeframe, month=month, variant=variant)
     dash = build_dashboard(view, timeframe="all")  # already filtered
     if month and month not in ("all", "full", ""):
         dash["months"] = [m for m in dash["months"] if m.get("month") == month]
-    # else keep full 12-month table
+    # else keep full 12-month table (zeros where the variant has no rows)
     disc = filter_rows(discards or [], timeframe=timeframe, month=month, variant=variant)
     funnel = build_funnel(disc, view)
-    scope_months = (
-        [month]
-        if month not in ("all", "full", "")
-        else [lab for _, _, lab in month_windows()]
-    )
+    full_labels = [lab for _, _, lab in month_windows()]
+    if month not in ("all", "full", ""):
+        scope_months = [month]
+    else:
+        present = months_present(view, timeframe="all", variant="any")
+        # Clip Full-period like-for-like to months the variant actually has.
+        # Keep the 12-row month tables for visibility of gaps.
+        scope_months = present if present else full_labels
+    if month not in ("all", "full", ""):
+        months_label = month
+    elif scope_months == full_labels:
+        months_label = "Full (Nov25–Oct26)"
+    else:
+        months_label = f"available ({', '.join(scope_months)})"
     scope_label = (
-        f"TF={timeframe}; months={month if month not in ('all', 'full', '') else 'Full (Nov25–Oct26)'}; "
+        f"TF={timeframe}; months={months_label}; "
         f"variant={variant}; closed vs closed (OPEN/MTM separate)"
     )
     comparison = None
     month_compare: List[Dict[str, Any]] = []
     if v1_trades is not None:
-        v1_view = filter_rows(v1_trades, timeframe=timeframe, month=month, variant="any")
-        # v1 has no variant column — month/tf filter only.
-        if month not in ("all", "full", ""):
-            v1_view = [r for r in v1_trades if str(r.get("month") or "") == month]
-            if timeframe and timeframe != "all":
-                v1_view = [r for r in v1_view if str(r.get("timeframe") or "") == timeframe]
-        else:
-            v1_view = filter_rows(v1_trades, timeframe=timeframe, month="all", variant="any")
+        # v1 has no variant column — match TF + like-for-like month scope only.
+        v1_view = [
+            r
+            for r in v1_trades
+            if (not timeframe or timeframe == "all" or str(r.get("timeframe") or "") == timeframe)
+            and str(r.get("month") or "") in scope_months
+        ]
         v1_dash = build_dashboard(v1_view, timeframe="all")
-        comparison = compare_summaries(v1_dash["summary"], dash["summary"])
+        # Headline comparison uses scoped months; rebuild selected summary on the
+        # same month set when Full was requested but coverage is partial.
+        if month in ("all", "full", "") and scope_months != full_labels:
+            scoped_view = [r for r in view if str(r.get("month") or "") in scope_months]
+            scoped_dash = build_dashboard(scoped_view, timeframe="all")
+            comparison = compare_summaries(v1_dash["summary"], scoped_dash["summary"])
+        else:
+            comparison = compare_summaries(v1_dash["summary"], dash["summary"])
         comparison["scope"] = scope_label
         comparison["scope_months"] = scope_months
-        month_compare = _month_compare(v1_dash["months"], dash["months"])
+        # Month table always shows the full experiment window (empty v2 cells = gap).
+        month_compare = _month_compare(
+            build_dashboard(
+                [r for r in v1_trades if (not timeframe or timeframe == "all" or str(r.get("timeframe") or "") == timeframe)],
+                timeframe="all",
+            )["months"],
+            dash["months"],
+        )
     baseline_equity = []
     if variant != "v1_equivalent":
         base_view = filter_rows(trades, timeframe=timeframe, month=month, variant="v1_equivalent")
+        if month in ("all", "full", "") and scope_months != full_labels:
+            base_view = [r for r in base_view if str(r.get("month") or "") in scope_months]
         baseline_equity = _equity_curve(base_view)
     selected_equity = dash["charts"]["equity"]
     return {
@@ -404,6 +494,7 @@ def build_v2_dashboard(
         "month": month,
         "variant": variant,
         "scope": scope_label,
+        "scope_months": scope_months,
         "summary": dash["summary"],
         "months": dash["months"],
         "month_compare": month_compare,
