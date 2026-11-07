@@ -30,6 +30,11 @@ class Levels:
     basis_contract: str
     screen_date: date
     valid_week: WeekKey
+    # Opposite extreme of previous week (reward anchor for potential RR / v1 T1).
+    opp_extreme: float = 0.0
+    # Timestamp of the bar that set the SL (sweep or pivot); used as trigger look-back.
+    sl_pivot_ts: Optional[datetime] = None
+    sl_basis: str = "abs_extreme"
 
 
 def week_stats(raw_bars: Sequence[Bar]) -> Optional[WeekStats]:
@@ -143,30 +148,75 @@ def _sweep_high_ts(bars: Sequence[Bar]) -> datetime:
     return ts
 
 
+def _pivot_sl_long(bars: Sequence[Bar], w2_low: float) -> Optional[Tuple[float, datetime]]:
+    """Lowest confirmed swing low in W1 strictly below previous week's low."""
+    best: Optional[Tuple[float, datetime]] = None
+    for i in swing_low_indexes(bars):
+        lo = bars[i].low
+        if lo >= w2_low:
+            continue
+        if best is None or lo < best[0]:
+            best = (lo, bars[i].ts)
+    return best
+
+
+def _pivot_sl_short(bars: Sequence[Bar], w2_high: float) -> Optional[Tuple[float, datetime]]:
+    """Highest confirmed swing high in W1 strictly above previous week's high."""
+    best: Optional[Tuple[float, datetime]] = None
+    for i in swing_high_indexes(bars):
+        hi = bars[i].high
+        if hi <= w2_high:
+            continue
+        if best is None or hi > best[0]:
+            best = (hi, bars[i].ts)
+    return best
+
+
 def build_levels(
     side: str,
     w1: WeekStats,
     w2: WeekStats,
     *,
     cluster_pct: float = CLUSTER_PCT,
+    sl_basis: str = "abs_extreme",
 ) -> Tuple[Optional[Levels], Optional[str]]:
-    """Return (levels, discard_reason). Reason is NO_SWING or LEVELS_ILLOGICAL."""
+    """Return (levels, discard_reason).
+
+    Reasons: NO_SWING, LEVELS_ILLOGICAL, NO_PIVOT_SL.
+    ``sl_basis=pivot_outside_prev_week`` places SL on a confirmed swing outside W2
+    and anchors the breakout-trigger look-back at that pivot's timestamp.
+    """
     bars = w1.adjusted
+    basis = (sl_basis or "abs_extreme").strip().lower()
     if side == "LONG":
-        sl = w1.low
-        t1 = w2.high
-        sweep_ts = _sweep_low_ts(bars)
-        idx = pick_swing_high(bars, sweep_ts, cluster_pct)
+        opp = w2.high
+        if basis == "pivot_outside_prev_week":
+            pivot = _pivot_sl_long(bars, w2.low)
+            if pivot is None:
+                return None, "NO_PIVOT_SL"
+            sl, sl_ts = pivot
+        else:
+            sl = w1.low
+            sl_ts = _sweep_low_ts(bars)
+        t1 = opp
+        idx = pick_swing_high(bars, sl_ts, cluster_pct)
         if idx is None:
             return None, "NO_SWING"
         trigger = bars[idx].high
         if not (sl < trigger < t1):
             return None, "LEVELS_ILLOGICAL"
     else:
-        sl = w1.high
-        t1 = w2.low
-        sweep_ts = _sweep_high_ts(bars)
-        idx = pick_swing_low(bars, sweep_ts, cluster_pct)
+        opp = w2.low
+        if basis == "pivot_outside_prev_week":
+            pivot = _pivot_sl_short(bars, w2.high)
+            if pivot is None:
+                return None, "NO_PIVOT_SL"
+            sl, sl_ts = pivot
+        else:
+            sl = w1.high
+            sl_ts = _sweep_high_ts(bars)
+        t1 = opp
+        idx = pick_swing_low(bars, sl_ts, cluster_pct)
         if idx is None:
             return None, "NO_SWING"
         trigger = bars[idx].low
@@ -184,6 +234,9 @@ def build_levels(
             basis_contract=w1.basis_contract,
             screen_date=w1.last_date,
             valid_week=valid,
+            opp_extreme=opp,
+            sl_pivot_ts=sl_ts,
+            sl_basis=basis,
         ),
         None,
     )

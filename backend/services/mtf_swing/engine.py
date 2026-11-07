@@ -1,4 +1,8 @@
-"""Bar-by-bar MTF Swing execution. Pure: no I/O. Month batches call this with carried state."""
+"""Bar-by-bar MTF Swing execution. Pure: no I/O. Month batches call this with carried state.
+
+v1 behaviour is the default. Experimental v2 flags live on ``MtfSwingConfig``
+(regime filter, pivot SL, R-multiple TP / no time exit, min potential RR).
+"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -17,6 +21,7 @@ from backend.services.mtf_swing.bars import (
 )
 from backend.services.mtf_swing.config import MtfSwingConfig
 from backend.services.mtf_swing.levels import Levels, adjusted_pair, build_levels, candidate_side
+from backend.services.mtf_swing.regime import regime_allows
 
 
 @dataclass
@@ -31,6 +36,11 @@ class Setup:
     phase: str = "watch"  # watch | next_open | limit
     limit_price: Optional[float] = None
     defer_fill: bool = False
+    opp_extreme: float = 0.0
+    regime: str = ""
+    potential_rr: str = ""
+    signal_close: Optional[float] = None
+    prospective_tp: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -51,6 +61,13 @@ class Setup:
             phase=raw.get("phase") or "watch",
             limit_price=None if raw.get("limit_price") in (None, "") else float(raw["limit_price"]),
             defer_fill=bool(raw.get("defer_fill")),
+            opp_extreme=float(raw.get("opp_extreme") or 0.0),
+            regime=str(raw.get("regime") or ""),
+            potential_rr=str(raw.get("potential_rr") or ""),
+            signal_close=None if raw.get("signal_close") in (None, "") else float(raw["signal_close"]),
+            prospective_tp=None
+            if raw.get("prospective_tp") in (None, "")
+            else float(raw["prospective_tp"]),
         )
 
 
@@ -67,6 +84,8 @@ class Position:
     basis_contract: str
     entry_month: str
     sessions: List[str] = field(default_factory=list)
+    regime: str = ""
+    potential_rr: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -85,6 +104,8 @@ class Position:
             basis_contract=str(raw.get("basis_contract") or ""),
             entry_month=raw["entry_month"],
             sessions=list(raw.get("sessions") or []),
+            regime=str(raw.get("regime") or ""),
+            potential_rr=str(raw.get("potential_rr") or ""),
         )
 
 
@@ -106,6 +127,12 @@ def _shift_setup(setup: Setup, gap: float, contract: str) -> None:
         setup.trigger += gap
         if setup.limit_price is not None:
             setup.limit_price += gap
+        if setup.opp_extreme:
+            setup.opp_extreme += gap
+        if setup.signal_close is not None:
+            setup.signal_close += gap
+        if setup.prospective_tp is not None:
+            setup.prospective_tp += gap
     setup.basis_contract = contract
 
 
@@ -144,6 +171,45 @@ def _pnl(side: str, entry: float, exit_px: float, sl: float, lot: int, cfg: MtfS
     return _fmt(gross, 2), _fmt(charges, 2), _fmt(net, 2), r
 
 
+def _mtm_pnl(side: str, entry: float, mtm: float, lot: int, cfg: MtfSwingConfig) -> float:
+    if side == "LONG":
+        points = mtm - entry
+    else:
+        points = entry - mtm
+    return points * int(lot) * int(cfg.qty_lots) - cfg.charge_inr()
+
+
+def _r_target(side: str, entry: float, sl: float, tp_r: float) -> float:
+    if side == "LONG":
+        return entry + float(tp_r) * (entry - sl)
+    return entry - float(tp_r) * (sl - entry)
+
+
+def _potential_rr(side: str, close: float, sl: float, opp: float) -> Optional[float]:
+    if side == "LONG":
+        risk = close - sl
+        reward = opp - close
+    else:
+        risk = sl - close
+        reward = close - opp
+    if risk <= 0:
+        return None
+    return reward / risk
+
+
+def _limit_at_rr(side: str, sl: float, opp: float, min_rr: float) -> Optional[float]:
+    """Limit price so potential RR vs opp extreme equals ``min_rr``."""
+    rr = float(min_rr)
+    if rr <= 0:
+        return None
+    if side == "LONG":
+        # (opp - L) / (L - sl) = rr  →  L = (opp + rr*sl) / (1+rr)
+        return (opp + rr * sl) / (1.0 + rr)
+    # (L - opp) / (sl - L) = rr  →  L = (opp + rr*sl) / (1+rr)  wait for short:
+    # (L - opp) = rr * (sl - L) → L - opp = rr*sl - rr*L → L + rr*L = opp + rr*sl
+    return (opp + rr * sl) / (1.0 + rr)
+
+
 def _trade_row(
     *,
     symbol: str,
@@ -153,15 +219,19 @@ def _trade_row(
     exit_price: Optional[float],
     exit_reason: str,
     run_ts: str,
+    mtm_price: Optional[float] = None,
+    mtm_pnl: Optional[float] = None,
 ) -> Dict[str, str]:
     tid = f"{symbol}|{cfg.timeframe}|{pos.side}|{pos.entry_time}"
+    if cfg.ablation_tag:
+        tid = f"{tid}|{cfg.ablation_tag}"
     if exit_reason == "OPEN":
         gross = charges = net = r = ""
         exit_px_s = ""
     else:
         gross, charges, net, r = _pnl(pos.side, pos.entry_price, float(exit_price), pos.sl, pos.lot_size, cfg)
         exit_px_s = _fmt(exit_price)
-    return {
+    row = {
         "trade_id": tid,
         "timeframe": cfg.timeframe,
         "month": pos.entry_month,
@@ -184,7 +254,15 @@ def _trade_row(
         "net_pnl": net,
         "r_multiple": r,
         "run_ts": run_ts,
+        "variant": cfg.ablation_tag or cfg.variant,
+        "regime": pos.regime,
+        "potential_rr": pos.potential_rr,
+        "sl_basis": cfg.sl_basis,
+        "tp_r": "" if cfg.tp_r is None else _fmt(float(cfg.tp_r), 2),
+        "mtm_price": _fmt(mtm_price) if mtm_price is not None else "",
+        "mtm_pnl": _fmt(mtm_pnl, 2) if mtm_pnl is not None else "",
     }
+    return row
 
 
 def _discard_row(
@@ -197,9 +275,12 @@ def _discard_row(
     detail: str,
     event_time: str,
     run_ts: str,
+    regime: str = "",
 ) -> Dict[str, str]:
     month = (screen_date or event_time or "")[:7]
     did = f"{symbol}|{cfg.timeframe}|{screen_date}|{side}|{reason}|{event_time}"
+    if cfg.ablation_tag:
+        did = f"{did}|{cfg.ablation_tag}"
     return {
         "discard_id": did,
         "timeframe": cfg.timeframe,
@@ -211,11 +292,14 @@ def _discard_row(
         "detail": detail,
         "event_time": event_time,
         "run_ts": run_ts,
+        "variant": cfg.ablation_tag or cfg.variant,
+        "regime": regime,
     }
 
 
 def _try_exit(pos: Position, bar: Bar, is_last_session_bar: bool, cfg: MtfSwingConfig) -> Optional[Tuple[float, str]]:
-    """Return (exit_price, reason) or None. SL wins when the same bar touches SL and T1."""
+    """Return (exit_price, reason) or None. SL wins when the same bar touches SL and target."""
+    target_reason = cfg.target_exit_reason
     sess = bar.session_date.isoformat()
     if sess not in pos.sessions:
         pos.sessions.append(sess)
@@ -223,7 +307,7 @@ def _try_exit(pos: Position, bar: Bar, is_last_session_bar: bool, cfg: MtfSwingC
         if bar.open <= pos.sl:
             return bar.open, "SL"
         if bar.open >= pos.t1:
-            return bar.open, "T1"
+            return bar.open, target_reason
         hit_sl = bar.low <= pos.sl
         hit_t1 = bar.high >= pos.t1
         if hit_sl and hit_t1:
@@ -231,12 +315,12 @@ def _try_exit(pos: Position, bar: Bar, is_last_session_bar: bool, cfg: MtfSwingC
         if hit_sl:
             return pos.sl, "SL"
         if hit_t1:
-            return pos.t1, "T1"
+            return pos.t1, target_reason
     else:
         if bar.open >= pos.sl:
             return bar.open, "SL"
         if bar.open <= pos.t1:
-            return bar.open, "T1"
+            return bar.open, target_reason
         hit_sl = bar.high >= pos.sl
         hit_t1 = bar.low <= pos.t1
         if hit_sl and hit_t1:
@@ -244,26 +328,41 @@ def _try_exit(pos: Position, bar: Bar, is_last_session_bar: bool, cfg: MtfSwingC
         if hit_sl:
             return pos.sl, "SL"
         if hit_t1:
-            return pos.t1, "T1"
-    if len(pos.sessions) >= int(cfg.max_sessions) and is_last_session_bar:
+            return pos.t1, target_reason
+    max_sess = cfg.max_sessions
+    if max_sess is not None and int(max_sess) > 0 and len(pos.sessions) >= int(max_sess) and is_last_session_bar:
         return bar.close, "TIME"
     return None
 
 
-def _cancel_long_before(setup: Setup, bar: Bar) -> Optional[str]:
+def _active_tp(setup: Setup) -> float:
+    if setup.prospective_tp is not None:
+        return float(setup.prospective_tp)
+    return float(setup.t1)
+
+
+def _cancel_long_before(setup: Setup, bar: Bar, cfg: MtfSwingConfig) -> Optional[str]:
     if bar.low < setup.sl:
         return "SL_BEFORE_ENTRY"
-    if bar.high >= setup.t1:
-        return "T1_BEFORE_ENTRY"
+    if bar.high >= _active_tp(setup):
+        return cfg.target_cancel_reason
     return None
 
 
-def _cancel_short_before(setup: Setup, bar: Bar) -> Optional[str]:
+def _cancel_short_before(setup: Setup, bar: Bar, cfg: MtfSwingConfig) -> Optional[str]:
     if bar.high > setup.sl:
         return "SL_BEFORE_ENTRY"
-    if bar.low <= setup.t1:
-        return "T1_BEFORE_ENTRY"
+    if bar.low <= _active_tp(setup):
+        return cfg.target_cancel_reason
     return None
+
+
+def _set_prospective_from_signal(setup: Setup, close: float, cfg: MtfSwingConfig) -> None:
+    setup.signal_close = close
+    if cfg.use_r_target:
+        setup.prospective_tp = _r_target(setup.side, close, setup.sl, float(cfg.tp_r))
+        # Working cancel level before fill; actual position T1 is set at fill.
+        setup.t1 = float(setup.prospective_tp)
 
 
 def _arm_or_enter_from_signal(
@@ -277,26 +376,49 @@ def _arm_or_enter_from_signal(
     if setup.side == "LONG":
         if close <= setup.sl:
             return "cancel", None, "RR_UNDEFINED"
-        rr = (setup.t1 - close) / (close - setup.sl)
     else:
         if close >= setup.sl:
             return "cancel", None, "RR_UNDEFINED"
-        rr = (close - setup.t1) / (setup.sl - close)
-    if rr >= 1.0:
+
+    # v2: min potential RR vs previous-week opposite extreme (replaces midpoint limit).
+    if cfg.min_potential_rr is not None:
+        opp = float(setup.opp_extreme or setup.t1)
+        prr = _potential_rr(setup.side, close, setup.sl, opp)
+        if prr is None:
+            return "cancel", None, "RR_UNDEFINED"
+        setup.potential_rr = f"{prr:.4f}"
+        if prr < float(cfg.min_potential_rr):
+            action = (cfg.below_threshold_action or "skip").strip().lower()
+            if action == "limit_at_threshold":
+                limit_px = _limit_at_rr(setup.side, setup.sl, opp, float(cfg.min_potential_rr))
+                if limit_px is None:
+                    return "cancel", None, "RR_BELOW_MIN"
+                _set_prospective_from_signal(setup, close, cfg)
+                # Recompute prospective TP from the intended limit fill later; for now
+                # cancel levels still use signal-based prospective TP until filled.
+                setup.phase = "limit"
+                setup.limit_price = limit_px
+                setup.defer_fill = False
+                return "pending", None, None
+            return "cancel", None, "RR_BELOW_MIN"
+        _set_prospective_from_signal(setup, close, cfg)
         if cfg.entry_timing == "close":
-            pos = Position(
-                side=setup.side,
-                screen_date=setup.screen_date,
-                entry_time=iso(ts),
-                entry_price=close,
-                entry_type="direct",
-                sl=setup.sl,
-                t1=setup.t1,
-                lot_size=int(lot_size),
-                basis_contract=setup.basis_contract,
-                entry_month=ts.date().strftime("%Y-%m"),
-                sessions=[ts.date().isoformat()],
-            )
+            pos = _enter_at(setup, ts, close, "direct", lot_size, cfg)
+            return "enter", pos, None
+        setup.phase = "next_open"
+        setup.defer_fill = False
+        return "pending", None, None
+
+    # v1 path: rr vs fixed T1 (opp extreme).
+    if setup.side == "LONG":
+        rr = (setup.t1 - close) / (close - setup.sl)
+    else:
+        rr = (close - setup.t1) / (setup.sl - close)
+    setup.potential_rr = f"{rr:.4f}"
+    if rr >= 1.0:
+        _set_prospective_from_signal(setup, close, cfg)
+        if cfg.entry_timing == "close":
+            pos = _enter_at(setup, ts, close, "direct", lot_size, cfg)
             return "enter", pos, None
         setup.phase = "next_open"
         setup.defer_fill = False
@@ -313,7 +435,11 @@ def _enter_at(
     price: float,
     entry_type: str,
     lot_size: int,
+    cfg: Optional[MtfSwingConfig] = None,
 ) -> Position:
+    t1 = setup.t1
+    if cfg is not None and cfg.use_r_target:
+        t1 = _r_target(setup.side, price, setup.sl, float(cfg.tp_r))
     return Position(
         side=setup.side,
         screen_date=setup.screen_date,
@@ -321,11 +447,13 @@ def _enter_at(
         entry_price=price,
         entry_type=entry_type,
         sl=setup.sl,
-        t1=setup.t1,
+        t1=t1,
         lot_size=int(lot_size),
         basis_contract=setup.basis_contract,
         entry_month=ts.date().strftime("%Y-%m"),
         sessions=[ts.date().isoformat()],
+        regime=setup.regime,
+        potential_rr=setup.potential_rr,
     )
 
 
@@ -341,52 +469,55 @@ def _step_setup(
     Limit orders are live starting the bar AFTER the signal bar.
     A next_open armed on this bar is not filled on this bar.
     """
+    tp_level = _active_tp(setup)
+    cancel_tp = cfg.target_cancel_reason
+
     if setup.phase == "next_open":
         if setup.side == "LONG":
             if bar.open < setup.sl:
                 return None, None, "GAP_THROUGH_SL"
-            if bar.open >= setup.t1:
-                return None, None, "GAP_THROUGH_T1"
+            if bar.open >= tp_level:
+                return None, None, f"GAP_THROUGH_{'TP' if cfg.use_r_target else 'T1'}"
         else:
             if bar.open > setup.sl:
                 return None, None, "GAP_THROUGH_SL"
-            if bar.open <= setup.t1:
-                return None, None, "GAP_THROUGH_T1"
-        return None, _enter_at(setup, bar.ts, bar.open, "direct", lot_size), None
+            if bar.open <= tp_level:
+                return None, None, f"GAP_THROUGH_{'TP' if cfg.use_r_target else 'T1'}"
+        return None, _enter_at(setup, bar.ts, bar.open, "direct", lot_size, cfg), None
 
     if setup.phase == "limit":
         limit_px = float(setup.limit_price if setup.limit_price is not None else (setup.t1 + setup.sl) / 2.0)
         if setup.side == "LONG":
             if bar.open <= setup.sl:
                 return None, None, "SL_BEFORE_ENTRY"
-            if bar.open >= setup.t1:
-                return None, None, "T1_BEFORE_ENTRY"
+            if bar.open >= tp_level:
+                return None, None, cancel_tp
             if bar.open <= limit_px:
-                return None, _enter_at(setup, bar.ts, bar.open, "limit", lot_size), None
+                return None, _enter_at(setup, bar.ts, bar.open, "limit", lot_size, cfg), None
             if bar.low < setup.sl:
                 return None, None, "SL_BEFORE_ENTRY"
-            if bar.high >= setup.t1:
-                return None, None, "T1_BEFORE_ENTRY"
+            if bar.high >= tp_level:
+                return None, None, cancel_tp
             if bar.low <= limit_px:
-                return None, _enter_at(setup, bar.ts, limit_px, "limit", lot_size), None
+                return None, _enter_at(setup, bar.ts, limit_px, "limit", lot_size, cfg), None
         else:
             if bar.open >= setup.sl:
                 return None, None, "SL_BEFORE_ENTRY"
-            if bar.open <= setup.t1:
-                return None, None, "T1_BEFORE_ENTRY"
+            if bar.open <= tp_level:
+                return None, None, cancel_tp
             if bar.open >= limit_px:
-                return None, _enter_at(setup, bar.ts, bar.open, "limit", lot_size), None
+                return None, _enter_at(setup, bar.ts, bar.open, "limit", lot_size, cfg), None
             if bar.high > setup.sl:
                 return None, None, "SL_BEFORE_ENTRY"
-            if bar.low <= setup.t1:
-                return None, None, "T1_BEFORE_ENTRY"
+            if bar.low <= tp_level:
+                return None, None, cancel_tp
             if bar.high >= limit_px:
-                return None, _enter_at(setup, bar.ts, limit_px, "limit", lot_size), None
+                return None, _enter_at(setup, bar.ts, limit_px, "limit", lot_size, cfg), None
         return setup, None, None
 
     # watch
     if setup.side == "LONG":
-        reason = _cancel_long_before(setup, bar)
+        reason = _cancel_long_before(setup, bar, cfg)
         if reason:
             return None, None, reason
         if bar.close > setup.trigger:
@@ -397,7 +528,7 @@ def _step_setup(
                 return None, pos, None
             return setup, None, None
     else:
-        reason = _cancel_short_before(setup, bar)
+        reason = _cancel_short_before(setup, bar, cfg)
         if reason:
             return None, None, reason
         if bar.close < setup.trigger:
@@ -415,7 +546,7 @@ def _log_screen_discard(discard, bar: Bar, note) -> None:
     if not discard:
         return
     side, reason, detail = discard
-    if reason in ("NO_SWING", "LEVELS_ILLOGICAL") and side:
+    if reason in ("NO_SWING", "LEVELS_ILLOGICAL", "NO_PIVOT_SL", "REGIME_BLOCK") and side:
         note(side, bar.session_date.isoformat(), reason, detail, bar.ts)
     elif reason == "NO_W2":
         note(side or "", bar.session_date.isoformat(), "NO_W2", detail, bar.ts)
@@ -425,6 +556,7 @@ def _screen(
     bars: Sequence[Bar],
     week_end_index: int,
     cfg: MtfSwingConfig,
+    regime_map: Optional[Dict[str, str]] = None,
 ) -> Tuple[Optional[Setup], Optional[Tuple[str, str, str]]]:
     """Screen the week that ends at ``week_end_index``. Discard tuple is (side, reason, detail)."""
     end = bars[week_end_index]
@@ -433,9 +565,6 @@ def _screen(
 
     prev_day = end.session_date - timedelta(days=7)
     w2_key = week_key(prev_day)
-    # previous calendar week: walk back 7 days from the Monday of W1, not from Friday,
-    # so a short holiday week still maps to the prior ISO week.
-    # week_key(last_date - 7 days) is the previous ISO week when last_date is inside the week.
     w1_raw = bars_for_week(bars, w1_key)
     w2_raw = bars_for_week(bars, w2_key)
     if not w2_raw:
@@ -446,7 +575,19 @@ def _screen(
     side = candidate_side(w1, w2)
     if side is None:
         return None, None
-    levels, reason = build_levels(side, w1, w2, cluster_pct=cfg.cluster_pct)
+    screen_iso = w1.last_date.isoformat()
+    regime = ""
+    if cfg.regime_filter:
+        regime = (regime_map or {}).get(screen_iso) or "Neutral"
+        if not regime_allows(side, regime, cfg.neutral_action):
+            return None, (side, "REGIME_BLOCK", f"regime={regime}")
+    levels, reason = build_levels(
+        side,
+        w1,
+        w2,
+        cluster_pct=cfg.cluster_pct,
+        sl_basis=cfg.sl_basis,
+    )
     if reason or levels is None:
         return None, (side, reason or "NO_SWING", "")
     return (
@@ -459,6 +600,8 @@ def _screen(
             trigger=levels.trigger,
             basis_contract=levels.basis_contract,
             phase="watch",
+            opp_extreme=float(levels.opp_extreme or levels.t1),
+            regime=regime,
         ),
         None,
     )
@@ -478,6 +621,7 @@ def run_symbol(
     run_ts: str = "",
     finalize_open: bool = False,
     exit_only_after: Optional[date] = None,
+    regime_map: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], Dict[str, Any]]:
     """Run one symbol.
 
@@ -486,10 +630,12 @@ def run_symbol(
     ``exit_only_after`` (default ``active_to``) still manages exits and an armed
     next-open fill, but does not take new breakouts or screen new weeks.
     Open positions are emitted only when ``finalize_open`` is set.
+    ``regime_map`` maps screen_date ISO → Bullish/Bearish/Neutral (v2).
     """
     cfg = config or MtfSwingConfig()
     hol = holidays or set()
     lots = lot_by_contract or {}
+    regimes = regime_map or {}
 
     def _lot(contract: str) -> int:
         try:
@@ -497,6 +643,7 @@ def run_symbol(
         except (TypeError, ValueError):
             n = 0
         return n or int(lot_size)
+
     series = filter_session_bars(bars, hol)
     st = _blank_state()
     if state:
@@ -506,7 +653,9 @@ def run_symbol(
         if st.get("queued"):
             st["queued"] = st["queued"] if isinstance(st["queued"], Setup) else Setup.from_dict(st["queued"])
         if st.get("position"):
-            st["position"] = st["position"] if isinstance(st["position"], Position) else Position.from_dict(st["position"])
+            st["position"] = (
+                st["position"] if isinstance(st["position"], Position) else Position.from_dict(st["position"])
+            )
 
     trades: List[Dict[str, str]] = []
     discards: List[Dict[str, str]] = []
@@ -519,6 +668,9 @@ def run_symbol(
     watermark = str(st.get("last_ts") or "")
 
     def _note_discard(side: str, screen_date: str, reason: str, detail: str, when: datetime) -> None:
+        regime = ""
+        if screen_date and regimes:
+            regime = regimes.get(screen_date, "")
         discards.append(
             _discard_row(
                 symbol=symbol,
@@ -529,6 +681,7 @@ def run_symbol(
                 detail=detail,
                 event_time=iso(when),
                 run_ts=run_ts,
+                regime=regime,
             )
         )
 
@@ -549,8 +702,6 @@ def run_symbol(
         prev = series[i - 1] if i else None
         if watermark and iso(bar.ts) <= watermark:
             continue
-        # History before the active window only tracks the roll reference,
-        # unless we still owe a deferred next-open fill on the first bar after watermark.
         before_window = bar.session_date < active_from
         after_cutoff = bar.session_date > cutoff
         manage_only = after_cutoff or (before_window and not (st.get("setup") and st["setup"].defer_fill))
@@ -563,7 +714,12 @@ def run_symbol(
         gap = 0.0
         if prev is not None and (not watermark or iso(prev.ts) <= watermark or True):
             gap = roll_gap(prev, bar)
-        elif st.get("last_contract") and bar.contract and st["last_contract"] != bar.contract and st.get("last_close") is not None:
+        elif (
+            st.get("last_contract")
+            and bar.contract
+            and st["last_contract"] != bar.contract
+            and st.get("last_close") is not None
+        ):
             gap = bar.open - float(st["last_close"])
         if gap and st.get("setup"):
             _shift_setup(st["setup"], gap, bar.contract)
@@ -576,7 +732,6 @@ def run_symbol(
         if st.get("position"):
             st["position"].basis_contract = bar.contract
 
-        # 1. Exit an open position (includes same-bar exit after an open entry below).
         if st.get("position") is not None:
             hit = _try_exit(st["position"], bar, last_session.get(bar.session_date) == i, cfg)
             if hit:
@@ -585,8 +740,6 @@ def run_symbol(
                 st["position"] = None
 
         allow_entries = (not manage_only) and (not after_cutoff) and bar.session_date <= cutoff
-        # A deferred next-open may fill on the first bar after the valid week,
-        # including a bar after the monthly cutoff (the entry was signaled inside the window).
         allow_defer_fill = bool(st.get("setup") and st["setup"].defer_fill)
 
         if st.get("position") is None and st.get("setup") is not None and (allow_entries or allow_defer_fill):
@@ -601,7 +754,6 @@ def run_symbol(
                 if pos is not None:
                     st["position"] = pos
                     st["queued"] = None
-                    # Same-bar exit after an open fill.
                     hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
                     if hit:
                         px, er = hit
@@ -618,7 +770,11 @@ def run_symbol(
                             _note_discard(setup.side, setup.screen_date, reason, "", bar.ts)
                         if pos is not None:
                             st["position"] = pos
-                            if cfg.entry_timing == "next_open" or pos.entry_type == "direct" and pos.entry_time == iso(bar.ts) and abs(pos.entry_price - bar.open) < 1e-9:
+                            if cfg.entry_timing == "next_open" or (
+                                pos.entry_type == "direct"
+                                and pos.entry_time == iso(bar.ts)
+                                and abs(pos.entry_price - bar.open) < 1e-9
+                            ):
                                 hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
                                 if hit and pos.entry_time == iso(bar.ts) and abs(pos.entry_price - bar.close) > 1e-9:
                                     px, er = hit
@@ -632,9 +788,12 @@ def run_symbol(
                     _note_discard(setup.side, setup.screen_date, reason, "", bar.ts)
                 if pos is not None:
                     st["position"] = pos
-                    # Exit on the entry bar only when the fill is the open, not the close.
                     filled_at_open = abs(pos.entry_price - bar.open) < 1e-6 or pos.entry_type == "limit"
-                    filled_at_close = cfg.entry_timing == "close" and pos.entry_type == "direct" and abs(pos.entry_price - bar.close) < 1e-6
+                    filled_at_close = (
+                        cfg.entry_timing == "close"
+                        and pos.entry_type == "direct"
+                        and abs(pos.entry_price - bar.close) < 1e-6
+                    )
                     if filled_at_open and not filled_at_close:
                         hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
                         if hit:
@@ -642,9 +801,6 @@ def run_symbol(
                             _close(pos, bar.ts, px, er)
                             st["position"] = None
 
-        # Week-end housekeeping only inside the entry window.
-        # Re-read setup after a possible cancel: the local reference would still
-        # point at the cancelled object and skip the new week's screen.
         if allow_entries and last_week.get(week_key(bar.session_date)) == i:
             setup = st.get("setup")
             if setup is not None and week_key(bar.session_date) == tuple(setup.valid_week) and st.get("position") is None:
@@ -655,7 +811,7 @@ def run_symbol(
                     setup.defer_fill = True
             setup = st.get("setup")
             if st.get("position") is None and setup is None:
-                new_setup, discard = _screen(series, i, cfg)
+                new_setup, discard = _screen(series, i, cfg, regimes)
                 _log_screen_discard(discard, bar, _note_discard)
                 if new_setup is not None:
                     st["setup"] = new_setup
@@ -665,7 +821,7 @@ def run_symbol(
                 and setup.phase == "next_open"
                 and setup.defer_fill
             ):
-                new_setup, discard = _screen(series, i, cfg)
+                new_setup, discard = _screen(series, i, cfg, regimes)
                 _log_screen_discard(discard, bar, _note_discard)
                 if new_setup is not None and st.get("position") is not None:
                     _note_discard(new_setup.side, new_setup.screen_date, "SKIP_OPEN_POSITION", "", bar.ts)
@@ -685,15 +841,21 @@ def run_symbol(
     if finalize_open and st.get("position") is not None:
         pos = st["position"]
         last_bar = series[-1]
+        # v1 keeps blank exit_time / blank P&L for OPEN. v2 records MTM at last bar.
+        is_v2 = (cfg.variant or "").lower() == "v2" or bool(cfg.ablation_tag)
+        mtm_px = float(last_bar.close) if is_v2 else None
+        mtm = _mtm_pnl(pos.side, pos.entry_price, mtm_px, pos.lot_size, cfg) if is_v2 else None
         trades.append(
             _trade_row(
                 symbol=symbol,
                 cfg=cfg,
                 pos=pos,
-                exit_time="",
+                exit_time=iso(last_bar.ts) if is_v2 else "",
                 exit_price=None,
                 exit_reason="OPEN",
                 run_ts=run_ts,
+                mtm_price=mtm_px,
+                mtm_pnl=mtm,
             )
         )
         st["position"] = None

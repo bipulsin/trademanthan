@@ -37,16 +37,11 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def data_dir() -> Path:
-    """Persistent MTF Swing CSV / cache directory.
-
-    On paperclip-vm the compose bind is ``./data:/home/ubuntu/trademanthan/data``.
-    Prefer that over ``/app/data`` (image layer) so backtests and the results API
-    share the same files across container recreates.
-    """
+def _resolve_data_subdir(name: str) -> Path:
+    """Persistent CSV / cache directory under the compose bind mount when present."""
     candidates = (
-        Path("/home/ubuntu/trademanthan/data/mtf_swing"),
-        repo_root() / "data" / "mtf_swing",
+        Path(f"/home/ubuntu/trademanthan/data/{name}"),
+        repo_root() / "data" / name,
     )
     for path in candidates:
         try:
@@ -60,6 +55,21 @@ def data_dir() -> Path:
     out = candidates[-1]
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def data_dir() -> Path:
+    """Persistent MTF Swing CSV / cache directory (v1).
+
+    On paperclip-vm the compose bind is ``./data:/home/ubuntu/trademanthan/data``.
+    Prefer that over ``/app/data`` (image layer) so backtests and the results API
+    share the same files across container recreates.
+    """
+    return _resolve_data_subdir("mtf_swing")
+
+
+def data_dir_v2() -> Path:
+    """Separate persistent directory for the v2 experiment. Never writes v1 CSVs."""
+    return _resolve_data_subdir("mtf_swing_v2")
 
 
 def trades_path() -> Path:
@@ -76,6 +86,31 @@ def progress_path() -> Path:
 
 def state_path(timeframe: str) -> Path:
     return data_dir() / f"state_{timeframe}.json"
+
+
+def trades_path_v2() -> Path:
+    return data_dir_v2() / "trades.csv"
+
+
+def discards_path_v2() -> Path:
+    return data_dir_v2() / "discards.csv"
+
+
+def progress_path_v2() -> Path:
+    return data_dir_v2() / "progress.json"
+
+
+def state_path_v2(timeframe: str, variant: str = "all") -> Path:
+    tag = (variant or "all").strip().lower() or "all"
+    return data_dir_v2() / f"state_{timeframe}_{tag}.json"
+
+
+def regime_log_path() -> Path:
+    return data_dir_v2() / "regime_log.csv"
+
+
+def variant_summary_path() -> Path:
+    return data_dir_v2() / "variant_summary.csv"
 
 
 def known_holidays() -> set:
@@ -548,3 +583,52 @@ def window_for_month(month_start: date, month_end: date, *, tail_days: int = 0) 
     start = month_start - timedelta(days=WARMUP_DAYS)
     end = month_end + timedelta(days=tail_days)
     return start, end
+
+
+NIFTY50_KEY = "NSE_INDEX|Nifty 50"
+
+
+def fetch_index_day_bars(
+    upstox: Any,
+    *,
+    instrument_key: str = NIFTY50_KEY,
+    start: date,
+    end: date,
+    use_cache: bool = True,
+) -> List[Bar]:
+    """Daily index bars for the regime filter (Nifty 50 by default)."""
+    cache = data_dir_v2() / "cache" / "regime" / (
+        f"{instrument_key.replace('|', '_').replace(' ', '_')}"
+        f"_{start.isoformat()}_{end.isoformat()}.json"
+    )
+    if use_cache and cache.is_file():
+        try:
+            payload = json.loads(cache.read_text(encoding="utf-8"))
+            return _rows_to_bars(payload, instrument_key)
+        except Exception as exc:
+            logger.info("mtf_swing regime cache miss: %s", exc)
+    rows: List[Dict[str, Any]] = []
+    cursor = start
+    span = 90
+    while cursor <= end:
+        chunk_end = min(end, cursor + timedelta(days=span))
+        try:
+            raw = upstox.get_historical_candles_by_instrument_key(
+                instrument_key,
+                interval="days/1",
+                days_back=(chunk_end - cursor).days + 3,
+                range_end_date=chunk_end,
+            )
+            rows.extend(raw or [])
+        except Exception as exc:
+            logger.info("mtf_swing regime day fetch %s..%s: %s", cursor, chunk_end, exc)
+        cursor = chunk_end + timedelta(days=1)
+    ordered = _dedupe_rows(rows, start, end)
+    bars = _rows_to_bars(ordered, instrument_key)
+    if use_cache and ordered:
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps(ordered), encoding="utf-8")
+        except Exception as exc:
+            logger.info("mtf_swing regime cache write failed: %s", exc)
+    return bars

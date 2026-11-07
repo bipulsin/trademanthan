@@ -1,6 +1,19 @@
 /* MTF Swing page. Uses stock-options tokens for the shell. */
 .ms-wrap { max-width: 1440px; margin: 0 auto; padding: 0 0.5rem 2.5rem; }
 .ms-status { color: var(--muted, #8fa398); min-height: 1.2rem; margin: 0.25rem 0 0.75rem; }
+.ms-mode { display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+.ms-mode button {
+  border: 1px solid var(--line, rgba(180,210,190,0.2));
+  background: var(--card-inner, #121a17);
+  color: var(--text, #e7f0ea);
+  border-radius: 8px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.ms-mode button.on { background: #1e3a2f; border-color: var(--accent, #3dba7a); color: #b8f0d0; }
+.ms-panel[hidden] { display: none !important; }
 .ms-tf { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
 .ms-tf button, .ms-btn {
   border: 1px solid var(--line, rgba(180,210,190,0.2));

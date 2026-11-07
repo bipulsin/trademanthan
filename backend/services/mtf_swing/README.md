@@ -2,9 +2,9 @@
 
 Weekly swing screen on continuous NSE futures, executed independently on 15-minute and 60-minute bars. One lot per trade. Research backtest for 1 Nov 2025 through 31 Oct 2026.
 
-The page at `/mtf-swing.html` reads `data/mtf_swing/trades.csv` through `GET /api/mtf-swing/results`. It does not embed trades.
+The page at `/mtf-swing.html` reads `data/mtf_swing/trades.csv` through `GET /api/mtf-swing/results`. It does not embed trades. The **v2 Experiment** tab reads `data/mtf_swing_v2/` through `GET /api/mtf-swing/v2/results`.
 
-## Resume
+## Resume (v1)
 
 From the repo root (Upstox credentials and `arbitrage_master` required):
 
@@ -17,6 +17,36 @@ python3 scripts/run_mtf_swing_backtest.py --symbol RELIANCE --timeframe 15m
 Each finished month and timeframe is stored in `data/mtf_swing/progress.json` and skipped on the next run. Carried state (open trade, pending or limit setup, next-week watchlist) is in `data/mtf_swing/state_15m.json` and `state_60m.json`. Trades append to `data/mtf_swing/trades.csv`. Cancelled and discarded setups append to `data/mtf_swing/discards.csv`. A re-run does not rewrite a row that is already there. The unique trade key is `symbol + timeframe + side + entry timestamp` (`trade_id`).
 
 Candle responses are cached under `data/mtf_swing/cache/` (not committed).
+
+## v2 Experiment
+
+Configurable flags layered on the v1 engine. Writes **only** to `data/mtf_swing_v2/` and never rewrites v1 CSVs.
+
+```bash
+python3 scripts/run_mtf_swing_backtest.py --v2 --months 2026-06,2026-10 --timeframes 60m,15m
+python3 scripts/run_mtf_swing_backtest.py --v2 --ablation
+```
+
+Defaults vs v1:
+
+| Flag | v1 | v2 |
+|------|----|----|
+| Regime filter (Nifty 10w EMA) | off | on (longs only bullish, shorts only bearish; neutral blocks) |
+| SL | W1 absolute extreme | confirmed swing pivot outside previous week's range |
+| Target | previous-week opposite extreme (T1) | 1.5R from fill (TP); no time exit |
+| Entry RR path | midpoint limit when rr &lt; 1 | skip unless potential RR ≥ 1.3 vs opp extreme |
+| Months | Nov'25–Oct'26 continuous | 2026-06 and 2026-10 independent flat starts |
+| OPEN | blank P&L | MTM at last bar (`mtm_price` / `mtm_pnl`) |
+
+Outputs: `trades.csv`, `discards.csv`, `regime_log.csv`, optional `variant_summary.csv`.
+
+### Assumptions (v2)
+
+- Regime is computed once per screening Friday from Nifty 50 daily→weekly closes with no look-ahead; the label applies to the following week's trades only.
+- Pivot SL uses confirmed swing highs/lows on the execution timeframe (same 3-bar definition as v1 triggers). If none sit outside the previous week's range, the setup is discarded (`NO_PIVOT_SL`).
+- Prospective TP before entry is 1.5R from the breakout close; after fill it is recomputed from the actual entry. Same-bar SL-before-TP and gap fills match v1.
+- June and October runs do not share state. Each gets ~3 weeks warm-up and follows open trades forward through available bars until SL/TP or OPEN+MTM.
+- Universe, 1-lot sizing, and zero default costs match v1.
 
 ## Assumptions
 

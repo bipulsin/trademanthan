@@ -5,7 +5,14 @@ import csv
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Set
 
-from backend.services.mtf_swing.config import DISCARD_FIELDS, TRADE_FIELDS
+from backend.services.mtf_swing.config import (
+    DISCARD_FIELDS,
+    DISCARD_FIELDS_V2,
+    REGIME_LOG_FIELDS,
+    TRADE_FIELDS,
+    TRADE_FIELDS_V2,
+    VARIANT_SUMMARY_FIELDS,
+)
 
 
 def trade_key(row: Dict[str, str]) -> str:
@@ -56,3 +63,27 @@ def append_trades(path: Path, rows: Iterable[Dict[str, str]]) -> int:
 
 def append_discards(path: Path, rows: Iterable[Dict[str, str]]) -> int:
     return append_rows(path, DISCARD_FIELDS, rows, "discard_id")
+
+
+def append_trades_v2(path: Path, rows: Iterable[Dict[str, str]]) -> int:
+    return append_rows(path, TRADE_FIELDS_V2, rows, "trade_id")
+
+
+def append_discards_v2(path: Path, rows: Iterable[Dict[str, str]]) -> int:
+    return append_rows(path, DISCARD_FIELDS_V2, rows, "discard_id")
+
+
+def append_regime_log(path: Path, rows: Iterable[Dict[str, str]]) -> int:
+    return append_rows(path, REGIME_LOG_FIELDS, rows, "screen_date")
+
+
+def write_variant_summary(path: Path, rows: Iterable[Dict[str, str]]) -> int:
+    """Overwrite variant_summary.csv (ablation roll-up, not append-only)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    material = list(rows)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(VARIANT_SUMMARY_FIELDS), extrasaction="ignore")
+        writer.writeheader()
+        for row in material:
+            writer.writerow({k: row.get(k, "") for k in VARIANT_SUMMARY_FIELDS})
+    return len(material)

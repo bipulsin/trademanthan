@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="mtf-swing.css?v=1" />
+    <link rel="stylesheet" href="mtf-swing.css?v=2" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -35,91 +35,219 @@
                 </div>
             </div>
             <div class="ms-wrap">
-                <div class="ms-tf" role="tablist">
-                    <button type="button" data-tf="60m">60m</button>
-                    <button type="button" data-tf="15m">15m</button>
-                    <button type="button" data-tf="all">All</button>
+                <div class="ms-mode" role="tablist" aria-label="MTF Swing mode">
+                    <button type="button" data-mode="v1" class="on">v1 Results</button>
+                    <button type="button" data-mode="v2">v2 Experiment</button>
                 </div>
-                <p class="ms-status" id="msStatus">Loading…</p>
-                <div class="ms-cards" id="msCards"></div>
-                <section class="ms-section">
-                    <h2>Month-wise</h2>
-                    <p class="ms-note">Closed trades only. OPEN rows stay in the blotter and are left out of these totals. Drawdown resets each month.</p>
-                    <div class="ms-table-wrap">
-                        <table class="ms">
-                            <thead>
-                                <tr>
-                                    <th>Month</th><th>Trades</th><th>Net P&L</th><th>Avg P&L</th><th>Max profit</th><th>Max loss</th><th>Max DD</th><th>Profitable</th><th>Losing</th><th>Win rate</th>
-                                </tr>
-                            </thead>
-                            <tbody id="msMonths"></tbody>
-                        </table>
+
+                <div id="msV1" class="ms-panel">
+                    <div class="ms-tf" role="tablist">
+                        <button type="button" data-tf="60m">60m</button>
+                        <button type="button" data-tf="15m">15m</button>
+                        <button type="button" data-tf="all">All</button>
                     </div>
-                </section>
-                <section class="ms-section">
-                    <h2>Charts</h2>
-                    <div class="ms-charts">
-                        <div class="ms-chart"><h3>Month P&L</h3><div id="chartMonth"></div></div>
-                        <div class="ms-chart"><h3>Equity (solid) and drawdown (dashed)</h3><div id="chartEquity"></div></div>
-                        <div class="ms-chart"><h3>Exit reason</h3><div id="chartReasons"></div></div>
-                        <div class="ms-chart"><h3>Long vs short</h3><div id="chartSides"></div></div>
+                    <p class="ms-status" id="msStatus">Loading…</p>
+                    <div class="ms-cards" id="msCards"></div>
+                    <section class="ms-section">
+                        <h2>Month-wise</h2>
+                        <p class="ms-note">Closed trades only. OPEN rows stay in the blotter and are left out of these totals. Drawdown resets each month.</p>
+                        <div class="ms-table-wrap">
+                            <table class="ms">
+                                <thead>
+                                    <tr>
+                                        <th>Month</th><th>Trades</th><th>Net P&L</th><th>Avg P&L</th><th>Max profit</th><th>Max loss</th><th>Max DD</th><th>Profitable</th><th>Losing</th><th>Win rate</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msMonths"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Charts</h2>
+                        <div class="ms-charts">
+                            <div class="ms-chart"><h3>Month P&L</h3><div id="chartMonth"></div></div>
+                            <div class="ms-chart"><h3>Equity (solid) and drawdown (dashed)</h3><div id="chartEquity"></div></div>
+                            <div class="ms-chart"><h3>Exit reason</h3><div id="chartReasons"></div></div>
+                            <div class="ms-chart"><h3>Long vs short</h3><div id="chartSides"></div></div>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Trade records</h2>
+                        <div class="ms-filters">
+                            <label>Symbol <input id="fSymbol" type="search" placeholder="RELIANCE" /></label>
+                            <label>Month <select id="fMonth"><option value="">All months</option></select></label>
+                            <label>Side
+                                <select id="fSide">
+                                    <option value="">All</option>
+                                    <option value="LONG">Long</option>
+                                    <option value="SHORT">Short</option>
+                                </select>
+                            </label>
+                            <label>Exit
+                                <select id="fReason">
+                                    <option value="">All</option>
+                                    <option value="SL">SL</option>
+                                    <option value="T1">T1</option>
+                                    <option value="TIME">TIME</option>
+                                    <option value="OPEN">OPEN</option>
+                                </select>
+                            </label>
+                            <button type="button" class="ms-btn" id="msDownload">Download CSV</button>
+                        </div>
+                        <div class="ms-table-wrap">
+                            <table class="ms" id="msTradeTable">
+                                <thead>
+                                    <tr>
+                                        <th data-key="symbol">Symbol</th>
+                                        <th data-key="timeframe">TF</th>
+                                        <th data-key="month">Month</th>
+                                        <th data-key="side">Side</th>
+                                        <th data-key="entry_type">Entry</th>
+                                        <th data-key="entry_time">Entry time</th>
+                                        <th data-key="entry_price">Entry</th>
+                                        <th data-key="exit_time">Exit time</th>
+                                        <th data-key="exit_price">Exit</th>
+                                        <th data-key="exit_reason">Reason</th>
+                                        <th data-key="sessions_held">Sessions</th>
+                                        <th data-key="net_pnl">Net P&L</th>
+                                        <th data-key="r_multiple">R</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msTrades"></tbody>
+                            </table>
+                        </div>
+                        <div class="ms-pager">
+                            <button type="button" class="ms-btn" id="msPrev">Prev</button>
+                            <span id="msPage"></span>
+                            <button type="button" class="ms-btn" id="msNext">Next</button>
+                        </div>
+                    </section>
+                </div>
+
+                <div id="msV2" class="ms-panel" hidden>
+                    <div class="ms-tf" role="tablist" aria-label="v2 timeframe">
+                        <button type="button" data-v2-tf="60m">60m</button>
+                        <button type="button" data-v2-tf="15m">15m</button>
+                        <button type="button" data-v2-tf="all" class="on">All</button>
                     </div>
-                </section>
-                <section class="ms-section">
-                    <h2>Trade records</h2>
-                    <div class="ms-filters">
-                        <label>Symbol <input id="fSymbol" type="search" placeholder="RELIANCE" /></label>
-                        <label>Month <select id="fMonth"><option value="">All months</option></select></label>
-                        <label>Side
-                            <select id="fSide">
-                                <option value="">All</option>
-                                <option value="LONG">Long</option>
-                                <option value="SHORT">Short</option>
-                            </select>
-                        </label>
-                        <label>Exit
-                            <select id="fReason">
-                                <option value="">All</option>
-                                <option value="SL">SL</option>
-                                <option value="T1">T1</option>
-                                <option value="TIME">TIME</option>
-                                <option value="OPEN">OPEN</option>
-                            </select>
-                        </label>
-                        <button type="button" class="ms-btn" id="msDownload">Download CSV</button>
+                    <div class="ms-tf" role="tablist" aria-label="v2 month">
+                        <button type="button" data-v2-month="2026-06">2026-06</button>
+                        <button type="button" data-v2-month="2026-10">2026-10</button>
+                        <button type="button" data-v2-month="all" class="on">Both</button>
                     </div>
-                    <div class="ms-table-wrap">
-                        <table class="ms" id="msTradeTable">
-                            <thead>
-                                <tr>
-                                    <th data-key="symbol">Symbol</th>
-                                    <th data-key="timeframe">TF</th>
-                                    <th data-key="month">Month</th>
-                                    <th data-key="side">Side</th>
-                                    <th data-key="entry_type">Entry</th>
-                                    <th data-key="entry_time">Entry time</th>
-                                    <th data-key="entry_price">Entry</th>
-                                    <th data-key="exit_time">Exit time</th>
-                                    <th data-key="exit_price">Exit</th>
-                                    <th data-key="exit_reason">Reason</th>
-                                    <th data-key="sessions_held">Sessions</th>
-                                    <th data-key="net_pnl">Net P&L</th>
-                                    <th data-key="r_multiple">R</th>
-                                </tr>
-                            </thead>
-                            <tbody id="msTrades"></tbody>
-                        </table>
-                    </div>
-                    <div class="ms-pager">
-                        <button type="button" class="ms-btn" id="msPrev">Prev</button>
-                        <span id="msPage"></span>
-                        <button type="button" class="ms-btn" id="msNext">Next</button>
-                    </div>
-                </section>
+                    <p class="ms-status" id="msV2Status">Loading v2…</p>
+                    <div class="ms-cards" id="msV2Cards"></div>
+                    <section class="ms-section">
+                        <h2>Open trades (MTM)</h2>
+                        <p class="ms-note" id="msV2OpenNote">OPEN rows are excluded from closed metrics; MTM is mark-to-market at the last available bar.</p>
+                        <div class="ms-cards" id="msV2OpenCards"></div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>v1 vs v2 (same filters)</h2>
+                        <div class="ms-table-wrap">
+                            <table class="ms">
+                                <thead>
+                                    <tr>
+                                        <th>Metric</th><th>v1</th><th>v2</th><th>Delta</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msV2Compare"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Funnel</h2>
+                        <div class="ms-cards" id="msV2Funnel"></div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Month-wise (v2)</h2>
+                        <div class="ms-table-wrap">
+                            <table class="ms">
+                                <thead>
+                                    <tr>
+                                        <th>Month</th><th>Trades</th><th>Net P&L</th><th>Avg P&L</th><th>Win rate</th><th>Profit factor</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msV2Months"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="ms-section" id="msV2AblationSection" hidden>
+                        <h2>Ablation</h2>
+                        <div class="ms-table-wrap">
+                            <table class="ms">
+                                <thead>
+                                    <tr>
+                                        <th>Variant</th><th>TF</th><th>Month</th><th>Trades</th><th>Net P&L</th><th>Win rate</th><th>PF</th><th>Open</th><th>MTM sum</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msV2Ablation"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Trade records (v2)</h2>
+                        <div class="ms-filters">
+                            <label>Symbol <input id="v2Symbol" type="search" placeholder="RELIANCE" /></label>
+                            <label>Side
+                                <select id="v2Side">
+                                    <option value="">All</option>
+                                    <option value="LONG">Long</option>
+                                    <option value="SHORT">Short</option>
+                                </select>
+                            </label>
+                            <label>Exit
+                                <select id="v2Reason">
+                                    <option value="">All</option>
+                                    <option value="SL">SL</option>
+                                    <option value="TP">TP</option>
+                                    <option value="OPEN">OPEN</option>
+                                </select>
+                            </label>
+                            <label>Regime
+                                <select id="v2Regime">
+                                    <option value="">All</option>
+                                    <option value="Bullish">Bullish</option>
+                                    <option value="Bearish">Bearish</option>
+                                    <option value="Neutral">Neutral</option>
+                                </select>
+                            </label>
+                            <button type="button" class="ms-btn" id="msV2Download">Download CSV</button>
+                        </div>
+                        <div class="ms-table-wrap">
+                            <table class="ms" id="msV2TradeTable">
+                                <thead>
+                                    <tr>
+                                        <th data-v2-key="symbol">Symbol</th>
+                                        <th data-v2-key="timeframe">TF</th>
+                                        <th data-v2-key="month">Month</th>
+                                        <th data-v2-key="side">Side</th>
+                                        <th data-v2-key="regime">Regime</th>
+                                        <th data-v2-key="entry_time">Entry</th>
+                                        <th data-v2-key="entry_price">Entry px</th>
+                                        <th data-v2-key="sl">SL</th>
+                                        <th data-v2-key="t1">TP</th>
+                                        <th data-v2-key="potential_rr">Pot RR</th>
+                                        <th data-v2-key="exit_reason">Reason</th>
+                                        <th data-v2-key="net_pnl">Net P&L</th>
+                                        <th data-v2-key="mtm_pnl">MTM</th>
+                                        <th data-v2-key="r_multiple">R</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msV2Trades"></tbody>
+                            </table>
+                        </div>
+                        <div class="ms-pager">
+                            <button type="button" class="ms-btn" id="msV2Prev">Prev</button>
+                            <span id="msV2Page"></span>
+                            <button type="button" class="ms-btn" id="msV2Next">Next</button>
+                        </div>
+                    </section>
+                </div>
             </div>
         </main>
     </div>
     <script src="left-menu.js?v=3.55"></script>
-    <script src="mtf-swing.js?v=1"></script>
+    <script src="mtf-swing.js?v=2"></script>
 </body>
 </html>
