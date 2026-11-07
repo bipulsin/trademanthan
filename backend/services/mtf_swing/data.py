@@ -38,7 +38,28 @@ def repo_root() -> Path:
 
 
 def data_dir() -> Path:
-    return repo_root() / "data" / "mtf_swing"
+    """Persistent MTF Swing CSV / cache directory.
+
+    On paperclip-vm the compose bind is ``./data:/home/ubuntu/trademanthan/data``.
+    Prefer that over ``/app/data`` (image layer) so backtests and the results API
+    share the same files across container recreates.
+    """
+    candidates = (
+        Path("/home/ubuntu/trademanthan/data/mtf_swing"),
+        repo_root() / "data" / "mtf_swing",
+    )
+    for path in candidates:
+        try:
+            if path.is_dir():
+                return path
+            if path.parent.is_dir():
+                path.mkdir(parents=True, exist_ok=True)
+                return path
+        except OSError:
+            continue
+    out = candidates[-1]
+    out.mkdir(parents=True, exist_ok=True)
+    return out
 
 
 def trades_path() -> Path:
