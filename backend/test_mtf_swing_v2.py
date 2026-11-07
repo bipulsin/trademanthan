@@ -699,6 +699,20 @@ def test_parity_hole_bar_filter_and_compare_open_signature():
     filtered = filter_bars_for_holes(bars, holes, timeframe="60m", symbol="ADANIENSOL")
     assert all(b.session_date.month != 4 for b in filtered)
 
+    # Mixed full_run.log: 15m untyped failures must not become 60m holes.
+    mixed = (
+        "2026-11-07 02:00:00 INFO mtf_swing 60m 2025-11 symbols=2 window=2025-10-11..2025-11-30\n"
+        "2026-11-07 02:01:00 INFO mtf_swing 60m 2025-11 RELIANCE bars=10 new_trades=0 new_discards=0 lot=500\n"
+        "2026-11-07 03:00:00 INFO mtf_swing 15m 2025-11 symbols=2 window=2025-10-11..2025-11-30\n"
+        "2026-11-07 03:01:00 INFO mtf_swing RELIANCE 2025-11 no candles\n"
+        "2026-11-07 03:01:01 INFO mtf_swing ONLY15M 2025-11 no candles\n"
+    )
+    mixed_holes = holes_from_events(parse_log_events(mixed, default_tf="60m"))
+    assert ("60m", "RELIANCE", "2025-11") not in mixed_holes
+    assert ("60m", "ONLY15M", "2025-11") not in mixed_holes
+    assert ("15m", "RELIANCE", "2025-11") in mixed_holes
+    assert ("15m", "ONLY15M", "2025-11") in mixed_holes
+
     # OPEN exit_time blank vs stamped must compare equal.
     a = {
         "timeframe": "60m", "symbol": "X", "side": "LONG", "entry_time": "t",

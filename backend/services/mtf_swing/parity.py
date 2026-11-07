@@ -40,6 +40,11 @@ _FAIL_UNTYPED_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?"
     r"mtf_swing (?P<sym>\S+) (?P<month>\d{4}-\d{2}) no candles"
 )
+# v1 logs untyped ``SYMBOL YYYY-MM no candles``; timeframe comes from the
+# surrounding month-start / typed line (full_run.log mixes 60m then 15m).
+_MONTH_START_RE = re.compile(
+    r"mtf_swing (?P<tf>\d+m) (?P<month>\d{4}-\d{2}) symbols="
+)
 
 
 def holes_path() -> Path:
@@ -107,25 +112,37 @@ def filter_bars_for_holes(bars: Sequence, holes: Set[HoleKey], *, timeframe: str
 
 
 def parse_log_events(text: str, *, default_tf: Optional[str] = None) -> List[Tuple[str, str, str, str, str]]:
-    """Return (ts, timeframe, symbol, month, status) events in file order."""
+    """Return (ts, timeframe, symbol, month, status) events in file order.
+
+    Untyped ``no candles`` lines inherit the active timeframe from the latest
+    ``mtf_swing {tf} {month} symbols=`` / typed bars line, falling back to
+    ``default_tf``. Blindly pinning a mixed ``full_run.log`` to ``default_tf=60m``
+    would attribute later 15m failures to 60m.
+    """
     events: List[Tuple[str, str, str, str, str]] = []
+    active_tf = default_tf
     for ln in text.splitlines():
+        m = _MONTH_START_RE.search(ln)
+        if m:
+            active_tf = m.group("tf")
         m = _SUCCESS_RE.search(ln)
         if m:
+            active_tf = m.group("tf")
             events.append(
                 (m.group("ts"), m.group("tf"), m.group("sym").upper(), m.group("month"), "ok")
             )
             continue
         m = _FAIL_TYPED_RE.search(ln)
         if m:
+            active_tf = m.group("tf")
             events.append(
                 (m.group("ts"), m.group("tf"), m.group("sym").upper(), m.group("month"), "no_candles")
             )
             continue
         m = _FAIL_UNTYPED_RE.search(ln)
-        if m and default_tf:
+        if m and active_tf:
             events.append(
-                (m.group("ts"), default_tf, m.group("sym").upper(), m.group("month"), "no_candles")
+                (m.group("ts"), active_tf, m.group("sym").upper(), m.group("month"), "no_candles")
             )
     return events
 
@@ -133,11 +150,12 @@ def parse_log_events(text: str, *, default_tf: Optional[str] = None) -> List[Tup
 def holes_from_events(events: Sequence[Tuple[str, str, str, str, str]]) -> Set[HoleKey]:
     """A (tf, symbol, month) is a hole only if it never logged a successful fetch.
 
-    v1 ``full_run.log`` often ends with a second-pass cascade of ``no candles`` that
-    overwrites earlier ``bars=N`` lines for the same keys. Last-status-wins would
-    incorrectly treat the whole book as holes. A later refill that logs ``bars=``
-    clears the hole. Keys that only ever failed (e.g. ADANIENSOL 2026-04 on 60m)
-    stay holes so continuous ``v1_equivalent`` replays the same gap.
+    v1 ``full_run.log`` often ends with a later ``no candles`` cascade (retries or
+    a mixed-TF section) after earlier ``bars=N`` lines for the same keys.
+    Last-status-wins would incorrectly treat the whole book as holes. A later
+    refill that logs ``bars=`` clears the hole. Keys that only ever failed
+    (e.g. ADANIENSOL 2026-04 on 60m) stay holes so continuous ``v1_equivalent``
+    replays the same gap.
     """
     seen: Set[HoleKey] = set()
     ever_ok: Set[HoleKey] = set()
@@ -152,7 +170,7 @@ def holes_from_events(events: Sequence[Tuple[str, str, str, str, str]]) -> Set[H
 def build_holes_from_v1_logs(
     log_specs: Sequence[Tuple[Path, Optional[str]]],
 ) -> Set[HoleKey]:
-    """Merge v1 run logs in order; last status per (tf, symbol, month) wins."""
+    """Merge v1 run logs in order; a key is a hole only if it never logged bars=."""
     events: List[Tuple[str, str, str, str, str]] = []
     for path, default_tf in log_specs:
         if not path.is_file():
