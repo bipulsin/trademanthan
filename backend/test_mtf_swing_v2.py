@@ -679,13 +679,19 @@ def test_parity_hole_bar_filter_and_compare_open_signature():
     from backend.services.mtf_swing.parity import filter_bars_for_holes, holes_from_events, parse_log_events
 
     text = (
-        "2026-11-07 03:00:00 INFO mtf_swing 60m 2026-04 ADANIENSOL bars=10\n"
-        "2026-11-07 03:01:00 INFO mtf_swing ADANIENSOL 2026-04 no candles\n"
+        # Real hole: never fetched successfully.
+        "2026-11-07 03:00:00 INFO mtf_swing ADANIENSOL 2026-04 no candles\n"
+        # Cascade overwrite must not turn a prior bars= month into a hole.
+        "2026-11-07 03:01:00 INFO mtf_swing 60m 2025-11 ADANIENSOL bars=10\n"
+        "2026-11-07 03:02:00 INFO mtf_swing ADANIENSOL 2025-11 no candles\n"
+        # Later refill clears a prior hole.
+        "2026-11-07 03:03:00 INFO mtf_swing ADANIENSOL 2026-05 no candles\n"
         "2026-11-07 06:00:00 INFO mtf_swing 60m 2026-05 ADANIENSOL bars=20\n"
     )
     events = parse_log_events(text, default_tf="60m")
     holes = holes_from_events(events)
     assert ("60m", "ADANIENSOL", "2026-04") in holes
+    assert ("60m", "ADANIENSOL", "2025-11") not in holes
     assert ("60m", "ADANIENSOL", "2026-05") not in holes
 
     days = days_from(date(2026, 4, 28), 5)

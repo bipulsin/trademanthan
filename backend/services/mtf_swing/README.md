@@ -93,7 +93,7 @@ New discard reasons: `TREND_BLOCK`, `TREND_UNKNOWN`, `AFTER_CUTOFF`, `WEEKLY_CAP
 
 v1’s frozen `trades.csv` was produced under partial Upstox fetches (many `SYMBOL YYYY-MM no candles` months). A naïve continuous `v1_equivalent` re-run with full history therefore diverges — e.g. **ADANIENSOL SHORT** screened on **2026-04-30** (Thursday; 2026-05-01 Labour Day holiday) and filled 2026-05-04 (+₹86.8k on 60m). v1 had no April candles for that symbol, so the screen never ran; a later May refill could not recover it because bars before `active_from` are warm-up only (no new screens). 15m diverged from Feb onward for the same reason (hundreds of hole months).
 
-`scripts/build_mtf_swing_v1_holes.py` writes `data/mtf_swing/v1_fetch_holes.json` from v1 run logs. The continuous `v1_equivalent` runner loads that file, skips hole months, and strips hole-month bars from warm-up windows so carry-over replays the same gaps. `variant=all` and other experimental tags do **not** apply the hole mask. OPEN rows for `v1_equivalent` keep blank `exit_time` (like v1); other variants still stamp MTM.
+`scripts/build_mtf_swing_v1_holes.py` writes `data/mtf_swing/v1_fetch_holes.json` from v1 run logs. A (tf, symbol, month) is a hole only if it **never** logged `bars=N` across the v1 logs (a later cascade of `no candles` does not erase an earlier success; a refill that logs `bars=` clears the hole). The continuous `v1_equivalent` runner loads that file, skips hole months, and strips hole-month bars from warm-up windows so carry-over replays the same gaps. `variant=all` and other experimental tags do **not** apply the hole mask. OPEN rows for `v1_equivalent` keep blank `exit_time` (like v1); other variants still stamp MTM.
 
 ### Assumptions (v2)
 

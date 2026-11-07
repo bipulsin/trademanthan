@@ -131,10 +131,22 @@ def parse_log_events(text: str, *, default_tf: Optional[str] = None) -> List[Tup
 
 
 def holes_from_events(events: Sequence[Tuple[str, str, str, str, str]]) -> Set[HoleKey]:
-    last: Dict[HoleKey, str] = {}
+    """A (tf, symbol, month) is a hole only if it never logged a successful fetch.
+
+    v1 ``full_run.log`` often ends with a second-pass cascade of ``no candles`` that
+    overwrites earlier ``bars=N`` lines for the same keys. Last-status-wins would
+    incorrectly treat the whole book as holes. A later refill that logs ``bars=``
+    clears the hole. Keys that only ever failed (e.g. ADANIENSOL 2026-04 on 60m)
+    stay holes so continuous ``v1_equivalent`` replays the same gap.
+    """
+    seen: Set[HoleKey] = set()
+    ever_ok: Set[HoleKey] = set()
     for _ts, tf, sym, month, status in events:
-        last[(tf, sym, month)] = status
-    return {k for k, status in last.items() if status == "no_candles"}
+        key = (tf, sym, month)
+        seen.add(key)
+        if status == "ok":
+            ever_ok.add(key)
+    return {k for k in seen if k not in ever_ok}
 
 
 def build_holes_from_v1_logs(
