@@ -20,45 +20,55 @@ Candle responses are cached under `data/mtf_swing/cache/` (not committed).
 
 ## v2 Experiment
 
-Configurable flags layered on the v1 engine. Writes **only** to `data/mtf_swing_v2/` and never rewrites v1 CSVs.
+Configurable flags layered on the v1 engine. Writes **only** to `data/mtf_swing_v2/` and never rewrites v1 CSVs. Month-by-month forward runs with **continuous state carry-over** (open trades, pending/limits, watchlist) — equivalent to one continuous run.
 
 ```bash
-python3 scripts/run_mtf_swing_backtest.py --v2 --months 2026-06,2026-10 --timeframes 60m,15m
-python3 scripts/run_mtf_swing_backtest.py --v2 --ablation
+# Validate first: flags off must match v1
+python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \
+  --timeframes 60m,15m --variants v1_equivalent
+
+# Full primary ablation matrix
+python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \
+  --timeframes 60m,15m --variants all
+
+# Optional leave-one-out
+python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \
+  --timeframes 60m,15m --variants all --leave-one-out
 ```
 
-Defaults vs v1:
+| variant | regime | SL pivot | TP 1.5R / no time | RR ≥ 1.3 |
+|---------|--------|----------|-------------------|----------|
+| v1_equivalent | off | off | off | off |
+| regime_only | on | off | off | off |
+| sl_only | off | on | off | off |
+| tp_only | off | off | on | off |
+| rr_only | off | off | off | on |
+| all | on | on | on | on |
 
-| Flag | v1 | v2 |
-|------|----|----|
-| Regime filter (Nifty 10w EMA) | off | on (longs only bullish, shorts only bearish; neutral blocks) |
-| SL | W1 absolute extreme | confirmed swing pivot outside previous week's range |
-| Target | previous-week opposite extreme (T1) | 1.5R from fill (TP); no time exit |
-| Entry RR path | midpoint limit when rr &lt; 1 | skip unless potential RR ≥ 1.3 vs opp extreme |
-| Months | Nov'25–Oct'26 continuous | 2026-06 and 2026-10 independent flat starts |
-| OPEN | blank P&L | MTM at last bar (`mtm_price` / `mtm_pnl`) |
+OPEN rows get MTM at the last available bar (`mtm_price` / `mtm_pnl`). Regime warm-up pulls ≥20 weeks of Nifty history before 1-Nov-2025. Coverage timestamps are logged in `coverage_log.csv` — if the feed ends ~27-Oct-2026 15:15, later calendar days are missing bars (not a silent strategy stop).
 
-Outputs: `trades.csv`, `discards.csv`, `regime_log.csv`, optional `variant_summary.csv`.
+Outputs: `trades.csv`, `discards.csv`, `regime_log.csv`, `coverage_log.csv`, `variant_summary.csv`.
+
+### Idempotency / pilot June+Oct rows
+
+Progress tokens are `v2:cont:{variant}:{tf}:{YYYY-MM}` so legacy flat pilot tokens (`v2:all:…`) do not mark continuous months complete. Trade IDs append `|{variant}`; append-only skips duplicates. The June+Oct pilot wrote `variant=all` with **flat** month starts (71 trades). A full-period continuous `all` run can share some entry-time keys with those rows — archive the pilot first:
+
+```bash
+# on paperclip, inside the data volume
+cp trades.csv trades_pilot_jun_oct_flat.csv
+# optionally truncate trades/discards for a clean continuous book, or leave
+# pilot rows (they remain distinguishable by entry paths / months only).
+```
+
+Prefer flocked runs: `flock -n /tmp/mtf_swing_v2.lock -c 'python3 scripts/run_mtf_swing_backtest.py --v2 …'`.
 
 ### Assumptions (v2)
 
 - Regime is computed once per screening Friday from Nifty 50 daily→weekly closes with no look-ahead; the label applies to the following week's trades only.
 - Pivot SL uses confirmed swing highs/lows on the execution timeframe (same 3-bar definition as v1 triggers). If none sit outside the previous week's range, the setup is discarded (`NO_PIVOT_SL`).
 - Prospective TP before entry is 1.5R from the breakout close; after fill it is recomputed from the actual entry. Same-bar SL-before-TP and gap fills match v1.
-- June and October runs do not share state. Each gets ~3 weeks warm-up and follows open trades forward through available bars until SL/TP or OPEN+MTM.
+- State carries across month boundaries (one open/pending setup per symbol). Follow trades past 31-Oct-2026 until SL/TP; else OPEN+MTM.
 - Universe, 1-lot sizing, and zero default costs match v1.
-
-### Headline results (paperclip run, 2026-11-07)
-
-Same months only (2026-06 + 2026-10). OPEN excluded from closed metrics; v2 also reports open MTM.
-
-| Slice | v1 closed | v1 net | v1 WR | v1 PF | v2 closed | v2 net | v2 WR | v2 PF | v2 open (MTM) |
-|-------|-----------|--------|-------|-------|-----------|--------|-------|-------|---------------|
-| 60m | 143 | ₹3.07L | 46.2% | 1.18 | 27 | ₹2.90L | 59.3% | 2.32 | 5 (−₹0.42L) |
-| 15m | 121 | ₹4.14L | 46.3% | 1.30 | 35 | ₹2.93L | 57.1% | 2.16 | 4 (−₹0.35L) |
-| Both | 264 | ₹7.22L | 46.2% | 1.23 | 62 | ₹5.82L | 58.1% | 2.24 | 9 (−₹0.77L) |
-
-v2 takes far fewer trades (filters + stricter RR) with higher win rate and profit factor, but lower total rupee P&L on this two-month window. Numbers are from `data/mtf_swing_v2/trades.csv` vs v1 `data/mtf_swing/trades.csv` (v1 file was not rewritten).
 
 ## Assumptions
 

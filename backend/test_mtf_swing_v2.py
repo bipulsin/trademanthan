@@ -7,11 +7,26 @@ from pathlib import Path
 import pytz
 
 from backend.services.mtf_swing.bars import Bar
-from backend.services.mtf_swing.config import MtfSwingConfig, TRADE_FIELDS, ablation_config, v2_config
+from backend.services.mtf_swing.config import (
+    ABLATION_VARIANTS,
+    MtfSwingConfig,
+    TRADE_FIELDS,
+    ablation_config,
+    months_between,
+    resolve_variants,
+    v2_config,
+)
 from backend.services.mtf_swing.csv_store import append_trades, append_trades_v2, read_rows
 from backend.services.mtf_swing.engine import run_symbol
 from backend.services.mtf_swing.levels import WeekStats, build_levels, candidate_side
-from backend.services.mtf_swing.metrics import build_dashboard, build_v2_dashboard
+from backend.services.mtf_swing.metrics import (
+    ablation_vs_baseline,
+    build_dashboard,
+    build_v2_dashboard,
+    compare_v1_equivalent,
+    core_trade_signature,
+    robustness_block,
+)
 from backend.services.mtf_swing.regime import (
     build_regime_series,
     classify_regime,
@@ -446,17 +461,33 @@ def test_v2_dashboard_aggregates_match_csv_and_exclude_open():
 
 
 def test_ablation_configs_toggle_flags():
+    v1e = ablation_config("v1_equivalent")
+    assert not v1e.regime_filter and v1e.sl_basis == "abs_extreme"
+    assert v1e.tp_r is None and v1e.max_sessions == 10 and v1e.min_potential_rr is None
+    # Legacy short names still resolve.
     r = ablation_config("regime")
-    assert r.regime_filter and r.sl_basis == "abs_extreme" and r.tp_r is None
-    s = ablation_config("sl")
+    assert r.ablation_tag == "regime_only" and r.regime_filter and r.sl_basis == "abs_extreme"
+    s = ablation_config("sl_only")
     assert s.sl_basis == "pivot_outside_prev_week" and not s.regime_filter
-    t = ablation_config("tp")
+    t = ablation_config("tp_only")
     assert t.tp_r == 1.5 and t.max_sessions is None
-    rr = ablation_config("rr")
+    rr = ablation_config("rr_only")
     assert rr.min_potential_rr == 1.3
     allc = ablation_config("all")
     assert allc.regime_filter and allc.sl_basis == "pivot_outside_prev_week"
     assert allc.tp_r == 1.5 and allc.min_potential_rr == 1.3
+    lo = ablation_config("all_except_regime")
+    assert not lo.regime_filter and lo.tp_r == 1.5
+
+
+def test_resolve_variants_matrix_and_specific():
+    assert resolve_variants(["all"]) == list(ABLATION_VARIANTS)
+    assert resolve_variants(["v1_equivalent"]) == ["v1_equivalent"]
+    assert resolve_variants(["regime_only", "all"]) == ["regime_only", "all"]
+    assert "all_except_sl" in resolve_variants(["v1_equivalent"], leave_one_out=True)
+    assert months_between("2025-11", "2026-10")[0] == "2025-11"
+    assert months_between("2025-11", "2026-10")[-1] == "2026-10"
+    assert len(months_between("2025-11", "2026-10")) == 12
 
 
 def test_ema_seed_matches_sma():
@@ -465,3 +496,129 @@ def test_ema_seed_matches_sma():
     assert series[0] is None and series[1] is None
     assert abs(series[2] - (10 + 11 + 12) / 3) < 1e-9
     assert series[3] is not None
+
+
+def test_v1_equivalent_month_batch_matches_continuous():
+    """Continuous state carry for v1_equivalent must match a single-window run."""
+    # Reuse the proven v1 carry series from test_mtf_swing via identical construction.
+    from backend.test_mtf_swing import _carry_series, _sig
+
+    bars = _carry_series()
+    cfg = ablation_config("v1_equivalent", timeframe="60m")
+    continuous, _, _ = run_symbol(
+        bars,
+        symbol="V1E",
+        active_from=date(2025, 11, 1),
+        active_to=date(2025, 12, 31),
+        config=cfg,
+        lot_size=250,
+        finalize_open=True,
+    )
+    assert len(continuous) == 1
+    nov_bars = [b for b in bars if b.session_date.month == 11]
+    dec_bars = [b for b in bars if b.session_date >= date(2025, 11, 10)]
+    t1, _, state = run_symbol(
+        nov_bars,
+        symbol="V1E",
+        active_from=date(2025, 11, 1),
+        active_to=date(2025, 11, 30),
+        config=cfg,
+        lot_size=250,
+        finalize_open=False,
+    )
+    assert t1 == []
+    assert state.get("position") is not None
+    t2, _, _ = run_symbol(
+        dec_bars,
+        symbol="V1E",
+        active_from=date(2025, 12, 1),
+        active_to=date(2025, 12, 31),
+        state=state,
+        config=cfg,
+        lot_size=250,
+        finalize_open=True,
+    )
+    assert _sig(t1 + t2) == _sig(continuous)
+    # Cross-month: one trade, entry month Nov, symbol lock via single position state.
+    assert continuous[0]["month"] == "2025-11"
+    assert continuous[0]["variant"] == "v1_equivalent"
+
+
+def test_v1_equivalent_matches_plain_v1_signatures():
+    from backend.test_mtf_swing import _carry_series
+
+    bars = _carry_series()
+    v1_cfg = MtfSwingConfig(timeframe="60m")
+    v2_cfg = ablation_config("v1_equivalent", timeframe="60m")
+    t_v1, _, _ = run_symbol(
+        bars, symbol="EQ", active_from=date(2025, 11, 1), active_to=date(2025, 12, 31),
+        config=v1_cfg, lot_size=250, finalize_open=True,
+    )
+    t_v2, _, _ = run_symbol(
+        bars, symbol="EQ", active_from=date(2025, 11, 1), active_to=date(2025, 12, 31),
+        config=v2_cfg, lot_size=250, finalize_open=True,
+    )
+    # trade_id gains a |v1_equivalent suffix; core fields must still match v1.
+    assert [core_trade_signature(r) for r in t_v1] == [core_trade_signature(r) for r in t_v2]
+    assert t_v1[0]["net_pnl"] == t_v2[0]["net_pnl"]
+
+
+def test_like_for_like_dashboard_scopes_months_and_wr_pp():
+    v1 = [
+        {"trade_id": "A", "timeframe": "60m", "month": "2026-06", "symbol": "A", "side": "LONG",
+         "exit_reason": "T1", "exit_time": "2026-06-10T15:15:00+05:30", "net_pnl": "100", "r_multiple": "1"},
+        {"trade_id": "B", "timeframe": "60m", "month": "2026-07", "symbol": "B", "side": "SHORT",
+         "exit_reason": "SL", "exit_time": "2026-07-10T15:15:00+05:30", "net_pnl": "-50", "r_multiple": "-1"},
+    ]
+    v2 = [
+        {"trade_id": "A|all", "timeframe": "60m", "month": "2026-06", "symbol": "A", "side": "LONG",
+         "exit_reason": "TP", "exit_time": "2026-06-10T15:15:00+05:30", "net_pnl": "80", "variant": "all",
+         "r_multiple": "1.5", "regime": "Bullish"},
+        {"trade_id": "C|all", "timeframe": "60m", "month": "2026-06", "symbol": "C", "side": "LONG",
+         "exit_reason": "OPEN", "exit_time": "2026-06-30T15:15:00+05:30", "net_pnl": "", "variant": "all",
+         "mtm_pnl": "10", "regime": "Bullish"},
+    ]
+    dash = build_v2_dashboard(v2, timeframe="60m", month="2026-06", variant="all", v1_trades=v1)
+    assert dash["comparison"]["scope"]
+    assert "pp" in dash["comparison"]["scope"] or "closed" in dash["comparison"]["scope"]
+    assert dash["comparison"]["v1"]["trades"] == 1
+    assert dash["comparison"]["v2"]["trades"] == 1
+    assert dash["comparison"]["delta_pp"]["win_rate"] is not None
+    # Full scope must not silently drop to June+Oct only.
+    full = build_v2_dashboard(v2, timeframe="60m", month="all", variant="all", v1_trades=v1)
+    assert len(full["month_compare"]) == 12
+    assert any(m["month"] == "2026-07" for m in full["month_compare"])
+
+
+def test_concentration_exposure_and_ablation_baseline():
+    rows = [
+        {"trade_id": "1", "timeframe": "15m", "month": "2026-06", "symbol": "AAA", "side": "LONG",
+         "exit_reason": "TP", "exit_time": "2026-06-01", "net_pnl": "100", "variant": "v1_equivalent",
+         "r_multiple": "1", "regime": "Bullish"},
+        {"trade_id": "2", "timeframe": "15m", "month": "2026-06", "symbol": "AAA", "side": "LONG",
+         "exit_reason": "SL", "exit_time": "2026-06-02", "net_pnl": "-40", "variant": "v1_equivalent",
+         "r_multiple": "-1", "regime": "Bullish"},
+        {"trade_id": "3", "timeframe": "15m", "month": "2026-06", "symbol": "BBB", "side": "SHORT",
+         "exit_reason": "TP", "exit_time": "2026-06-03", "net_pnl": "50", "variant": "regime_only",
+         "r_multiple": "1.2", "regime": "Bearish"},
+        {"trade_id": "4", "timeframe": "15m", "month": "2026-06", "symbol": "CCC", "side": "LONG",
+         "exit_reason": "OPEN", "exit_time": "2026-06-30", "net_pnl": "", "variant": "regime_only",
+         "mtm_pnl": "5", "regime": "Bullish"},
+    ]
+    rob = robustness_block([r for r in rows if r["variant"] == "regime_only"])
+    assert rob["open_trades"] == 1
+    assert rob["unique_symbols"] == 1
+    assert "SHORT" in rob["side_breakdown"]
+    table = ablation_vs_baseline(rows, timeframe="15m")
+    tags = {r["variant"] for r in table}
+    assert "v1_equivalent" in tags and "regime_only" in tags
+    report = compare_v1_equivalent(
+        [{"trade_id": "1", "timeframe": "15m", "month": "2026-06", "symbol": "AAA", "side": "LONG",
+          "entry_time": "t", "exit_time": "t2", "exit_reason": "T1", "entry_price": "1",
+          "exit_price": "2", "net_pnl": "100"}],
+        [{"trade_id": "1|v1_equivalent", "timeframe": "15m", "month": "2026-06", "symbol": "AAA",
+          "side": "LONG", "entry_time": "t", "exit_time": "t2", "exit_reason": "T1",
+          "entry_price": "1", "exit_price": "2", "net_pnl": "100", "variant": "v1_equivalent"}],
+        timeframe="15m",
+    )
+    assert report["ok"] is True

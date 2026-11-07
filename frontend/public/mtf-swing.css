@@ -54,6 +54,7 @@ table.ms th { position: sticky; top: 0; background: #101815; color: var(--muted,
 }
 .ms-pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.55rem; flex-wrap: wrap; }
 .ms-note { color: var(--muted, #8fa398); font-size: 0.8rem; }
+tr.ms-worse { background: rgba(224, 107, 107, 0.12); }
 @media (max-width: 720px) {
   .ms-card .val { font-size: 1rem; }
   table.ms { font-size: 0.75rem; }

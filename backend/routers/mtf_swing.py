@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
+from backend.services.mtf_swing.config import ABLATION_VARIANTS, LEAVE_ONE_OUT_VARIANTS, month_windows
 from backend.services.mtf_swing.csv_store import read_rows
 from backend.services.mtf_swing.data import (
     data_dir_v2,
@@ -23,9 +25,12 @@ from backend.services.mtf_swing.data import (
     trades_path_v2,
     variant_summary_path,
 )
-from backend.services.mtf_swing.metrics import ablation_table, build_dashboard, build_v2_dashboard
+from backend.services.mtf_swing.metrics import ablation_table, build_dashboard, build_v2_dashboard, compare_v1_equivalent
 
 router = APIRouter(prefix="/mtf-swing", tags=["mtf-swing"])
+
+_MONTH_RE = re.compile(r"^(all|full|2025-1[1-2]|2026-0[1-9]|2026-10)$")
+_VARIANT_ANY = "any"
 
 
 def _auth_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -111,6 +116,13 @@ def _find_discards_v2() -> Optional[Path]:
     return None
 
 
+def _normalize_month(month: str) -> str:
+    m = (month or "all").strip().lower()
+    if m == "full":
+        return "all"
+    return m
+
+
 @router.get("/health")
 def health(_: User = Depends(_auth_user)) -> Dict[str, Any]:
     path = find_trades_csv()
@@ -155,47 +167,89 @@ def results(
 @router.get("/v2/results")
 def v2_results(
     timeframe: str = Query("all", pattern="^(60m|15m|all)$"),
-    month: str = Query("all", pattern="^(all|2026-06|2026-10)$"),
+    month: str = Query("all"),
     variant: str = Query("all"),
     _: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
+    month_n = _normalize_month(month)
+    if not _MONTH_RE.match(month_n):
+        raise HTTPException(status_code=422, detail=f"invalid month {month!r}")
     path = find_trades_csv_v2()
     rows = read_rows(path) if path else []
     disc_path = _find_discards_v2()
     discards = read_rows(disc_path) if disc_path else []
     v1_path = find_trades_csv()
     v1_rows = read_rows(v1_path) if v1_path else []
-    # Restrict v1 comparison to the same months/timeframes when filtering.
     dash = build_v2_dashboard(
         rows,
         discards,
         timeframe=timeframe,
-        month=month,
+        month=month_n,
         variant=variant,
         v1_trades=v1_rows,
     )
-    ablation = ablation_table(rows) if any(r.get("variant") and r.get("variant") != "all" for r in rows) else []
-    # Prefer on-disk variant_summary when present.
+    ablation = ablation_table(rows)
     summary_path = variant_summary_path()
     summary_rows = read_rows(summary_path) if summary_path.is_file() else []
+    # Filter on-disk summary to selected TF / month when not Full.
+    if summary_rows:
+        filtered = summary_rows
+        if timeframe != "all":
+            filtered = [r for r in filtered if r.get("timeframe") == timeframe]
+        if month_n != "all":
+            filtered = [r for r in filtered if r.get("month") == month_n]
+        ablation = filtered or ablation
     regime_path = regime_log_path()
+    month_options = [{"value": "all", "label": "Full"}] + [
+        {"value": lab, "label": lab} for _, _, lab in month_windows()
+    ]
+    variant_options = (
+        [{"value": "any", "label": "Any variant"}]
+        + [{"value": v, "label": v} for v in ABLATION_VARIANTS]
+        + [{"value": v, "label": v} for v in LEAVE_ONE_OUT_VARIANTS]
+    )
     return {
         "ok": True,
         "csv": str(path or ""),
         "timeframe": timeframe,
-        "month": month,
+        "month": month_n,
         "variant": variant,
+        "scope": dash.get("scope"),
         "trades": dash["trades"],
         "summary": dash["summary"],
         "months": dash["months"],
+        "month_compare": dash.get("month_compare") or [],
         "charts": dash["charts"],
         "open_trades": dash["open_trades"],
         "open_mtm": dash.get("open_mtm") or {},
         "funnel": dash.get("funnel") or {},
         "comparison": dash.get("comparison"),
-        "ablation": summary_rows or ablation,
+        "robustness": dash.get("robustness") or {},
+        "ablation": dash.get("ablation_vs_baseline") or summary_rows or ablation,
+        "ablation_detail": ablation,
         "regime_log_csv": str(regime_path if regime_path.is_file() else ""),
+        "month_options": month_options,
+        "variant_options": variant_options,
     }
+
+
+@router.get("/v2/validate")
+def v2_validate(
+    timeframe: str = Query("all", pattern="^(60m|15m|all)$"),
+    _: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Compare v1_equivalent rows to v1 for the like-for-like validation gate."""
+    v1 = load_trades()
+    v2 = load_trades_v2()
+    if timeframe == "all":
+        reports = {
+            "60m": compare_v1_equivalent(v1, v2, timeframe="60m"),
+            "15m": compare_v1_equivalent(v1, v2, timeframe="15m"),
+            "all": compare_v1_equivalent(v1, v2, timeframe="all"),
+        }
+        return {"ok": all(r.get("ok") for r in reports.values()), "reports": reports}
+    report = compare_v1_equivalent(v1, v2, timeframe=timeframe)
+    return {"ok": bool(report.get("ok")), "reports": {timeframe: report}}
 
 
 @router.get("/trades.csv")
@@ -225,19 +279,22 @@ def download_trades(
 @router.get("/v2/trades.csv")
 def download_trades_v2(
     timeframe: str = Query("all", pattern="^(60m|15m|all)$"),
-    month: str = Query("all", pattern="^(all|2026-06|2026-10)$"),
+    month: str = Query("all"),
     variant: str = Query("all"),
     _: User = Depends(_auth_user),
 ) -> PlainTextResponse:
+    month_n = _normalize_month(month)
+    if not _MONTH_RE.match(month_n):
+        raise HTTPException(status_code=422, detail=f"invalid month {month!r}")
     path = find_trades_csv_v2()
     if path is None:
         raise HTTPException(status_code=404, detail="MTF Swing v2 trades CSV not written yet")
     rows = read_rows(path)
     if timeframe != "all":
         rows = [r for r in rows if r.get("timeframe") == timeframe]
-    if month != "all":
-        rows = [r for r in rows if r.get("month") == month]
-    if variant != "all":
+    if month_n != "all":
+        rows = [r for r in rows if r.get("month") == month_n]
+    if variant and variant not in (_VARIANT_ANY, "*", "all_variants"):
         rows = [r for r in rows if r.get("variant") == variant]
     buf = io.StringIO()
     if rows:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 BACKTEST_START = date(2025, 11, 1)
@@ -18,10 +18,33 @@ QTY_LOTS = 1
 TIMEFRAMES: Tuple[str, ...] = ("60m", "15m")
 INTERVAL = {"60m": "hours/1", "15m": "minutes/15"}
 
-# v2 experiment months only (independent flat starts).
+# Legacy pilot months (flat starts). Full-period continuous uses month_windows().
 V2_MONTHS: Tuple[str, ...] = ("2026-06", "2026-10")
+V2_FULL_START = "2025-11"
+V2_FULL_END = "2026-10"
 
-ABLATION_VARIANTS: Tuple[str, ...] = ("regime", "sl", "tp", "rr", "all")
+# Primary ablation matrix (spec names). Legacy short names still resolve via aliases.
+ABLATION_VARIANTS: Tuple[str, ...] = (
+    "v1_equivalent",
+    "regime_only",
+    "sl_only",
+    "tp_only",
+    "rr_only",
+    "all",
+)
+LEAVE_ONE_OUT_VARIANTS: Tuple[str, ...] = (
+    "all_except_regime",
+    "all_except_sl",
+    "all_except_tp",
+    "all_except_rr",
+)
+VARIANT_ALIASES: Dict[str, str] = {
+    "regime": "regime_only",
+    "sl": "sl_only",
+    "tp": "tp_only",
+    "rr": "rr_only",
+    "v1": "v1_equivalent",
+}
 
 TRADE_FIELDS = [
     "trade_id",
@@ -96,8 +119,20 @@ VARIANT_SUMMARY_FIELDS = [
     "win_rate",
     "profit_factor",
     "avg_pnl",
+    "avg_r",
     "open_trades",
     "mtm_pnl_sum",
+    "run_ts",
+]
+
+COVERAGE_LOG_FIELDS = [
+    "coverage_id",
+    "variant",
+    "timeframe",
+    "month",
+    "symbol",
+    "last_bar_ts",
+    "bars",
     "run_ts",
 ]
 
@@ -126,6 +161,26 @@ def month_window_for(label: str) -> Tuple[date, date, str]:
     raise ValueError(f"unknown month label {label!r}")
 
 
+def months_between(start_label: str, end_label: str) -> List[str]:
+    """Inclusive YYYY-MM labels from start through end within the backtest window."""
+    month_window_for(start_label)
+    month_window_for(end_label)
+    if start_label > end_label:
+        raise ValueError(f"start {start_label} is after end {end_label}")
+    return [lab for _, _, lab in month_windows() if start_label <= lab <= end_label]
+
+
+def normalize_variant(name: str) -> str:
+    tag = (name or "").strip().lower()
+    return VARIANT_ALIASES.get(tag, tag)
+
+
+def known_variants(*, leave_one_out: bool = False) -> Tuple[str, ...]:
+    if leave_one_out:
+        return ABLATION_VARIANTS + LEAVE_ONE_OUT_VARIANTS
+    return ABLATION_VARIANTS
+
+
 @dataclass
 class MtfSwingConfig:
     entry_timing: str = "next_open"  # "next_open" | "close"
@@ -148,7 +203,7 @@ class MtfSwingConfig:
     tp_r: Optional[float] = None  # None → v1 opposite-extreme T1; else R-multiple TP
     min_potential_rr: Optional[float] = None  # None → v1 midpoint-limit path
     below_threshold_action: str = "skip"  # skip | limit_at_threshold
-    ablation_tag: str = ""  # regime | sl | tp | rr | all | ""
+    ablation_tag: str = ""  # v1_equivalent | regime_only | ... | all | ""
 
     def charge_inr(self) -> float:
         return float(self.brokerage) + float(self.charges)
@@ -183,20 +238,128 @@ def v2_config(**overrides) -> MtfSwingConfig:
     return replace(base, **overrides)
 
 
+def _flags_for_variant(tag: str) -> Dict[str, object]:
+    """Map a canonical variant name to engine flags layered on v1 defaults."""
+    if tag == "v1_equivalent":
+        return {
+            "regime_filter": False,
+            "sl_basis": "abs_extreme",
+            "tp_r": None,
+            "max_sessions": MAX_SESSIONS,
+            "min_potential_rr": None,
+        }
+    if tag == "regime_only":
+        return {"regime_filter": True}
+    if tag == "sl_only":
+        return {"sl_basis": "pivot_outside_prev_week"}
+    if tag == "tp_only":
+        return {"tp_r": 1.5, "max_sessions": None}
+    if tag == "rr_only":
+        return {"min_potential_rr": 1.3, "below_threshold_action": "skip"}
+    if tag == "all":
+        return {
+            "regime_filter": True,
+            "sl_basis": "pivot_outside_prev_week",
+            "tp_r": 1.5,
+            "max_sessions": None,
+            "min_potential_rr": 1.3,
+            "below_threshold_action": "skip",
+        }
+    if tag == "all_except_regime":
+        return {
+            "regime_filter": False,
+            "sl_basis": "pivot_outside_prev_week",
+            "tp_r": 1.5,
+            "max_sessions": None,
+            "min_potential_rr": 1.3,
+            "below_threshold_action": "skip",
+        }
+    if tag == "all_except_sl":
+        return {
+            "regime_filter": True,
+            "sl_basis": "abs_extreme",
+            "tp_r": 1.5,
+            "max_sessions": None,
+            "min_potential_rr": 1.3,
+            "below_threshold_action": "skip",
+        }
+    if tag == "all_except_tp":
+        return {
+            "regime_filter": True,
+            "sl_basis": "pivot_outside_prev_week",
+            "tp_r": None,
+            "max_sessions": MAX_SESSIONS,
+            "min_potential_rr": 1.3,
+            "below_threshold_action": "skip",
+        }
+    if tag == "all_except_rr":
+        return {
+            "regime_filter": True,
+            "sl_basis": "pivot_outside_prev_week",
+            "tp_r": 1.5,
+            "max_sessions": None,
+            "min_potential_rr": None,
+        }
+    raise ValueError(f"unknown ablation variant {tag!r}")
+
+
 def ablation_config(name: str, **overrides) -> MtfSwingConfig:
-    """Build a single-feature or full ablation variant on top of v1 defaults."""
-    tag = (name or "all").strip().lower()
-    if tag not in ABLATION_VARIANTS:
-        raise ValueError(f"ablation variant must be one of {ABLATION_VARIANTS}")
-    cfg = MtfSwingConfig(variant="v2", ablation_tag=tag)
-    if tag in ("regime", "all"):
-        cfg = replace(cfg, regime_filter=True)
-    if tag in ("sl", "all"):
-        cfg = replace(cfg, sl_basis="pivot_outside_prev_week")
-    if tag in ("tp", "all"):
-        cfg = replace(cfg, tp_r=1.5, max_sessions=None)
-    if tag in ("rr", "all"):
-        cfg = replace(cfg, min_potential_rr=1.3, below_threshold_action="skip")
+    """Build a named ablation variant on top of v1 defaults.
+
+    Accepts both spec names (``regime_only``) and legacy short names (``regime``).
+    """
+    tag = normalize_variant(name)
+    allowed = set(ABLATION_VARIANTS) | set(LEAVE_ONE_OUT_VARIANTS)
+    if tag not in allowed:
+        raise ValueError(f"ablation variant must be one of {sorted(allowed)}")
+    flags = _flags_for_variant(tag)
+    cfg = replace(MtfSwingConfig(variant="v2", ablation_tag=tag), **flags)  # type: ignore[arg-type]
     if overrides:
         cfg = replace(cfg, **overrides)
     return cfg
+
+
+def resolve_variants(
+    raw: Optional[Sequence[str]] = None,
+    *,
+    ablation: bool = False,
+    leave_one_out: bool = False,
+) -> List[str]:
+    """Resolve CLI variant selectors.
+
+    Bare ``all`` (or ``--ablation``) expands to the full primary matrix.
+    A multi-item list may include the feature-combo variant named ``all``.
+    """
+    if ablation and not raw:
+        return list(known_variants(leave_one_out=leave_one_out))
+    if not raw:
+        if leave_one_out:
+            return list(known_variants(leave_one_out=True))
+        return ["all"]
+    parts: List[str] = []
+    for item in raw:
+        for part in str(item).split(","):
+            p = part.strip()
+            if p:
+                parts.append(p)
+    if not parts:
+        return ["all"]
+    # Bare --variants all → full primary matrix (optionally + leave-one-out).
+    if len(parts) == 1 and parts[0].strip().lower() == "all":
+        return list(known_variants(leave_one_out=leave_one_out))
+    out: List[str] = []
+    seen = set()
+    allowed = set(known_variants(leave_one_out=True))
+    for p in parts:
+        tag = normalize_variant(p)
+        if tag not in allowed:
+            raise ValueError(f"unknown variant {p!r}; expected one of {sorted(allowed)}")
+        if tag not in seen:
+            seen.add(tag)
+            out.append(tag)
+    if leave_one_out:
+        for tag in LEAVE_ONE_OUT_VARIANTS:
+            if tag not in seen:
+                out.append(tag)
+                seen.add(tag)
+    return out

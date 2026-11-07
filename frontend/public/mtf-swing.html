@@ -130,12 +130,20 @@
                         <button type="button" data-v2-tf="15m">15m</button>
                         <button type="button" data-v2-tf="all" class="on">All</button>
                     </div>
-                    <div class="ms-tf" role="tablist" aria-label="v2 month">
-                        <button type="button" data-v2-month="2026-06">2026-06</button>
-                        <button type="button" data-v2-month="2026-10">2026-10</button>
-                        <button type="button" data-v2-month="all" class="on">Both</button>
+                    <div class="ms-filters" style="margin-bottom:0.8rem">
+                        <label>Month
+                            <select id="v2MonthSelect">
+                                <option value="all">Full</option>
+                            </select>
+                        </label>
+                        <label>Variant
+                            <select id="v2VariantSelect">
+                                <option value="all">all</option>
+                            </select>
+                        </label>
                     </div>
                     <p class="ms-status" id="msV2Status">Loading v2…</p>
+                    <p class="ms-note" id="msV2Scope"></p>
                     <div class="ms-cards" id="msV2Cards"></div>
                     <section class="ms-section">
                         <h2>Open trades (MTM)</h2>
@@ -143,12 +151,13 @@
                         <div class="ms-cards" id="msV2OpenCards"></div>
                     </section>
                     <section class="ms-section">
-                        <h2>v1 vs v2 (same filters)</h2>
+                        <h2>Like-for-like v1 vs selected variant</h2>
+                        <p class="ms-note">Same months + TF; closed vs closed. Win-rate delta in percentage points (pp).</p>
                         <div class="ms-table-wrap">
                             <table class="ms">
                                 <thead>
                                     <tr>
-                                        <th>Metric</th><th>v1</th><th>v2</th><th>Delta</th>
+                                        <th>Metric</th><th>v1</th><th>Selected</th><th>Delta</th>
                                     </tr>
                                 </thead>
                                 <tbody id="msV2Compare"></tbody>
@@ -156,11 +165,42 @@
                         </div>
                     </section>
                     <section class="ms-section">
-                        <h2>Funnel</h2>
+                        <h2>Equity vs v1_equivalent</h2>
+                        <div class="ms-charts">
+                            <div class="ms-chart" id="msV2EquityChart"></div>
+                            <div class="ms-chart" id="msV2DrawdownChart"></div>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Funnel + regime</h2>
                         <div class="ms-cards" id="msV2Funnel"></div>
                     </section>
                     <section class="ms-section">
-                        <h2>Month-wise (v2)</h2>
+                        <h2>Robustness</h2>
+                        <div class="ms-cards" id="msV2RobustCards"></div>
+                        <div class="ms-table-wrap" style="margin-top:0.5rem">
+                            <table class="ms">
+                                <thead><tr><th>Slice</th><th>Key</th><th>Trades</th><th>Net P&L</th><th>Win rate</th><th>PF</th></tr></thead>
+                                <tbody id="msV2RobustTable"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Month-wise v1 vs selected</h2>
+                        <p class="ms-note">Rows where selected net P&L is worse than v1 are highlighted.</p>
+                        <div class="ms-table-wrap">
+                            <table class="ms">
+                                <thead>
+                                    <tr>
+                                        <th>Month</th><th>v1 trades</th><th>v2 trades</th><th>v1 net</th><th>v2 net</th><th>Δ net</th><th>Δ WR (pp)</th><th>v1 PF</th><th>v2 PF</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="msV2MonthCompare"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="ms-section">
+                        <h2>Month-wise (selected variant)</h2>
                         <div class="ms-table-wrap">
                             <table class="ms">
                                 <thead>
@@ -173,12 +213,12 @@
                         </div>
                     </section>
                     <section class="ms-section" id="msV2AblationSection" hidden>
-                        <h2>Ablation</h2>
+                        <h2>Ablation vs v1_equivalent</h2>
                         <div class="ms-table-wrap">
                             <table class="ms">
                                 <thead>
                                     <tr>
-                                        <th>Variant</th><th>TF</th><th>Month</th><th>Trades</th><th>Net P&L</th><th>Win rate</th><th>PF</th><th>Open</th><th>MTM sum</th>
+                                        <th>Variant</th><th>Trades</th><th>Net P&L</th><th>Win rate</th><th>PF</th><th>Avg R</th><th>Δ PF</th><th>Δ Avg R</th><th>Δ WR pp</th><th>Open</th><th>MTM</th>
                                     </tr>
                                 </thead>
                                 <tbody id="msV2Ablation"></tbody>
@@ -248,6 +288,6 @@
         </main>
     </div>
     <script src="left-menu.js?v=3.55"></script>
-    <script src="mtf-swing.js?v=2"></script>
+    <script src="mtf-swing.js?v=3"></script>
 </body>
 </html>

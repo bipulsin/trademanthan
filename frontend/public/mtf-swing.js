@@ -12,17 +12,29 @@
     sortDir: -1,
     page: 1,
   };
+  var V2_MONTHS = [
+    "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04",
+    "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10",
+  ];
+  var V2_VARIANTS = [
+    "all", "v1_equivalent", "regime_only", "sl_only", "tp_only", "rr_only",
+    "any", "all_except_regime", "all_except_sl", "all_except_tp", "all_except_rr",
+  ];
   var v2 = {
     tf: "all",
     month: "all",
+    variant: "all",
     trades: [],
     summary: null,
     months: [],
+    month_compare: [],
     charts: null,
     comparison: null,
     funnel: {},
     open_mtm: {},
+    robustness: {},
     ablation: [],
+    scope: "",
     sortKey: "entry_time",
     sortDir: -1,
     page: 1,
@@ -92,8 +104,15 @@
 
   function qsV2Month() {
     var m = qs().get("v2month") || "all";
-    if (m !== "2026-06" && m !== "2026-10" && m !== "all") m = "all";
+    if (m === "full") m = "all";
+    if (m !== "all" && V2_MONTHS.indexOf(m) === -1) m = "all";
     return m;
+  }
+
+  function qsV2Variant() {
+    var v = qs().get("variant") || "all";
+    if (V2_VARIANTS.indexOf(v) === -1) v = "all";
+    return v;
   }
 
   function replaceParams(patch) {
@@ -141,10 +160,41 @@
     v2.month = month;
     v2.page = 1;
     replaceParams({ v2month: month });
-    document.querySelectorAll("[data-v2-month]").forEach(function (btn) {
-      btn.classList.toggle("on", btn.getAttribute("data-v2-month") === month);
-    });
+    var sel = document.getElementById("v2MonthSelect");
+    if (sel) sel.value = month;
     loadV2();
+  }
+
+  function setV2Variant(variant) {
+    v2.variant = variant;
+    v2.page = 1;
+    replaceParams({ variant: variant });
+    var sel = document.getElementById("v2VariantSelect");
+    if (sel) sel.value = variant;
+    loadV2();
+  }
+
+  function fillV2Selectors(data) {
+    var monthSel = document.getElementById("v2MonthSelect");
+    var varSel = document.getElementById("v2VariantSelect");
+    var months = (data && data.month_options) || [{ value: "all", label: "Full" }].concat(
+      V2_MONTHS.map(function (m) { return { value: m, label: m }; })
+    );
+    var variants = (data && data.variant_options) || V2_VARIANTS.map(function (v) {
+      return { value: v, label: v };
+    });
+    if (monthSel) {
+      monthSel.innerHTML = months.map(function (o) {
+        return '<option value="' + o.value + '">' + (o.label || o.value) + "</option>";
+      }).join("");
+      monthSel.value = v2.month;
+    }
+    if (varSel) {
+      varSel.innerHTML = variants.map(function (o) {
+        return '<option value="' + o.value + '">' + (o.label || o.value) + "</option>";
+      }).join("");
+      varSel.value = v2.variant;
+    }
   }
 
   function setStatus(msg) {
@@ -186,7 +236,9 @@
         "/api/mtf-swing/v2/results?timeframe=" +
         encodeURIComponent(v2.tf) +
         "&month=" +
-        encodeURIComponent(v2.month);
+        encodeURIComponent(v2.month) +
+        "&variant=" +
+        encodeURIComponent(v2.variant);
       var res = await fetch(url, {
         headers: { Authorization: "Bearer " + token() },
         cache: "no-store",
@@ -196,11 +248,15 @@
       v2.trades = data.trades || [];
       v2.summary = data.summary || {};
       v2.months = data.months || [];
+      v2.month_compare = data.month_compare || [];
       v2.charts = data.charts || {};
       v2.comparison = data.comparison || null;
       v2.funnel = data.funnel || {};
       v2.open_mtm = data.open_mtm || {};
+      v2.robustness = data.robustness || {};
       v2.ablation = data.ablation || [];
+      v2.scope = data.scope || (data.comparison && data.comparison.scope) || "";
+      fillV2Selectors(data);
       renderV2();
       var n = v2.trades.length;
       setV2Status(n ? n + " v2 rows from " + (data.csv || "CSV") : "No v2 rows yet. Run the v2 backtest.");
@@ -412,13 +468,70 @@
     renderTable();
   }
 
+  function renderDualEquity(host, selected, baseline, key) {
+    host.innerHTML = "";
+    var title = document.createElement("h3");
+    title.textContent = key === "drawdown" ? "Drawdown" : "Equity";
+    host.appendChild(title);
+    var w = Math.max(320, host.clientWidth || 640);
+    var h = 220;
+    var pad = { l: 48, r: 8, t: 12, b: 20 };
+    var svg = svgEl("svg", { viewBox: "0 0 " + w + " " + h, width: "100%", height: h });
+    var series = [
+      { pts: selected || [], color: "#3dba7a", label: "selected" },
+      { pts: baseline || [], color: "#64748b", label: "v1_equivalent" },
+    ].filter(function (s) { return s.pts.length; });
+    if (!series.length) {
+      host.appendChild(svg);
+      return;
+    }
+    var vals = [];
+    series.forEach(function (s) {
+      s.pts.forEach(function (p) { vals.push(Number(p[key]) || 0); });
+    });
+    var minV = key === "drawdown" ? 0 : Math.min(0, Math.min.apply(null, vals));
+    var maxV = Math.max(1, Math.max.apply(null, vals));
+    var innerW = w - pad.l - pad.r;
+    var innerH = h - pad.t - pad.b;
+    function y(v) {
+      if (key === "drawdown") return pad.t + ((Number(v) || 0) / maxV) * innerH;
+      return pad.t + (1 - ((Number(v) || 0) - minV) / (maxV - minV || 1)) * innerH;
+    }
+    series.forEach(function (s) {
+      function x(i) {
+        return pad.l + (s.pts.length === 1 ? innerW / 2 : (i / (s.pts.length - 1)) * innerW);
+      }
+      var poly = s.pts.map(function (p, i) { return x(i) + "," + y(p[key]); }).join(" ");
+      svg.appendChild(svgEl("polyline", {
+        points: poly,
+        fill: "none",
+        stroke: s.color,
+        "stroke-width": "2",
+        "stroke-dasharray": s.label === "v1_equivalent" ? "4 3" : "none",
+      }));
+    });
+    host.appendChild(svg);
+    var legend = document.createElement("div");
+    legend.className = "ms-legend";
+    series.forEach(function (s) {
+      var item = document.createElement("span");
+      item.innerHTML = '<i style="background:' + s.color + '"></i>' + s.label;
+      legend.appendChild(item);
+    });
+    host.appendChild(legend);
+  }
+
   function renderV2() {
+    var scopeEl = document.getElementById("msV2Scope");
+    if (scopeEl) scopeEl.textContent = v2.scope || "";
+
     var s = v2.summary || {};
     document.getElementById("msV2Cards").innerHTML = [
       card("Closed trades", num(s.trades, 0)),
       card("Net P&L", money(s.net_pnl), pnlClass(s.net_pnl)),
       card("Win rate", pct(s.win_rate)),
       card("Avg P&L", money(s.avg_pnl), pnlClass(s.avg_pnl)),
+      card("Avg R", num(s.avg_r, 2)),
       card("Profit factor", pf(s.profit_factor)),
       card("Max DD", money(s.max_drawdown)),
       card("Open trades", num(s.open_trades != null ? s.open_trades : v2.open_mtm.open_trades, 0)),
@@ -432,38 +545,101 @@
       card("MTM rows", num(om.mtm_available, 0)),
     ].join("");
 
-    var cmp = v2.comparison || { v1: {}, v2: {}, delta: {} };
+    var cmp = v2.comparison || { v1: {}, v2: {}, delta: {}, delta_pp: {} };
     var metrics = [
-      ["trades", "Closed trades", false],
-      ["net_pnl", "Net P&L", true],
-      ["win_rate", "Win rate", false],
-      ["avg_pnl", "Avg P&L", true],
-      ["profit_factor", "Profit factor", false],
-      ["max_drawdown", "Max drawdown", true],
-      ["open_trades", "Open trades", false],
+      ["trades", "Closed trades", "count"],
+      ["net_pnl", "Net P&L", "money"],
+      ["win_rate", "Win rate", "wr"],
+      ["avg_pnl", "Avg P&L", "money"],
+      ["avg_r", "Avg R", "num"],
+      ["profit_factor", "Profit factor", "pf"],
+      ["max_drawdown", "Max drawdown", "money"],
+      ["open_trades", "Open trades", "count"],
     ];
     document.getElementById("msV2Compare").innerHTML = metrics.map(function (row) {
       var k = row[0];
       var label = row[1];
-      var isMoney = row[2];
+      var kind = row[2];
       var a = cmp.v1[k];
       var b = cmp.v2[k];
       var d = cmp.delta[k];
       function fmt(v) {
-        if (k === "win_rate") return pct(v);
-        if (k === "profit_factor") return pf(v);
-        if (isMoney) return money(v);
-        return num(v, k === "trades" || k === "open_trades" ? 0 : 2);
+        if (kind === "wr") return pct(v);
+        if (kind === "pf") return pf(v);
+        if (kind === "money") return money(v);
+        if (kind === "count") return num(v, 0);
+        return num(v, 2);
+      }
+      var dTxt = "—";
+      var dCls = "";
+      if (k === "win_rate" && cmp.delta_pp && cmp.delta_pp.win_rate != null) {
+        dTxt = (Number(cmp.delta_pp.win_rate) >= 0 ? "+" : "") + Number(cmp.delta_pp.win_rate).toFixed(1) + " pp";
+        dCls = pnlClass(cmp.delta_pp.win_rate);
+      } else if (d != null) {
+        dCls = pnlClass(d);
+        dTxt = kind === "money" ? money(d) : (kind === "pf" || kind === "num" ? num(d, 2) : num(d, 0));
       }
       return "<tr><td>" + label + "</td><td>" + fmt(a) + "</td><td>" + fmt(b) +
-        "</td><td class=\"" + pnlClass(d) + "\">" + (d == null ? "—" : (isMoney || k === "max_drawdown" || k === "avg_pnl" || k === "net_pnl" ? money(d) : num(d, 2))) + "</td></tr>";
+        "</td><td class=\"" + dCls + "\">" + dTxt + "</td></tr>";
     }).join("");
+
+    var charts = v2.charts || {};
+    renderDualEquity(
+      document.getElementById("msV2EquityChart"),
+      charts.equity_selected || charts.equity || [],
+      charts.equity_v1_equivalent || [],
+      "equity"
+    );
+    renderDualEquity(
+      document.getElementById("msV2DrawdownChart"),
+      charts.equity_selected || charts.equity || [],
+      charts.equity_v1_equivalent || [],
+      "drawdown"
+    );
 
     var funnel = v2.funnel || {};
     var funnelKeys = Object.keys(funnel).sort();
     document.getElementById("msV2Funnel").innerHTML = funnelKeys.length
       ? funnelKeys.map(function (k) { return card(k, num(funnel[k], 0)); }).join("")
       : card("Funnel", "No discard rows yet");
+
+    var rb = v2.robustness || {};
+    document.getElementById("msV2RobustCards").innerHTML = [
+      card("Unique symbols", num(rb.unique_symbols, 0)),
+      card("Closed trades", num(rb.closed_trades, 0)),
+      card("Open trades", num(rb.open_trades, 0)),
+      card("Top-5 |PnL| share", rb.top5_abs_pnl_share != null ? (Number(rb.top5_abs_pnl_share) * 100).toFixed(1) + "%" : "—"),
+    ].join("");
+    var robustRows = [];
+    Object.keys(rb.side_breakdown || {}).forEach(function (k) {
+      var b = rb.side_breakdown[k];
+      robustRows.push(["side", k, b]);
+    });
+    Object.keys(rb.regime_breakdown || {}).forEach(function (k) {
+      var b = rb.regime_breakdown[k];
+      robustRows.push(["regime", k, b]);
+    });
+    (rb.top5_symbols || []).forEach(function (row) {
+      robustRows.push(["top symbol", row.symbol, { trades: "—", net_pnl: row.net_pnl, win_rate: null, profit_factor: null }]);
+    });
+    document.getElementById("msV2RobustTable").innerHTML = robustRows.map(function (row) {
+      var b = row[2] || {};
+      return "<tr><td>" + row[0] + "</td><td>" + row[1] + "</td><td>" + num(b.trades, 0) +
+        "</td><td class=\"" + pnlClass(b.net_pnl) + "\">" + money(b.net_pnl) +
+        "</td><td>" + pct(b.win_rate) + "</td><td>" + pf(b.profit_factor) + "</td></tr>";
+    }).join("");
+
+    document.getElementById("msV2MonthCompare").innerHTML = (v2.month_compare || []).map(function (m) {
+      var worse = m.v2_worse ? " ms-worse" : "";
+      var wr = m.delta_wr_pp == null ? "—" : ((Number(m.delta_wr_pp) >= 0 ? "+" : "") + Number(m.delta_wr_pp).toFixed(1));
+      return "<tr class=\"" + worse.trim() + "\"><td>" + m.month + "</td><td>" + num(m.v1_trades, 0) +
+        "</td><td>" + num(m.v2_trades, 0) +
+        "</td><td class=\"" + pnlClass(m.v1_net_pnl) + "\">" + money(m.v1_net_pnl) +
+        "</td><td class=\"" + pnlClass(m.v2_net_pnl) + "\">" + money(m.v2_net_pnl) +
+        "</td><td class=\"" + pnlClass(m.delta_net_pnl) + "\">" + money(m.delta_net_pnl) +
+        "</td><td class=\"" + pnlClass(m.delta_wr_pp) + "\">" + wr +
+        "</td><td>" + pf(m.v1_pf) + "</td><td>" + pf(m.v2_pf) + "</td></tr>";
+    }).join("");
 
     document.getElementById("msV2Months").innerHTML = (v2.months || []).map(function (m) {
       return "<tr><td>" + m.month + "</td><td>" + num(m.trades, 0) + "</td><td class=\"" + pnlClass(m.net_pnl) + "\">" + money(m.net_pnl) +
@@ -476,9 +652,16 @@
     if (ab.length) {
       abSec.hidden = false;
       document.getElementById("msV2Ablation").innerHTML = ab.map(function (r) {
-        return "<tr><td>" + (r.variant || "") + "</td><td>" + (r.timeframe || "") + "</td><td>" + (r.month || "") +
-          "</td><td>" + num(r.trades, 0) + "</td><td class=\"" + pnlClass(r.net_pnl) + "\">" + money(r.net_pnl) +
-          "</td><td>" + pct(r.win_rate) + "</td><td>" + pf(r.profit_factor) + "</td><td>" + num(r.open_trades, 0) +
+        var dWr = r.delta_wr_pp_vs_baseline == null ? "—" :
+          ((Number(r.delta_wr_pp_vs_baseline) >= 0 ? "+" : "") + Number(r.delta_wr_pp_vs_baseline).toFixed(1));
+        return "<tr><td>" + (r.variant || "") + "</td><td>" + num(r.trades, 0) +
+          "</td><td class=\"" + pnlClass(r.net_pnl) + "\">" + money(r.net_pnl) +
+          "</td><td>" + pct(r.win_rate) + "</td><td>" + pf(r.profit_factor) +
+          "</td><td>" + num(r.avg_r, 2) +
+          "</td><td>" + (r.delta_pf_vs_baseline == null ? "—" : num(r.delta_pf_vs_baseline, 2)) +
+          "</td><td>" + (r.delta_avg_r_vs_baseline == null ? "—" : num(r.delta_avg_r_vs_baseline, 2)) +
+          "</td><td>" + dWr +
+          "</td><td>" + num(r.open_trades, 0) +
           "</td><td class=\"" + pnlClass(r.mtm_pnl_sum) + "\">" + money(r.mtm_pnl_sum) + "</td></tr>";
       }).join("");
     } else {
@@ -546,7 +729,9 @@
       "/api/mtf-swing/v2/trades.csv?timeframe=" +
       encodeURIComponent(v2.tf) +
       "&month=" +
-      encodeURIComponent(v2.month);
+      encodeURIComponent(v2.month) +
+      "&variant=" +
+      encodeURIComponent(v2.variant);
     fetch(url, { headers: { Authorization: "Bearer " + token() } })
       .then(function (res) {
         if (!res.ok) throw new Error("download failed");
@@ -556,7 +741,7 @@
         var blob = new Blob([text], { type: "text/csv" });
         var a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = "mtf-swing-v2-" + v2.tf + "-" + v2.month + ".csv";
+        a.download = "mtf-swing-v2-" + v2.variant + "-" + v2.tf + "-" + v2.month + ".csv";
         a.click();
         URL.revokeObjectURL(a.href);
       })
@@ -568,6 +753,8 @@
     state.tf = qsTf();
     v2.tf = qsV2Tf();
     v2.month = qsV2Month();
+    v2.variant = qsV2Variant();
+    fillV2Selectors({});
 
     document.querySelectorAll(".ms-mode button").forEach(function (btn) {
       btn.classList.toggle("on", btn.getAttribute("data-mode") === state.mode);
@@ -584,10 +771,16 @@
       btn.classList.toggle("on", btn.getAttribute("data-v2-tf") === v2.tf);
       btn.addEventListener("click", function () { setV2Tf(btn.getAttribute("data-v2-tf")); });
     });
-    document.querySelectorAll("[data-v2-month]").forEach(function (btn) {
-      btn.classList.toggle("on", btn.getAttribute("data-v2-month") === v2.month);
-      btn.addEventListener("click", function () { setV2Month(btn.getAttribute("data-v2-month")); });
-    });
+    var monthSel = document.getElementById("v2MonthSelect");
+    if (monthSel) {
+      monthSel.value = v2.month;
+      monthSel.addEventListener("change", function () { setV2Month(monthSel.value); });
+    }
+    var varSel = document.getElementById("v2VariantSelect");
+    if (varSel) {
+      varSel.value = v2.variant;
+      varSel.addEventListener("change", function () { setV2Variant(varSel.value); });
+    }
 
     ["fSymbol", "fMonth", "fSide", "fReason"].forEach(function (id) {
       document.getElementById(id).addEventListener("input", function () { state.page = 1; renderTable(); });

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resume the MTF Swing backtest (v1 full year, or v2 experiment months).
+"""Resume the MTF Swing backtest (v1 full year, or v2 continuous experiment).
 
 From the repo root:
 
@@ -8,9 +8,12 @@ From the repo root:
     python3 scripts/run_mtf_swing_backtest.py --timeframe 60m
     python3 scripts/run_mtf_swing_backtest.py --symbol RELIANCE --timeframe 15m
 
-    # v2 experiment (June + October 2026, 60m + 15m)
-    python3 scripts/run_mtf_swing_backtest.py --v2 --months 2026-06,2026-10 --timeframes 60m,15m
-    python3 scripts/run_mtf_swing_backtest.py --v2 --ablation
+    # v2 continuous full period (state carries across months)
+    python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \\
+        --timeframes 60m,15m --variants v1_equivalent
+    python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \\
+        --timeframes 60m,15m --variants all
+    python3 scripts/run_mtf_swing_backtest.py --v2 --ablation --leave-one-out
 
 v1 writes data/mtf_swing/; v2 writes data/mtf_swing_v2/ and never rewrites v1 CSVs.
 """
@@ -38,9 +41,21 @@ def main() -> None:
     parser.add_argument(
         "--months",
         default="",
-        help="v2 comma-separated YYYY-MM months (default 2026-06,2026-10)",
+        help="v2 comma-separated YYYY-MM months (overrides --start/--end when set)",
     )
-    parser.add_argument("--ablation", action="store_true", help="v2: run regime/sl/tp/rr/all variants")
+    parser.add_argument("--start", default="", help="v2 first month YYYY-MM (default 2025-11)")
+    parser.add_argument("--end", default="", help="v2 last month YYYY-MM (default 2026-10)")
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="v2 variants: bare 'all' = full matrix; or comma list e.g. v1_equivalent,regime_only",
+    )
+    parser.add_argument("--ablation", action="store_true", help="v2: run the full primary ablation matrix")
+    parser.add_argument(
+        "--leave-one-out",
+        action="store_true",
+        help="v2: also run all_except_* leave-one-out variants",
+    )
     parser.add_argument("--symbol", action="append", default=[], help="Repeat to limit the universe")
     parser.add_argument("--no-resume", action="store_true", help="Recompute months even if marked done")
     args = parser.parse_args()
@@ -51,12 +66,17 @@ def main() -> None:
 
         months = [m for m in (args.months or "").split(",") if m.strip()] or None
         tfs = [t for t in (args.timeframes or "").split(",") if t.strip()] or None
+        variants = [v for v in (args.variants or "").split(",") if v.strip()] or None
         summary = run_backtest_v2(
             timeframes=tfs,
             months=months,
+            start=(args.start or None),
+            end=(args.end or None),
             symbols=args.symbol or None,
             resume=not args.no_resume,
             ablation=bool(args.ablation),
+            variants=variants,
+            leave_one_out=bool(args.leave_one_out),
         )
     else:
         from backend.services.mtf_swing.runner import run_backtest  # noqa: E402
