@@ -217,8 +217,16 @@ def build_v2_dashboard(
     funnel = build_funnel(disc, view)
     comparison = None
     if v1_trades is not None:
-        v1_view = filter_rows(v1_trades, timeframe=timeframe, month=month)
-        # v1 has no variant column; month filter still applies for June/Oct slices.
+        # Fair apples-to-apples: when month=all, still restrict v1 to the v2
+        # experiment months rather than the full Nov'25–Oct'26 book.
+        if month and month != "all":
+            v1_view = filter_rows(v1_trades, timeframe=timeframe, month=month)
+        else:
+            v1_view = [
+                r
+                for r in filter_rows(v1_trades, timeframe=timeframe, month="all")
+                if str(r.get("month") or "") in V2_MONTHS
+            ]
         v1_dash = build_dashboard(v1_view, timeframe="all")
         comparison = compare_summaries(v1_dash["summary"], dash["summary"])
     return {

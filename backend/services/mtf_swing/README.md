@@ -48,6 +48,18 @@ Outputs: `trades.csv`, `discards.csv`, `regime_log.csv`, optional `variant_summa
 - June and October runs do not share state. Each gets ~3 weeks warm-up and follows open trades forward through available bars until SL/TP or OPEN+MTM.
 - Universe, 1-lot sizing, and zero default costs match v1.
 
+### Headline results (paperclip run, 2026-11-07)
+
+Same months only (2026-06 + 2026-10). OPEN excluded from closed metrics; v2 also reports open MTM.
+
+| Slice | v1 closed | v1 net | v1 WR | v1 PF | v2 closed | v2 net | v2 WR | v2 PF | v2 open (MTM) |
+|-------|-----------|--------|-------|-------|-----------|--------|-------|-------|---------------|
+| 60m | 143 | ₹3.07L | 46.2% | 1.18 | 27 | ₹2.90L | 59.3% | 2.32 | 5 (−₹0.42L) |
+| 15m | 121 | ₹4.14L | 46.3% | 1.30 | 35 | ₹2.93L | 57.1% | 2.16 | 4 (−₹0.35L) |
+| Both | 264 | ₹7.22L | 46.2% | 1.23 | 62 | ₹5.82L | 58.1% | 2.24 | 9 (−₹0.77L) |
+
+v2 takes far fewer trades (filters + stricter RR) with higher win rate and profit factor, but lower total rupee P&L on this two-month window. Numbers are from `data/mtf_swing_v2/trades.csv` vs v1 `data/mtf_swing/trades.csv` (v1 file was not rewritten).
+
 ## Assumptions
 
 - Calendar weeks are ISO weeks (Monday start) in Asia/Kolkata. Screening runs on the last trading session of the week. A Friday holiday means Thursday is that session. A week with no sessions is not a W1. W2 is the previous ISO week; if that week has no bars the screen is discarded as `NO_W2` rather than skipping back to an older week.
