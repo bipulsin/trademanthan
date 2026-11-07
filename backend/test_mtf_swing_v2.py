@@ -651,3 +651,53 @@ def test_concentration_exposure_and_ablation_baseline():
         timeframe="15m",
     )
     assert report["ok"] is True
+
+
+def test_v1_equivalent_open_exit_time_blank_like_v1():
+    from backend.test_mtf_swing import _carry_series
+
+    bars = _carry_series()
+    v1_cfg = MtfSwingConfig(timeframe="60m")
+    v2_cfg = ablation_config("v1_equivalent", timeframe="60m")
+    t_v1, _, _ = run_symbol(
+        bars, symbol="EQ", active_from=date(2025, 11, 1), active_to=date(2025, 12, 31),
+        config=v1_cfg, lot_size=250, finalize_open=True,
+    )
+    t_v2, _, _ = run_symbol(
+        bars, symbol="EQ", active_from=date(2025, 11, 1), active_to=date(2025, 12, 31),
+        config=v2_cfg, lot_size=250, finalize_open=True,
+    )
+    opens_v1 = [r for r in t_v1 if r["exit_reason"] == "OPEN"]
+    opens_v2 = [r for r in t_v2 if r["exit_reason"] == "OPEN"]
+    if opens_v1:
+        assert opens_v1[0]["exit_time"] == ""
+        assert opens_v2[0]["exit_time"] == ""
+        assert opens_v2[0]["mtm_price"] == ""
+
+
+def test_parity_hole_bar_filter_and_compare_open_signature():
+    from backend.services.mtf_swing.parity import filter_bars_for_holes, holes_from_events, parse_log_events
+
+    text = (
+        "2026-11-07 03:00:00 INFO mtf_swing 60m 2026-04 ADANIENSOL bars=10\n"
+        "2026-11-07 03:01:00 INFO mtf_swing ADANIENSOL 2026-04 no candles\n"
+        "2026-11-07 06:00:00 INFO mtf_swing 60m 2026-05 ADANIENSOL bars=20\n"
+    )
+    events = parse_log_events(text, default_tf="60m")
+    holes = holes_from_events(events)
+    assert ("60m", "ADANIENSOL", "2026-04") in holes
+    assert ("60m", "ADANIENSOL", "2026-05") not in holes
+
+    days = days_from(date(2026, 4, 28), 5)
+    bars = [bar(d, 100, 101, 99, 100) for d in days]
+    filtered = filter_bars_for_holes(bars, holes, timeframe="60m", symbol="ADANIENSOL")
+    assert all(b.session_date.month != 4 for b in filtered)
+
+    # OPEN exit_time blank vs stamped must compare equal.
+    a = {
+        "timeframe": "60m", "symbol": "X", "side": "LONG", "entry_time": "t",
+        "exit_time": "", "exit_reason": "OPEN", "entry_price": "1", "exit_price": "",
+        "net_pnl": "", "month": "2026-10",
+    }
+    b = dict(a, exit_time="2026-10-27T15:15:00+05:30")
+    assert core_trade_signature(a) == core_trade_signature(b)

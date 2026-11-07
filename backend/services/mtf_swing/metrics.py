@@ -546,14 +546,20 @@ def ablation_table(trades: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def core_trade_signature(row: Dict[str, Any]) -> Tuple:
-    """Comparable identity for v1 vs v1_equivalent (ignores v2-only columns / id suffix)."""
+    """Comparable identity for v1 vs v1_equivalent (ignores v2-only columns / id suffix).
+
+    OPEN rows in v1 leave ``exit_time`` blank; older v1_equivalent rows stamped the
+    last bar. Treat blank and any exit_time as equivalent when exit_reason is OPEN.
+    """
+    reason = str(row.get("exit_reason") or "").upper()
+    exit_time = "" if reason == "OPEN" else str(row.get("exit_time") or "")
     return (
         str(row.get("timeframe") or ""),
         str(row.get("symbol") or ""),
         str(row.get("side") or ""),
         str(row.get("entry_time") or ""),
-        str(row.get("exit_time") or ""),
-        str(row.get("exit_reason") or ""),
+        exit_time,
+        reason,
         str(row.get("entry_price") or ""),
         str(row.get("exit_price") or ""),
         str(row.get("net_pnl") or ""),

@@ -63,6 +63,7 @@ from backend.services.mtf_swing.data import (
 )
 from backend.services.mtf_swing.engine import run_symbol
 from backend.services.mtf_swing.metrics import ablation_table
+from backend.services.mtf_swing.parity import filter_bars_for_holes, is_hole, load_holes
 from backend.services.mtf_swing.regime import build_regime_series, regime_by_screen_date, regime_log_rows
 from backend.services.mtf_swing.config import COVERAGE_LOG_FIELDS
 
@@ -248,6 +249,14 @@ def _run_one_variant(
     min_screened, min_entries = _month_thresholds(len(universe), tag)
     month_labels = list(months)
     today = datetime.now(IST).date()
+    # Replay v1's historical fetch holes so v1_equivalent matches the frozen v1 CSV.
+    parity_holes = load_holes() if tag == "v1_equivalent" else set()
+    if parity_holes:
+        logger.info(
+            "mtf_swing_v2 %s applying %s v1 fetch-hole keys for candle-gap parity",
+            tag,
+            len(parity_holes),
+        )
 
     for tf in timeframes:
         # Continuous carry: one state map per timeframe × variant across months.
@@ -272,22 +281,34 @@ def _run_one_variant(
             )
             if fetch_end > today:
                 fetch_end = today
-            month_ok = False
+                month_ok = False
+            # With v1 fetch-hole replay, many symbols are intentionally skipped;
+            # thresholds apply to the remaining (non-hole) universe for this month.
+            if parity_holes:
+                eligible_n = sum(
+                    1 for row in universe if not is_hole(parity_holes, tf, row["symbol"], label)
+                )
+                month_min_screened, month_min_entries = _month_thresholds(eligible_n, tag)
+            else:
+                eligible_n = len(universe)
+                month_min_screened, month_min_entries = min_screened, min_entries
             for attempt in range(1, _MONTH_ATTEMPTS + 1):
                 snap = copy.deepcopy(sym_state)
                 logger.info(
-                    "mtf_swing_v2 %s %s %s symbols=%s window=%s..%s attempt=%s/%s "
-                    "carry=%s finalize_open=%s",
+                    "mtf_swing_v2 %s %s %s symbols=%s eligible=%s window=%s..%s attempt=%s/%s "
+                    "carry=%s finalize_open=%s min_screened=%s",
                     tag,
                     tf,
                     label,
                     len(universe),
+                    eligible_n,
                     fetch_start,
                     fetch_end,
                     attempt,
                     _MONTH_ATTEMPTS,
                     bool(sym_state),
                     is_last,
+                    month_min_screened,
                 )
                 regime_map = _build_regime_map(
                     client,
@@ -305,6 +326,16 @@ def _run_one_variant(
                 month_last_ts = ""
                 for row in universe:
                     symbol = row["symbol"]
+                    # Month marked as a v1 fetch hole → skip entirely (state carries).
+                    if parity_holes and is_hole(parity_holes, tf, symbol, label):
+                        logger.info(
+                            "mtf_swing_v2 %s %s %s %s skip v1_fetch_hole",
+                            tag,
+                            tf,
+                            label,
+                            symbol,
+                        )
+                        continue
                     bars: List[Any] = []
                     lots: Dict[str, int] = {}
                     for _fetch_try in range(2):
@@ -332,6 +363,19 @@ def _run_one_variant(
                             empty_streak = 0
                         else:
                             time.sleep(0.5)
+                    if parity_holes and bars:
+                        before = len(bars)
+                        bars = filter_bars_for_holes(bars, parity_holes, timeframe=tf, symbol=symbol)
+                        if len(bars) != before:
+                            logger.info(
+                                "mtf_swing_v2 %s %s %s %s stripped_hole_bars %s→%s",
+                                tag,
+                                tf,
+                                label,
+                                symbol,
+                                before,
+                                len(bars),
+                            )
                     if not bars:
                         continue
                     time.sleep(0.4)
@@ -398,7 +442,7 @@ def _run_one_variant(
                         label,
                         month_last_ts,
                     )
-                if screened >= min_screened and entries >= min_entries:
+                if screened >= month_min_screened and entries >= month_min_entries:
                     n_tr = append_trades_v2(trades_path_v2(), pending_trades)
                     n_ds = append_discards_v2(discards_path_v2(), pending_discards)
                     _append_coverage(coverage_rows)
@@ -428,9 +472,9 @@ def _run_one_variant(
                     "mtf_swing_v2 %s incomplete screened=%s (need >=%s) entries=%s (need >=%s) attempt=%s",
                     token,
                     screened,
-                    min_screened,
+                    month_min_screened,
                     entries,
-                    min_entries,
+                    month_min_entries,
                     attempt,
                 )
                 sym_state = snap

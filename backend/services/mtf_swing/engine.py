@@ -841,16 +841,18 @@ def run_symbol(
     if finalize_open and st.get("position") is not None:
         pos = st["position"]
         last_bar = series[-1]
-        # v1 keeps blank exit_time / blank P&L for OPEN. v2 records MTM at last bar.
-        is_v2 = (cfg.variant or "").lower() == "v2" or bool(cfg.ablation_tag)
-        mtm_px = float(last_bar.close) if is_v2 else None
-        mtm = _mtm_pnl(pos.side, pos.entry_price, mtm_px, pos.lot_size, cfg) if is_v2 else None
+        # v1 and v1_equivalent keep blank exit_time / blank P&L for OPEN.
+        # Experimental ablation tags (all, regime_only, v3_*, …) record MTM.
+        tag = (cfg.ablation_tag or "").strip().lower()
+        record_mtm = bool(tag) and tag != "v1_equivalent"
+        mtm_px = float(last_bar.close) if record_mtm else None
+        mtm = _mtm_pnl(pos.side, pos.entry_price, mtm_px, pos.lot_size, cfg) if record_mtm else None
         trades.append(
             _trade_row(
                 symbol=symbol,
                 cfg=cfg,
                 pos=pos,
-                exit_time=iso(last_bar.ts) if is_v2 else "",
+                exit_time=iso(last_bar.ts) if record_mtm else "",
                 exit_price=None,
                 exit_reason="OPEN",
                 run_ts=run_ts,
