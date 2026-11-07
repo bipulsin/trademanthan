@@ -79,6 +79,8 @@ _EMPTY_STREAK_COOLDOWN = 45.0
 _MONTH_RETRY_COOLDOWN = 90.0
 # Follow trades past the final month end through latest available data.
 _FORWARD_TAIL_DAYS = 120
+# v1_equivalent must match v1's last-batch tail (~3 weeks) for OPEN parity.
+_V1_EQUIV_TAIL_DAYS = 20
 # ≥20 weekly index closes before 1-Nov-2025 (~154 calendar days + buffer).
 _REGIME_WARMUP_DAYS = 160
 
@@ -259,10 +261,14 @@ def _run_one_variant(
                 logger.info("mtf_swing_v2 skip %s", token)
                 continue
             is_last = idx == len(month_labels) - 1
+            if is_last:
+                tail = _V1_EQUIV_TAIL_DAYS if tag == "v1_equivalent" else _FORWARD_TAIL_DAYS
+            else:
+                tail = 0
             fetch_start, fetch_end = window_for_month(
                 m_start,
                 m_end,
-                tail_days=_FORWARD_TAIL_DAYS if is_last else 0,
+                tail_days=tail,
             )
             if fetch_end > today:
                 fetch_end = today
