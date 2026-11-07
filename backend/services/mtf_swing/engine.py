@@ -22,6 +22,7 @@ from backend.services.mtf_swing.bars import (
 from backend.services.mtf_swing.config import MtfSwingConfig
 from backend.services.mtf_swing.levels import Levels, adjusted_pair, build_levels, candidate_side
 from backend.services.mtf_swing.regime import regime_allows
+from backend.services.mtf_swing.stock_trend import TrendPoint, trend_allows
 
 
 @dataclass
@@ -41,6 +42,10 @@ class Setup:
     potential_rr: str = ""
     signal_close: Optional[float] = None
     prospective_tp: Optional[float] = None
+    trend_state: str = ""
+    ema20_weekly: str = ""
+    weekly_close: str = ""
+    rank_key_value: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -68,6 +73,10 @@ class Setup:
             prospective_tp=None
             if raw.get("prospective_tp") in (None, "")
             else float(raw["prospective_tp"]),
+            trend_state=str(raw.get("trend_state") or ""),
+            ema20_weekly=str(raw.get("ema20_weekly") or ""),
+            weekly_close=str(raw.get("weekly_close") or ""),
+            rank_key_value=str(raw.get("rank_key_value") or ""),
         )
 
 
@@ -86,6 +95,13 @@ class Position:
     sessions: List[str] = field(default_factory=list)
     regime: str = ""
     potential_rr: str = ""
+    entry_week: str = ""
+    entry_weekday: str = ""
+    week_trade_no: str = ""
+    trend_state: str = ""
+    ema20_weekly: str = ""
+    weekly_close: str = ""
+    rank_key_value: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -106,6 +122,13 @@ class Position:
             sessions=list(raw.get("sessions") or []),
             regime=str(raw.get("regime") or ""),
             potential_rr=str(raw.get("potential_rr") or ""),
+            entry_week=str(raw.get("entry_week") or ""),
+            entry_weekday=str(raw.get("entry_weekday") or ""),
+            week_trade_no=str(raw.get("week_trade_no") or ""),
+            trend_state=str(raw.get("trend_state") or ""),
+            ema20_weekly=str(raw.get("ema20_weekly") or ""),
+            weekly_close=str(raw.get("weekly_close") or ""),
+            rank_key_value=str(raw.get("rank_key_value") or ""),
         )
 
 
@@ -261,6 +284,13 @@ def _trade_row(
         "tp_r": "" if cfg.tp_r is None else _fmt(float(cfg.tp_r), 2),
         "mtm_price": _fmt(mtm_price) if mtm_price is not None else "",
         "mtm_pnl": _fmt(mtm_pnl, 2) if mtm_pnl is not None else "",
+        "entry_week": pos.entry_week,
+        "entry_weekday": pos.entry_weekday,
+        "week_trade_no": pos.week_trade_no,
+        "trend_state": pos.trend_state,
+        "ema20_weekly": pos.ema20_weekly,
+        "weekly_close": pos.weekly_close,
+        "rank_key_value": pos.rank_key_value,
     }
     return row
 
@@ -276,6 +306,10 @@ def _discard_row(
     event_time: str,
     run_ts: str,
     regime: str = "",
+    trend_state: str = "",
+    ema20_weekly: str = "",
+    weekly_close: str = "",
+    rank_key_value: str = "",
 ) -> Dict[str, str]:
     month = (screen_date or event_time or "")[:7]
     did = f"{symbol}|{cfg.timeframe}|{screen_date}|{side}|{reason}|{event_time}"
@@ -294,7 +328,16 @@ def _discard_row(
         "run_ts": run_ts,
         "variant": cfg.ablation_tag or cfg.variant,
         "regime": regime,
+        "trend_state": trend_state,
+        "ema20_weekly": ema20_weekly,
+        "weekly_close": weekly_close,
+        "rank_key_value": rank_key_value,
     }
+
+
+def _iso_week_label(d: date) -> str:
+    y, w, _ = d.isocalendar()
+    return f"{y:04d}-W{w:02d}"
 
 
 def _try_exit(pos: Position, bar: Bar, is_last_session_bar: bool, cfg: MtfSwingConfig) -> Optional[Tuple[float, str]]:
@@ -329,6 +372,10 @@ def _try_exit(pos: Position, bar: Bar, is_last_session_bar: bool, cfg: MtfSwingC
             return pos.sl, "SL"
         if hit_t1:
             return pos.t1, target_reason
+    # v3 weekly window: force flat on configured exit weekday last bar (or next
+    # session when Friday is a holiday — caller sets week_end_today).
+    if cfg.weekly_window and is_last_session_bar and getattr(pos, "_week_end_today", False):
+        return bar.close, "WEEK_END"
     max_sess = cfg.max_sessions
     if max_sess is not None and int(max_sess) > 0 and len(pos.sessions) >= int(max_sess) and is_last_session_bar:
         return bar.close, "TIME"
@@ -440,6 +487,7 @@ def _enter_at(
     t1 = setup.t1
     if cfg is not None and cfg.use_r_target:
         t1 = _r_target(setup.side, price, setup.sl, float(cfg.tp_r))
+    d = ts.date()
     return Position(
         side=setup.side,
         screen_date=setup.screen_date,
@@ -450,10 +498,17 @@ def _enter_at(
         t1=t1,
         lot_size=int(lot_size),
         basis_contract=setup.basis_contract,
-        entry_month=ts.date().strftime("%Y-%m"),
-        sessions=[ts.date().isoformat()],
+        entry_month=d.strftime("%Y-%m"),
+        sessions=[d.isoformat()],
         regime=setup.regime,
         potential_rr=setup.potential_rr,
+        entry_week=_iso_week_label(d),
+        entry_weekday=str(d.weekday()),
+        week_trade_no="",
+        trend_state=setup.trend_state,
+        ema20_weekly=setup.ema20_weekly,
+        weekly_close=setup.weekly_close,
+        rank_key_value=setup.rank_key_value or setup.potential_rr,
     )
 
 
@@ -546,7 +601,14 @@ def _log_screen_discard(discard, bar: Bar, note) -> None:
     if not discard:
         return
     side, reason, detail = discard
-    if reason in ("NO_SWING", "LEVELS_ILLOGICAL", "NO_PIVOT_SL", "REGIME_BLOCK") and side:
+    if reason in (
+        "NO_SWING",
+        "LEVELS_ILLOGICAL",
+        "NO_PIVOT_SL",
+        "REGIME_BLOCK",
+        "TREND_BLOCK",
+        "TREND_UNKNOWN",
+    ) and side:
         note(side, bar.session_date.isoformat(), reason, detail, bar.ts)
     elif reason == "NO_W2":
         note(side or "", bar.session_date.isoformat(), "NO_W2", detail, bar.ts)
@@ -557,6 +619,7 @@ def _screen(
     week_end_index: int,
     cfg: MtfSwingConfig,
     regime_map: Optional[Dict[str, str]] = None,
+    trend_map: Optional[Dict[str, TrendPoint]] = None,
 ) -> Tuple[Optional[Setup], Optional[Tuple[str, str, str]]]:
     """Screen the week that ends at ``week_end_index``. Discard tuple is (side, reason, detail)."""
     end = bars[week_end_index]
@@ -581,6 +644,16 @@ def _screen(
         regime = (regime_map or {}).get(screen_iso) or "Neutral"
         if not regime_allows(side, regime, cfg.neutral_action):
             return None, (side, "REGIME_BLOCK", f"regime={regime}")
+    trend_state = ema20_s = weekly_close_s = ""
+    if cfg.stock_ema_trend:
+        pt = (trend_map or {}).get(screen_iso)
+        if pt is None:
+            return None, (side, "TREND_UNKNOWN", "insufficient weekly history")
+        trend_state = pt.trend_state
+        ema20_s = _fmt(pt.ema20)
+        weekly_close_s = _fmt(pt.weekly_close)
+        if not trend_allows(side, trend_state):
+            return None, (side, "TREND_BLOCK", f"trend={trend_state}")
     levels, reason = build_levels(
         side,
         w1,
@@ -602,6 +675,9 @@ def _screen(
             phase="watch",
             opp_extreme=float(levels.opp_extreme or levels.t1),
             regime=regime,
+            trend_state=trend_state,
+            ema20_weekly=ema20_s,
+            weekly_close=weekly_close_s,
         ),
         None,
     )
@@ -622,6 +698,9 @@ def run_symbol(
     finalize_open: bool = False,
     exit_only_after: Optional[date] = None,
     regime_map: Optional[Dict[str, str]] = None,
+    trend_map: Optional[Dict[str, TrendPoint]] = None,
+    weekly_cap_state: Optional[Dict[str, int]] = None,
+    ranked_allow: Optional[Set[Tuple[str, str]]] = None,
 ) -> Tuple[List[Dict[str, str]], List[Dict[str, str]], Dict[str, Any]]:
     """Run one symbol.
 
@@ -631,11 +710,16 @@ def run_symbol(
     next-open fill, but does not take new breakouts or screen new weeks.
     Open positions are emitted only when ``finalize_open`` is set.
     ``regime_map`` maps screen_date ISO → Bullish/Bearish/Neutral (v2).
+    ``trend_map`` maps screen_date ISO → TrendPoint (v3 stock EMA).
+    ``weekly_cap_state`` maps ISO week label → entry count (shared across symbols).
+    ``ranked_allow`` optional set of (symbol, entry_week) allowed under ranked_watchlist.
     """
     cfg = config or MtfSwingConfig()
     hol = holidays or set()
     lots = lot_by_contract or {}
     regimes = regime_map or {}
+    trends = trend_map or {}
+    cap_state = weekly_cap_state if weekly_cap_state is not None else {}
 
     def _lot(contract: str) -> int:
         try:
@@ -667,10 +751,48 @@ def run_symbol(
     cutoff = exit_only_after or active_to
     watermark = str(st.get("last_ts") or "")
 
+    # Precompute week-end exit sessions for weekly_window (Fri last bar, or next
+    # session when Friday is a holiday).
+    week_end_dates: Set[date] = set()
+    if cfg.weekly_window:
+        from datetime import timedelta as _td
+
+        seen_weeks: Set[Tuple[int, int]] = set()
+        for b in series:
+            wk = week_key(b.session_date)
+            if wk in seen_weeks:
+                continue
+            seen_weeks.add(wk)
+            # Canonical Friday of this ISO week.
+            # isocalendar weekday: Mon=1 … Fri=5
+            y, w, wd = b.session_date.isocalendar()
+            friday = b.session_date + _td(days=(5 - wd))
+            if cfg.friday_holiday_rule == "next_session":
+                d = friday
+                for _ in range(10):
+                    if d.weekday() < 5 and d not in hol:
+                        week_end_dates.add(d)
+                        break
+                    d += _td(days=1)
+            else:
+                d = friday
+                for _ in range(10):
+                    if d.weekday() < 5 and d not in hol:
+                        week_end_dates.add(d)
+                        break
+                    d -= _td(days=1)
+
     def _note_discard(side: str, screen_date: str, reason: str, detail: str, when: datetime) -> None:
         regime = ""
         if screen_date and regimes:
             regime = regimes.get(screen_date, "")
+        trend_state = ema20_s = weekly_close_s = ""
+        if screen_date and trends:
+            pt = trends.get(screen_date)
+            if pt is not None:
+                trend_state = pt.trend_state
+                ema20_s = _fmt(pt.ema20)
+                weekly_close_s = _fmt(pt.weekly_close)
         discards.append(
             _discard_row(
                 symbol=symbol,
@@ -682,8 +804,40 @@ def run_symbol(
                 event_time=iso(when),
                 run_ts=run_ts,
                 regime=regime,
+                trend_state=trend_state,
+                ema20_weekly=ema20_s,
+                weekly_close=weekly_close_s,
             )
         )
+
+    def _within_entry_window(d: date) -> bool:
+        if not cfg.weekly_window:
+            return True
+        return d.weekday() <= int(cfg.entry_cutoff_weekday)
+
+    def _try_take_cap(entry_week: str) -> Optional[int]:
+        """Return 1-based week_trade_no if allowed, else None. 0 means cap disabled."""
+        if cfg.weekly_cap is None:
+            return 0
+        if ranked_allow is not None and (symbol, entry_week) not in ranked_allow:
+            return None
+        cur = int(cap_state.get(entry_week) or 0)
+        if cur >= int(cfg.weekly_cap):
+            return None
+        cap_state[entry_week] = cur + 1
+        return cur + 1
+
+    def _accept_entry(pos: Position, when: datetime) -> bool:
+        """Apply weekly cap / ranked allowlist. Returns False if entry is discarded."""
+        week_lab = pos.entry_week or _iso_week_label(when.date())
+        pos.entry_week = week_lab
+        n = _try_take_cap(week_lab)
+        if n is None:
+            _note_discard(pos.side, pos.screen_date, "WEEKLY_CAP", week_lab, when)
+            return False
+        if n:
+            pos.week_trade_no = str(n)
+        return True
 
     def _close(pos: Position, when: datetime, price: float, reason: str) -> None:
         trades.append(
@@ -733,16 +887,39 @@ def run_symbol(
             st["position"].basis_contract = bar.contract
 
         if st.get("position") is not None:
-            hit = _try_exit(st["position"], bar, last_session.get(bar.session_date) == i, cfg)
+            pos = st["position"]
+            is_last = last_session.get(bar.session_date) == i
+            if cfg.weekly_window and is_last and bar.session_date in week_end_dates:
+                setattr(pos, "_week_end_today", True)
+            else:
+                setattr(pos, "_week_end_today", False)
+            hit = _try_exit(pos, bar, is_last, cfg)
             if hit:
                 px, reason = hit
-                _close(st["position"], bar.ts, px, reason)
+                _close(pos, bar.ts, px, reason)
                 st["position"] = None
 
         allow_entries = (not manage_only) and (not after_cutoff) and bar.session_date <= cutoff
         allow_defer_fill = bool(st.get("setup") and st["setup"].defer_fill)
+        in_entry_window = _within_entry_window(bar.session_date)
+        # Cancel pending setups on the first bar after the entry cutoff weekday.
+        if (
+            cfg.weekly_window
+            and st.get("setup") is not None
+            and bar.session_date.weekday() > int(cfg.entry_cutoff_weekday)
+            and not st["setup"].defer_fill
+        ):
+            setup = st["setup"]
+            _note_discard(setup.side, setup.screen_date, "AFTER_CUTOFF", "past Wed entry window", bar.ts)
+            st["setup"] = None
+            st["queued"] = None
 
-        if st.get("position") is None and st.get("setup") is not None and (allow_entries or allow_defer_fill):
+        # New signals/fills only Mon–Wed when weekly_window is on (defer_fill still OK).
+        setup_ok = allow_entries or allow_defer_fill
+        if cfg.weekly_window and st.get("setup") is not None and not st["setup"].defer_fill:
+            setup_ok = setup_ok and in_entry_window and allow_entries
+
+        if st.get("position") is None and st.get("setup") is not None and setup_ok:
             setup: Setup = st["setup"]
             in_week = week_key(bar.session_date) == tuple(setup.valid_week)
             consumed_defer = False
@@ -752,13 +929,17 @@ def run_symbol(
                 if reason:
                     _note_discard(setup.side, setup.screen_date, reason, "", bar.ts)
                 if pos is not None:
-                    st["position"] = pos
-                    st["queued"] = None
-                    hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
-                    if hit:
-                        px, er = hit
-                        _close(pos, bar.ts, px, er)
-                        st["position"] = None
+                    if _accept_entry(pos, bar.ts):
+                        st["position"] = pos
+                        st["queued"] = None
+                        hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
+                        if hit:
+                            px, er = hit
+                            _close(pos, bar.ts, px, er)
+                            st["position"] = None
+                    else:
+                        st["setup"] = None
+                        st["queued"] = None
                 if st.get("position") is None and st.get("queued") is not None and allow_entries:
                     st["setup"] = st["queued"]
                     st["queued"] = None
@@ -769,17 +950,20 @@ def run_symbol(
                         if reason:
                             _note_discard(setup.side, setup.screen_date, reason, "", bar.ts)
                         if pos is not None:
-                            st["position"] = pos
-                            if cfg.entry_timing == "next_open" or (
-                                pos.entry_type == "direct"
-                                and pos.entry_time == iso(bar.ts)
-                                and abs(pos.entry_price - bar.open) < 1e-9
-                            ):
-                                hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
-                                if hit and pos.entry_time == iso(bar.ts) and abs(pos.entry_price - bar.close) > 1e-9:
-                                    px, er = hit
-                                    _close(pos, bar.ts, px, er)
-                                    st["position"] = None
+                            if _accept_entry(pos, bar.ts):
+                                st["position"] = pos
+                                if cfg.entry_timing == "next_open" or (
+                                    pos.entry_type == "direct"
+                                    and pos.entry_time == iso(bar.ts)
+                                    and abs(pos.entry_price - bar.open) < 1e-9
+                                ):
+                                    hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
+                                    if hit and pos.entry_time == iso(bar.ts) and abs(pos.entry_price - bar.close) > 1e-9:
+                                        px, er = hit
+                                        _close(pos, bar.ts, px, er)
+                                        st["position"] = None
+                            else:
+                                st["setup"] = None
                 elif consumed_defer:
                     st["setup"] = None
             elif in_week and allow_entries:
@@ -787,19 +971,22 @@ def run_symbol(
                 if reason:
                     _note_discard(setup.side, setup.screen_date, reason, "", bar.ts)
                 if pos is not None:
-                    st["position"] = pos
-                    filled_at_open = abs(pos.entry_price - bar.open) < 1e-6 or pos.entry_type == "limit"
-                    filled_at_close = (
-                        cfg.entry_timing == "close"
-                        and pos.entry_type == "direct"
-                        and abs(pos.entry_price - bar.close) < 1e-6
-                    )
-                    if filled_at_open and not filled_at_close:
-                        hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
-                        if hit:
-                            px, er = hit
-                            _close(pos, bar.ts, px, er)
-                            st["position"] = None
+                    if _accept_entry(pos, bar.ts):
+                        st["position"] = pos
+                        filled_at_open = abs(pos.entry_price - bar.open) < 1e-6 or pos.entry_type == "limit"
+                        filled_at_close = (
+                            cfg.entry_timing == "close"
+                            and pos.entry_type == "direct"
+                            and abs(pos.entry_price - bar.close) < 1e-6
+                        )
+                        if filled_at_open and not filled_at_close:
+                            hit = _try_exit(pos, bar, last_session.get(bar.session_date) == i, cfg)
+                            if hit:
+                                px, er = hit
+                                _close(pos, bar.ts, px, er)
+                                st["position"] = None
+                    else:
+                        st["setup"] = None
 
         if allow_entries and last_week.get(week_key(bar.session_date)) == i:
             setup = st.get("setup")
@@ -811,7 +998,7 @@ def run_symbol(
                     setup.defer_fill = True
             setup = st.get("setup")
             if st.get("position") is None and setup is None:
-                new_setup, discard = _screen(series, i, cfg, regimes)
+                new_setup, discard = _screen(series, i, cfg, regimes, trends)
                 _log_screen_discard(discard, bar, _note_discard)
                 if new_setup is not None:
                     st["setup"] = new_setup
@@ -821,7 +1008,7 @@ def run_symbol(
                 and setup.phase == "next_open"
                 and setup.defer_fill
             ):
-                new_setup, discard = _screen(series, i, cfg, regimes)
+                new_setup, discard = _screen(series, i, cfg, regimes, trends)
                 _log_screen_discard(discard, bar, _note_discard)
                 if new_setup is not None and st.get("position") is not None:
                     _note_discard(new_setup.side, new_setup.screen_date, "SKIP_OPEN_POSITION", "", bar.ts)

@@ -18,6 +18,7 @@
   ];
   var V2_VARIANTS = [
     "v1_equivalent", "all", "regime_only", "sl_only", "tp_only", "rr_only",
+    "v3_trend_only", "v3_window_only", "v3_cap_only", "v3_all", "v3_all_ranked",
     "any", "all_except_regime", "all_except_sl", "all_except_tp", "all_except_rr",
   ];
   var v2 = {
@@ -499,7 +500,7 @@
     renderTable();
   }
 
-  function renderDualEquity(host, selected, baseline, key) {
+  function renderDualEquity(host, selected, baseline, key, third) {
     host.innerHTML = "";
     var title = document.createElement("h3");
     title.textContent = key === "drawdown" ? "Drawdown" : "Equity";
@@ -511,6 +512,7 @@
     var series = [
       { pts: selected || [], color: "#3dba7a", label: "selected" },
       { pts: baseline || [], color: "#64748b", label: "v1_equivalent" },
+      { pts: third || [], color: "#2563eb", label: "v2_all" },
     ].filter(function (s) { return s.pts.length; });
     if (!series.length) {
       host.appendChild(svg);
@@ -538,7 +540,7 @@
         fill: "none",
         stroke: s.color,
         "stroke-width": "2",
-        "stroke-dasharray": s.label === "v1_equivalent" ? "4 3" : "none",
+        "stroke-dasharray": s.label === "selected" ? "none" : "4 3",
       }));
     });
     host.appendChild(svg);
@@ -667,19 +669,67 @@
         "</td><td class=\"" + dCls + "\">" + dTxt + "</td></tr>";
     }).join("");
 
+    var tw = v2.three_way || null;
+    var twBody = document.getElementById("msV2ThreeWay");
+    if (twBody) {
+      if (!tw) {
+        twBody.innerHTML = "<tr><td colspan=\"6\">No 3-way comparison yet</td></tr>";
+      } else {
+        twBody.innerHTML = metrics.map(function (row) {
+          var k = row[0];
+          var kind = row[2];
+          function fmt(v) {
+            if (kind === "wr") return pct(v);
+            if (kind === "pf") return pf(v);
+            if (kind === "money") return money(v);
+            if (kind === "count") return num(v, 0);
+            return num(v, 2);
+          }
+          var a = (tw.v1 || {})[k];
+          var b = (tw.v2_all || {})[k];
+          var c = (tw.selected || {})[k];
+          var d1 = (tw.delta_vs_v1 || {})[k];
+          var d2 = (tw.delta_vs_v2_all || {})[k];
+          function dFmt(d) {
+            if (d == null) return "—";
+            if (kind === "wr") return ((Number(d) >= 0 ? "+" : "") + (Number(d) * 100).toFixed(1) + " pp");
+            if (kind === "money") return money(d);
+            if (kind === "count") return num(d, 0);
+            return num(d, 2);
+          }
+          return "<tr><td>" + row[1] + "</td><td>" + fmt(a) + "</td><td>" + fmt(b) +
+            "</td><td>" + fmt(c) +
+            "</td><td class=\"" + pnlClass(d1) + "\">" + dFmt(d1) +
+            "</td><td class=\"" + pnlClass(d2) + "\">" + dFmt(d2) + "</td></tr>";
+        }).join("");
+      }
+    }
+
     var charts = v2.charts || {};
     renderDualEquity(
       document.getElementById("msV2EquityChart"),
       charts.equity_selected || charts.equity || [],
       charts.equity_v1_equivalent || [],
-      "equity"
+      "equity",
+      charts.equity_v2_all || []
     );
     renderDualEquity(
       document.getElementById("msV2DrawdownChart"),
       charts.equity_selected || charts.equity || [],
       charts.equity_v1_equivalent || [],
-      "drawdown"
+      "drawdown",
+      charts.equity_v2_all || []
     );
+
+    var wkBody = document.getElementById("msV2Weekly");
+    if (wkBody) {
+      wkBody.innerHTML = (v2.weekly || []).map(function (w) {
+        return "<tr><td>" + (w.entry_week || "") + "</td><td>" + num(w.trades, 0) +
+          "</td><td class=\"" + pnlClass(w.net_pnl) + "\">" + money(w.net_pnl) +
+          "</td><td>" + pct(w.win_rate) + "</td><td>" + pf(w.profit_factor) +
+          "</td><td>" + num(w.avg_r, 2) + "</td></tr>";
+      }).join("") || "<tr><td colspan=\"6\">No weekly rows (entry_week blank on older variants)</td></tr>";
+    }
 
     var funnel = v2.funnel || {};
     var funnelKeys = Object.keys(funnel).sort();
@@ -750,6 +800,30 @@
       }).join("");
     } else {
       abSec.hidden = true;
+    }
+
+    var ab2 = v2.ablation_vs_v2_all || [];
+    var ab2Sec = document.getElementById("msV2AblationV2Section");
+    if (ab2Sec) {
+      var v3rows = ab2.filter(function (r) {
+        return String(r.variant || "").indexOf("v3_") === 0 || r.variant === "all";
+      });
+      if (v3rows.length) {
+        ab2Sec.hidden = false;
+        document.getElementById("msV2AblationV2").innerHTML = v3rows.map(function (r) {
+          var dWr = r.delta_wr_pp_vs_baseline == null ? "—" :
+            ((Number(r.delta_wr_pp_vs_baseline) >= 0 ? "+" : "") + Number(r.delta_wr_pp_vs_baseline).toFixed(1));
+          return "<tr><td>" + (r.variant || "") + "</td><td>" + num(r.trades, 0) +
+            "</td><td class=\"" + pnlClass(r.net_pnl) + "\">" + money(r.net_pnl) +
+            "</td><td>" + pct(r.win_rate) + "</td><td>" + pf(r.profit_factor) +
+            "</td><td>" + num(r.avg_r, 2) +
+            "</td><td>" + (r.delta_pf_vs_baseline == null ? "—" : num(r.delta_pf_vs_baseline, 2)) +
+            "</td><td>" + (r.delta_avg_r_vs_baseline == null ? "—" : num(r.delta_avg_r_vs_baseline, 2)) +
+            "</td><td>" + dWr + "</td></tr>";
+        }).join("");
+      } else {
+        ab2Sec.hidden = true;
+      }
     }
 
     renderV2Table();

@@ -65,6 +65,7 @@ from backend.services.mtf_swing.engine import run_symbol
 from backend.services.mtf_swing.metrics import ablation_table
 from backend.services.mtf_swing.parity import filter_bars_for_holes, is_hole, load_holes
 from backend.services.mtf_swing.regime import build_regime_series, regime_by_screen_date, regime_log_rows
+from backend.services.mtf_swing.stock_trend import build_stock_trend_series, trend_by_screen_date
 from backend.services.mtf_swing.config import COVERAGE_LOG_FIELDS
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,11 @@ def _run_one_variant(
         # Continuous carry: one state map per timeframe × variant across months.
         state_blob = _load_json(state_path_v2(tf, tag), {"symbols": {}})
         sym_state: Dict[str, Any] = state_blob.get("symbols") or {}
+        # Persist weekly entry counts across month boundaries (v3 cap).
+        weekly_cap_state: Dict[str, int] = {
+            str(k): int(v)
+            for k, v in (state_blob.get("weekly_caps") or {}).items()
+        }
         for idx, label in enumerate(month_labels):
             m_start, m_end, _ = month_window_for(label)
             token = _progress_token(tag, tf, label)
@@ -397,6 +403,23 @@ def _run_one_variant(
                     lot = lot_size_for(symbol, bars[-1].contract) or next(iter(lots.values()), 0)
                     month_cfg = copy.copy(cfg)
                     month_cfg.timeframe = tf
+                    trend_map = {}
+                    if month_cfg.stock_ema_trend:
+                        # Warm stock weekly EMA with bars already in the fetch
+                        # window (includes WARMUP_DAYS); TREND_UNKNOWN if short.
+                        pts = build_stock_trend_series(
+                            bars,
+                            ema_length=int(month_cfg.stock_ema_length),
+                            warmup_weeks=int(month_cfg.stock_ema_warmup_weeks),
+                        )
+                        trend_map = trend_by_screen_date(pts)
+                    ranked_allow = None
+                    if (
+                        month_cfg.weekly_cap is not None
+                        and (month_cfg.weekly_cap_mode or "") == "ranked_watchlist"
+                    ):
+                        # Allowlist built once per month below; placeholder until set.
+                        ranked_allow = state_blob.get("ranked_allow") or None
                     trades, discards, new_state = run_symbol(
                         bars,
                         symbol=symbol,
@@ -413,6 +436,9 @@ def _run_one_variant(
                         finalize_open=is_last,
                         exit_only_after=m_end,
                         regime_map=regime_map,
+                        trend_map=trend_map,
+                        weekly_cap_state=weekly_cap_state,
+                        ranked_allow=set(tuple(x) for x in ranked_allow) if ranked_allow else None,
                     )
                     # Like v1: append every emitted trade/discards. Cross-month
                     # exits keep their entry month; trade_id idempotency dedupes.
@@ -451,6 +477,7 @@ def _run_one_variant(
                     state_blob["symbols"] = sym_state
                     state_blob["month"] = label
                     state_blob["last_bar"] = month_last_ts
+                    state_blob["weekly_caps"] = weekly_cap_state
                     _save_json(state_path_v2(tf, tag), state_blob)
                     done.add(token)
                     progress["completed"] = sorted(done)

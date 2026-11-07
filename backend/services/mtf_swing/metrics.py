@@ -1,9 +1,10 @@
 """Closed-trade dashboard math. OPEN rows are visible in the blotter and excluded here."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from backend.services.mtf_swing.config import ABLATION_VARIANTS, month_windows
+from backend.services.mtf_swing.config import ABLATION_VARIANTS, V3_VARIANTS, month_windows
 
 
 def _f(raw: Any) -> Optional[float]:
@@ -361,7 +362,7 @@ def ablation_vs_baseline(
         by_variant.setdefault(str(r.get("variant") or ""), []).append(r)
     base_rows = by_variant.get(baseline) or []
     base = _block(base_rows)
-    order = list(ABLATION_VARIANTS)
+    order = list(ABLATION_VARIANTS) + list(V3_VARIANTS)
     extra = sorted(k for k in by_variant if k and k not in order)
     rows = []
     for tag in order + extra:
@@ -488,7 +489,34 @@ def build_v2_dashboard(
         if month in ("all", "full", "") and scope_months != full_labels:
             base_view = [r for r in base_view if str(r.get("month") or "") in scope_months]
         baseline_equity = _equity_curve(base_view)
+    v2_all_view = filter_rows(trades, timeframe=timeframe, month=month, variant="all")
+    if month in ("all", "full", "") and scope_months != full_labels:
+        v2_all_view = [r for r in v2_all_view if str(r.get("month") or "") in scope_months]
+    v2_all_equity = _equity_curve(v2_all_view)
+    v2_all_summary = _block(v2_all_view)
     selected_equity = dash["charts"]["equity"]
+    # 3-way: v1 vs v2 all vs selected (used heavily for v3).
+    three_way = None
+    if v1_trades is not None and comparison is not None:
+        three_way = {
+            "v1": comparison.get("v1") or {},
+            "v2_all": v2_all_summary,
+            "selected": comparison.get("v2") or dash["summary"],
+            "delta_vs_v1": comparison.get("delta") or {},
+            "delta_vs_v2_all": {
+                k: (
+                    (dash["summary"].get(k) - v2_all_summary.get(k))
+                    if isinstance(dash["summary"].get(k), (int, float))
+                    and isinstance(v2_all_summary.get(k), (int, float))
+                    and dash["summary"].get(k) != float("inf")
+                    and v2_all_summary.get(k) != float("inf")
+                    else None
+                )
+                for k in ("trades", "net_pnl", "win_rate", "profit_factor", "avg_r", "max_drawdown")
+            },
+            "scope": scope_label,
+        }
+    weekly = _weekly_rollups(view)
     return {
         "timeframe": timeframe,
         "month": month,
@@ -502,15 +530,43 @@ def build_v2_dashboard(
             **dash["charts"],
             "equity_selected": selected_equity,
             "equity_v1_equivalent": baseline_equity,
+            "equity_v2_all": v2_all_equity,
         },
         "open_trades": dash["open_trades"],
         "open_mtm": dash.get("open_mtm") or {},
         "funnel": funnel,
         "comparison": comparison,
+        "three_way": three_way,
+        "weekly": weekly,
         "robustness": robustness_block(view),
         "ablation_vs_baseline": ablation_vs_baseline(trades, timeframe=timeframe),
+        "ablation_vs_v2_all": ablation_vs_baseline(trades, timeframe=timeframe, baseline="all"),
         "trades": view,
     }
+
+
+def _weekly_rollups(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Group closed trades by entry_week (fallback: ISO week of entry_time)."""
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        if not is_closed(r):
+            continue
+        wk = str(r.get("entry_week") or "").strip()
+        if not wk:
+            et = str(r.get("entry_time") or "")
+            try:
+                d = date.fromisoformat(et[:10])
+                y, w, _ = d.isocalendar()
+                wk = f"{y:04d}-W{w:02d}"
+            except Exception:
+                wk = "unknown"
+        buckets.setdefault(wk, []).append(r)
+    out = []
+    for wk in sorted(buckets):
+        block = _block(buckets[wk])
+        block["entry_week"] = wk
+        out.append(block)
+    return out
 
 
 def ablation_table(trades: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:

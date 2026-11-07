@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models.user import User
 from backend.routers.auth import get_user_from_token, oauth2_scheme
-from backend.services.mtf_swing.config import ABLATION_VARIANTS, LEAVE_ONE_OUT_VARIANTS, month_windows
+from backend.services.mtf_swing.config import (
+    ABLATION_VARIANTS,
+    LEAVE_ONE_OUT_VARIANTS,
+    V3_LEAVE_ONE_OUT,
+    V3_VARIANTS,
+    month_windows,
+)
 from backend.services.mtf_swing.csv_store import read_rows
 from backend.services.mtf_swing.data import (
     data_dir_v2,
@@ -251,6 +257,14 @@ def v2_results(
             "all_except_sl": "all except pivot SL",
             "all_except_tp": "all except TP rule",
             "all_except_rr": "all except min RR",
+            "v3_trend_only": "v3 stock EMA20 only",
+            "v3_window_only": "v3 Mon–Wed + Fri close only",
+            "v3_cap_only": "v3 weekly cap 5 only",
+            "v3_all": "v3 all (trend+window+cap)",
+            "v3_all_ranked": "v3 all ranked watchlist",
+            "v3_all_except_trend": "v3 all except trend",
+            "v3_all_except_window": "v3 all except window",
+            "v3_all_except_cap": "v3 all except cap",
         }.get(tag, tag)
         if not n:
             return pretty
@@ -264,10 +278,15 @@ def v2_results(
             return f"{pretty} ({n} · full)"
         return f"{pretty} ({n} · {mc} mo)"
 
+    present_tags = sorted({str(r.get("variant") or "") for r in rows if r.get("variant")})
+    catalog = list(ABLATION_VARIANTS) + list(V3_VARIANTS) + list(LEAVE_ONE_OUT_VARIANTS) + list(V3_LEAVE_ONE_OUT)
+    # Include any on-disk tags not in the static catalog (forward-compatible).
+    for t in present_tags:
+        if t and t not in catalog:
+            catalog.append(t)
     variant_options = (
         [{"value": "any", "label": "Any variant"}]
-        + [{"value": v, "label": _variant_label(v)} for v in ABLATION_VARIANTS]
-        + [{"value": v, "label": _variant_label(v)} for v in LEAVE_ONE_OUT_VARIANTS]
+        + [{"value": v, "label": _variant_label(v)} for v in catalog]
     )
     return {
         "ok": True,
@@ -287,6 +306,9 @@ def v2_results(
         "open_trades": dash["open_trades"],
         "open_mtm": dash.get("open_mtm") or {},
         "funnel": dash.get("funnel") or {},
+        "three_way": dash.get("three_way"),
+        "weekly": dash.get("weekly") or [],
+        "ablation_vs_v2_all": dash.get("ablation_vs_v2_all") or [],
         "comparison": dash.get("comparison"),
         "robustness": dash.get("robustness") or {},
         "ablation": dash.get("ablation_vs_baseline") or summary_rows or ablation,

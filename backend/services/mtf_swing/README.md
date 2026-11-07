@@ -67,6 +67,28 @@ flock -n /tmp/mtf_swing_v2.lock -c \
 
 Prefer flocked runs: `flock -n /tmp/mtf_swing_v2.lock -c 'python3 scripts/run_mtf_swing_backtest.py --v2 …'`.
 
+## v3 (on top of v2 `all`)
+
+Append-only variants; never rewrite `v1_equivalent` or `all` rows.
+
+| variant | stock EMA20 | Mon–Wed + Fri close | max 5/week |
+|---------|-------------|---------------------|------------|
+| v3_trend_only | on (index off) | off | off |
+| v3_window_only | off (index on) | on | off |
+| v3_cap_only | off (index on) | off | on first_come |
+| v3_all | on | on | on first_come |
+| v3_all_ranked | on | on | on ranked_watchlist |
+
+```bash
+# Bare --variants all still expands the v2 matrix. Pass an explicit v3 list:
+flock -n /tmp/mtf_swing_v2.lock -c \
+  'python3 scripts/run_mtf_swing_backtest.py --v2 --start 2025-11 --end 2026-10 \
+     --timeframes 60m,15m --variants v3_trend_only,v3_window_only,v3_cap_only,v3_all,v3_all_ranked'
+# or: --variants v3
+```
+
+New discard reasons: `TREND_BLOCK`, `TREND_UNKNOWN`, `AFTER_CUTOFF`, `WEEKLY_CAP`. New exit: `WEEK_END`. Extra trade columns: `entry_week`, `entry_weekday`, `week_trade_no`, `trend_state`, `ema20_weekly`, `weekly_close`, `rank_key_value`. Weekly cap counters persist in `state_{tf}_{variant}.json` across months.
+
 ### v1_equivalent candle-gap parity
 
 v1’s frozen `trades.csv` was produced under partial Upstox fetches (many `SYMBOL YYYY-MM no candles` months). A naïve continuous `v1_equivalent` re-run with full history therefore diverges — e.g. **ADANIENSOL SHORT** screened on **2026-04-30** (Thursday; 2026-05-01 Labour Day holiday) and filled 2026-05-04 (+₹86.8k on 60m). v1 had no April candles for that symbol, so the screen never ran; a later May refill could not recover it because bars before `active_from` are warm-up only (no new screens). 15m diverged from Feb onward for the same reason (hundreds of hole months).

@@ -38,6 +38,19 @@ LEAVE_ONE_OUT_VARIANTS: Tuple[str, ...] = (
     "all_except_tp",
     "all_except_rr",
 )
+# v3 layered on v2 ``all`` (pivot SL, TP 1.5R, RR≥1.3). Append-only; never rewrites v2 rows.
+V3_VARIANTS: Tuple[str, ...] = (
+    "v3_trend_only",
+    "v3_window_only",
+    "v3_cap_only",
+    "v3_all",
+    "v3_all_ranked",
+)
+V3_LEAVE_ONE_OUT: Tuple[str, ...] = (
+    "v3_all_except_trend",
+    "v3_all_except_window",
+    "v3_all_except_cap",
+)
 VARIANT_ALIASES: Dict[str, str] = {
     "regime": "regime_only",
     "sl": "sl_only",
@@ -80,6 +93,14 @@ TRADE_FIELDS_V2 = TRADE_FIELDS + [
     "tp_r",
     "mtm_price",
     "mtm_pnl",
+    # v3 extras (blank for older rows)
+    "entry_week",
+    "entry_weekday",
+    "week_trade_no",
+    "trend_state",
+    "ema20_weekly",
+    "weekly_close",
+    "rank_key_value",
 ]
 
 DISCARD_FIELDS = [
@@ -95,7 +116,14 @@ DISCARD_FIELDS = [
     "run_ts",
 ]
 
-DISCARD_FIELDS_V2 = DISCARD_FIELDS + ["variant", "regime"]
+DISCARD_FIELDS_V2 = DISCARD_FIELDS + [
+    "variant",
+    "regime",
+    "trend_state",
+    "ema20_weekly",
+    "weekly_close",
+    "rank_key_value",
+]
 
 REGIME_LOG_FIELDS = [
     "screen_date",
@@ -175,12 +203,6 @@ def normalize_variant(name: str) -> str:
     return VARIANT_ALIASES.get(tag, tag)
 
 
-def known_variants(*, leave_one_out: bool = False) -> Tuple[str, ...]:
-    if leave_one_out:
-        return ABLATION_VARIANTS + LEAVE_ONE_OUT_VARIANTS
-    return ABLATION_VARIANTS
-
-
 @dataclass
 class MtfSwingConfig:
     entry_timing: str = "next_open"  # "next_open" | "close"
@@ -204,6 +226,19 @@ class MtfSwingConfig:
     min_potential_rr: Optional[float] = None  # None → v1 midpoint-limit path
     below_threshold_action: str = "skip"  # skip | limit_at_threshold
     ablation_tag: str = ""  # v1_equivalent | regime_only | ... | all | ""
+    # --- v3 flags (defaults keep v1/v2 behaviour) ---
+    # Stock weekly EMA trend replaces index regime when enabled.
+    stock_ema_trend: bool = False
+    stock_ema_length: int = 20
+    stock_ema_warmup_weeks: int = 80
+    # Keep regime_filter as the index-regime switch (index_regime=off ⇒ regime_filter=False).
+    weekly_window: bool = False
+    entry_cutoff_weekday: int = 2  # Mon=0 … Wed=2
+    exit_weekday: int = 4  # Friday
+    friday_holiday_rule: str = "next_session"  # next_session | prior_session
+    weekly_cap: Optional[int] = None  # e.g. 5 new entries/week/TF
+    weekly_cap_mode: str = "first_come"  # first_come | ranked_watchlist
+    rank_key: str = "prewarning_rr"
 
     def charge_inr(self) -> float:
         return float(self.brokerage) + float(self.charges)
@@ -300,7 +335,95 @@ def _flags_for_variant(tag: str) -> Dict[str, object]:
             "max_sessions": None,
             "min_potential_rr": None,
         }
+    # --- v3 (on top of v2 ``all`` base) ---
+    v2_all = {
+        "sl_basis": "pivot_outside_prev_week",
+        "tp_r": 1.5,
+        "max_sessions": None,
+        "min_potential_rr": 1.3,
+        "below_threshold_action": "skip",
+    }
+    if tag == "v3_trend_only":
+        return {
+            **v2_all,
+            "regime_filter": False,  # stock EMA replaces index
+            "stock_ema_trend": True,
+            "weekly_window": False,
+            "weekly_cap": None,
+        }
+    if tag == "v3_window_only":
+        return {
+            **v2_all,
+            "regime_filter": True,
+            "stock_ema_trend": False,
+            "weekly_window": True,
+            "weekly_cap": None,
+        }
+    if tag == "v3_cap_only":
+        return {
+            **v2_all,
+            "regime_filter": True,
+            "stock_ema_trend": False,
+            "weekly_window": False,
+            "weekly_cap": 5,
+            "weekly_cap_mode": "first_come",
+        }
+    if tag == "v3_all":
+        return {
+            **v2_all,
+            "regime_filter": False,
+            "stock_ema_trend": True,
+            "weekly_window": True,
+            "weekly_cap": 5,
+            "weekly_cap_mode": "first_come",
+        }
+    if tag == "v3_all_ranked":
+        return {
+            **v2_all,
+            "regime_filter": False,
+            "stock_ema_trend": True,
+            "weekly_window": True,
+            "weekly_cap": 5,
+            "weekly_cap_mode": "ranked_watchlist",
+            "rank_key": "prewarning_rr",
+        }
+    if tag == "v3_all_except_trend":
+        return {
+            **v2_all,
+            "regime_filter": True,
+            "stock_ema_trend": False,
+            "weekly_window": True,
+            "weekly_cap": 5,
+            "weekly_cap_mode": "first_come",
+        }
+    if tag == "v3_all_except_window":
+        return {
+            **v2_all,
+            "regime_filter": False,
+            "stock_ema_trend": True,
+            "weekly_window": False,
+            "weekly_cap": 5,
+            "weekly_cap_mode": "first_come",
+        }
+    if tag == "v3_all_except_cap":
+        return {
+            **v2_all,
+            "regime_filter": False,
+            "stock_ema_trend": True,
+            "weekly_window": True,
+            "weekly_cap": None,
+        }
     raise ValueError(f"unknown ablation variant {tag!r}")
+
+
+def known_variants(*, leave_one_out: bool = False, include_v3: bool = True) -> Tuple[str, ...]:
+    base = ABLATION_VARIANTS
+    if include_v3:
+        base = base + V3_VARIANTS
+    if leave_one_out:
+        extra = LEAVE_ONE_OUT_VARIANTS + (V3_LEAVE_ONE_OUT if include_v3 else ())
+        return base + extra
+    return base
 
 
 def ablation_config(name: str, **overrides) -> MtfSwingConfig:
@@ -309,11 +432,12 @@ def ablation_config(name: str, **overrides) -> MtfSwingConfig:
     Accepts both spec names (``regime_only``) and legacy short names (``regime``).
     """
     tag = normalize_variant(name)
-    allowed = set(ABLATION_VARIANTS) | set(LEAVE_ONE_OUT_VARIANTS)
+    allowed = set(known_variants(leave_one_out=True, include_v3=True))
     if tag not in allowed:
         raise ValueError(f"ablation variant must be one of {sorted(allowed)}")
     flags = _flags_for_variant(tag)
-    cfg = replace(MtfSwingConfig(variant="v2", ablation_tag=tag), **flags)  # type: ignore[arg-type]
+    family = "v3" if tag.startswith("v3_") else "v2"
+    cfg = replace(MtfSwingConfig(variant=family, ablation_tag=tag), **flags)  # type: ignore[arg-type]
     if overrides:
         cfg = replace(cfg, **overrides)
     return cfg
@@ -327,14 +451,18 @@ def resolve_variants(
 ) -> List[str]:
     """Resolve CLI variant selectors.
 
-    Bare ``all`` (or ``--ablation``) expands to the full primary matrix.
-    A multi-item list may include the feature-combo variant named ``all``.
+    Bare ``all`` (or ``--ablation``) expands to the full primary v2 matrix (not v3).
+    Pass ``v3_all,v3_trend_only`` (multi-item) to run specific v3 tags — a bare
+    ``all`` alone still means the v2 primary matrix (historical CLI quirk).
+    Prefix ``v3`` alone expands to all V3_VARIANTS.
     """
     if ablation and not raw:
-        return list(known_variants(leave_one_out=leave_one_out))
+        return list(ABLATION_VARIANTS) + (
+            list(LEAVE_ONE_OUT_VARIANTS) if leave_one_out else []
+        )
     if not raw:
         if leave_one_out:
-            return list(known_variants(leave_one_out=True))
+            return list(ABLATION_VARIANTS) + list(LEAVE_ONE_OUT_VARIANTS)
         return ["all"]
     parts: List[str] = []
     for item in raw:
@@ -344,12 +472,21 @@ def resolve_variants(
                 parts.append(p)
     if not parts:
         return ["all"]
-    # Bare --variants all → full primary matrix (optionally + leave-one-out).
+    # Bare --variants all → full primary v2 matrix (optionally + leave-one-out).
     if len(parts) == 1 and parts[0].strip().lower() == "all":
-        return list(known_variants(leave_one_out=leave_one_out))
+        out = list(ABLATION_VARIANTS)
+        if leave_one_out:
+            out.extend(LEAVE_ONE_OUT_VARIANTS)
+        return out
+    # Bare --variants v3 → all v3 primary variants.
+    if len(parts) == 1 and parts[0].strip().lower() == "v3":
+        out = list(V3_VARIANTS)
+        if leave_one_out:
+            out.extend(V3_LEAVE_ONE_OUT)
+        return out
     out: List[str] = []
     seen = set()
-    allowed = set(known_variants(leave_one_out=True))
+    allowed = set(known_variants(leave_one_out=True, include_v3=True))
     for p in parts:
         tag = normalize_variant(p)
         if tag not in allowed:
@@ -358,7 +495,7 @@ def resolve_variants(
             seen.add(tag)
             out.append(tag)
     if leave_one_out:
-        for tag in LEAVE_ONE_OUT_VARIANTS:
+        for tag in list(LEAVE_ONE_OUT_VARIANTS) + list(V3_LEAVE_ONE_OUT):
             if tag not in seen:
                 out.append(tag)
                 seen.add(tag)
