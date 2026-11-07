@@ -9,6 +9,7 @@ values that are already on disk, and never rewrite earlier bytes.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import time
@@ -36,6 +37,15 @@ from backend.services.mtf_swing.engine import run_symbol
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
+# Full-universe months that finish with mass empty fetches used to be marked
+# complete (screened>=1). Require a real pass before writing progress.json.
+_FULL_UNIVERSE = 20
+_MIN_SCREENED_RATIO = 0.70
+_MIN_ENTRIES_FULL = 10
+_MONTH_ATTEMPTS = 3
+_EMPTY_STREAK_COOLDOWN = 45.0
+_MONTH_RETRY_COOLDOWN = 90.0
+
 
 def _load_json(path, default):
     if not path.is_file():
@@ -59,6 +69,13 @@ def _upstox():
     from backend.services.upstox_service import UpstoxService
 
     return UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+
+
+def _month_thresholds(universe_size: int) -> tuple[int, int]:
+    """Return (min_screened, min_entries) for this run's universe size."""
+    if universe_size >= _FULL_UNIVERSE:
+        return max(1, int(_MIN_SCREENED_RATIO * universe_size)), _MIN_ENTRIES_FULL
+    return max(1, universe_size), 0
 
 
 def run_backtest(
@@ -89,109 +106,196 @@ def run_backtest(
     }
     run_ts = datetime.now(IST).isoformat()
     months = month_windows()
+    min_screened, min_entries = _month_thresholds(len(universe))
 
-    for tf in timeframes:
-        if tf not in TIMEFRAMES:
-            raise ValueError(f"timeframe must be one of {TIMEFRAMES}")
-        state = _load_json(state_path(tf), {"symbols": {}})
-        sym_state: Dict[str, Any] = state.get("symbols") or {}
-        cfg = MtfSwingConfig(timeframe=tf)
-        for idx, (m_start, m_end, label) in enumerate(months):
-            token = f"{tf}:{label}"
-            if resume and token in done:
-                summary["skipped"].append(token)
-                logger.info("mtf_swing skip %s (already complete)", token)
-                continue
-            is_last = idx == len(months) - 1
-            fetch_start, fetch_end = window_for_month(m_start, m_end, tail_days=20 if is_last else 0)
-            logger.info(
-                "mtf_swing %s %s symbols=%s window=%s..%s",
-                tf,
-                label,
-                len(universe),
-                fetch_start,
-                fetch_end,
-            )
-            screened = candidates = setups = entries = exits = 0
-            for row in universe:
-                symbol = row["symbol"]
-                try:
-                    bars, lots = stitch_symbol_bars(
-                        client,
-                        symbol,
+    # Wait for candle slots instead of deny→empty→"no candles" thrash.
+    prefetch_mode = None
+    try:
+        from backend.services.upstox_rate_limiter import set_backtest_bulk_prefetch_mode as prefetch_mode
+
+        prefetch_mode(True)
+    except Exception:
+        prefetch_mode = None
+
+    try:
+        for tf in timeframes:
+            if tf not in TIMEFRAMES:
+                raise ValueError(f"timeframe must be one of {TIMEFRAMES}")
+            state = _load_json(state_path(tf), {"symbols": {}})
+            sym_state: Dict[str, Any] = state.get("symbols") or {}
+            cfg = MtfSwingConfig(timeframe=tf)
+            for idx, (m_start, m_end, label) in enumerate(months):
+                token = f"{tf}:{label}"
+                if resume and token in done:
+                    summary["skipped"].append(token)
+                    logger.info("mtf_swing skip %s (already complete)", token)
+                    continue
+                is_last = idx == len(months) - 1
+                fetch_start, fetch_end = window_for_month(m_start, m_end, tail_days=20 if is_last else 0)
+                month_ok = False
+                for attempt in range(1, _MONTH_ATTEMPTS + 1):
+                    snap = copy.deepcopy(sym_state)
+                    logger.info(
+                        "mtf_swing %s %s symbols=%s window=%s..%s attempt=%s/%s "
+                        "min_screened=%s min_entries=%s",
+                        tf,
+                        label,
+                        len(universe),
                         fetch_start,
                         fetch_end,
-                        tf,
-                        hol,
-                        underlying_key=row.get("underlying_key") or "",
+                        attempt,
+                        _MONTH_ATTEMPTS,
+                        min_screened,
+                        min_entries,
                     )
-                except Exception as exc:
-                    logger.warning("mtf_swing fetch %s %s failed: %s", symbol, label, exc)
-                    time.sleep(0.25)
-                    continue
-                if not bars:
-                    logger.info("mtf_swing %s %s no candles", symbol, label)
-                    time.sleep(0.15)
-                    continue
-                # Light pacing so a full universe pass does not trip Upstox 429s
-                # immediately after a heavy 60m run (which left 15m with empty months).
-                time.sleep(0.05)
-                lot = lot_size_for(symbol, bars[-1].contract) or next(iter(lots.values()), 0)
-                trades, discards, new_state = run_symbol(
-                    bars,
-                    symbol=symbol,
-                    holidays=hol,
-                    active_from=m_start,
-                    active_to=m_end,
-                    state=sym_state.get(symbol),
-                    config=cfg,
-                    lot_size=lot,
-                    lot_by_contract=lots,
-                    run_ts=run_ts,
-                    finalize_open=is_last,
-                    exit_only_after=m_end,
-                )
-                n_tr = append_trades(trades_path(), trades)
-                n_ds = append_discards(discards_path(), discards)
-                summary["trades_appended"] += n_tr
-                summary["discards_appended"] += n_ds
-                sym_state[symbol] = new_state
-                screened += 1
-                candidates += sum(1 for d in discards if d.get("reason") in ("NO_SWING", "LEVELS_ILLOGICAL"))
-                setups += sum(1 for d in discards if d.get("reason") == "WEEK_EXPIRED") + len(trades)
-                entries += len(trades)
-                exits += sum(1 for t in trades if t.get("exit_reason") != "OPEN")
-                logger.info(
-                    "mtf_swing %s %s %s bars=%s new_trades=%s new_discards=%s lot=%s",
-                    tf,
-                    label,
-                    symbol,
-                    len(bars),
-                    n_tr,
-                    n_ds,
-                    lot,
-                )
-            if screened == 0:
-                logger.error("mtf_swing %s had no candles; leaving the month incomplete", token)
-                summary["failed"].append(token)
-                continue
-            state["symbols"] = sym_state
-            _save_json(state_path(tf), state)
-            done.add(token)
-            progress["completed"] = sorted(done)
-            progress["updated"] = run_ts
-            progress.pop("note", None)
-            _save_json(progress_path(), progress)
-            summary["completed_now"].append(token)
-            logger.info(
-                "mtf_swing progress %s screened=%s structural_discards=%s week_expired=%s entries=%s exits=%s",
-                token,
-                screened,
-                candidates,
-                setups,
-                entries,
-                exits,
-            )
+                    screened = candidates = setups = entries = exits = 0
+                    empty_streak = 0
+                    pending_trades: List[Dict[str, Any]] = []
+                    pending_discards: List[Dict[str, Any]] = []
+                    for row in universe:
+                        symbol = row["symbol"]
+                        bars: List[Any] = []
+                        lots: Dict[str, int] = {}
+                        for fetch_try in range(2):
+                            try:
+                                bars, lots = stitch_symbol_bars(
+                                    client,
+                                    symbol,
+                                    fetch_start,
+                                    fetch_end,
+                                    tf,
+                                    hol,
+                                    underlying_key=row.get("underlying_key") or "",
+                                )
+                            except Exception as exc:
+                                logger.warning(
+                                    "mtf_swing fetch %s %s failed: %s", symbol, label, exc
+                                )
+                                time.sleep(1.0)
+                                bars = []
+                                lots = {}
+                            if bars:
+                                empty_streak = 0
+                                break
+                            empty_streak += 1
+                            logger.info("mtf_swing %s %s no candles", symbol, label)
+                            if empty_streak >= 8:
+                                logger.warning(
+                                    "mtf_swing %s empty streak=%s; cooling %.0fs",
+                                    token,
+                                    empty_streak,
+                                    _EMPTY_STREAK_COOLDOWN,
+                                )
+                                time.sleep(_EMPTY_STREAK_COOLDOWN)
+                                empty_streak = 0
+                            else:
+                                time.sleep(0.5)
+                        if not bars:
+                            continue
+                        # Pace successful symbols so a full universe pass stays under
+                        # the shared Upstox candle budget.
+                        time.sleep(0.4)
+                        lot = lot_size_for(symbol, bars[-1].contract) or next(
+                            iter(lots.values()), 0
+                        )
+                        trades, discards, new_state = run_symbol(
+                            bars,
+                            symbol=symbol,
+                            holidays=hol,
+                            active_from=m_start,
+                            active_to=m_end,
+                            state=sym_state.get(symbol),
+                            config=cfg,
+                            lot_size=lot,
+                            lot_by_contract=lots,
+                            run_ts=run_ts,
+                            finalize_open=is_last,
+                            exit_only_after=m_end,
+                        )
+                        # Buffer CSV writes until the month clears thresholds so a
+                        # rate-limited pass cannot leave RELIANCE-only stubs on disk.
+                        pending_trades.extend(trades)
+                        pending_discards.extend(discards)
+                        sym_state[symbol] = new_state
+                        screened += 1
+                        candidates += sum(
+                            1
+                            for d in discards
+                            if d.get("reason") in ("NO_SWING", "LEVELS_ILLOGICAL")
+                        )
+                        setups += sum(
+                            1 for d in discards if d.get("reason") == "WEEK_EXPIRED"
+                        ) + len(trades)
+                        entries += len(trades)
+                        exits += sum(1 for t in trades if t.get("exit_reason") != "OPEN")
+                        logger.info(
+                            "mtf_swing %s %s %s bars=%s new_trades=%s new_discards=%s lot=%s",
+                            tf,
+                            label,
+                            symbol,
+                            len(bars),
+                            len(trades),
+                            len(discards),
+                            lot,
+                        )
+                    if screened >= min_screened and entries >= min_entries:
+                        n_tr = append_trades(trades_path(), pending_trades)
+                        n_ds = append_discards(discards_path(), pending_discards)
+                        summary["trades_appended"] += n_tr
+                        summary["discards_appended"] += n_ds
+                        state["symbols"] = sym_state
+                        _save_json(state_path(tf), state)
+                        done.add(token)
+                        progress["completed"] = sorted(done)
+                        progress["updated"] = run_ts
+                        progress.pop("note", None)
+                        _save_json(progress_path(), progress)
+                        summary["completed_now"].append(token)
+                        month_ok = True
+                        logger.info(
+                            "mtf_swing progress %s screened=%s structural_discards=%s "
+                            "week_expired=%s entries=%s exits=%s",
+                            token,
+                            screened,
+                            candidates,
+                            setups,
+                            entries,
+                            exits,
+                        )
+                        break
+
+                    # Thin / rate-limited pass — do not mark complete; restore watermarks.
+                    logger.error(
+                        "mtf_swing %s incomplete screened=%s (need >=%s) entries=%s "
+                        "(need >=%s); restoring state (attempt %s/%s)",
+                        token,
+                        screened,
+                        min_screened,
+                        entries,
+                        min_entries,
+                        attempt,
+                        _MONTH_ATTEMPTS,
+                    )
+                    sym_state = snap
+                    if attempt < _MONTH_ATTEMPTS:
+                        time.sleep(_MONTH_RETRY_COOLDOWN)
+
+                if not month_ok:
+                    summary["failed"].append(token)
+                    logger.error(
+                        "mtf_swing %s failed after %s attempts; stopping further %s months",
+                        token,
+                        _MONTH_ATTEMPTS,
+                        tf,
+                    )
+                    break
+    finally:
+        if prefetch_mode is not None:
+            try:
+                prefetch_mode(False)
+            except Exception:
+                pass
+
     summary["trades_csv"] = str(trades_path())
     summary["discards_csv"] = str(discards_path())
     summary["data_dir"] = str(data_dir())
