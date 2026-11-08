@@ -183,9 +183,23 @@ def build_holes_from_v1_logs(
 
 
 def default_v1_log_specs() -> List[Tuple[Path, Optional[str]]]:
+    """Return (log_path, default_tf) specs for hole discovery.
+
+    Include every ``full_run_60m_refill.log*`` (current + ``.bak_*``). A later
+    May–Oct-only refill can overwrite the live refill log and drop earlier
+    Feb–Apr ``bars=`` successes; without the bak files those months falsely
+    stay holes and ``v1_equivalent`` under-trades vs frozen v1.
+    """
     root = data_dir()
-    return [
-        (root / "full_run.log", "60m"),
-        (root / "full_run_60m_refill.log", "60m"),
-        (root / "full_run_15m.log", "15m"),
-    ]
+    specs: List[Tuple[Path, Optional[str]]] = [(root / "full_run.log", "60m")]
+    refill_primary = root / "full_run_60m_refill.log"
+    refill_paths = sorted(
+        {p.resolve() for p in root.glob("full_run_60m_refill.log*") if p.is_file()},
+        key=lambda p: (p.name != refill_primary.name, p.name),
+    )
+    if not refill_paths and refill_primary.is_file():
+        refill_paths = [refill_primary]
+    for path in refill_paths:
+        specs.append((path, "60m"))
+    specs.append((root / "full_run_15m.log", "15m"))
+    return specs
