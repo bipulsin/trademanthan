@@ -675,8 +675,15 @@ def test_v1_equivalent_open_exit_time_blank_like_v1():
         assert opens_v2[0]["mtm_price"] == ""
 
 
-def test_parity_hole_bar_filter_and_compare_open_signature():
-    from backend.services.mtf_swing.parity import filter_bars_for_holes, holes_from_events, parse_log_events
+def test_parity_hole_bar_filter_and_compare_open_signature(tmp_path: Path):
+    from backend.services.mtf_swing.parity import (
+        build_holes_from_v1_logs,
+        default_v1_log_specs,
+        filter_bars_for_holes,
+        holes_from_events,
+        parse_log_events,
+    )
+    import backend.services.mtf_swing.parity as parity_mod
 
     text = (
         # Real hole: never fetched successfully.
@@ -712,6 +719,49 @@ def test_parity_hole_bar_filter_and_compare_open_signature():
     assert ("60m", "ONLY15M", "2025-11") not in mixed_holes
     assert ("15m", "RELIANCE", "2025-11") in mixed_holes
     assert ("15m", "ONLY15M", "2025-11") in mixed_holes
+
+    # Cross-file merge: hole only if never bars= in ANY log. Bak refill clears
+    # false holes when live refill was overwritten to May–Oct-only.
+    (tmp_path / "full_run.log").write_text(
+        "2026-11-07 03:00:00 INFO mtf_swing 60m 2026-02 symbols=2 window=2026-01-01..2026-02-28\n"
+        "2026-11-07 03:01:00 INFO mtf_swing ADANIENT 2026-02 no candles\n"
+        "2026-11-07 03:02:00 INFO mtf_swing ADANIENSOL 2026-04 no candles\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "full_run_60m_refill.log").write_text(
+        "2026-11-07 07:00:00 INFO mtf_swing 60m 2026-05 ADANIENT bars=40\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "full_run_60m_refill.log.bak_feb").write_text(
+        "2026-11-07 05:00:00 INFO mtf_swing 60m 2026-02 ADANIENT bars=30\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "full_run_15m.log").write_text("", encoding="utf-8")
+    cross = build_holes_from_v1_logs(
+        [
+            (tmp_path / "full_run.log", "60m"),
+            (tmp_path / "full_run_60m_refill.log", "60m"),
+            (tmp_path / "full_run_60m_refill.log.bak_feb", "60m"),
+            (tmp_path / "full_run_15m.log", "15m"),
+        ]
+    )
+    assert ("60m", "ADANIENT", "2026-02") not in cross
+    assert ("60m", "ADANIENSOL", "2026-04") in cross
+
+    orig = parity_mod.data_dir
+    parity_mod.data_dir = lambda: tmp_path  # type: ignore[assignment]
+    try:
+        specs = default_v1_log_specs()
+        names = [p.name for p, _tf in specs]
+        assert "full_run.log" in names
+        assert "full_run_60m_refill.log" in names
+        assert "full_run_60m_refill.log.bak_feb" in names
+        assert "full_run_15m.log" in names
+        assert names.index("full_run_60m_refill.log") < names.index(
+            "full_run_60m_refill.log.bak_feb"
+        )
+    finally:
+        parity_mod.data_dir = orig  # type: ignore[assignment]
 
     # OPEN exit_time blank vs stamped must compare equal.
     a = {
