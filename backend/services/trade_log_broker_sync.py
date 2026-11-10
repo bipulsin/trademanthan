@@ -78,6 +78,7 @@ class Fill:
     price: float
     ts: datetime
     fill_id: str
+    security_id: str = ""
 
 
 @dataclass
@@ -130,8 +131,9 @@ def normalize_broker(raw: Any) -> str:
 
 
 def underlying_from_future_symbol(symbol: str) -> str:
-    """RELIANCE25NOVFUT / NIFTY-Nov2026-FUT / NIFTY NOV FUT → underlying."""
-    compact = re.sub(r"[^A-Z0-9]", "", (symbol or "").upper())
+    """RELIANCE25NOVFUT / NIFTY-Nov2026-FUT / TCS NOV FUT NSE → underlying."""
+    raw = re.sub(r"\b(NSE|BSE|MCX)\b", " ", (symbol or "").upper())
+    compact = re.sub(r"[^A-Z0-9]", "", raw)
     compact = re.sub(r"FUT$", "", compact)
     if not compact:
         return ""
@@ -225,6 +227,9 @@ def is_stock_or_index_future(row: Dict[str, Any], *, segment_hint: str = "") -> 
     BSE_FO (including SENSEX and BANKEX). If the row has no exchange, segment,
     or NSE instrument key, it is rejected. ``segment_hint`` is ignored so a
     caller cannot widen a row that did not name its venue.
+
+    productType is not a filter. Margin, Intraday, and CNC futures all stay
+    when the row is an NSE future.
     """
     del segment_hint  # fail closed: only fields on the broker row count
     if not isinstance(row, dict):
@@ -236,7 +241,14 @@ def is_stock_or_index_future(row: Dict[str, Any], *, segment_hint: str = "") -> 
     compact = re.sub(r"[^A-Z0-9]", "", symbol)
     option_type = _upper(_first(row, "drvOptionType", "option_type", "optionType"))
     instrument_type = _upper(
-        _first(row, "instrument_type", "instrumentType", "drvInstrumentType", "security_type")
+        _first(
+            row,
+            "instrument_type",
+            "instrumentType",
+            "drvInstrumentType",
+            "security_type",
+            "instrument",
+        )
     )
     blob = f"{exchange} {segment} {key} {compact}"
 
@@ -350,12 +362,15 @@ def row_to_fill(row: Dict[str, Any], trade_day: date, *, segment_hint: str = "")
     )
     if not _on_trade_day(stamp, row, trade_day):
         return None
-    fill_id = str(
-        _first(row, "trade_id", "exchangeTradeId", "order_id", "orderId")
-        or f"{stamp.isoformat()}|{side}|{qty}|{price}"
-    ).strip()
+    trade_id = str(_first(row, "trade_id", "exchangeTradeId") or "").strip()
+    if trade_id.upper() in {"NA", "NONE", "NULL"}:
+        trade_id = ""
+    # Do not key a fill on order id. Both legs of a round trip can share one,
+    # and a shared id would keep only the first row Dhan returned.
+    fill_id = trade_id or f"{symbol}|{stamp.isoformat()}|{side}|{qty}|{price}"
     instrument = re.sub(r"[^A-Z0-9]", "", symbol.upper())
     underlying = underlying_from_future_symbol(symbol) or instrument
+    security_id = str(_first(row, "securityId", "security_id") or "").strip()
     return Fill(
         instrument=instrument,
         symbol_raw=symbol,
@@ -365,6 +380,7 @@ def row_to_fill(row: Dict[str, Any], trade_day: date, *, segment_hint: str = "")
         price=round(price, 4),
         ts=stamp,
         fill_id=fill_id,
+        security_id=security_id,
     )
 
 
@@ -520,7 +536,7 @@ def plans_from_fills(fills: Sequence[Fill]) -> List[PlannedTrade]:
             continue
         if is_bse_only_symbol(fill.symbol_raw) or is_bse_only_symbol(fill.underlying):
             continue
-        grouped.setdefault(fill.instrument or fill.underlying, []).append(fill)
+        grouped.setdefault(fill.security_id or fill.instrument or fill.underlying, []).append(fill)
     plans: List[PlannedTrade] = []
     for instrument in sorted(grouped):
         plans.extend(_pair_group(grouped[instrument]))
@@ -576,6 +592,30 @@ def _instrument_names(row: Dict[str, Any]) -> set:
     return names
 
 
+def _is_broker_row(row: Dict[str, Any]) -> bool:
+    return str(row.get("source") or "").strip().lower().startswith("broker_")
+
+
+def _same_session(row: Dict[str, Any], session_date: date) -> bool:
+    row_day = str(row.get("session_date") or "")[:10]
+    return not row_day or row_day == session_date.isoformat()
+
+
+def _same_instrument_row(row: Dict[str, Any], plan: PlannedTrade) -> bool:
+    names = _instrument_names(row)
+    wanted = {plan.instrument, plan.underlying, re.sub(r"[^A-Z0-9]", "", plan.symbol_raw.upper())}
+    wanted.discard("")
+    return bool(names.intersection(wanted))
+
+
+def _entry_matches(row: Dict[str, Any], plan: PlannedTrade) -> bool:
+    if str(row.get("direction") or "").strip().upper() != plan.direction:
+        return False
+    if _clock_text(row.get("entry_time")) != plan.entry_time:
+        return False
+    return _price_key(row.get("entry_price")) == _price_key(plan.entry_price)
+
+
 def is_duplicate(row: Dict[str, Any], plan: PlannedTrade, session_date: date) -> bool:
     """Same instrument, same entry date-time, and same entry price."""
     row_day = str(row.get("session_date") or "")[:10]
@@ -624,23 +664,43 @@ def apply_plans(
     closed_trades = 0
     seen: List[Dict[str, Any]] = [dict(row) for row in existing]
     for plan in plans:
+        broker_row = next(
+            (
+                row
+                for row in seen
+                if _is_broker_row(row)
+                and row.get("id") is not None
+                and _same_session(row, session_date)
+                and _same_instrument_row(row, plan)
+            ),
+            None,
+        )
+        if broker_row is not None and update_fn is not None:
+            exit_matches = plan.open_trade or _price_key(broker_row.get("exit_price")) == _price_key(
+                plan.exit_price
+            )
+            if _entry_matches(broker_row, plan) and exit_matches:
+                skipped += 1
+                continue
+            update_fn(broker_row, plan)
+            broker_row["direction"] = plan.direction
+            broker_row["entry_time"] = plan.entry_time
+            broker_row["entry_price"] = plan.entry_price
+            broker_row["exit_time"] = None if plan.open_trade else plan.exit_time
+            broker_row["exit_price"] = None if plan.open_trade else plan.exit_price
+            broker_row["symbol"] = plan.underlying
+            broker_row["contract"] = plan.symbol_raw
+            updated += 1
+            if plan.open_trade:
+                open_trades += 1
+            else:
+                closed_trades += 1
+            continue
         duplicate = next((row for row in seen if is_duplicate(row, plan, session_date)), None)
         if duplicate is not None:
-            can_close = (
-                update_fn is not None
-                and not plan.open_trade
-                and duplicate.get("id") is not None
-                and _price_key(duplicate.get("exit_price")) is None
-                and not _clock_text(duplicate.get("exit_time"))
-            )
-            if can_close:
-                update_fn(duplicate, plan)
-                duplicate["exit_time"] = plan.exit_time
-                duplicate["exit_price"] = plan.exit_price
-                updated += 1
-                closed_trades += 1
-            else:
-                skipped += 1
+            # Exact instrument + entry time + entry price already journaled.
+            # Manual rows (no broker source) are left untouched.
+            skipped += 1
             continue
         payload = trade_payload(plan, session_date, broker)
         insert_fn(payload)
@@ -833,7 +893,7 @@ def _load_existing(db, trade_day: date) -> List[Dict[str, Any]]:
         text(
             """
             SELECT id, session_date, symbol, contract, direction,
-                   entry_time, entry_price, exit_time, exit_price
+                   entry_time, entry_price, exit_time, exit_price, source
             FROM trade_log
             WHERE session_date = CAST(:d AS date)
             """
@@ -872,10 +932,21 @@ def _sync_db(trade_day: date, broker: str, plans: Sequence[PlannedTrade], fill_c
             upsert_trade(db, stored)
 
         def update_fn(row: Dict[str, Any], plan: PlannedTrade) -> None:
+            label = "Dhan" if broker == "dhan" else "Upstox"
             update_trade_fields(
                 db,
                 int(row["id"]),
-                {"exit_time": plan.exit_time, "exit_price": plan.exit_price},
+                {
+                    "symbol": _master_symbol(db, plan.underlying),
+                    "contract": plan.symbol_raw,
+                    "direction": plan.direction,
+                    "qty": plan.qty,
+                    "entry_time": plan.entry_time,
+                    "entry_price": plan.entry_price,
+                    "exit_time": None if plan.open_trade else plan.exit_time,
+                    "exit_price": None if plan.open_trade else plan.exit_price,
+                    "notes": f"Synced from {label}",
+                },
             )
 
         applied = apply_plans(plans, existing, trade_day, broker, insert_fn, update_fn)

@@ -270,3 +270,267 @@ def test_round_trip_stores_entry_and_exit():
     assert row["exit_time"] == "14:10:00"
     assert row["exit_price"] == 52150
     assert row["qty"] == 15
+
+
+def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
+    """Dhan screen order is not time order. Margin and Intraday NSE futures all import.
+
+    List order matches the 09 Nov 2026 Dhan futures screen (sell TCS first).
+    Exchange timestamps are the ones returned by get_trade_history: the earlier
+    fill is the entry, so TCS is LONG even though the sell row is listed first.
+    """
+    cnc = row_to_fill(
+        _dhan("NSE_FNO", "RELIANCE25NOVFUT", productType="CNC", qty=250, price=1280),
+        DAY,
+    )
+    assert cnc is not None
+
+    rows = [
+        _dhan(
+            "NSE_FNO",
+            "TCS NOV FUT NSE",
+            side="SELL",
+            qty=225,
+            price=2480.30,
+            when="2026-11-09T12:16:46",
+            productType="MARGIN",
+            securityId="61724",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "TCS NOV FUT NSE",
+            side="BUY",
+            qty=225,
+            price=2485.00,
+            when="2026-11-09T11:41:42",
+            productType="MARGIN",
+            securityId="61724",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "AMBER NOV FUT NSE",
+            side="BUY",
+            qty=100,
+            price=6136.50,
+            when="2026-11-09T10:10:15",
+            productType="INTRADAY",
+            securityId="61483",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "AMBER NOV FUT NSE",
+            side="SELL",
+            qty=100,
+            price=6085.00,
+            when="2026-11-09T09:59:54",
+            productType="INTRADAY",
+            securityId="61483",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "LAURUSLABS NOV FUT NSE",
+            side="SELL",
+            qty=425,
+            price=2423.10,
+            when="2026-11-09T09:33:52",
+            productType="INTRADAY",
+            securityId="61629",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "SBIN NOV FUT NSE",
+            side="SELL",
+            qty=750,
+            price=1038.25,
+            when="2026-11-09T09:33:11",
+            productType="INTRADAY",
+            securityId="61706",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "LAURUSLABS NOV FUT NSE",
+            side="BUY",
+            qty=425,
+            price=2412.50,
+            when="2026-11-09T09:29:41",
+            productType="INTRADAY",
+            securityId="61629",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "SBIN NOV FUT NSE",
+            side="BUY",
+            qty=750,
+            price=1034.55,
+            when="2026-11-09T09:24:16",
+            productType="INTRADAY",
+            securityId="61706",
+        ),
+        _dhan(
+            "MCX_COMM",
+            "SILVERM NOV FUT",
+            side="SELL",
+            qty=5,
+            price=189610,
+            when="2026-11-09T16:49:48",
+            productType="MARGIN",
+        ),
+    ]
+    fills = [fill for fill in (row_to_fill(row, DAY) for row in rows) if fill]
+    assert sorted(fill.underlying for fill in fills) == [
+        "AMBER",
+        "AMBER",
+        "LAURUSLABS",
+        "LAURUSLABS",
+        "SBIN",
+        "SBIN",
+        "TCS",
+        "TCS",
+    ]
+    inserted = []
+    result = sync_from_broker(
+        "2026-11-09",
+        "dhan",
+        fills=fills,
+        existing=[],
+        insert_fn=inserted.append,
+    )
+    by_symbol = {row["symbol"]: row for row in inserted}
+    assert sorted(by_symbol) == ["AMBER", "LAURUSLABS", "SBIN", "TCS"]
+    assert result["inserted"] == 4
+    assert result["skipped"] == 0
+
+    tcs = by_symbol["TCS"]
+    assert tcs["direction"] == "LONG"
+    assert tcs["entry_time"] == "11:41:42"
+    assert tcs["entry_price"] == 2485.0
+    assert tcs["exit_time"] == "12:16:46"
+    assert tcs["exit_price"] == 2480.3
+    assert tcs["qty"] == 225
+
+    amber = by_symbol["AMBER"]
+    assert amber["direction"] == "SHORT"
+    assert amber["entry_time"] == "09:59:54"
+    assert amber["entry_price"] == 6085.0
+    assert amber["exit_time"] == "10:10:15"
+    assert amber["exit_price"] == 6136.5
+    assert amber["qty"] == 100
+
+    laurus = by_symbol["LAURUSLABS"]
+    assert laurus["direction"] == "LONG"
+    assert laurus["entry_time"] == "09:29:41"
+    assert laurus["entry_price"] == 2412.5
+    assert laurus["exit_time"] == "09:33:52"
+    assert laurus["exit_price"] == 2423.1
+
+    sbin = by_symbol["SBIN"]
+    assert sbin["direction"] == "LONG"
+    assert sbin["entry_time"] == "09:24:16"
+    assert sbin["entry_price"] == 1034.55
+    assert sbin["exit_time"] == "09:33:11"
+    assert sbin["exit_price"] == 1038.25
+
+
+def test_broker_row_with_wrong_entry_is_updated_manual_row_is_kept():
+    rows = [
+        _dhan(
+            "NSE_FNO",
+            "TCS NOV FUT",
+            side="SELL",
+            qty=225,
+            price=2480.30,
+            when="2026-11-09T12:16:46",
+            productType="MARGIN",
+            securityId="61724",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "TCS NOV FUT",
+            side="BUY",
+            qty=225,
+            price=2485.00,
+            when="2026-11-09T11:41:42",
+            productType="MARGIN",
+            securityId="61724",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "SBIN NOV FUT",
+            side="BUY",
+            qty=750,
+            price=1034.55,
+            when="2026-11-09T09:24:16",
+            productType="INTRADAY",
+            securityId="61706",
+        ),
+        _dhan(
+            "NSE_FNO",
+            "SBIN NOV FUT",
+            side="SELL",
+            qty=750,
+            price=1038.25,
+            when="2026-11-09T09:33:11",
+            productType="INTRADAY",
+            securityId="61706",
+        ),
+    ]
+    fills = [fill for fill in (row_to_fill(row, DAY) for row in rows) if fill]
+    existing = [
+        {
+            "id": 191,
+            "session_date": "2026-11-09",
+            "symbol": "TCS",
+            "contract": "TCS FUT 23 NOV 26",
+            "direction": "SHORT",
+            "qty": 225,
+            "entry_time": "12:16:46",
+            "entry_price": 2480.3,
+            "exit_time": None,
+            "exit_price": None,
+            "source": "broker_dhan",
+        },
+        {
+            "id": 50,
+            "session_date": "2026-11-09",
+            "symbol": "SBIN",
+            "contract": "SBIN",
+            "direction": "SHORT",
+            "qty": 1,
+            "entry_time": "09:00:00",
+            "entry_price": 1000,
+            "exit_time": None,
+            "exit_price": None,
+            "source": "tradelog_ui",
+        },
+    ]
+    updated = []
+    inserted = []
+
+    def update_fn(row, plan):
+        updated.append(
+            (
+                row["id"],
+                plan.underlying,
+                plan.direction,
+                plan.entry_time,
+                plan.entry_price,
+                plan.exit_time,
+                plan.exit_price,
+            )
+        )
+
+    result = sync_from_broker(
+        "2026-11-09",
+        "dhan",
+        fills=fills,
+        existing=existing,
+        insert_fn=inserted.append,
+        update_fn=update_fn,
+    )
+    assert updated == [(191, "TCS", "LONG", "11:41:42", 2485.0, "12:16:46", 2480.3)]
+    assert [row["symbol"] for row in inserted] == ["SBIN"]
+    assert inserted[0]["direction"] == "LONG"
+    assert inserted[0]["entry_price"] == 1034.55
+    assert result["updated"] == 1
+    assert result["inserted"] == 1
+    assert updated[0][0] != 50
