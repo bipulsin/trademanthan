@@ -137,6 +137,54 @@ def fetch_btc_option_fills(*, lookback_days: int = 40, page_size: int = 100, max
     return {"ok": True, "missing_env": [], "fills": fills, "truncated": truncated, "window_start": start}
 
 
+def fetch_dated_option_fills(
+    *,
+    start_time_us: int,
+    end_time_us: Optional[int] = None,
+    page_size: int = 100,
+    max_pages: int = 10,
+) -> Dict[str, Any]:
+    """Option fills in one window. The query asks only for calls and puts.
+
+    Credentials are the same ``DELTA_INDIA_*`` values as ``fetch_btc_option_fills``.
+    The key and secret are never logged or returned.
+    """
+    missing = missing_credential_env()
+    if missing:
+        return {"ok": False, "missing_env": missing, "fills": [], "truncated": False, "error": "missing_credentials"}
+    fills: List[Dict[str, Any]] = []
+    after = None
+    truncated = False
+    for _page in range(max_pages):
+        params: Dict[str, Any] = {
+            "contract_types": "call_options,put_options",
+            "page_size": page_size,
+            "start_time": int(start_time_us),
+        }
+        if end_time_us:
+            params["end_time"] = int(end_time_us)
+        if after:
+            params["after"] = after
+        page = _auth_get("/v2/fills", params)
+        if not page.get("ok"):
+            return {
+                "ok": False,
+                "missing_env": page.get("missing_env") or [],
+                "fills": [],
+                "truncated": False,
+                "error": page.get("error") or "http_error",
+                "http_status": page.get("http_status"),
+            }
+        batch = page.get("result") or []
+        fills.extend(batch)
+        after = page.get("after")
+        if not after or not batch:
+            break
+    else:
+        truncated = True
+    return {"ok": True, "missing_env": [], "fills": fills, "truncated": truncated, "error": None}
+
+
 def fetch_public_tickers(
     *,
     contract_types: str,

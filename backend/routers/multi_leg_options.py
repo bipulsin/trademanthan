@@ -31,12 +31,12 @@ from backend.services.multi_leg_options import (
     suggested_expiry,
     update_trade,
 )
+from backend.services.multi_leg_broker_sync import sync_multi_leg_from_broker
 from backend.services.multi_leg_upstox_sync import (
     assign_orphan,
     dismiss_orphan,
     journal_orphan_state,
     promote_orphan_as_ladder_main,
-    sync_from_upstox,
 )
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,7 @@ class AssignBody(BaseModel):
 
 class SyncBody(BaseModel):
     trade_date: Optional[str] = None
+    broker: Optional[str] = None
 
 
 def _call(fn, *args, **kwargs):
@@ -180,9 +181,24 @@ def sync_upstox(
     body: Optional[SyncBody] = None,
     _user: User = Depends(_auth_user),
 ) -> Dict[str, Any]:
-    """Import executed NIFTY, BANKNIFTY, and SENSEX option fills for one IST day."""
+    """Import option fills for one IST day from Upstox.
+
+    NIFTY, BANKNIFTY, and SENSEX keep the original Upstox path. Stock options,
+    other index options, and MCX options are stored the same way.
+    """
     raw = body.trade_date if body is not None else None
-    return _call(sync_from_upstox, raw)
+    return _call(sync_multi_leg_from_broker, raw, "upstox")
+
+
+@router.post("/sync/broker")
+def sync_broker(
+    body: Optional[SyncBody] = None,
+    _user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Import option fills for one IST day from Upstox, Dhan, or Delta Exchange India."""
+    raw_date = body.trade_date if body is not None else None
+    raw_broker = body.broker if body is not None else None
+    return _call(sync_multi_leg_from_broker, raw_date, raw_broker)
 
 
 @router.post("/orphans/{leg_id}/assign")

@@ -306,7 +306,8 @@ body.mlo-page .right-panel {
     color: var(--muted);
 }
 
-.mlo-sync-date input {
+.mlo-sync-date input,
+.mlo-sync-date select {
     background: var(--bg1, #0e1613);
     color: var(--text);
     border: 1px solid var(--line);

@@ -370,14 +370,16 @@ def build_sync_plan(
             if _looks_like_index_option(order):
                 skipped_unmapped += 1
             continue
-        if oid in known_ids:
-            duplicates += 1
-            continue
         contract = lookup_contract(contracts, _order_token(order))
         index_option = _looks_like_index_option(order) or (
             contract is not None and contract.get("instrument") in INDEX_UNDERLYINGS
         )
+        # Stock, BSE, and MCX options are imported by the broker sync, which
+        # uses the same order id. Counting them here would double-count a re-sync.
         if not index_option:
+            continue
+        if oid in known_ids:
+            duplicates += 1
             continue
         if contract is None or not contract.get("lot_size"):
             skipped_no_lot += 1

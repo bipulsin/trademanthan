@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
     <link rel="stylesheet" href="stockOptions.css?v=28" />
-    <link rel="stylesheet" href="multiLegOptions.css?v=20" />
+    <link rel="stylesheet" href="multiLegOptions.css?v=21" />
 </head>
 <body class="stock-options-page theme-page left-menu-web-hamburger stock-options-body mlo-page" data-theme="dark">
     <div class="mobile-title-bar">
@@ -178,13 +178,20 @@
         <div class="mlo-modal-card so-modal-card mlo-sync-card" role="dialog" aria-modal="true" aria-labelledby="mloSyncTitle">
             <form id="mloSyncForm">
                 <div class="mlo-modal-head">
-                    <h2 id="mloSyncTitle">Sync frm Broker</h2>
+                    <h2 id="mloSyncTitle">Sync from Broker</h2>
                     <button type="button" class="mlo-icon-btn" id="mloSyncClose" aria-label="Close">&times;</button>
                 </div>
+                <label class="mlo-sync-date">Broker
+                    <select id="mloSyncBroker" required>
+                        <option value="upstox" selected>Upstox</option>
+                        <option value="dhan">Dhan</option>
+                        <option value="delta">Delta Exchange India</option>
+                    </select>
+                </label>
                 <label class="mlo-sync-date">Trade date
                     <input id="mloSyncDate" type="date" required />
                 </label>
-                <p class="mlo-meta">NIFTY, BANKNIFTY, and SENSEX option fills placed on this date.</p>
+                <p class="mlo-meta">Upstox and Dhan import NSE, BSE, and MCX option fills (index, stock, and commodity). Delta Exchange India imports crypto options. Futures, equity cash, and perpetuals are skipped.</p>
                 <p class="mlo-err" id="mloSyncErr" hidden></p>
                 <div class="mlo-modal-actions">
                     <button type="button" class="mlo-btn so-modal-btn secondary" id="mloSyncCancel">Cancel</button>
@@ -196,6 +203,6 @@
     <script src="left-menu.js?v=3.55"></script>
     <script src="multiLegPayoff.js?v=5"></script>
     <script src="ladderReportGroups.js?v=1"></script>
-    <script src="multiLegOptions.js?v=26"></script>
+    <script src="multiLegOptions.js?v=27"></script>
 </body>
 </html>

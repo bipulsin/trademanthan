@@ -53,11 +53,34 @@
     var res = await fetch(apiBase() + "/api/multi-leg-options" + path, Object.assign({ headers: authHeaders() }, opts || {}));
     var data = await res.json().catch(function () { return {}; });
     if (!res.ok) {
-      var detail = data.detail != null ? data.detail : data.message;
-      var text = typeof detail === "string" ? detail.trim() : "";
-      throw new Error(text || res.statusText || "Request failed");
+      throw new Error(apiErrorText(data, res));
     }
     return data;
+  }
+
+  function apiErrorText(data, res) {
+    function from(value) {
+      if (value == null) return "";
+      if (typeof value === "string") return value.trim();
+      if (Array.isArray(value)) {
+        return value.map(from).filter(Boolean).join("; ");
+      }
+      if (typeof value === "object") {
+        if (value.msg) return from(value.msg);
+        if (value.message) return from(value.message);
+        if (value.error && value.error !== value) return from(value.error);
+        try { return JSON.stringify(value); } catch (e) { return ""; }
+      }
+      return String(value).trim();
+    }
+    var text = from(data && data.detail);
+    if (!text) text = from(data && (data.message || data.error));
+    if (!text || text === "Error") {
+      var status = res && res.status ? " (" + res.status + ")" : "";
+      var statusText = res && res.statusText && res.statusText !== "Error" ? res.statusText : "Sync failed";
+      text = statusText + status;
+    }
+    return text;
   }
 
   function saveErrorText(err, fallback) {
@@ -2012,8 +2035,23 @@
     }
   }
 
+  function normalizeTradeDate(raw) {
+    var text = String(raw || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    var match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) return "";
+    var dd = ("0" + match[1]).slice(-2);
+    var mm = ("0" + match[2]).slice(-2);
+    var iso = match[3] + "-" + mm + "-" + dd;
+    var probe = new Date(iso + "T12:00:00Z");
+    if (isNaN(probe.getTime())) return "";
+    if (probe.getUTCDate() !== Number(dd) || (probe.getUTCMonth() + 1) !== Number(mm)) return "";
+    return iso;
+  }
+
   function openSyncModal() {
     $("mloSyncDate").value = todayISO();
+    if ($("mloSyncBroker")) $("mloSyncBroker").value = "upstox";
     $("mloSyncErr").hidden = true;
     $("mloSyncErr").textContent = "";
     $("mloSyncModal").hidden = false;
@@ -2023,24 +2061,31 @@
     $("mloSyncModal").hidden = true;
   }
 
-  async function syncFromUpstox(tradeDate) {
+  function brokerLabel(value) {
+    if (value === "dhan") return "Dhan";
+    if (value === "delta") return "Delta Exchange India";
+    return "Upstox";
+  }
+
+  async function syncFromBroker(tradeDate, broker) {
     var btn = $("mloSyncUpstox");
     var label = btn.querySelector(".text");
     btn.disabled = true;
     if (label) label.textContent = "Syncing…";
     try {
-      var data = await api("/sync/upstox", {
+      var data = await api("/sync/broker", {
         method: "POST",
-        body: JSON.stringify({ trade_date: tradeDate }),
+        body: JSON.stringify({ trade_date: tradeDate, broker: broker }),
       });
       var dated = data.trade_date ? data.trade_date + ": " : "";
-      setSyncBanner(dated + syncSummary(data), false);
+      setSyncBanner(brokerLabel(broker) + " " + dated + syncSummary(data), false);
       closeSyncModal();
-      await loadActive(true);
+      await reloadCurrent();
     } catch (e) {
+      var message = (e && e.message) || "Sync failed";
       $("mloSyncErr").hidden = false;
-      $("mloSyncErr").textContent = e.message || "Sync failed";
-      setSyncBanner(e.message || "Sync failed", true);
+      $("mloSyncErr").textContent = message;
+      setSyncBanner(message, true);
     } finally {
       btn.disabled = false;
       if (label) label.textContent = "Sync frm Broker";
@@ -2051,13 +2096,14 @@
   $("mloSyncClose").addEventListener("click", closeSyncModal);
   $("mloSyncForm").addEventListener("submit", function (ev) {
     ev.preventDefault();
-    var day = $("mloSyncDate").value;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    var day = normalizeTradeDate($("mloSyncDate").value);
+    if (!day) {
       $("mloSyncErr").hidden = false;
-      $("mloSyncErr").textContent = "Choose a trade date";
+      $("mloSyncErr").textContent = "Choose a trade date (YYYY-MM-DD or DD/MM/YYYY)";
       return;
     }
-    syncFromUpstox(day);
+    var broker = ($("mloSyncBroker") && $("mloSyncBroker").value) || "upstox";
+    syncFromBroker(day, broker);
   });
 
   $("mloActive").addEventListener("input", function (ev) {
