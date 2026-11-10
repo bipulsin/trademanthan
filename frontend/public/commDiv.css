@@ -191,6 +191,15 @@ body.comm-div-page .cd-manual-link {
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
+body.comm-div-page .cd-sync-status[data-error="1"] {
+    color: #f0b4b4;
+}
+
+body.comm-div-page .cd-sync-status a {
+    color: #93c5fd;
+    margin-left: 0.35rem;
+}
+
 body.comm-div-page .cd-manual-resolve {
     display: block;
     margin-top: 0.35rem;

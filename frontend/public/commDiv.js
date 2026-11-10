@@ -35,7 +35,15 @@
         });
         if (!res.ok) {
           var detail = data.detail || data.message || res.statusText;
-          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+          var msg =
+            typeof detail === "string"
+              ? detail
+              : (detail && (detail.message || detail.msg)) || JSON.stringify(detail);
+          var err = new Error(msg);
+          var loginUrl =
+            (detail && typeof detail === "object" && detail.login_url) || data.login_url || "";
+          if (loginUrl) err.loginUrl = loginUrl;
+          throw err;
         }
         return data;
       } catch (e) {
@@ -1105,6 +1113,64 @@
     manualResolveTimer = setTimeout(previewManualCommodity, 350);
   }
 
+  function istToday() {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+    } catch (e) {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }
+
+  function setSyncStatus(msg, isErr, loginUrl) {
+    var el = $("cdSyncStatus");
+    if (!el) return;
+    el.textContent = "";
+    if (!msg) {
+      el.hidden = true;
+      el.removeAttribute("data-error");
+      return;
+    }
+    el.hidden = false;
+    el.setAttribute("data-error", isErr ? "1" : "0");
+    el.appendChild(document.createTextNode(msg));
+    if (loginUrl) {
+      var link = document.createElement("a");
+      link.href = loginUrl;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Sign in to Dhan";
+      el.appendChild(document.createTextNode(" "));
+      el.appendChild(link);
+    }
+  }
+
+  function openSync() {
+    var dateInput = $("cdSyncDate");
+    if (dateInput && !dateInput.value) dateInput.value = istToday();
+    if ($("cdSyncBroker") && !$("cdSyncBroker").value) $("cdSyncBroker").value = "upstox";
+    var submit = $("cdSyncSubmit");
+    if (submit) {
+      submit.disabled = false;
+      submit.textContent = "Submit";
+    }
+    setSyncStatus("");
+    $("cdSyncModal").hidden = false;
+    setTimeout(function () {
+      if (dateInput) dateInput.focus();
+    }, 50);
+  }
+
+  function closeSync() {
+    var modal = $("cdSyncModal");
+    if (modal) modal.hidden = true;
+    setSyncStatus("");
+  }
+
   function openManual() {
     var nowParts = toDatetimeLocalValue($("cdServerTime").textContent);
     $("cdManualCommodity").value = "";
@@ -1200,6 +1266,8 @@
     $("cdTakeCancel").addEventListener("click", closeTake);
     $("cdEditCancel").addEventListener("click", closeEdit);
     $("cdManualEntryBtn").addEventListener("click", openManual);
+    if ($("cdSyncBrokerBtn")) $("cdSyncBrokerBtn").addEventListener("click", openSync);
+    if ($("cdSyncCancel")) $("cdSyncCancel").addEventListener("click", closeSync);
     $("cdManualCancel").addEventListener("click", closeManual);
     if ($("cdManualCommodity")) {
       $("cdManualCommodity").addEventListener("blur", previewManualCommodity);
@@ -1399,6 +1467,51 @@
         showBanner(String(e.message || e), true);
       }
     });
+
+    if ($("cdSyncForm")) {
+      $("cdSyncForm").addEventListener("submit", async function (ev) {
+        ev.preventDefault();
+        var dateVal = String(($("cdSyncDate") && $("cdSyncDate").value) || "").trim();
+        var broker = String(($("cdSyncBroker") && $("cdSyncBroker").value) || "").trim();
+        if (!dateVal) {
+          setSyncStatus("Choose a date to sync.", true);
+          return;
+        }
+        if (broker !== "upstox" && broker !== "dhan") {
+          setSyncStatus("Choose Upstox or Dhan.", true);
+          return;
+        }
+        var submit = $("cdSyncSubmit");
+        if (submit) {
+          submit.disabled = true;
+          submit.textContent = "Syncing…";
+        }
+        setSyncStatus("Fetching MCX trades…", false);
+        try {
+          var res = await api("/sync-from-broker", {
+            method: "POST",
+            body: JSON.stringify({ date: dateVal, broker: broker }),
+          });
+          var message = (res && res.message) || "Sync finished.";
+          var warnings = res && res.warnings && res.warnings.length;
+          closeSync();
+          showBanner(message, !!warnings);
+          var openCount = Number(res && res.in_trade) || 0;
+          var histCount = Number(res && res.history) || 0;
+          if (openCount && !histCount) setTab("in_trade");
+          else if (histCount && !openCount) setTab("history");
+          await load();
+          if (message) showBanner(message, !!warnings);
+        } catch (e) {
+          setSyncStatus(String(e.message || e), true, e.loginUrl || "");
+        } finally {
+          if (submit) {
+            submit.disabled = false;
+            submit.textContent = "Submit";
+          }
+        }
+      });
+    }
 
     $("cdManualForm").addEventListener("submit", async function (ev) {
       ev.preventDefault();

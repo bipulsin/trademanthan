@@ -84,6 +84,13 @@ ALTER TABLE commodities_div_signals
 ALTER TABLE commodities_div_signals
     ADD COLUMN IF NOT EXISTS activated_ltp DOUBLE PRECISION;
 
+-- Broker sync idempotency key (Upstox / Dhan MCX import). Null on webhook rows.
+ALTER TABLE commodities_div_signals
+    ADD COLUMN IF NOT EXISTS broker_sync_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_broker_sync_key
+    ON commodities_div_signals (broker_sync_key)
+    WHERE broker_sync_key IS NOT NULL;
+
 -- At most one open cycle per underlying (History / Rejected free the slot).
 DROP INDEX IF EXISTS uq_commodities_div_one_active_per_symbol;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_commodities_div_one_active_per_symbol

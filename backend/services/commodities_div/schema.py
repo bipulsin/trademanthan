@@ -106,6 +106,25 @@ def ensure_commodities_div_tables() -> None:
                 """
             )
         )
+        # Broker sync idempotency (null on webhook / manual rows).
+        conn.execute(
+            text(
+                """
+                ALTER TABLE commodities_div_signals
+                    ADD COLUMN IF NOT EXISTS broker_sync_key TEXT
+                """
+            )
+        )
+        conn.execute(text("DROP INDEX IF EXISTS uq_commodities_div_broker_sync_key"))
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX uq_commodities_div_broker_sync_key
+                    ON commodities_div_signals (broker_sync_key)
+                    WHERE broker_sync_key IS NOT NULL
+                """
+            )
+        )
         # Open cycle unique: History and Rejected free the underlying slot.
         conn.execute(text("DROP INDEX IF EXISTS uq_commodities_div_one_active_per_symbol"))
         conn.execute(

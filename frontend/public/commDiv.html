@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="commDiv.css?v=19" />
+    <link rel="stylesheet" href="commDiv.css?v=20" />
 </head>
 <body class="comm-div-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -37,6 +37,7 @@
                     </div>
                     <div class="cd-header-aside">
                         <div class="cd-header-actions">
+                            <button type="button" class="cd-manual-link" id="cdSyncBrokerBtn" title="Import MCX trades from Upstox or Dhan">Sync frm Broker</button>
                             <button type="button" class="cd-manual-link" id="cdManualEntryBtn" title="Enter a completed trade without webhook">Manual entry</button>
                             <a class="cd-backtest-link" href="divtest.html" title="MACD Divergence Backtest">BackTest</a>
                             <span class="cd-server-time" id="cdServerTime">—</span>
@@ -171,6 +172,29 @@
         </div>
     </div>
 
+    <div class="cd-modal" id="cdSyncModal" hidden>
+        <div class="cd-modal-card" role="dialog" aria-modal="true" aria-labelledby="cdSyncTitle">
+            <h2 id="cdSyncTitle">Sync frm Broker</h2>
+            <p class="cd-note">Import that day's MCX trades. A position with only Buy or only Sell stays In Trade. A round trip with both Buy and Sell goes to History.</p>
+            <form id="cdSyncForm">
+                <label>Date
+                    <input type="date" id="cdSyncDate" required />
+                </label>
+                <label>Broker
+                    <select id="cdSyncBroker" required>
+                        <option value="upstox">Upstox</option>
+                        <option value="dhan">Dhan</option>
+                    </select>
+                </label>
+                <p class="cd-note cd-sync-status" id="cdSyncStatus" hidden></p>
+                <div class="cd-modal-actions">
+                    <button type="button" class="cd-btn cd-btn-ghost" id="cdSyncCancel">Cancel</button>
+                    <button type="submit" class="cd-btn cd-btn-primary" id="cdSyncSubmit">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="cd-modal" id="cdManualModal" hidden>
         <div class="cd-modal-card cd-modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="cdManualTitle">
             <h2 id="cdManualTitle">Manual entry</h2>
@@ -224,6 +248,6 @@
     </div>
 
     <script src="left-menu.js?v=3.55"></script>
-    <script src="commDiv.js?v=23"></script>
+    <script src="commDiv.js?v=24"></script>
 </body>
 </html>

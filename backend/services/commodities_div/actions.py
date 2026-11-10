@@ -757,6 +757,7 @@ def create_manual_history(
     exit_at: Any = None,
     trade_mode: Optional[str] = None,
     qty: Optional[int] = None,
+    mapped_symbol: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Insert a manual trade without webhook / DIV / GO flow.
@@ -804,8 +805,10 @@ def create_manual_history(
         logger.debug("commodities_div manual resolve failed for %s: %s", symbol_raw, e)
         inst = {}
 
+    override_mapped = str(mapped_symbol or "").strip().upper()
     symbol_mapped = (
-        str(inst.get("symbol_mapped") or "").strip()
+        override_mapped
+        or str(inst.get("symbol_mapped") or "").strip()
         or normalize_tv_ticker(symbol_raw)
         or symbol_raw.upper()
     )

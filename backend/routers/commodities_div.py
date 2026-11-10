@@ -76,6 +76,11 @@ class DeleteSignalBody(BaseModel):
     signal_id: int
 
 
+class SyncFromBrokerBody(BaseModel):
+    date: str = Field(..., min_length=8, description="YYYY-MM-DD")
+    broker: str = Field(..., description="upstox or dhan")
+
+
 class ManualEntryBody(BaseModel):
     commodity: str = Field(..., min_length=1, description="Commodity / TV symbol text")
     direction: str = Field(..., description="BULL | BEAR")
@@ -195,6 +200,23 @@ def commodities_div_resolve_commodity(
         "parse_mode": inst.get("parse_mode") or parsed.get("parse_mode"),
         "expiry_fallback": bool(inst.get("expiry_fallback")),
     }
+
+
+@router.post("/sync-from-broker")
+def commodities_div_sync_from_broker(
+    body: SyncFromBrokerBody,
+    user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Pull one day's MCX trades from Upstox or Dhan into In-Trade / History."""
+    from backend.services.commodities_div.broker_sync import BrokerSyncError, sync_from_broker
+
+    try:
+        return sync_from_broker(body.date, body.broker)
+    except BrokerSyncError as exc:
+        detail: Any = str(exc)
+        if exc.login_url:
+            detail = {"message": str(exc), "login_url": exc.login_url}
+        raise HTTPException(status_code=400, detail=detail) from exc
 
 
 @router.post("/manual-entry")
