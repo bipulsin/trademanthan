@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     UPSTOX_API_KEY: str = os.getenv("UPSTOX_API_KEY", "dd1d3bcc-e1a4-4eed-be7c-1833d9301738")
     UPSTOX_API_SECRET: str = os.getenv("UPSTOX_API_SECRET", "8lvpi8fb1f")
     UPSTOX_REDIRECT_URI: str = os.getenv("UPSTOX_REDIRECT_URI", "https://tradewithcto.com/scan/upstox/callback")
+
+    # DhanHQ Trading API — one app for every algo. Key and secret come from the
+    # environment (.env locally, Docker env_file in production).
+    DHAN_APP_NAME: str = os.getenv("DHAN_APP_NAME", "TWCTO")
+    DHAN_API_KEY: str = os.getenv("DHAN_API_KEY", "")
+    DHAN_API_SECRET: str = os.getenv("DHAN_API_SECRET", "")
+    DHAN_CLIENT_ID: str = os.getenv("DHAN_CLIENT_ID", "")
+    DHAN_ACCESS_TOKEN: str = os.getenv("DHAN_ACCESS_TOKEN", "")
+    DHAN_REDIRECT_URL: str = os.getenv(
+        "DHAN_REDIRECT_URL", "https://www.tradewithcto.com/webhook/dhan/callback"
+    )
+    DHAN_POSTBACK_URL: str = os.getenv(
+        "DHAN_POSTBACK_URL", "https://www.tradewithcto.com/webhook/dhan/postback"
+    )
     # Historical OHLC: V2 API is more reliable for many instruments; V3 used as fallback for unsupported intervals (e.g. hours/1).
     UPSTOX_HISTORICAL_CANDLE_USE_V2: bool = os.getenv("UPSTOX_HISTORICAL_CANDLE_USE_V2", "true").lower() in (
         "1",

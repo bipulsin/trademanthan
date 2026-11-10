@@ -1,21 +1,33 @@
 """
-Dhan API Service for fetching market data
-Uses direct HTTP API calls with Upstox as fallback
+Dhan API Service for fetching market data and, later, orders.
+Credentials are the app-wide DhanHQ app (settings.DHAN_*), shared by every algo.
 """
-import requests
 import logging
-from datetime import datetime
-from typing import Dict, Optional, List
-import pytz
+from typing import Dict, Optional
+
+from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
 class DhanService:
     """Service to interact with Dhan API (Primary) and Upstox API (Fallback)"""
     
-    def __init__(self, dhan_client_id: str, dhan_access_token: str):
-        self.dhan_client_id = dhan_client_id
-        self.dhan_access_token = dhan_access_token
+    def __init__(
+        self,
+        dhan_client_id: Optional[str] = None,
+        dhan_access_token: Optional[str] = None,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+    ):
+        self.app_name = settings.DHAN_APP_NAME
+        self.api_key = api_key if api_key is not None else settings.DHAN_API_KEY
+        self.api_secret = api_secret if api_secret is not None else settings.DHAN_API_SECRET
+        self.dhan_client_id = dhan_client_id if dhan_client_id is not None else settings.DHAN_CLIENT_ID
+        self.dhan_access_token = (
+            dhan_access_token if dhan_access_token is not None else settings.DHAN_ACCESS_TOKEN
+        )
+        self.redirect_url = settings.DHAN_REDIRECT_URL
+        self.postback_url = settings.DHAN_POSTBACK_URL
         self.base_url = "https://api.dhan.co"
         
     def get_headers(self) -> Dict[str, str]:
@@ -118,11 +130,4 @@ class DhanService:
         return None
 
 
-# Initialize Dhan service with credentials from token
-DHAN_CLIENT_ID = "1100781317"
-DHAN_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkaGFuIiwicGFydG5lcklkIjoiIiwiZXhwIjoxNzYxNjU4ODY0LCJpYXQiOjE3NjE1NzI0NjQsInRva2VuQ29uc3VtZXJUeXBlIjoiU0VMRiIsIndlYmhvb2tVcmwiOiIiLCJkaGFuQ2xpZW50SWQiOiIxMTAwNzgxMzE3In0.0aVr7J4o_7oU-9qqBhGqY28fGPXKbi94W9QtbETPZIqq5JWwzuiUPj32kXvHTs3LYXfp2y8DaDrSJRVuqyi7Bw"
-
-dhan_service = DhanService(
-    dhan_client_id=DHAN_CLIENT_ID,
-    dhan_access_token=DHAN_ACCESS_TOKEN
-)
+dhan_service = DhanService()
