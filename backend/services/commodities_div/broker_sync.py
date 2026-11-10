@@ -74,16 +74,31 @@ class Plan:
     fill_ids: List[str] = field(default_factory=list)
 
 
+_DMY = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})")
+
+
 def parse_trade_date(raw: Any) -> date:
+    """IST calendar day. YYYY-MM-DD, or DD/MM/YYYY so 09/11/2026 is 9 Nov."""
     text_raw = str(raw or "").strip()
     if not text_raw:
         raise BrokerSyncError("Choose a date to sync.")
-    if len(text_raw) >= 10:
-        text_raw = text_raw[:10]
-    try:
-        parsed = date.fromisoformat(text_raw)
-    except ValueError as exc:
-        raise BrokerSyncError("Choose a date as YYYY-MM-DD.") from exc
+    parsed: Optional[date] = None
+    iso_head = text_raw[:10]
+    if len(iso_head) == 10 and iso_head[4] == "-" and iso_head[7] == "-":
+        try:
+            parsed = date.fromisoformat(iso_head)
+        except ValueError:
+            parsed = None
+    if parsed is None:
+        match = _DMY.match(text_raw)
+        if match:
+            day_n, month_n, year_n = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            try:
+                parsed = date(year_n, month_n, day_n)
+            except ValueError as exc:
+                raise BrokerSyncError("Choose a date as YYYY-MM-DD or DD/MM/YYYY.") from exc
+    if parsed is None:
+        raise BrokerSyncError("Choose a date as YYYY-MM-DD or DD/MM/YYYY.")
     today = datetime.now(IST).date()
     if parsed > today:
         raise BrokerSyncError("Choose a date that is not in the future.")

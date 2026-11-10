@@ -213,6 +213,7 @@ def commodities_div_sync_from_broker(
     try:
         return sync_from_broker(body.date, body.broker)
     except BrokerSyncError as exc:
+        logger.warning("commodities_div sync-from-broker rejected: %s", exc)
         detail: Any = str(exc)
         if exc.login_url:
             detail = {"message": str(exc), "login_url": exc.login_url}

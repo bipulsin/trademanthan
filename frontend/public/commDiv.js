@@ -24,31 +24,68 @@
     return h;
   }
 
+  function apiErrorFrom(res, data) {
+    var detail = data && data.detail != null && data.detail !== "" ? data.detail : data && data.message;
+    var loginUrl = (data && data.login_url) || "";
+    var message = "";
+    if (typeof detail === "string") {
+      message = detail;
+    } else if (Array.isArray(detail)) {
+      message = detail
+        .map(function (item) {
+          if (!item) return "";
+          if (typeof item === "string") return item;
+          var loc = Array.isArray(item.loc)
+            ? item.loc.filter(function (part) { return part !== "body"; }).join(".")
+            : "";
+          var bit = item.msg || item.message || "";
+          return loc && bit ? loc + ": " + bit : bit || loc;
+        })
+        .filter(Boolean)
+        .join("; ");
+    } else if (detail && typeof detail === "object") {
+      message = detail.message || detail.msg || detail.error || "";
+      if (detail.login_url) loginUrl = detail.login_url;
+      if (!message) {
+        try {
+          message = JSON.stringify(detail);
+        } catch (e) {
+          message = "";
+        }
+      }
+    }
+    if (!message) {
+      var status = res && res.status ? "HTTP " + res.status : "request";
+      var reason = res && res.statusText ? String(res.statusText).trim() : "";
+      message = reason ? reason + " (" + status + ")" : "Request failed (" + status + ")";
+    }
+    return { message: String(message), loginUrl: loginUrl || "" };
+  }
+
   async function api(path, opts) {
     var bases = [apiBase() + "/api/commodities-div", apiBase() + "/commodities-div"];
     var lastErr = null;
     for (var i = 0; i < bases.length; i++) {
+      var res;
       try {
-        var res = await fetch(bases[i] + path, Object.assign({ headers: authHeaders() }, opts || {}));
-        var data = await res.json().catch(function () {
-          return {};
-        });
-        if (!res.ok) {
-          var detail = data.detail || data.message || res.statusText;
-          var msg =
-            typeof detail === "string"
-              ? detail
-              : (detail && (detail.message || detail.msg)) || JSON.stringify(detail);
-          var err = new Error(msg);
-          var loginUrl =
-            (detail && typeof detail === "object" && detail.login_url) || data.login_url || "";
-          if (loginUrl) err.loginUrl = loginUrl;
-          throw err;
-        }
-        return data;
+        res = await fetch(bases[i] + path, Object.assign({ headers: authHeaders() }, opts || {}));
       } catch (e) {
         lastErr = e;
+        continue;
       }
+      var data = await res.json().catch(function () {
+        return null;
+      });
+      var isJson = data !== null && typeof data === "object";
+      if (res.ok && isJson) return data;
+      if (isJson) {
+        var parsed = apiErrorFrom(res, data);
+        var err = new Error(parsed.message || "Request failed (HTTP " + res.status + ")");
+        if (parsed.loginUrl) err.loginUrl = parsed.loginUrl;
+        throw err;
+      }
+      var fallback = apiErrorFrom(res, {});
+      lastErr = new Error(fallback.message || "Request failed (HTTP " + res.status + ")");
     }
     throw lastErr || new Error("API failed");
   }
@@ -1113,6 +1150,19 @@
     manualResolveTimer = setTimeout(previewManualCommodity, 350);
   }
 
+  function syncDateIso(raw) {
+    var text = String(raw || "").trim();
+    var iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return iso[1] + "-" + iso[2] + "-" + iso[3];
+    var dmy = text.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+    if (dmy) {
+      var dd = ("0" + dmy[1]).slice(-2);
+      var mm = ("0" + dmy[2]).slice(-2);
+      return dmy[3] + "-" + mm + "-" + dd;
+    }
+    return text;
+  }
+
   function istToday() {
     try {
       return new Intl.DateTimeFormat("en-CA", {
@@ -1139,12 +1189,12 @@
     el.setAttribute("data-error", isErr ? "1" : "0");
     el.appendChild(document.createTextNode(msg));
     if (loginUrl) {
+      el.appendChild(document.createElement("br"));
       var link = document.createElement("a");
       link.href = loginUrl;
       link.target = "_blank";
       link.rel = "noopener";
       link.textContent = "Sign in to Dhan";
-      el.appendChild(document.createTextNode(" "));
       el.appendChild(link);
     }
   }
@@ -1471,7 +1521,7 @@
     if ($("cdSyncForm")) {
       $("cdSyncForm").addEventListener("submit", async function (ev) {
         ev.preventDefault();
-        var dateVal = String(($("cdSyncDate") && $("cdSyncDate").value) || "").trim();
+        var dateVal = syncDateIso(($("cdSyncDate") && $("cdSyncDate").value) || "");
         var broker = String(($("cdSyncBroker") && $("cdSyncBroker").value) || "").trim();
         if (!dateVal) {
           setSyncStatus("Choose a date to sync.", true);
@@ -1503,7 +1553,9 @@
           await load();
           if (message) showBanner(message, !!warnings);
         } catch (e) {
-          setSyncStatus(String(e.message || e), true, e.loginUrl || "");
+          var shown = e && e.message ? String(e.message) : "";
+          if (!shown || shown === "Error") shown = "Sync failed";
+          setSyncStatus(shown, true, (e && e.loginUrl) || "");
         } finally {
           if (submit) {
             submit.disabled = false;

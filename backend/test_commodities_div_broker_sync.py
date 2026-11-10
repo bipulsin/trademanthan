@@ -3,12 +3,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import pytest
+
 from backend.services.commodities_div.broker_sync import (
+    BrokerSyncError,
     Fill,
     _row_to_fill,
+    parse_trade_date,
     plans_from_fills,
     reconcile,
     scale_traded_qty,
+    sync_from_broker,
 )
 
 
@@ -202,3 +207,116 @@ def test_scale_lot_versus_units():
     assert scale_traded_qty(100, 100) == 100
     assert scale_traded_qty(2, 1250) == 2500
     assert scale_traded_qty(1250, 1250) == 1250
+
+
+def test_slash_date_is_ninth_november_not_september():
+    assert parse_trade_date("09/11/2026") == DAY
+    assert parse_trade_date("09-11-2026") == DAY
+    assert parse_trade_date("9/11/2026") == DAY
+    assert parse_trade_date("2026-11-09") == DAY
+    assert parse_trade_date("2026-11-09T00:00:00") == DAY
+
+
+def test_dhan_sync_without_token_keeps_login_url(monkeypatch):
+    """The live 400: no access token. 09/11/2026 must still mean 9 Nov and carry login_url."""
+    from backend.services.dhan_service import DhanAuthError
+    from backend.services import dhan_service as dhan_mod
+
+    seen = {}
+
+    def boom(day):
+        seen["day"] = day
+        raise DhanAuthError(
+            "Dhan access token is missing or expired. It lasts 24 hours.",
+            login_url="https://auth.dhan.co/login/consentApp-login?consentAppId=test",
+        )
+
+    monkeypatch.setattr(dhan_mod.dhan_service, "get_trades_for_date", boom)
+    with pytest.raises(BrokerSyncError) as caught:
+        sync_from_broker("09/11/2026", "dhan")
+    assert seen["day"] == "2026-11-09"
+    assert "missing or expired" in str(caught.value)
+    assert caught.value.login_url.startswith("https://auth.dhan.co/login/consentApp-login")
+
+
+def test_dhan_history_url_keeps_mcx_for_ninth_november(monkeypatch):
+    from backend.services import dhan_service as dhan_mod
+
+    svc = dhan_mod.DhanService(
+        dhan_client_id="1000000001",
+        dhan_access_token="header.payload.sig",
+        api_key="app-key",
+        api_secret="app-secret",
+    )
+    seen = []
+
+    class Resp:
+        def __init__(self, payload):
+            self.status_code = 200
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, headers=None, timeout=None):
+        seen.append((url, headers or {}))
+        if url.endswith("/0"):
+            return Resp(
+                [
+                    {
+                        "exchangeSegment": "MCX_COMM",
+                        "transactionType": "BUY",
+                        "tradingSymbol": "COPPER25NOVFUT",
+                        "tradedQuantity": 1,
+                        "tradedPrice": 850,
+                        "exchangeTime": "2026-11-09 10:15:00",
+                        "exchangeTradeId": "mcx9",
+                    },
+                    {
+                        "exchangeSegment": "NSE_EQ",
+                        "transactionType": "BUY",
+                        "tradingSymbol": "RELIANCE",
+                        "tradedQuantity": 1,
+                        "tradedPrice": 1400,
+                        "exchangeTime": "2026-11-09 10:16:00",
+                        "exchangeTradeId": "nse9",
+                    },
+                ]
+            )
+        return Resp([])
+
+    monkeypatch.setattr(dhan_mod.requests, "get", fake_get)
+    rows = svc.get_trades_for_date("2026-11-09")
+    assert seen[0][0] == "https://api.dhan.co/v2/trades/2026-11-09/2026-11-09/0"
+    assert seen[0][1]["access-token"] == "header.payload.sig"
+    assert seen[0][1]["dhanClientId"] == "1000000001"
+    fills = [fill for fill in (_row_to_fill(row, DAY) for row in rows) if fill]
+    assert [fill.symbol_raw for fill in fills] == ["COPPER25NOVFUT"]
+
+
+def test_consume_consent_stores_token(monkeypatch, tmp_path):
+    from backend.services import dhan_service as dhan_mod
+
+    path = tmp_path / "dhan_token.json"
+    monkeypatch.setattr(dhan_mod, "_dhan_token_path", lambda: path)
+    svc = dhan_mod.DhanService(
+        dhan_client_id="1000000001",
+        dhan_access_token="",
+        api_key="app-key",
+        api_secret="app-secret",
+    )
+
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"accessToken": "header.payload.sig", "expiryTime": "2026-11-11T18:00:00"}
+
+    monkeypatch.setattr(dhan_mod.requests, "get", lambda *args, **kwargs: Resp())
+    svc.consume_consent("consent-token-id")
+    assert path.is_file()
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert svc.resolved_access_token() == "header.payload.sig"
+    stored = path.read_text(encoding="utf-8")
+    assert "header.payload.sig" in stored
+    assert "app-secret" not in stored
