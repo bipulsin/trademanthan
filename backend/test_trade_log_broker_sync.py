@@ -295,6 +295,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T12:16:46",
             productType="MARGIN",
             securityId="61724",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -305,6 +306,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T11:41:42",
             productType="MARGIN",
             securityId="61724",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -315,6 +317,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T10:10:15",
             productType="INTRADAY",
             securityId="61483",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -325,6 +328,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T09:59:54",
             productType="INTRADAY",
             securityId="61483",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -335,6 +339,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T09:33:52",
             productType="INTRADAY",
             securityId="61629",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -345,6 +350,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T09:33:11",
             productType="INTRADAY",
             securityId="61706",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -355,6 +361,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T09:29:41",
             productType="INTRADAY",
             securityId="61629",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -365,6 +372,7 @@ def test_nov9_screenshot_pairs_by_execution_time_and_keeps_intraday():
             when="2026-11-09T09:24:16",
             productType="INTRADAY",
             securityId="61706",
+            exchangeTradeId="0",
         ),
         _dhan(
             "MCX_COMM",
@@ -442,6 +450,7 @@ def test_broker_row_with_wrong_entry_is_updated_manual_row_is_kept():
             when="2026-11-09T12:16:46",
             productType="MARGIN",
             securityId="61724",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -452,6 +461,7 @@ def test_broker_row_with_wrong_entry_is_updated_manual_row_is_kept():
             when="2026-11-09T11:41:42",
             productType="MARGIN",
             securityId="61724",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -462,6 +472,7 @@ def test_broker_row_with_wrong_entry_is_updated_manual_row_is_kept():
             when="2026-11-09T09:24:16",
             productType="INTRADAY",
             securityId="61706",
+            exchangeTradeId="0",
         ),
         _dhan(
             "NSE_FNO",
@@ -472,6 +483,7 @@ def test_broker_row_with_wrong_entry_is_updated_manual_row_is_kept():
             when="2026-11-09T09:33:11",
             productType="INTRADAY",
             securityId="61706",
+            exchangeTradeId="0",
         ),
     ]
     fills = [fill for fill in (row_to_fill(row, DAY) for row in rows) if fill]

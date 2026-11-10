@@ -363,10 +363,10 @@ def row_to_fill(row: Dict[str, Any], trade_day: date, *, segment_hint: str = "")
     if not _on_trade_day(stamp, row, trade_day):
         return None
     trade_id = str(_first(row, "trade_id", "exchangeTradeId") or "").strip()
-    if trade_id.upper() in {"NA", "NONE", "NULL"}:
+    # Dhan history returns exchangeTradeId "0" on every row. Treating that as
+    # an id keeps only the first fill in the payload (newest TCS sell).
+    if trade_id.upper() in {"", "NA", "NONE", "NULL", "0"}:
         trade_id = ""
-    # Do not key a fill on order id. Both legs of a round trip can share one,
-    # and a shared id would keep only the first row Dhan returned.
     fill_id = trade_id or f"{symbol}|{stamp.isoformat()}|{side}|{qty}|{price}"
     instrument = re.sub(r"[^A-Z0-9]", "", symbol.upper())
     underlying = underlying_from_future_symbol(symbol) or instrument
@@ -734,7 +734,7 @@ def _summary(broker: str, trade_day: date, fill_count: int, applied: Dict[str, A
     else:
         message = f"Synced {inserted} futures trade(s) from {label} for {trade_day.isoformat()}."
         if updated:
-            message += f" {updated} open trade(s) closed with an exit."
+            message += f" {updated} broker trade(s) updated to the chronological entry."
         if skipped:
             message += f" {skipped} already in the trade log."
     return {
