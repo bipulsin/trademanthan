@@ -41,14 +41,22 @@ def _upstox(segment, symbol, key, side="BUY", qty=30, price=52000, **extra):
     return row
 
 
-def test_futures_filter_keeps_stock_and_index_and_drops_the_rest():
+def test_futures_filter_keeps_nse_and_drops_mcx_bse_and_the_rest():
     nifty = row_to_fill(_dhan("NSE_FNO", "NIFTY-Nov2026-FUT", qty=65, price=24550.5), DAY)
+    finnifty = row_to_fill(
+        _dhan("NSE_FNO", "FINNIFTY-Nov2026-FUT", qty=40, price=21000, when="2026-11-09 10:16:00"),
+        DAY,
+    )
     reliance = row_to_fill(
         _dhan("NSE_FNO", "RELIANCE25NOVFUT", qty=250, price=1280.5, when="2026-11-09 10:20:00"),
         DAY,
     )
     sensex = row_to_fill(
         _dhan("BSE_FNO", "SENSEX-Nov2026-FUT", qty=10, price=80000, when="2026-11-09 10:21:00"),
+        DAY,
+    )
+    bankex = row_to_fill(
+        _upstox("FO", "BANKEX25NOVFUT", "BSE_FO|12", qty=15, price=60000),
         DAY,
     )
     banknifty = row_to_fill(
@@ -94,17 +102,77 @@ def test_futures_filter_keeps_stock_and_index_and_drops_the_rest():
         },
         DAY,
     )
+    crude_no_exchange = row_to_fill(
+        {
+            "transactionType": "BUY",
+            "tradingSymbol": "CRUDEOIL25NOVFUT",
+            "tradedQuantity": 1,
+            "tradedPrice": 5500,
+            "exchangeTime": "2026-11-09 11:10:00",
+            "exchangeTradeId": "crude-bare",
+        },
+        DAY,
+    )
+    gold_mislabeled_nse = row_to_fill(
+        _dhan("NSE_FNO", "GOLDM25DECFUT", qty=1, price=72000, when="2026-11-09 11:11:00"),
+        DAY,
+    )
+    nifty_no_venue = row_to_fill(
+        {
+            "transactionType": "BUY",
+            "tradingSymbol": "NIFTY-Nov2026-FUT",
+            "tradedQuantity": 65,
+            "tradedPrice": 24550.5,
+            "exchangeTime": "2026-11-09 10:15:03",
+            "exchangeTradeId": "nifty-bare",
+        },
+        DAY,
+    )
 
     assert nifty is not None and nifty.underlying == "NIFTY" and nifty.side == "BUY"
+    assert finnifty is not None and finnifty.underlying == "FINNIFTY"
     assert reliance is not None and reliance.underlying == "RELIANCE"
-    assert sensex is not None and sensex.underlying == "SENSEX"
     assert banknifty is not None and banknifty.underlying == "BANKNIFTY" and banknifty.side == "SELL"
+    assert sensex is None
+    assert bankex is None
     assert option_call is None
     assert option_symbol is None
     assert opt_product is None
     assert equity is None
     assert mcx is None
     assert currency is None
+    assert crude_no_exchange is None
+    assert gold_mislabeled_nse is None
+    assert nifty_no_venue is None
+
+
+def test_mcx_and_bse_fills_are_not_inserted():
+    rows = [
+        _dhan("NSE_FNO", "RELIANCE25NOVFUT", qty=250, price=1280.25, when="2026-11-09 09:20:01"),
+        _dhan("NSE_FNO", "NIFTY-Nov2026-FUT", qty=65, price=24550.5),
+        _dhan("MCX_COMM", "NATURALGAS25NOVFUT", qty=1, price=250, when="2026-11-09 11:20:00"),
+        _dhan("BSE_FNO", "SENSEX-Nov2026-FUT", qty=10, price=80000, when="2026-11-09 10:21:00"),
+        {
+            "transactionType": "SELL",
+            "tradingSymbol": "COPPER25NOVFUT",
+            "tradedQuantity": 1,
+            "tradedPrice": 800,
+            "exchangeTime": "2026-11-09 11:30:00",
+            "exchangeTradeId": "copper-bare",
+        },
+    ]
+    fills = [fill for fill in (row_to_fill(row, DAY) for row in rows) if fill]
+    inserted = []
+    result = sync_from_broker(
+        "2026-11-09",
+        "dhan",
+        fills=fills,
+        existing=[],
+        insert_fn=inserted.append,
+    )
+    assert sorted(row["symbol"] for row in inserted) == ["NIFTY", "RELIANCE"]
+    assert result["inserted"] == 2
+    assert all(row["source"] == "broker_dhan" for row in inserted)
 
 
 def test_dedup_skips_same_instrument_datetime_and_entry_price():

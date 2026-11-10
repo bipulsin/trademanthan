@@ -1,11 +1,12 @@
-"""Sync one day's stock and index futures into trade_log.
+"""Sync one day's NSE stock and index futures into trade_log.
 
-Upstox and Dhan fills are kept only when they are NSE/BSE equity-stock futures
-or index futures (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, SENSEX, BANKEX, and
-other F&O futures). Equity cash, options, currency, and MCX/commodity fills
-are dropped. A round trip becomes one trade_log row with entry and exit. A
-single side is stored as an open trade (exit empty). A row already stored for
-the same instrument, entry date-time, and entry price is not inserted again.
+Only NSE equity-stock futures and NSE index futures (NIFTY, BANKNIFTY,
+FINNIFTY, MIDCPNIFTY, and other NSE index futures) are kept. MCX and other
+commodities, options, equity cash, currency, and BSE futures (SENSEX, BANKEX)
+are dropped. A row with no exchange or segment is dropped. A round trip becomes
+one trade_log row with entry and exit. A single side is stored as an open
+trade (exit empty). A row already stored for the same instrument, entry
+date-time, and entry price is not inserted again.
 """
 from __future__ import annotations
 
@@ -23,10 +24,41 @@ IST = pytz.timezone("Asia/Kolkata")
 
 _COMPLETE = {"complete", "completed", "traded", "filled", "success"}
 _SKIP_STATUS = {"rejected", "cancelled", "canceled", "open", "pending", "trigger pending"}
-_FNO_EXCHANGES = {"NSE_FNO", "BSE_FNO", "NSE_FO", "BSE_FO"}
-_FO_SEGMENTS = {"FO", "FNO", "NSE_FO", "BSE_FO", "NSE_FNO", "BSE_FNO"}
 _MONTHS = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
 _CURRENCY_ROOTS = ("USDINR", "EURINR", "GBPINR", "JPYINR", "EURUSD", "GBPUSD", "USDJPY")
+# MCX underlyings. Matched on the parsed root so a missing or wrong exchange still drops them.
+_COMMODITY_ROOTS = {
+    "GOLD",
+    "GOLDM",
+    "GOLDGUINEA",
+    "GOLDPETAL",
+    "GOLDTEN",
+    "SILVER",
+    "SILVERM",
+    "SILVERMIC",
+    "CRUDEOIL",
+    "CRUDEOILM",
+    "CRUDE",
+    "NATURALGAS",
+    "NATGASMINI",
+    "COPPER",
+    "COPPERM",
+    "ALUMINIUM",
+    "ALUMINI",
+    "ZINC",
+    "ZINCMINI",
+    "LEAD",
+    "LEADMINI",
+    "NICKEL",
+    "NICKELM",
+    "COTTON",
+    "COTTONCNDY",
+    "KAPAS",
+    "MENTHAOIL",
+    "CPO",
+}
+# BSE index futures. Trade log sync is NSE only.
+_BSE_INDEX_ROOTS = {"SENSEX", "BANKEX", "SENSEX50"}
 _DMY = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})")
 
 
@@ -134,19 +166,8 @@ def _upper(raw: Any) -> str:
     return str(raw or "").strip().upper()
 
 
-def is_stock_or_index_future(row: Dict[str, Any], *, segment_hint: str = "") -> bool:
-    """True for NSE/BSE stock futures and index futures. Drops the rest.
-
-    Dhan uses exchangeSegment NSE_FNO / BSE_FNO and drvOptionType NA (not CALL/PUT).
-    Upstox uses instrument keys NSE_FO|… / BSE_FO|… and segment FO, with a FUT symbol.
-    Options (OPT*, CE/PE/CALL/PUT), equity cash, currency, and MCX are rejected.
-    """
-    if not isinstance(row, dict):
-        return False
-    exchange = _upper(_first(row, "exchange", "exchangeSegment", "exchange_segment"))
-    segment = _upper(_first(row, "segment", "exchange_segment") or segment_hint)
-    key = _upper(_first(row, "instrument_token", "instrument_key", "instrumentToken"))
-    symbol = _upper(
+def _row_symbol(row: Dict[str, Any]) -> str:
+    return _upper(
         _first(
             row,
             "trading_symbol",
@@ -157,14 +178,73 @@ def is_stock_or_index_future(row: Dict[str, Any], *, segment_hint: str = "") -> 
             "scrip_name",
         )
     )
+
+
+def is_commodity_symbol(symbol: str) -> bool:
+    """True for MCX-style underlyings, even when the exchange field is blank or wrong."""
+    root = underlying_from_future_symbol(symbol)
+    compact = re.sub(r"[^A-Z0-9]", "", (symbol or "").upper())
+    if "MCX" in compact:
+        return True
+    return root in _COMMODITY_ROOTS
+
+
+def is_bse_only_symbol(symbol: str) -> bool:
+    """SENSEX / BANKEX futures are BSE, not NSE."""
+    return underlying_from_future_symbol(symbol) in _BSE_INDEX_ROOTS
+
+
+def _has_nse_fno_marker(exchange: str, segment: str, key: str) -> bool:
+    """True only when the row itself says NSE F&O. A missing field is not assumed."""
+    if not exchange and not segment and not key:
+        return False
+    blob = f"{exchange} {segment} {key}"
+    if "BSE" in blob or "MCX" in blob:
+        return False
+    if key.startswith("NSE_FO") or key.startswith("NSE_FNO"):
+        return True
+    if segment in {"NSE_FNO", "NSE_FO"} and exchange in {"", "NSE", "NSE_FNO", "NSE_FO"}:
+        return True
+    if exchange in {"NSE_FNO", "NSE_FO"}:
+        return True
+    if exchange == "NSE" and segment in {"FO", "FNO"}:
+        return True
+    return False
+
+
+def is_stock_or_index_future(row: Dict[str, Any], *, segment_hint: str = "") -> bool:
+    """True only for NSE stock futures and NSE index futures.
+
+    Allow: Dhan exchangeSegment NSE_FNO, or Upstox exchange NSE + segment FO,
+    or an instrument key NSE_FO|… / NSE_FNO|…, and a futures symbol
+    (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY, RELIANCE, and other NSE futures).
+
+    Deny: MCX / MCX_COMM / COM, commodity symbols (GOLD, SILVER, CRUDEOIL,
+    NATURALGAS, COPPER, and the other MCX roots) even if the exchange is
+    missing or says NSE, options, equity cash, currency, and BSE / BSE_FNO /
+    BSE_FO (including SENSEX and BANKEX). If the row has no exchange, segment,
+    or NSE instrument key, it is rejected. ``segment_hint`` is ignored so a
+    caller cannot widen a row that did not name its venue.
+    """
+    del segment_hint  # fail closed: only fields on the broker row count
+    if not isinstance(row, dict):
+        return False
+    exchange = _upper(_first(row, "exchange", "exchangeSegment", "exchange_segment"))
+    segment = _upper(_first(row, "segment", "exchange_segment"))
+    key = _upper(_first(row, "instrument_token", "instrument_key", "instrumentToken"))
+    symbol = _row_symbol(row)
     compact = re.sub(r"[^A-Z0-9]", "", symbol)
     option_type = _upper(_first(row, "drvOptionType", "option_type", "optionType"))
     instrument_type = _upper(
         _first(row, "instrument_type", "instrumentType", "drvInstrumentType", "security_type")
     )
-    blob = f"{exchange} {segment} {key}"
+    blob = f"{exchange} {segment} {key} {compact}"
 
+    if is_commodity_symbol(symbol) or is_bse_only_symbol(symbol):
+        return False
     if "MCX" in blob or segment in {"COM", "MCX_COMM"} or exchange in {"MCX", "MCX_COMM", "MCX_FO"}:
+        return False
+    if "BSE" in f"{exchange} {segment} {key}":
         return False
     if any(part in blob for part in ("CURRENCY", "NSE_CDS", "BSE_CDS", "NCD_FO", "BCD_FO", "CDS_FO")):
         return False
@@ -183,26 +263,9 @@ def is_stock_or_index_future(row: Dict[str, Any], *, segment_hint: str = "") -> 
     root = underlying_from_future_symbol(symbol)
     if root.startswith(_CURRENCY_ROOTS):
         return False
-
-    fno = (
-        exchange in _FNO_EXCHANGES
-        or segment in _FO_SEGMENTS
-        or key.startswith(("NSE_FO", "BSE_FO", "NSE_FNO", "BSE_FNO"))
-        or (exchange in {"NSE", "BSE"} and segment in {"FO", "FNO"})
-    )
-    if not fno:
+    if not _has_nse_fno_marker(exchange, segment, key):
         return False
     if "FUT" in compact or instrument_type.startswith("FUT"):
-        return True
-    if option_type in {"", "NA", "XX", "NONE", "FUT"} and instrument_type in {
-        "",
-        "NA",
-        "FUT",
-        "FUTSTK",
-        "FUTIDX",
-        "FUTURE",
-        "FUTURES",
-    }:
         return True
     return False
 
@@ -451,6 +514,11 @@ def plans_from_fills(fills: Sequence[Fill]) -> List[PlannedTrade]:
     grouped: Dict[str, List[Fill]] = {}
     for fill in fills:
         if fill.qty <= 0 or fill.price <= 0:
+            continue
+        # Second gate: a commodity or BSE index fill never becomes a trade_log row.
+        if is_commodity_symbol(fill.symbol_raw) or is_commodity_symbol(fill.underlying):
+            continue
+        if is_bse_only_symbol(fill.symbol_raw) or is_bse_only_symbol(fill.underlying):
             continue
         grouped.setdefault(fill.instrument or fill.underlying, []).append(fill)
     plans: List[PlannedTrade] = []
