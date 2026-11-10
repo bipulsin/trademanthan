@@ -277,6 +277,127 @@
         return ist.toISOString().slice(0, 10);
     }
 
+    function syncErrorMessage(res, data) {
+        var detail = data && data.detail != null && data.detail !== "" ? data.detail : (data && data.message);
+        var loginUrl = (data && data.login_url) || "";
+        var message = "";
+        if (typeof detail === "string") {
+            message = detail;
+        } else if (Array.isArray(detail)) {
+            message = detail.map(function (item) {
+                if (!item) return "";
+                if (typeof item === "string") return item;
+                var bit = item.msg || item.message || "";
+                return bit || "";
+            }).filter(Boolean).join("; ");
+        } else if (detail && typeof detail === "object") {
+            message = detail.message || detail.msg || detail.error || "";
+            if (detail.login_url) loginUrl = detail.login_url;
+            if (!message) {
+                try { message = JSON.stringify(detail); } catch (e) { message = ""; }
+            }
+        }
+        if (!message || message === "Error") {
+            var status = res && res.status ? res.status : 0;
+            message = status ? ("Sync failed (HTTP " + status + ")") : "Sync failed";
+        }
+        return { message: String(message), loginUrl: loginUrl || "" };
+    }
+
+    function setSyncStatus(msg, isErr, loginUrl) {
+        var el = $("tlSyncStatus");
+        if (!el) return;
+        el.textContent = "";
+        if (!msg) {
+            el.hidden = true;
+            el.removeAttribute("data-error");
+            return;
+        }
+        el.hidden = false;
+        el.setAttribute("data-error", isErr ? "1" : "0");
+        el.appendChild(document.createTextNode(msg));
+        if (loginUrl) {
+            el.appendChild(document.createElement("br"));
+            var link = document.createElement("a");
+            link.href = loginUrl;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.textContent = "Sign in to Dhan";
+            el.appendChild(link);
+        }
+    }
+
+    function openSync() {
+        var dateInput = $("tlSyncDate");
+        if (dateInput && !dateInput.value) dateInput.value = todayISO();
+        if ($("tlSyncBroker") && !$("tlSyncBroker").value) $("tlSyncBroker").value = "upstox";
+        var submit = $("tlSyncSubmit");
+        if (submit) {
+            submit.disabled = false;
+            submit.textContent = "Submit";
+        }
+        setSyncStatus("");
+        $("tlSyncModal").hidden = false;
+        setTimeout(function () {
+            if (dateInput) dateInput.focus();
+        }, 50);
+    }
+
+    function closeSync() {
+        var modal = $("tlSyncModal");
+        if (modal) modal.hidden = true;
+        setSyncStatus("");
+    }
+
+    async function submitSync(ev) {
+        ev.preventDefault();
+        var dateVal = String(($("tlSyncDate") && $("tlSyncDate").value) || "").trim();
+        var broker = String(($("tlSyncBroker") && $("tlSyncBroker").value) || "").trim();
+        if (!dateVal) {
+            setSyncStatus("Choose a date to sync.", true);
+            return;
+        }
+        if (broker !== "upstox" && broker !== "dhan") {
+            setSyncStatus("Choose Upstox or Dhan.", true);
+            return;
+        }
+        var submit = $("tlSyncSubmit");
+        if (submit) {
+            submit.disabled = true;
+            submit.textContent = "Syncing…";
+        }
+        setSyncStatus("Fetching stock and index futures…", false);
+        try {
+            var res = await fetch(apiBase() + "/api/trade-log/sync-from-broker", {
+                method: "POST",
+                headers: headers(),
+                body: JSON.stringify({ date: dateVal, broker: broker })
+            });
+            var data = await res.json().catch(function () { return null; });
+            if (!res.ok || !data || data.ok === false) {
+                var parsed = syncErrorMessage(res, data || {});
+                setSyncStatus(parsed.message, true, parsed.loginUrl);
+                return;
+            }
+            var message = data.message || "Sync finished.";
+            closeSync();
+            if ($("tlFrom")) $("tlFrom").value = dateVal.slice(0, 10);
+            if ($("tlTo")) $("tlTo").value = dateVal.slice(0, 10);
+            showTab("list");
+            await loadList();
+            setStatus(message, true);
+        } catch (e) {
+            var shown = e && e.message ? String(e.message) : "";
+            if (!shown || shown === "Error") shown = "Sync failed";
+            setSyncStatus(shown, true);
+        } finally {
+            if (submit) {
+                submit.disabled = false;
+                submit.textContent = "Submit";
+            }
+        }
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         var today = todayISO();
         $("tlDate").value = today;
@@ -307,6 +428,11 @@
         };
         $("tlClearFormBtn").onclick = clearForm;
         $("tlLoadBtn").onclick = function () { loadList().catch(function (e) { setStatus(String(e), false); }); };
+        if ($("tlSyncBrokerBtn")) $("tlSyncBrokerBtn").onclick = openSync;
+        if ($("tlSyncCancel")) $("tlSyncCancel").onclick = closeSync;
+        if ($("tlSyncForm")) $("tlSyncForm").addEventListener("submit", function (ev) {
+            submitSync(ev).catch(function (e) { setSyncStatus(String(e && e.message || e), true); });
+        });
         loadList().catch(function () {});
     });
 })();

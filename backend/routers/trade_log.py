@@ -55,6 +55,11 @@ class TradeBody(BaseModel):
     journal_text: Optional[str] = None
 
 
+class SyncFromBrokerBody(BaseModel):
+    date: str
+    broker: str
+
+
 class PatchBody(BaseModel):
     session_date: Optional[str] = None
     symbol: Optional[str] = None
@@ -226,3 +231,20 @@ def delete_journal(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"ok": True, "id": trade_id, "deleted": deleted}
+
+
+@router.post("/sync-from-broker")
+def sync_journal_from_broker(
+    body: SyncFromBrokerBody,
+    user: User = Depends(_auth_user),
+) -> Dict[str, Any]:
+    """Pull one day's stock and index futures from Upstox or Dhan into trade_log."""
+    from backend.services.trade_log_broker_sync import TradeLogBrokerSyncError, sync_from_broker
+
+    try:
+        return sync_from_broker(body.date, body.broker)
+    except TradeLogBrokerSyncError as exc:
+        detail: Any = str(exc)
+        if exc.login_url:
+            detail = {"message": str(exc), "login_url": exc.login_url}
+        raise HTTPException(status_code=400, detail=detail) from exc

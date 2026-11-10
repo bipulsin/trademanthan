@@ -49,7 +49,7 @@ body.landing-page #app {
   object-position: center center;
 }
 
-/* Mobile portrait asset — hidden on desktop / landscape */
+/* Portrait phones use the same landscape clip (object-fit: cover). */
 .landing-wallpaper-video--portrait {
   display: none;
 }
@@ -64,13 +64,9 @@ body.landing-page #app {
   }
 }
 
-/* Phone portrait: dedicated vertical MP4 */
+/* Phone portrait: same desktop clip, cropped to the viewport. */
 @media (max-width: 768px) and (orientation: portrait) {
   .landing-wallpaper-video--desktop {
-    display: none !important;
-  }
-
-  .landing-wallpaper-video--portrait {
     display: block;
     inset: 0;
     width: 100%;
@@ -80,20 +76,13 @@ body.landing-page #app {
     object-position: center center;
   }
 
-  .landing-hero::before {
-    background:
-      radial-gradient(ellipse 80% 50% at 50% 35%, rgba(61, 186, 122, 0.1) 0%, transparent 60%);
-  }
-}
-
-/* Phone landscape: same as desktop (landscape MP4) */
-@media (max-width: 768px) and (orientation: landscape) {
   .landing-wallpaper-video--portrait {
     display: none !important;
   }
 
-  .landing-wallpaper-video--desktop {
-    display: block;
+  .landing-hero::before {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 35%, rgba(61, 186, 122, 0.1) 0%, transparent 60%);
   }
 }
 

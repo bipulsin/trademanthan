@@ -75,6 +75,11 @@ body.tradelog-page .tl-page {
 body.tradelog-page .tl-page-header {
     margin-bottom: 1.25rem;
     padding: 0 0 8px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px 16px;
+    flex-wrap: wrap;
 }
 
 body.tradelog-page .tl-page-title {
@@ -358,3 +363,77 @@ body.tradelog-page[data-theme="light"] .tm-web-topbar-brand { color: #14201a; }
 body.tradelog-page[data-theme="light"] .tm-web-hamburger { background: #e4ebe6; color: #1f7a4d; }
 body.tradelog-page[data-theme="light"] .mobile-title-bar { background: #eef3f0 !important; }
 body.tradelog-page[data-theme="light"] .mobile-title { color: #14201a !important; }
+
+.tl-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 4000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(6, 12, 10, 0.72);
+}
+
+.tl-modal[hidden] { display: none !important; }
+
+.tl-modal-card {
+    width: min(440px, 100%);
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px 18px 16px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+.tl-modal-card h2 {
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    color: var(--accent);
+}
+
+.tl-modal-card form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.tl-modal-card input,
+.tl-modal-card select {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: var(--text);
+    background: var(--card-inner);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-family: var(--font-body);
+}
+
+.tl-sync-status {
+    margin: 12px 0 0;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: var(--text);
+}
+
+.tl-sync-status[data-error="1"] { color: var(--danger); }
+
+.tl-sync-status a { color: var(--accent); }
+
+.tl-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}

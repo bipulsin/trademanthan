@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="settings.css?v=2">
     <link rel="stylesheet" href="left-menu.css?v=3.48">
     <link rel="stylesheet" href="theme.css?v=1.4">
-    <link rel="stylesheet" href="tradelog.css?v=5">
+    <link rel="stylesheet" href="tradelog.css?v=6">
 </head>
 <body class="tradelog-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -37,6 +37,7 @@
                             An option uses that future’s expiry, with option lot size. Gross P&amp;L is points × qty.
                         </p>
                     </div>
+                    <button type="button" class="tl-btn" id="tlSyncBrokerBtn">Sync from Broker</button>
                 </div>
 
                 <div class="tl-wrap">
@@ -123,7 +124,29 @@
             </div>
         </main>
     </div>
+    <div class="tl-modal" id="tlSyncModal" hidden>
+        <div class="tl-modal-card" role="dialog" aria-modal="true" aria-labelledby="tlSyncTitle">
+            <h2 id="tlSyncTitle">Sync from Broker</h2>
+            <p class="tl-hint">Import that day's stock futures and index futures (NSE and BSE F&amp;O). Equity cash, options, currency, and MCX are skipped. A fill with only Buy or only Sell stays open. A round trip stores entry and exit.</p>
+            <form id="tlSyncForm">
+                <label>Date
+                    <input type="date" id="tlSyncDate" required>
+                </label>
+                <label>Broker
+                    <select id="tlSyncBroker" required>
+                        <option value="upstox">Upstox</option>
+                        <option value="dhan">Dhan</option>
+                    </select>
+                </label>
+                <p class="tl-sync-status" id="tlSyncStatus" hidden></p>
+                <div class="tl-modal-actions">
+                    <button type="button" class="tl-btn" id="tlSyncCancel">Cancel</button>
+                    <button type="submit" class="tl-btn tl-btn-primary" id="tlSyncSubmit">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
     <script src="left-menu.js?v=3.55"></script>
-    <script src="tradelog.js?v=6"></script>
+    <script src="tradelog.js?v=7"></script>
 </body>
 </html>

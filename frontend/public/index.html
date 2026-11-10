@@ -8,7 +8,7 @@
     <title>Tradentical - AI-Powered Trading Intelligence</title>
     <meta name="description" content="Trading Identical. AI-based Algo platform by Trade With CTO. Harness the power of advanced AI to automate your trading strategies.">
     <link rel="stylesheet" href="styles.css?v=1.7">
-    <link rel="stylesheet" href="landing.css?v=37">
+    <link rel="stylesheet" href="landing.css?v=38">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
@@ -24,18 +24,7 @@
             preload="auto"
             poster="hero-visual.png"
         >
-            <source src="landing-wallpaper.mp4?v=3" type="video/mp4">
-        </video>
-        <video
-            class="landing-wallpaper-video landing-wallpaper-video--portrait"
-            autoplay
-            muted
-            loop
-            playsinline
-            preload="metadata"
-            poster="hero-visual.png"
-        >
-            <source src="landing-wallpaper-mobile.mp4?v=2" type="video/mp4">
+            <source src="landing-wallpaper.mp4?v=4" type="video/mp4">
         </video>
     </div>
     <div id="app">
@@ -206,9 +195,15 @@
         })();
 
         (function initLandingWallpaperVideos() {
+            // Phone portrait uses the same clip as desktop: landing-wallpaper.mp4
+            var WALLPAPER = 'landing-wallpaper.mp4?v=4';
             var desktop = document.querySelector('.landing-wallpaper-video--desktop');
-            var portrait = document.querySelector('.landing-wallpaper-video--portrait');
-            if (!desktop || !portrait) return;
+            if (!desktop) return;
+            var source = desktop.querySelector('source');
+            if (source && source.getAttribute('src') !== WALLPAPER) {
+                source.setAttribute('src', WALLPAPER);
+                desktop.load();
+            }
             function lockHalfSpeed(video) {
                 if (video.playbackRate !== 0.5) {
                     video.playbackRate = 0.5;
@@ -222,26 +217,7 @@
                 video.addEventListener('ratechange', function () { lockHalfSpeed(video); });
             }
             hookHalfSpeed(desktop);
-            hookHalfSpeed(portrait);
-            var mq = window.matchMedia('(max-width: 768px) and (orientation: portrait)');
-            function sync() {
-                if (mq.matches) {
-                    desktop.pause();
-                    lockHalfSpeed(portrait);
-                    portrait.play().catch(function () {});
-                } else {
-                    portrait.pause();
-                    lockHalfSpeed(desktop);
-                    desktop.play().catch(function () {});
-                }
-            }
-            sync();
-            if (mq.addEventListener) {
-                mq.addEventListener('change', sync);
-            } else if (mq.addListener) {
-                mq.addListener(sync);
-            }
-            window.addEventListener('orientationchange', sync);
+            desktop.play().catch(function () {});
         })();
 
         (function initHeroHeadlineRotation() {
