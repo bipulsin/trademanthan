@@ -104,6 +104,10 @@ from backend.services.commodities_div.scheduler import (
     start_commodities_div_ltp_scheduler,
     stop_commodities_div_ltp_scheduler,
 )
+from backend.dhan.scheduler import (
+    start_dhan_token_scheduler,
+    stop_dhan_token_scheduler,
+)
 from backend.services.tarang.scheduler import (
     start_tarang_scheduler,
     stop_tarang_scheduler,
@@ -279,6 +283,14 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Continuing without Commodities Div LTP scheduler")
 
         try:
+            logger.info("Starting Dhan token refresh scheduler (08:30 IST weekdays)...")
+            start_dhan_token_scheduler()
+            logger.info("✅ Dhan token scheduler: STARTED (08:30 IST weekdays)")
+        except Exception as e:
+            logger.error(f"❌ Dhan token scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Dhan token scheduler")
+
+        try:
             logger.info("Starting Kosmic Tarang IV snapshot scheduler...")
             start_tarang_scheduler()
             logger.info("✅ Kosmic Tarang scheduler: STARTED (IV snapshots IST)")
@@ -425,6 +437,12 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Commodities Div LTP scheduler stopped")
     except Exception as e:
         logger.error(f"⚠️ Error stopping Commodities Div LTP scheduler: {e}", exc_info=True)
+
+    try:
+        stop_dhan_token_scheduler()
+        logger.info("✅ Dhan token scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Dhan token scheduler: {e}", exc_info=True)
 
     try:
         stop_tarang_scheduler()

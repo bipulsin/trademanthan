@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     DHAN_API_KEY: str = os.getenv("DHAN_API_KEY", "")
     DHAN_API_SECRET: str = os.getenv("DHAN_API_SECRET", "")
     DHAN_CLIENT_ID: str = os.getenv("DHAN_CLIENT_ID", "")
+    DHAN_PIN: str = os.getenv("DHAN_PIN", "")
+    DHAN_TOTP_SECRET: str = os.getenv("DHAN_TOTP_SECRET", "")
+    TOKEN_ENCRYPTION_KEY: str = os.getenv("TOKEN_ENCRYPTION_KEY", "")
     DHAN_ACCESS_TOKEN: str = os.getenv("DHAN_ACCESS_TOKEN", "")
     DHAN_REDIRECT_URL: str = os.getenv(
         "DHAN_REDIRECT_URL", "https://www.tradewithcto.com/webhook/dhan/callback"

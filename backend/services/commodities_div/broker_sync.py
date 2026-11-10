@@ -857,13 +857,32 @@ def _fetch_upstox(trade_day: date) -> List[Fill]:
     return fills
 
 
-def _fetch_dhan(trade_day: date) -> List[Fill]:
-    from backend.services.dhan_service import DhanApiError, DhanAuthError, dhan_service
-
+def _dhan_browser_login_url() -> Optional[str]:
+    """Browser consent URL when TOTP generation cannot produce a token."""
     try:
-        rows = dhan_service.get_trades_for_date(trade_day.isoformat())
+        from backend.services.dhan_service import dhan_service
+
+        return dhan_service.start_consent_login()
+    except Exception:
+        logger.info("commodities_div broker sync: Dhan browser login fallback unavailable")
+        return None
+
+
+def _fetch_dhan(trade_day: date) -> List[Fill]:
+    """MCX fills via the shared TOTP token. Today's book, otherwise paged history."""
+    from backend.dhan.auth import DhanAuthError
+    from backend.dhan.client import DhanApiError, DhanClient
+
+    day = trade_day.isoformat()
+    try:
+        client = DhanClient()
+        if trade_day == datetime.now(IST).date():
+            rows = client.get_trade_book()
+        else:
+            rows = client.get_trade_history(day, day)
     except DhanAuthError as exc:
-        raise BrokerSyncError(str(exc), login_url=getattr(exc, "login_url", None)) from exc
+        login_url = getattr(exc, "login_url", None) or _dhan_browser_login_url()
+        raise BrokerSyncError(str(exc), login_url=login_url) from exc
     except DhanApiError as exc:
         raise BrokerSyncError(str(exc) or "Dhan trade request failed.") from exc
     fills = []

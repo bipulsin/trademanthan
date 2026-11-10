@@ -218,23 +218,40 @@ def test_slash_date_is_ninth_november_not_september():
 
 
 def test_dhan_sync_without_token_keeps_login_url(monkeypatch):
-    """The live 400: no access token. 09/11/2026 must still mean 9 Nov and carry login_url."""
-    from backend.services.dhan_service import DhanAuthError
+    """TOTP failure still offers browser login. 09/11/2026 must still mean 9 Nov."""
+    from backend.dhan.auth import DhanAuthError
+    from backend.dhan import client as client_mod
+    from backend.services.commodities_div import broker_sync as sync_mod
     from backend.services import dhan_service as dhan_mod
 
+    class FrozenNow(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 10, 12, 0, tzinfo=tz)
+
+    monkeypatch.setattr(sync_mod, "datetime", FrozenNow)
     seen = {}
 
-    def boom(day):
-        seen["day"] = day
-        raise DhanAuthError(
-            "Dhan access token is missing or expired. It lasts 24 hours.",
-            login_url="https://auth.dhan.co/login/consentApp-login?consentAppId=test",
-        )
+    class BoomClient:
+        def __init__(self, access_token=None):
+            pass
 
-    monkeypatch.setattr(dhan_mod.dhan_service, "get_trades_for_date", boom)
+        def get_trade_history(self, from_date, to_date):
+            seen["range"] = (from_date, to_date)
+            raise DhanAuthError("Dhan access token is missing or expired. It lasts 24 hours.")
+
+        def get_trade_book(self):
+            raise AssertionError("9 Nov is not today; trade book must not be used")
+
+    monkeypatch.setattr(client_mod, "DhanClient", BoomClient)
+    monkeypatch.setattr(
+        dhan_mod.dhan_service,
+        "start_consent_login",
+        lambda: "https://auth.dhan.co/login/consentApp-login?consentAppId=test",
+    )
     with pytest.raises(BrokerSyncError) as caught:
         sync_from_broker("09/11/2026", "dhan")
-    assert seen["day"] == "2026-11-09"
+    assert seen["range"] == ("2026-11-09", "2026-11-09")
     assert "missing or expired" in str(caught.value)
     assert caught.value.login_url.startswith("https://auth.dhan.co/login/consentApp-login")
 
