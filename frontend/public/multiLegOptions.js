@@ -444,7 +444,9 @@
     if (data.skipped_no_lot) parts.push(countPhrase(data.skipped_no_lot, "skipped (no lot)", "skipped (no lot)"));
     if (data.skipped_unmapped) parts.push(countPhrase(data.skipped_unmapped, "skipped (unmapped)", "skipped (unmapped)"));
     if (data.master_empty) parts.push("instrument master had no index option contracts");
-    return parts.join(", ") + ".";
+    var text = parts.join(", ") + ".";
+    if (data.note) text += " " + String(data.note);
+    return text;
   }
 
   function minForType() {

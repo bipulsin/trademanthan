@@ -83,6 +83,12 @@ _SPACED_OPT = re.compile(
     re.IGNORECASE,
 )
 _DELTA_OPT = re.compile(r"^(C|P)-([A-Z0-9]+)-(\d+(?:\.\d+)?)-(\d{6})$", re.IGNORECASE)
+_SYMBOL_STRIKE_RIGHT = re.compile(
+    r"^(?P<root>[A-Z][A-Z0-9&]*?)\s+(?P<strike>\d+(?:\.\d+)?)\s+(?P<right>CE|PE|CALL|PUT)$",
+    re.IGNORECASE,
+)
+_DMON_EXPIRY = re.compile(r"^(\d{1,2})([A-Z]{3,4})(\d{2,4})$", re.IGNORECASE)
+_STRATEGY_PRODUCTS = {"STRATEGY", "STG", "CUSTOM", "STRATEGY_CUSTOM"}
 
 
 def canonical_broker(raw: Any) -> str:
@@ -297,6 +303,18 @@ def _parse_expiry_value(raw: Any) -> Optional[date]:
     parsed = _parse_date(raw)
     if parsed is not None and not str(raw).strip().isdigit():
         return parsed
+    text_raw = str(raw).strip().upper()
+    dmon = _DMON_EXPIRY.match(re.sub(r"[^A-Z0-9]", "", text_raw))
+    if dmon:
+        month = _MONTHS.get(dmon.group(2)[:3])
+        year = int(dmon.group(3))
+        if year < 100:
+            year += 2000
+        if month:
+            try:
+                return date(year, month, int(dmon.group(1)))
+            except ValueError:
+                return None
     text_raw = str(raw).strip()
     for fmt, width in (
         ("%d-%m-%Y", 10),
@@ -342,6 +360,14 @@ def _parts_from_symbol(symbol: str) -> Dict[str, Any]:
     if not match:
         match = _SPACED_OPT.match(text_raw)
     if not match:
+        named = _SYMBOL_STRIKE_RIGHT.match(text_raw)
+        if named:
+            return {
+                "root": re.sub(r"\s+", "", named.group("root") or ""),
+                "strike": float(named.group("strike")),
+                "right": _right_from_text(named.group("right")),
+            }
+    if not match:
         plain = re.sub(r"[^A-Z0-9&]", "", text_raw)
         if plain and plain.isalnum():
             return {"root": plain}
@@ -383,6 +409,53 @@ def _fill_time(row: Dict[str, Any], trade_date: date) -> Optional[datetime]:
     return None
 
 
+def _is_strategy_row(row: Dict[str, Any]) -> bool:
+    product = _upper(_first(row, "product", "product_type", "productType"))
+    if product in _STRATEGY_PRODUCTS or "STRATEGY" in product:
+        return True
+    ref = _upper(_first(row, "order_ref_id", "orderRefId", "tag"))
+    return ref.startswith("STG")
+
+
+def _strategy_id(row: Dict[str, Any]) -> str:
+    """Shared id for the legs of one custom strategy. Empty for a normal order."""
+    ref = str(_first(row, "order_ref_id", "orderRefId") or "").strip()
+    if ref.upper().startswith("STG"):
+        parts = ref.split("-")
+        if len(parts) >= 2 and parts[1]:
+            return "STG-" + parts[1]
+        return ref.upper()
+    if not _is_strategy_row(row):
+        return ""
+    label = str(_first(row, "strategy", "strategy_name", "strategyName") or "").strip()
+    return label.upper() or _upper(_first(row, "product", "product_type"))
+
+
+def _expand_strategy_rows(rows: Sequence[Any]) -> List[Dict[str, Any]]:
+    """Flatten a custom-strategy position that carries its option legs inline."""
+    out: List[Dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        nested = None
+        for key in ("legs", "strategy_legs"):
+            value = row.get(key)
+            if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+                nested = value
+                break
+        if nested and _is_strategy_row(row):
+            for leg in nested:
+                merged = {k: v for k, v in row.items() if k not in {"legs", "strategy_legs"}}
+                merged.update(leg)
+                merged["_strategy_position"] = True
+                if not merged.get("product"):
+                    merged["product"] = row.get("product")
+                out.append(merged)
+            continue
+        out.append(row)
+    return out
+
+
 def _instrument_name(root: str) -> str:
     name = canonical_underlying(root) or _upper(root)
     return name
@@ -404,6 +477,15 @@ def _listed_leg(row: Dict[str, Any], trade_date: date, broker: str) -> Optional[
         return None
     qty = _num(_first(row, "filled_quantity", "tradedQuantity", "quantity", "qty", "size"))
     price = _num(_first(row, "tradedPrice", "average_price", "price", "trade_price", "averagePrice"))
+    side = _upper(_first(row, "transaction_type", "transactionType", "side"))
+    # A short strategy position is a negative quantity and often has no side field.
+    if side not in {"BUY", "SELL"} and qty is not None:
+        if qty < 0:
+            side = "SELL"
+        elif qty > 0:
+            side = "BUY"
+    if qty is not None:
+        qty = abs(qty)
     if qty is None or qty <= 0 or price is None or price <= 0:
         return None
     if status and "complete" not in status and status not in {"filled", "traded", ""} and qty <= 0:
@@ -421,10 +503,13 @@ def _listed_leg(row: Dict[str, Any], trade_date: date, broker: str) -> Optional[
         expiry = _month_expiry(int(parts["year"]), int(parts["month"]), parts.get("day"), root, f"{exchange} {segment}")
     if expiry is None or not root:
         return None
-    side = _upper(_first(row, "transaction_type", "transactionType", "side"))
     if side not in {"BUY", "SELL"}:
         return None
     stamp = _fill_time(row, trade_date)
+    # A strategy position snapshot has average price and no fill clock.
+    # Keep it on the sync date instead of dropping the leg.
+    if stamp is None and (_is_strategy_row(row) or row.get("_strategy_position")):
+        stamp = IST.localize(datetime(trade_date.year, trade_date.month, trade_date.day, 15, 30, 0))
     if stamp is None or stamp.astimezone(IST).date() != trade_date:
         return None
     row_day = str(_first(row, "trade_date") or "").strip()[:10]
@@ -448,6 +533,7 @@ def _listed_leg(row: Dict[str, Any], trade_date: date, broker: str) -> Optional[
         "entry_time": stamp.astimezone(IST),
         "lot_size": lot,
         "instrument_key": instrument_key,
+        "strategy_id": _strategy_id(row),
     }
     raw_id = _first(row, "order_id", "trade_id", "exchange_order_id", "orderId")
     leg["upstox_order_id"] = order_id_for(broker, leg, raw_id)
@@ -516,9 +602,16 @@ def parse_broker_rows(rows: Sequence[Dict[str, Any]], trade_date: date, broker: 
     day = trade_date if isinstance(trade_date, date) else parse_sync_date(trade_date)
     legs: List[Dict[str, Any]] = []
     unmapped = 0
-    for row in rows or []:
+    strategy_other_day = 0
+    source = rows if name == "delta" else _expand_strategy_rows(rows)
+    for row in source or []:
         if not isinstance(row, dict):
             continue
+        if name != "delta" and _is_strategy_row(row):
+            stamp = _fill_time(row, day)
+            if stamp is not None and stamp.astimezone(IST).date() != day:
+                strategy_other_day += 1
+                continue
         if name == "delta":
             leg = _delta_leg(row, day)
             looked_like_option = bool(_DELTA_OPT.match(_symbol_text(row).strip()))
@@ -531,7 +624,11 @@ def parse_broker_rows(rows: Sequence[Dict[str, Any]], trade_date: date, broker: 
                 unmapped += 1
             continue
         legs.append(leg)
-    return {"legs": legs, "skipped_unmapped": unmapped}
+    return {
+        "legs": legs,
+        "skipped_unmapped": unmapped,
+        "strategy_other_day": strategy_other_day,
+    }
 
 
 def build_option_plan(
@@ -760,6 +857,58 @@ def _upstox_history_segment(ux, trade_date: date, segment: str) -> List[Dict[str
     return rows
 
 
+def _rows_or_raise(response: Any, label: str) -> List[Dict[str, Any]]:
+    if not isinstance(response, dict) or response.get("status") != "success":
+        err = response.get("message") if isinstance(response, dict) else None
+        errors = response.get("errors") if isinstance(response, dict) else None
+        if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+            err = errors[0].get("message") or err
+        raise _token_error(str(err or label))
+    data = response.get("data") or []
+    if isinstance(data, dict):
+        for key in ("orders", "trades", "positions"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            data = []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _cover_tokens(rows: Sequence[Dict[str, Any]]) -> set:
+    covered = set()
+    for row in rows:
+        symbol = _upper(_symbol_text(row))
+        token = _upper(_first(row, "instrument_token", "instrument_key", "instrumentToken"))
+        if symbol:
+            covered.add(symbol)
+        if token:
+            covered.add(token)
+    return covered
+
+
+def _strategy_positions_not_in_trades(positions: Sequence[Dict[str, Any]], covered: set) -> List[Dict[str, Any]]:
+    """Strategy option rows the order and trade books did not already return."""
+    extra: List[Dict[str, Any]] = []
+    for row in _expand_strategy_rows(positions):
+        if not _is_strategy_row(row):
+            continue
+        symbol = _upper(_symbol_text(row))
+        token = _upper(_first(row, "instrument_token", "instrument_key", "instrumentToken"))
+        if (symbol and symbol in covered) or (token and token in covered):
+            continue
+        copied = dict(row)
+        copied["_strategy_position"] = True
+        extra.append(copied)
+        if symbol:
+            covered.add(symbol)
+        if token:
+            covered.add(token)
+    return extra
+
+
 def _fetch_upstox_rows(trade_date: date) -> List[Dict[str, Any]]:
     from backend.services.multi_leg_options import _upstox
 
@@ -767,12 +916,33 @@ def _fetch_upstox_rows(trade_date: date) -> List[Dict[str, Any]]:
     if not getattr(ux, "access_token", None):
         raise MultiLegValidationError("Upstox access token is missing or expired")
     if trade_date == datetime.now(IST).date():
+        # retrieve-all misses custom-strategy fills. They are on the day trade book
+        # with order_ref_id STG-..., and product is null. Short-term positions can
+        # also omit them, so the trade book is the source for this straddle.
         book = ux.get_order_book_today()
         if not isinstance(book, dict) or not book.get("success"):
             err = book.get("error") if isinstance(book, dict) else "Upstox order book failed"
             raise _token_error(str(err or "Upstox order book failed"))
         orders = book.get("orders") or []
-        return [item for item in orders if isinstance(item, dict)] if isinstance(orders, list) else []
+        orders = [item for item in orders if isinstance(item, dict)] if isinstance(orders, list) else []
+        trades = _rows_or_raise(
+            ux.make_api_request(
+                url="https://api.upstox.com/v2/order/trades/get-trades-for-day",
+                method="GET",
+                timeout=20,
+            ),
+            "Upstox trade book failed",
+        )
+        positions: List[Dict[str, Any]] = []
+        try:
+            held = ux.get_short_term_positions()
+            if isinstance(held, dict) and held.get("success"):
+                raw_positions = held.get("positions") or []
+                positions = [item for item in raw_positions if isinstance(item, dict)] if isinstance(raw_positions, list) else []
+        except Exception:
+            logger.info("multi_leg broker sync: upstox positions lookup failed")
+        covered = _cover_tokens(list(orders) + list(trades))
+        return list(orders) + list(trades) + _strategy_positions_not_in_trades(positions, covered)
     rows: List[Dict[str, Any]] = []
     for segment in ("FO", "BSE_FO", "COM"):
         try:
@@ -841,6 +1011,7 @@ def sync_multi_leg_from_broker(trade_date: Any = None, broker: Any = None) -> Di
         db = SessionLocal()
         try:
             before_ids, _before_trades = _load_existing(db)
+            before_fp = _load_fingerprints(db)
         finally:
             db.close()
         summary = sync_from_upstox(day.isoformat())
@@ -851,15 +1022,15 @@ def sync_multi_leg_from_broker(trade_date: Any = None, broker: Any = None) -> Di
             after_fp = _load_fingerprints(db)
         finally:
             db.close()
+        just_ids = after_ids - before_ids
+        just_fp = after_fp - before_fp
         parsed = parse_broker_rows(_fetch_upstox_rows(day), day, "upstox")
         kept = []
         for leg in parsed["legs"]:
             oid = str(leg.get("upstox_order_id") or "").strip()
-            # Index fills sync_from_upstox already stored (or that were already
-            # in the journal) stay on that path. A fill it skipped is kept.
-            if leg.get("instrument") in INDEX_UNDERLYINGS and (oid in after_ids or leg_fingerprint(leg) in after_fp):
-                continue
-            if oid and oid in before_ids and leg.get("instrument") in INDEX_UNDERLYINGS:
+            fingerprint = leg_fingerprint(leg)
+            # The index pass just stored this fill. Do not count it again.
+            if leg.get("instrument") in INDEX_UNDERLYINGS and (oid in just_ids or fingerprint in just_fp):
                 continue
             kept.append(leg)
         extra = import_parsed_legs(
@@ -868,6 +1039,11 @@ def sync_multi_leg_from_broker(trade_date: Any = None, broker: Any = None) -> Di
             "upstox",
         )
         merged = _merge_summary(summary, extra)
+        other_day = int(parsed.get("strategy_other_day") or 0)
+        if not merged.get("new_legs") and not merged.get("duplicates_skipped") and other_day:
+            merged["note"] = (
+                "Custom strategy option positions are open, but none of the fills are on this date."
+            )
         logger.info("multi_leg broker sync upstox merged: new_legs=%s duplicates=%s", merged.get("new_legs"), merged.get("duplicates_skipped"))
         return merged
     if name == "dhan":

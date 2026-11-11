@@ -320,12 +320,17 @@ def group_new_legs(
     legs: Sequence[Dict[str, Any]],
     window: timedelta = GROUP_WINDOW,
 ) -> List[List[Dict[str, Any]]]:
-    """Group new legs by underlying + expiry, then by the 5-minute entry window."""
-    buckets: Dict[TradeKey, List[Dict[str, Any]]] = {}
+    """Group new legs by underlying, expiry, and strategy, then by entry window.
+
+    Legs with no strategy id stay in one bucket, which is the previous rule.
+    Two custom strategies on the same underlying are not merged.
+    """
+    buckets: Dict[Tuple, List[Dict[str, Any]]] = {}
     for leg in legs:
-        buckets.setdefault((leg["instrument"], leg["expiry"]), []).append(leg)
+        strategy = str(leg.get("strategy_id") or "").strip()
+        buckets.setdefault((leg["instrument"], leg["expiry"], strategy), []).append(leg)
     groups: List[List[Dict[str, Any]]] = []
-    for key in sorted(buckets, key=lambda item: (item[0], item[1].isoformat())):
+    for key in sorted(buckets, key=lambda item: (item[0], item[1].isoformat(), item[2])):
         groups.extend(group_by_entry_window(buckets[key], window))
     groups.sort(key=lambda group: (group[0]["entry_time"], group[0]["instrument"]))
     return groups

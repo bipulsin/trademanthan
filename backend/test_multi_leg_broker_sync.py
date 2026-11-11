@@ -234,6 +234,132 @@ def test_dedup_skips_same_instrument_time_and_price():
     assert doubled["duplicates_skipped"] == 1
 
 
+DAY_11 = date(2026, 11, 11)
+EXPIRY_DEC = date(2026, 12, 29)
+
+
+def _strategy_position(symbol, price, token):
+    return {
+        "product": "STRATEGY",
+        "strategy": "Custom",
+        "trading_symbol": symbol,
+        "instrument_token": token,
+        "exchange": "NFO",
+        "quantity": -65,
+        "average_price": price,
+        "expiry": "29DEC26",
+    }
+
+
+def test_custom_strategy_position_imports_both_short_legs_and_skips_equity_mtf():
+    rows = [
+        _strategy_position("NIFTY 25350 PE", 516.80, "NSE_FO|63990"),
+        _strategy_position("NIFTY 25350 CE", 508.40, "NSE_FO|63989"),
+        {
+            "product": "MTF",
+            "trading_symbol": "INDUSTOWER",
+            "instrument_token": "NSE_EQ|INE121J01017",
+            "exchange": "NSE",
+            "quantity": 23,
+            "average_price": 428.0,
+        },
+    ]
+    legs = parse_broker_rows(rows, DAY_11, "upstox")["legs"]
+    assert sorted(leg["option_type"] for leg in legs) == ["CE", "PE"]
+    assert {leg["instrument"] for leg in legs} == {"NIFTY"}
+    assert {leg["side"] for leg in legs} == {"SELL"}
+    assert {leg["lot_size"] for leg in legs} == {65}
+    assert {leg["expiry"] for leg in legs} == {EXPIRY_DEC}
+    assert sorted(leg["entry_price"] for leg in legs) == [508.40, 516.80]
+    assert {leg["strategy_id"] for leg in legs} == {"CUSTOM"}
+    plan = build_option_plan(legs)
+    assert plan["new_legs"] == 2
+    assert plan["new_trades"] == 1
+    assert plan["creates"][0]["trade_type"] == "STRADDLE"
+    again = build_option_plan(legs, existing_order_ids=[leg["upstox_order_id"] for leg in legs])
+    assert again["new_legs"] == 0
+    assert again["duplicates_skipped"] == 2
+
+
+def test_upstox_trade_book_imports_strategy_fills_and_a_normal_option_fill():
+    """retrieve-all was empty. The legs were on get-trades-for-day."""
+    rows = [
+        {
+            "exchange": "NFO",
+            "product": None,
+            "trading_symbol": "NIFTY26DEC25350PE",
+            "instrument_token": "NSE_FO|63990",
+            "order_type": "MARKET",
+            "transaction_type": "SELL",
+            "quantity": 65,
+            "average_price": 516.8,
+            "order_id": "261111000455709",
+            "trade_id": "4978469",
+            "order_ref_id": "STG-1111262875748-1-0",
+            "order_timestamp": "2026-11-11 15:06:49",
+            "exchange_timestamp": "2026-11-11 20:36:49",
+        },
+        {
+            "exchange": "NFO",
+            "product": None,
+            "trading_symbol": "NIFTY26DEC25350CE",
+            "instrument_token": "NSE_FO|63989",
+            "order_type": "MARKET",
+            "transaction_type": "SELL",
+            "quantity": 65,
+            "average_price": 508.4,
+            "order_id": "261111000455706",
+            "trade_id": "4978440",
+            "order_ref_id": "STG-1111262875748-0-0",
+            "order_timestamp": "2026-11-11 15:06:49",
+        },
+        {
+            "order_id": "NORMAL-1",
+            "status": "complete",
+            "instrument_token": "NSE_FO|555",
+            "trading_symbol": "RELIANCE26NOV1400CE",
+            "transaction_type": "BUY",
+            "average_price": 12.5,
+            "filled_quantity": 250,
+            "order_timestamp": "2026-11-11 11:05:00",
+        },
+    ]
+    parsed = parse_broker_rows(rows, DAY_11, "upstox")
+    legs = parsed["legs"]
+    by_symbol = {leg["option_type"] + ":" + leg["instrument"]: leg for leg in legs}
+    assert set(by_symbol) == {"PE:NIFTY", "CE:NIFTY", "CE:RELIANCE"}
+    assert by_symbol["PE:NIFTY"]["side"] == "SELL"
+    assert by_symbol["PE:NIFTY"]["entry_price"] == 516.8
+    assert by_symbol["PE:NIFTY"]["lot_size"] == 65
+    assert by_symbol["PE:NIFTY"]["expiry"] == EXPIRY_DEC
+    assert by_symbol["CE:NIFTY"]["entry_price"] == 508.4
+    assert by_symbol["PE:NIFTY"]["upstox_order_id"] == "261111000455709"
+    assert by_symbol["CE:RELIANCE"]["side"] == "BUY"
+    assert by_symbol["CE:RELIANCE"]["upstox_order_id"] == "NORMAL-1"
+    plan = build_option_plan(legs)
+    kinds = {item["instrument"]: item["trade_type"] for item in plan["creates"]}
+    assert kinds["NIFTY"] == "STRADDLE"
+    assert kinds["RELIANCE"] == "UNCLASSIFIED"
+    assert plan["new_legs"] == 3
+    assert parsed["strategy_other_day"] == 0
+
+
+def test_strategy_fill_on_another_date_is_not_imported():
+    row = {
+        "trading_symbol": "NIFTY26DEC25350CE",
+        "instrument_token": "NSE_FO|63989",
+        "transaction_type": "SELL",
+        "quantity": 65,
+        "average_price": 508.4,
+        "order_id": "OLD-1",
+        "order_ref_id": "STG-1110260000001-0-0",
+        "order_timestamp": "2026-11-10 15:06:49",
+    }
+    parsed = parse_broker_rows([row], DAY_11, "upstox")
+    assert parsed["legs"] == []
+    assert parsed["strategy_other_day"] == 1
+
+
 def test_trade_date_accepts_iso_and_indian_day_first():
     assert parse_sync_date("2026-11-09") == DAY
     assert parse_sync_date("09/11/2026") == DAY
