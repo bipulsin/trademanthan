@@ -640,7 +640,12 @@ def build_option_plan(
     ignore_order_ids: Iterable[str] = (),
     ignore_fingerprints: Iterable[str] = (),
 ) -> Dict[str, Any]:
-    """Same grouping and orphan rule as the Upstox index sync."""
+    """Group like the Upstox index sync.
+
+    A custom-strategy group still becomes its own trade when the journal
+    already has that underlying and expiry. Fills with no strategy id stay
+    orphans in that case.
+    """
     known_ids = {str(item).strip() for item in existing_order_ids if str(item or "").strip()}
     known_fp = {str(item) for item in existing_fingerprints if item}
     ignore_ids = {str(item).strip() for item in ignore_order_ids if str(item or "").strip()}
@@ -667,7 +672,12 @@ def build_option_plan(
     orphan_legs: List[Dict[str, Any]] = []
     for group in group_new_legs(fresh):
         key = (group[0]["instrument"], group[0]["expiry"])
-        if key in known_trades:
+        strategy_ids = {str(leg.get("strategy_id") or "").strip() for leg in group}
+        shared_strategy = len(strategy_ids) == 1 and bool(next(iter(strategy_ids)))
+        # A custom strategy is its own trade. An older journal row for the same
+        # underlying and expiry must not turn that pair into orphans.
+        # A fill with no strategy id keeps the previous orphan rule.
+        if key in known_trades and not shared_strategy:
             orphan_legs.extend(group)
             continue
         entry = min(leg["entry_time"] for leg in group).astimezone(IST).date()
@@ -678,7 +688,8 @@ def build_option_plan(
             "entry_date": entry,
             "legs": group,
         })
-        known_trades.add(key)
+        if not shared_strategy:
+            known_trades.add(key)
     return {
         "new_legs": sum(len(item["legs"]) for item in creates),
         "new_trades": len(creates),

@@ -344,6 +344,51 @@ def test_upstox_trade_book_imports_strategy_fills_and_a_normal_option_fill():
     assert parsed["strategy_other_day"] == 0
 
 
+def test_strategy_pair_is_a_straddle_when_that_expiry_already_has_a_trade():
+    """Closed ladders on the same NIFTY expiry must not orphan a custom strategy."""
+    rows = [
+        {
+            "trading_symbol": "NIFTY26DEC25350PE",
+            "instrument_token": "NSE_FO|63990",
+            "transaction_type": "SELL",
+            "quantity": 65,
+            "average_price": 516.8,
+            "order_id": "261111000455709",
+            "order_ref_id": "STG-1111262875748-1-0",
+            "order_timestamp": "2026-11-11 15:06:49",
+        },
+        {
+            "trading_symbol": "NIFTY26DEC25350CE",
+            "instrument_token": "NSE_FO|63989",
+            "transaction_type": "SELL",
+            "quantity": 65,
+            "average_price": 508.4,
+            "order_id": "261111000455706",
+            "order_ref_id": "STG-1111262875748-0-0",
+            "order_timestamp": "2026-11-11 15:06:49",
+        },
+        {
+            "trading_symbol": "NIFTY26DEC24000CE",
+            "instrument_token": "NSE_FO|64001",
+            "transaction_type": "BUY",
+            "quantity": 65,
+            "average_price": 900,
+            "order_id": "PLAIN-1",
+            "order_timestamp": "2026-11-11 10:00:00",
+        },
+    ]
+    legs = parse_broker_rows(rows, DAY_11, "upstox")["legs"]
+    plan = build_option_plan(legs, existing_trades=[("NIFTY", EXPIRY_DEC)])
+    assert plan["new_trades"] == 1
+    assert plan["new_legs"] == 2
+    created = plan["creates"][0]
+    assert created["trade_type"] == "STRADDLE"
+    assert created["instrument"] == "NIFTY"
+    assert {leg["option_type"] for leg in created["legs"]} == {"CE", "PE"}
+    assert plan["orphans"] == 1
+    assert plan["orphan_legs"][0]["upstox_order_id"] == "PLAIN-1"
+
+
 def test_strategy_fill_on_another_date_is_not_imported():
     row = {
         "trading_symbol": "NIFTY26DEC25350CE",
