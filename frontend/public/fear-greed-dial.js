@@ -133,29 +133,6 @@
 </svg>`;
     }
 
-    function breakdownHtml(data) {
-        const inds = data.indicators || {};
-        const skipped = data.skipped || {};
-        const rows = Object.keys(inds)
-            .map((k) => {
-                const r = inds[k] || {};
-                return `<li><strong>${escapeHtml(k)}</strong>: ${
-                    r.normalized != null ? Math.round(r.normalized) : "—"
-                } <span class="fg-ind-note">${escapeHtml(r.note || "")}</span></li>`;
-            })
-            .join("");
-        const skipRows = Object.keys(skipped)
-            .map(
-                (k) =>
-                    `<li class="fg-skipped"><strong>${escapeHtml(k)}</strong>: ${escapeHtml(
-                        skipped[k]
-                    )}</li>`
-            )
-            .join("");
-        if (!rows && !skipRows) return "";
-        return `<details class="fg-breakdown"><summary>Indicator breakdown</summary><ul>${rows}${skipRows}</ul></details>`;
-    }
-
     function renderCard(host, data, opts, prevScore) {
         const size = opts.size || "medium";
         const instrument = (data && data.instrument) || opts.instrument || "";
@@ -192,6 +169,10 @@
             chartHtml = dialSvg(score, gid, prevScore);
         }
 
+        const title = instrument
+            ? "Fear / Greed (" + escapeHtml(instrument) + ")"
+            : "Fear / Greed";
+
         host.className =
             "sentiment-dial fear-greed-dial sentiment-dial--" +
             cls +
@@ -203,15 +184,13 @@
         host.setAttribute("role", "listitem");
         host.innerHTML = `
   <div class="sentiment-dial-head">
-    <span class="sentiment-dial-name">Fear / Greed</span>
-    <span class="sentiment-dial-src">${escapeHtml(instrument)}</span>
+    <span class="sentiment-dial-name">${title}</span>
   </div>
   <div class="sentiment-dial-chart">${chartHtml}</div>
   <div class="sentiment-dial-footer">
     <span class="sentiment-dial-pct fg-score">${footerMain}</span>
     <span class="sentiment-dial-meta">${footerMeta}</span>
   </div>
-  ${state === "ok" ? breakdownHtml(data) : ""}
 `;
 
         // Smooth needle to target after paint

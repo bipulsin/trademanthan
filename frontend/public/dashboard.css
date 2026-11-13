@@ -1585,7 +1585,25 @@ body[data-theme="dark"] .sentiment-dials-updated {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.75rem 1rem;
-    align-items: start;
+    align-items: stretch;
+}
+
+.market-sentiment-dials-grid .sentiment-dial {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.market-sentiment-dials-grid .sentiment-dial-chart {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.market-sentiment-dials-grid .sentiment-dial-footer {
+    margin-top: auto;
 }
 
 .sentiment-dials-scroll-hint {
@@ -1784,11 +1802,6 @@ body[data-theme="dark"] .sentiment-dial--vix-high .sentiment-dial-pct {
 }
 
 /* Fear & Greed dial (Market Sentiments + reusable embed) */
-.fear-greed-dial .sentiment-dial-src {
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
 .fear-greed-dial .fg-score {
     font-size: 1.35rem;
 }
@@ -1840,61 +1853,6 @@ body[data-theme="dark"] .sentiment-dial--fg-greed .sentiment-dial-pct {
 
 body[data-theme="dark"] .sentiment-dial--fg-extreme-greed .sentiment-dial-pct {
     color: #4ade80;
-}
-
-.fg-breakdown {
-    margin-top: 0.35rem;
-    text-align: left;
-    font-size: 0.65rem;
-    color: #64748b;
-    max-width: 220px;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-.fg-breakdown summary {
-    cursor: pointer;
-    text-align: center;
-    list-style: none;
-    color: #94a3b8;
-}
-
-.fg-breakdown summary::-webkit-details-marker {
-    display: none;
-}
-
-.fg-breakdown ul {
-    margin: 0.35rem 0 0;
-    padding: 0.35rem 0.5rem;
-    list-style: none;
-    background: rgba(148, 163, 184, 0.12);
-    border-radius: 8px;
-    max-height: 140px;
-    overflow: auto;
-}
-
-.fg-breakdown li {
-    margin: 0.2rem 0;
-    line-height: 1.25;
-}
-
-.fg-breakdown .fg-ind-note {
-    display: block;
-    font-weight: 400;
-    opacity: 0.85;
-}
-
-.fg-breakdown .fg-skipped {
-    opacity: 0.7;
-    font-style: italic;
-}
-
-body[data-theme="dark"] .fg-breakdown {
-    color: #94a3b8;
-}
-
-body[data-theme="dark"] .fg-breakdown ul {
-    background: rgba(15, 23, 42, 0.55);
 }
 
 .fear-greed-dial--loading,
