@@ -1783,6 +1783,126 @@ body[data-theme="dark"] .sentiment-dial--vix-high .sentiment-dial-pct {
     text-transform: lowercase;
 }
 
+/* Fear & Greed dial (Market Sentiments + reusable embed) */
+.fear-greed-dial .sentiment-dial-src {
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.fear-greed-dial .fg-score {
+    font-size: 1.35rem;
+}
+
+.fear-greed-dial--small .sentiment-dial-svg {
+    max-width: 140px;
+}
+
+.fear-greed-dial--small .fg-score {
+    font-size: 1.05rem;
+}
+
+.fear-greed-dial--large .sentiment-dial-svg {
+    max-width: 280px;
+}
+
+.fear-greed-dial--large .fg-score {
+    font-size: 1.7rem;
+}
+
+.sentiment-dial--fg-extreme-fear .sentiment-dial-pct,
+.sentiment-dial--fg-fear .sentiment-dial-pct {
+    color: #b91c1c;
+}
+
+.sentiment-dial--fg-fear .sentiment-dial-pct {
+    color: #c2410c;
+}
+
+.sentiment-dial--fg-greed .sentiment-dial-pct {
+    color: #16a34a;
+}
+
+.sentiment-dial--fg-extreme-greed .sentiment-dial-pct {
+    color: #15803d;
+}
+
+body[data-theme="dark"] .sentiment-dial--fg-extreme-fear .sentiment-dial-pct {
+    color: #f87171;
+}
+
+body[data-theme="dark"] .sentiment-dial--fg-fear .sentiment-dial-pct {
+    color: #fb923c;
+}
+
+body[data-theme="dark"] .sentiment-dial--fg-greed .sentiment-dial-pct {
+    color: #86efac;
+}
+
+body[data-theme="dark"] .sentiment-dial--fg-extreme-greed .sentiment-dial-pct {
+    color: #4ade80;
+}
+
+.fg-breakdown {
+    margin-top: 0.35rem;
+    text-align: left;
+    font-size: 0.65rem;
+    color: #64748b;
+    max-width: 220px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.fg-breakdown summary {
+    cursor: pointer;
+    text-align: center;
+    list-style: none;
+    color: #94a3b8;
+}
+
+.fg-breakdown summary::-webkit-details-marker {
+    display: none;
+}
+
+.fg-breakdown ul {
+    margin: 0.35rem 0 0;
+    padding: 0.35rem 0.5rem;
+    list-style: none;
+    background: rgba(148, 163, 184, 0.12);
+    border-radius: 8px;
+    max-height: 140px;
+    overflow: auto;
+}
+
+.fg-breakdown li {
+    margin: 0.2rem 0;
+    line-height: 1.25;
+}
+
+.fg-breakdown .fg-ind-note {
+    display: block;
+    font-weight: 400;
+    opacity: 0.85;
+}
+
+.fg-breakdown .fg-skipped {
+    opacity: 0.7;
+    font-style: italic;
+}
+
+body[data-theme="dark"] .fg-breakdown {
+    color: #94a3b8;
+}
+
+body[data-theme="dark"] .fg-breakdown ul {
+    background: rgba(15, 23, 42, 0.55);
+}
+
+.fear-greed-dial--loading,
+.fear-greed-dial--error,
+.fear-greed-dial--empty {
+    opacity: 0.85;
+}
+
 /* Top Gainers & Losers — Nifty sectors */
 .sector-movers-toolbar {
     display: flex;

@@ -6304,10 +6304,11 @@ async def get_index_prices():
 @router.get("/market-sentiment-dials")
 async def market_sentiment_dials(basis: str = Query("today")):
     """
-    NIFTY 50, BANKNIFTY, INDIA VIX dials.
-    basis=today => % from today's open (NIFTY/BANKNIFTY)
-    basis=yesterday => % from previous close (NIFTY/BANKNIFTY)
+    NIFTY 50 and INDIA VIX dials (BANKNIFTY removed from Market Sentiments).
+    basis=today => % from today's open (NIFTY)
+    basis=yesterday => % from previous close (NIFTY)
     INDIA VIX remains spot dial (basis not applied).
+    Fear/Greed is a separate endpoint: GET /api/fear-greed?instrument=NIFTY
     Uses Upstox quotes when available, else Yahoo Finance.
     """
     try:

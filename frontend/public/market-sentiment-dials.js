@@ -1,12 +1,17 @@
 /**
- * Market sentiment half-dials: NIFTY / BANKNIFTY (% vs open, tri-zone arc),
- * INDIA VIX (spot 0–35 scale). Fetches /scan/market-sentiment-dials.
+ * Market sentiment half-dials: Fear/Greed (NIFTY), NIFTY 50 (% vs open),
+ * INDIA VIX (spot 0–35 scale). Fetches /scan/market-sentiment-dials + FearGreedDial.
+ *
+ * Embed Fear/Greed alone on another page:
+ *   FearGreedDial.mount("#host", { instrument: "RELIANCE", size: "medium" });
  */
 (function () {
     const API = "/scan/market-sentiment-dials";
     const POLL_MS = 5 * 60 * 1000;
+    const FG_DEFAULT_INSTRUMENT = "NIFTY";
     let timer = null;
     let currentBasis = "yesterday";
+    let fgHandle = null;
 
     const CX = 100;
     const CY = 96;
@@ -165,6 +170,32 @@
 </svg>`;
     }
 
+    function ensureFearGreedHost(grid) {
+        let host = grid.querySelector('[data-id="feargreed"]');
+        if (!host && globalThis.FearGreedDial) {
+            host = FearGreedDial.createHost();
+            grid.insertBefore(host, grid.firstChild);
+        }
+        return host;
+    }
+
+    function mountFearGreed(grid) {
+        if (!globalThis.FearGreedDial) return;
+        const host = ensureFearGreedHost(grid);
+        if (!host) return;
+        if (fgHandle) {
+            try {
+                fgHandle.destroy();
+            } catch (_) {}
+            fgHandle = null;
+        }
+        fgHandle = FearGreedDial.mount(host, {
+            instrument: FG_DEFAULT_INSTRUMENT,
+            size: "medium",
+            autoRefresh: true,
+        });
+    }
+
     function render(indices, updatedAt, basis) {
         const grid = document.getElementById("marketSentimentDialsGrid");
         const elTime = document.getElementById("sentimentDialsUpdated");
@@ -183,7 +214,24 @@
             }
         }
 
-        grid.innerHTML = (indices || [])
+        // Preserve Fear/Greed host across re-renders of NIFTY / VIX cards.
+        const existingFg = grid.querySelector('[data-id="feargreed"]');
+        const fgKeep = existingFg || (globalThis.FearGreedDial ? FearGreedDial.createHost() : null);
+
+        const filtered = (indices || []).filter((row) => {
+            const id = String(row.id || "").toLowerCase();
+            return id !== "banknifty" && id !== "feargreed";
+        });
+
+        // Stable order: NIFTY 50 then India VIX (Fear/Greed prepended as host).
+        const order = { nifty50: 0, indiavix: 1 };
+        filtered.sort((a, b) => {
+            const ia = order[String(a.id || "").toLowerCase()];
+            const ib = order[String(b.id || "").toLowerCase()];
+            return (ia == null ? 99 : ia) - (ib == null ? 99 : ib);
+        });
+
+        const indexHtml = filtered
             .map((row) => {
                 const gid = String(row.id || "x").replace(/[^a-z0-9_-]/gi, "");
                 const mode = row.dial_mode || (row.id === "indiavix" ? "vix" : "pct");
@@ -217,7 +265,7 @@
                 }
 
                 return `
-<div class="sentiment-dial sentiment-dial--${cls}" data-id="${row.id || ""}">
+<div class="sentiment-dial sentiment-dial--${cls}" data-id="${row.id || ""}" role="listitem">
   <div class="sentiment-dial-head">
     <span class="sentiment-dial-name">${row.label || ""}</span>
   </div>
@@ -229,6 +277,14 @@
 </div>`;
             })
             .join("");
+
+        grid.innerHTML = "";
+        if (fgKeep) grid.appendChild(fgKeep);
+        grid.insertAdjacentHTML("beforeend", indexHtml);
+
+        if (!fgHandle && globalThis.FearGreedDial) {
+            mountFearGreed(grid);
+        }
     }
 
     async function fetchDials() {
@@ -271,6 +327,11 @@
         const root = document.getElementById("marketSentimentDials");
         if (!root) return;
 
+        const grid = document.getElementById("marketSentimentDialsGrid");
+        if (grid && globalThis.FearGreedDial) {
+            mountFearGreed(grid);
+        }
+
         fetchDials();
         startPolling();
 
@@ -278,7 +339,11 @@
         if (btn) {
             btn.addEventListener("click", () => {
                 btn.setAttribute("disabled", "disabled");
-                fetchDials().finally(() => btn.removeAttribute("disabled"));
+                const jobs = [fetchDials()];
+                if (fgHandle && typeof fgHandle.refresh === "function") {
+                    jobs.push(Promise.resolve(fgHandle.refresh()));
+                }
+                Promise.all(jobs).finally(() => btn.removeAttribute("disabled"));
             });
         }
 

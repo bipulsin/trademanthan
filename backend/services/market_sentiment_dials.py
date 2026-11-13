@@ -387,10 +387,11 @@ def _row_payload(
 
 def build_dial_rows(upstox_service, basis: str = "today") -> List[Dict[str, Any]]:
     """
-    Returns three rows: NIFTY 50, BANKNIFTY (intraday % vs open), INDIA VIX (spot level for 0–35 dial).
+    Returns NIFTY 50 (intraday % vs open/close) and INDIA VIX (spot 0–35 dial).
+
+    BANKNIFTY was removed from Market Sentiments in favour of the Fear/Greed dial.
     """
     nifty_key = upstox_service.NIFTY50_KEY
-    bank_key = upstox_service.BANKNIFTY_KEY
     vix_key = getattr(upstox_service, "INDIA_VIX_KEY", "NSE_INDEX|India VIX")
     basis_norm = str(basis or "today").strip().lower()
     if basis_norm not in ("today", "yesterday"):
@@ -405,14 +406,6 @@ def build_dial_rows(upstox_service, basis: str = "today") -> List[Dict[str, Any]
     else:
         u = _quote_from_upstox(upstox_service, nifty_key, basis=basis_norm) or yahoo_map.get("nifty50")
     r = _row_payload("nifty50", "NIFTY 50", u)
-    r["basis"] = basis_norm
-    rows.append(r)
-
-    if basis_norm == "yesterday":
-        u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm) or yahoo_map.get("banknifty")
-    else:
-        u = _quote_from_upstox(upstox_service, bank_key, basis=basis_norm) or yahoo_map.get("banknifty")
-    r = _row_payload("banknifty", "BANKNIFTY", u)
     r["basis"] = basis_norm
     rows.append(r)
 

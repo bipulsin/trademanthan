@@ -14,6 +14,7 @@ from backend.database import engine, SessionLocal, create_tables
 import backend.models as models
 import backend.routers.auth as auth
 import backend.routers.dashboard as dashboard
+import backend.routers.fear_greed as fear_greed
 import backend.routers.strategy as strategy
 import backend.routers.broker as broker
 import backend.routers.products as products
@@ -496,6 +497,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(dashboard.router)
+app.include_router(fear_greed.router)
+app.include_router(fear_greed.router, prefix="/api")
 app.include_router(strategy.router)
 app.include_router(broker.router)
 app.include_router(products.router)
