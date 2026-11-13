@@ -221,6 +221,41 @@ def _trim_trading_days(candles: List[Dict[str, Any]], n: int) -> List[Dict[str, 
     return candles[-n:]
 
 
+def _candle_day(c: Dict[str, Any]) -> str:
+    return str(c.get("timestamp") or "")[:10]
+
+
+def _merge_spot_with_fut_oi(
+    spot: Optional[List[Dict[str, Any]]],
+    fut: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """Use the longer price series; overlay futures OI/volume by calendar date."""
+    if spot and fut:
+        base = spot if len(spot) >= len(fut) else fut
+        if base is fut:
+            return list(base)
+        oi_by_day = {_candle_day(c): c for c in fut if _candle_day(c)}
+        merged: List[Dict[str, Any]] = []
+        for c in base:
+            row = dict(c)
+            f = oi_by_day.get(_candle_day(c))
+            if f:
+                oi = f.get("oi")
+                if oi is not None:
+                    row["oi"] = oi
+                # Prefer futures volume when spot volume is missing/zero
+                vol = f.get("volume")
+                if vol and not (row.get("volume") or 0):
+                    row["volume"] = vol
+            merged.append(row)
+        return merged
+    if spot:
+        return list(spot)
+    if fut:
+        return list(fut)
+    return []
+
+
 def get_fear_greed(
     instrument: str,
     *,
@@ -254,27 +289,31 @@ def get_fear_greed(
     resolved = resolve_instrument(name, ux)
     calendar_days = max(lookback_n + 40, int(lookback_n * 1.55))
 
-    primary_key = resolved.get("fut_key") or resolved.get("spot_key")
     spot_key = resolved.get("spot_key")
     fut_key = resolved.get("fut_key")
-
-    primary = _fetch_daily(ux, str(primary_key or ""), calendar_days)
-    primary = _trim_trading_days(primary, lookback_n)
-
+    # Prefer the longer history series for price/vol/momentum. Current-month
+    # futures often only have ~1–3 months of daily bars; index/equity spots
+    # usually cover a full year. OI still comes from futures when present.
     spot_candles: Optional[List[Dict[str, Any]]] = None
     fut_candles: Optional[List[Dict[str, Any]]] = None
-    if fut_key and spot_key and str(fut_key) != str(spot_key):
+
+    if spot_key:
         spot_candles = _trim_trading_days(
             _fetch_daily(ux, str(spot_key), calendar_days), lookback_n
         )
+    if fut_key and (not spot_key or str(fut_key) != str(spot_key)):
         fut_candles = _trim_trading_days(
             _fetch_daily(ux, str(fut_key), calendar_days), lookback_n
         )
-        # Prefer futures series (OI/volume) as primary when available
-        if fut_candles and len(fut_candles) >= 60:
-            primary = fut_candles
-    elif fut_key and not spot_key:
-        fut_candles = primary
+    elif fut_key and spot_key and str(fut_key) == str(spot_key):
+        fut_candles = spot_candles
+
+    primary = _merge_spot_with_fut_oi(spot_candles, fut_candles)
+    primary_key = (
+        str(spot_key)
+        if spot_candles and (not fut_candles or len(spot_candles) >= len(fut_candles))
+        else str(fut_key or spot_key or "")
+    )
 
     # Benchmark for relative strength (skip when instrument IS NIFTY)
     benchmark_candles: Optional[List[Dict[str, Any]]] = None
