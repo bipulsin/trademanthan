@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>EMA Scan - TradeWithCTO</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3" />
+  <script src="auth-check.js?v=1"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+  <link rel="stylesheet" href="settings.css?v=2" />
+  <link rel="stylesheet" href="left-menu.css?v=3.48" />
+  <link rel="stylesheet" href="theme.css?v=1.4" />
+  <link rel="stylesheet" href="ema-scan.css?v=1" />
+</head>
+<body class="ema-scan-page theme-page left-menu-web-hamburger" data-theme="dark">
+  <div class="mobile-title-bar">
+    <button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Menu"><i class="fas fa-bars"></i></button>
+    <div class="mobile-title-content">
+      <img src="tradewithcto-logo.png" alt="TradeWithCTO" class="mobile-logo" />
+      <h1 class="mobile-title">EMA Scan</h1>
+    </div>
+  </div>
+  <div class="app-container app-with-left-menu">
+    <div id="left-menu-container"></div>
+    <main class="right-panel main-content-area">
+      <div class="es-page">
+        <header class="es-head">
+          <div>
+            <h1 class="es-title"><i class="fas fa-wave-square" aria-hidden="true"></i> EMA Scan</h1>
+            <p class="es-sub" id="esRule">Bullish 5-minute EMA 30 reclaim on the front-month stock future.</p>
+          </div>
+          <div class="es-meta" id="esMeta">Loading study…</div>
+        </header>
+
+        <section class="es-params" id="esParams" aria-label="Parameters"></section>
+
+        <p class="es-status" id="esStatus" hidden></p>
+
+        <section class="es-cards" id="esCards" aria-label="Summary"></section>
+        <section class="es-hits" id="esHits" aria-label="ATR thresholds"></section>
+
+        <section class="es-block">
+          <h2>Distribution of max favorable move</h2>
+          <div class="es-chart" id="esChart" role="img" aria-label="Histogram of maximum favorable excursion in ATR"></div>
+        </section>
+
+        <section class="es-block">
+          <h2>Breakdowns</h2>
+          <div class="es-break-grid">
+            <div>
+              <h3>Trigger candle</h3>
+              <div class="es-table-wrap" id="esByCandle"></div>
+            </div>
+            <div>
+              <h3>ADX</h3>
+              <div class="es-table-wrap" id="esByAdx"></div>
+            </div>
+            <div>
+              <h3>Distance above EMA 30</h3>
+              <div class="es-table-wrap" id="esByDist"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="es-block">
+          <h2>Day by day</h2>
+          <div id="esDays"></div>
+        </section>
+
+        <section class="es-block">
+          <div class="es-section-head">
+            <h2>All signals</h2>
+            <div class="es-filters">
+              <label>Symbol <input type="search" id="esSymbol" placeholder="Filter" autocomplete="off" /></label>
+              <label>Date <select id="esDate"><option value="">All dates</option></select></label>
+            </div>
+          </div>
+          <p class="es-hint" id="esTableHint"></p>
+          <div class="es-table-wrap es-records-wrap">
+            <table class="es-table" id="esTable">
+              <thead>
+                <tr>
+                  <th data-sort="date">Date</th>
+                  <th data-sort="symbol">Symbol</th>
+                  <th data-sort="contract">Contract</th>
+                  <th data-sort="candle_number">Candle</th>
+                  <th data-sort="time">Time</th>
+                  <th data-sort="open" class="num">Open</th>
+                  <th data-sort="close" class="num">Close</th>
+                  <th data-sort="ema30" class="num">EMA 30</th>
+                  <th data-sort="pct_above_ema" class="num">% above EMA</th>
+                  <th data-sort="adx" class="num">ADX</th>
+                  <th data-sort="plus_di" class="num">+DI</th>
+                  <th data-sort="minus_di" class="num">−DI</th>
+                  <th data-sort="atr" class="num">ATR</th>
+                  <th data-sort="entry" class="num">Entry</th>
+                  <th data-sort="max_favorable_atr" class="num">Max +ATR</th>
+                  <th data-sort="max_adverse_atr" class="num">Max −ATR</th>
+                  <th data-sort="close_at_2h_atr" class="num">Close 2h ATR</th>
+                  <th data-sort="time_to_max_favorable" class="num">Mins to max</th>
+                  <th data-sort="first_touch">First touch</th>
+                </tr>
+              </thead>
+              <tbody id="esTbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="es-block">
+          <details class="es-skipped" id="esSkipped">
+            <summary>Skipped</summary>
+            <div class="es-filters">
+              <label>Symbol <input type="search" id="esSkipSymbol" placeholder="Filter" autocomplete="off" /></label>
+            </div>
+            <div class="es-table-wrap">
+              <table class="es-table">
+                <thead>
+                  <tr><th>Date</th><th>Symbol</th><th>Contract</th><th>Reason</th></tr>
+                </thead>
+                <tbody id="esSkipBody"></tbody>
+              </table>
+            </div>
+          </details>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="left-menu.js?v=3.56"></script>
+  <script src="ema-scan.js?v=2"></script>
+</body>
+</html>
