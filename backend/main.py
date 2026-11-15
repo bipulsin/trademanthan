@@ -53,6 +53,7 @@ import backend.routers.relative_strength as relative_strength
 import backend.routers.daily_checklist as daily_checklist
 import backend.routers.future_screener as future_screener
 import backend.routers.ema_scan as ema_scan
+import backend.routers.big_move as big_move
 import backend.routers.garuda_screener as garuda_screener
 import backend.routers.garuda_export as garuda_export
 import backend.routers.rs_confidence_divergence as rs_confidence_divergence
@@ -563,6 +564,7 @@ app.include_router(daily_checklist.router, prefix="/scan")
 app.include_router(future_screener.router)
 app.include_router(future_screener.router, prefix="/scan")
 app.include_router(ema_scan.router)
+app.include_router(big_move.router)
 app.include_router(garuda_screener.router)
 app.include_router(garuda_screener.router, prefix="/scan")
 app.include_router(garuda_export.router)
