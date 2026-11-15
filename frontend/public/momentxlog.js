@@ -110,28 +110,49 @@
     );
   }
 
+  function sortValAttr(v) {
+    return ' data-sort-val="' + esc(v == null ? "" : v) + '"';
+  }
+
+  function isoSortKey(iso) {
+    if (!iso) return "";
+    try {
+      var d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
+      return String(d.getTime());
+    } catch (e) {
+      return "";
+    }
+  }
+
   function rowHtml(r) {
     var name = r.future_symbol || r.stock || "—";
     var traded = !!r.traded_at;
     var side = String(r.side || "bullish").toLowerCase() === "bearish" ? "bearish" : "bullish";
     var sideCls = side === "bearish" ? "mx-log-side-bearish" : "mx-log-side-bullish";
     var sideLabel = side === "bearish" ? "Bearish" : "Bullish";
+    var pnlShown = traded || r.pnl != null;
     return (
       "<tr data-id=\"" + esc(r.id) + "\" class=\"mx-bt-row-" + side + "\">" +
-      "<td><button type=\"button\" class=\"mx-sym-link\" data-act=\"chart\" " +
+      "<td" + sortValAttr(name) + "><button type=\"button\" class=\"mx-sym-link\" data-act=\"chart\" " +
         "data-ik=\"" + esc(r.future_instrument_key || "") + "\" " +
         "data-sym=\"" + esc(name) + "\">" + esc(name) + "</button>" +
         sectorBadgeHtml(r) + "</td>" +
-      "<td class=\"" + sideCls + "\">" + esc(sideLabel) + "</td>" +
-      "<td>" + esc(fmtHm(r.filtered_at)) + "</td>" +
-      "<td>" + esc(fmtHm(r.first_active_at)) + "</td>" +
-      "<td>" + esc(fmtNum(r.first_active_ltp)) + "</td>" +
-      "<td>" + esc(fmtHm(r.last_active_at)) + "</td>" +
-      "<td>" + (traded ? esc(fmtHm(r.traded_at)) : "") + "</td>" +
-      "<td>" + (traded ? esc(fmtNum(r.entry_price)) : "") + "</td>" +
-      "<td>" + (traded ? esc(fmtNum(r.exit_price)) : "") + "</td>" +
-      "<td class=\"" + (r.pnl != null ? (Number(r.pnl) >= 0 ? "mx-pnl-pos" : "mx-pnl-neg") : "") + "\">" +
-        (traded || r.pnl != null ? esc(fmtNum(r.pnl)) : "") + "</td>" +
+      "<td class=\"" + sideCls + "\"" + sortValAttr(sideLabel) + ">" + esc(sideLabel) + "</td>" +
+      "<td" + sortValAttr(isoSortKey(r.filtered_at)) + ">" + esc(fmtHm(r.filtered_at)) + "</td>" +
+      "<td" + sortValAttr(isoSortKey(r.first_active_at)) + ">" + esc(fmtHm(r.first_active_at)) + "</td>" +
+      "<td" + sortValAttr(r.first_active_ltp != null ? r.first_active_ltp : "") + ">" +
+        esc(fmtNum(r.first_active_ltp)) + "</td>" +
+      "<td" + sortValAttr(isoSortKey(r.last_active_at)) + ">" + esc(fmtHm(r.last_active_at)) + "</td>" +
+      "<td" + sortValAttr(traded ? isoSortKey(r.traded_at) : "") + ">" +
+        (traded ? esc(fmtHm(r.traded_at)) : "") + "</td>" +
+      "<td" + sortValAttr(traded && r.entry_price != null ? r.entry_price : "") + ">" +
+        (traded ? esc(fmtNum(r.entry_price)) : "") + "</td>" +
+      "<td" + sortValAttr(traded && r.exit_price != null ? r.exit_price : "") + ">" +
+        (traded ? esc(fmtNum(r.exit_price)) : "") + "</td>" +
+      "<td class=\"" + (r.pnl != null ? (Number(r.pnl) >= 0 ? "mx-pnl-pos" : "mx-pnl-neg") : "") + "\"" +
+        sortValAttr(pnlShown && r.pnl != null ? r.pnl : "") + ">" +
+        (pnlShown ? esc(fmtNum(r.pnl)) : "") + "</td>" +
       "<td><button type=\"button\" class=\"mx-icon-btn\" data-act=\"edit\" title=\"Edit\" " +
         "data-id=\"" + esc(r.id) + "\" " +
         "data-entry-price=\"" + esc(r.entry_price != null ? r.entry_price : "") + "\" " +
@@ -140,6 +161,14 @@
         "data-exit-time=\"" + esc(r.exit_time || "") + "\">" +
         "<i class=\"fas fa-pencil-alt\"></i></button></td>" +
       "</tr>"
+    );
+  }
+
+  function sortTh(key, type, label) {
+    return (
+      '<th class="mx-log-sortable" data-sort="' + key + '" data-type="' + type + '" ' +
+      'role="button" tabindex="0" title="Sort by ' + esc(label) + '">' +
+      esc(label) + "</th>"
     );
   }
 
@@ -155,12 +184,80 @@
       "</header>" +
       '<div class="mx-log-table-wrap"><table class="mx-log-table">' +
       "<thead><tr>" +
-      "<th>Future</th><th>Side</th><th>Filtered</th><th>1st Activ</th><th>1st Activ LTP</th>" +
-      "<th>Last Activ</th><th>Traded</th><th>Entry</th><th>Exit</th><th>PnL</th><th></th>" +
+      sortTh("future", "text", "Future") +
+      sortTh("side", "text", "Side") +
+      sortTh("filtered", "time", "Filtered") +
+      sortTh("first_active", "time", "1st Activ") +
+      sortTh("first_active_ltp", "num", "1st Activ LTP") +
+      sortTh("last_active", "time", "Last Activ") +
+      sortTh("traded", "time", "Traded") +
+      sortTh("entry", "num", "Entry") +
+      sortTh("exit", "num", "Exit") +
+      sortTh("pnl", "num", "PnL") +
+      "<th></th>" +
       "</tr></thead><tbody>" +
       (g.rows || []).map(rowHtml).join("") +
       "</tbody></table></div></section>"
     );
+  }
+
+  function cellSortRaw(td) {
+    if (!td) return "";
+    var v = td.getAttribute("data-sort-val");
+    return v == null ? "" : String(v);
+  }
+
+  function compareSortValues(a, b, type, dir) {
+    var emptyA = a === "";
+    var emptyB = b === "";
+    if (emptyA && emptyB) return 0;
+    if (emptyA) return 1;
+    if (emptyB) return -1;
+    var cmp = 0;
+    if (type === "num" || type === "time") {
+      var na = Number(a);
+      var nb = Number(b);
+      if (!Number.isNaN(na) && !Number.isNaN(nb)) cmp = na < nb ? -1 : na > nb ? 1 : 0;
+      else cmp = a < b ? -1 : a > b ? 1 : 0;
+    } else {
+      cmp = a.localeCompare(b, undefined, { sensitivity: "base" });
+    }
+    return cmp * dir;
+  }
+
+  function sortLogTable(th) {
+    var table = th.closest("table.mx-log-table");
+    if (!table) return;
+    var tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    var key = th.getAttribute("data-sort");
+    var type = th.getAttribute("data-type") || "text";
+    var colIdx = Array.prototype.indexOf.call(th.parentNode.children, th);
+    if (colIdx < 0) return;
+
+    var prevKey = table.getAttribute("data-sort-key");
+    var prevDir = table.getAttribute("data-sort-dir") === "desc" ? -1 : 1;
+    var dir = prevKey === key ? -prevDir : 1;
+    table.setAttribute("data-sort-key", key);
+    table.setAttribute("data-sort-dir", dir > 0 ? "asc" : "desc");
+
+    table.querySelectorAll("th.mx-log-sortable").forEach(function (h) {
+      h.classList.remove("sort-asc", "sort-desc");
+      h.removeAttribute("aria-sort");
+    });
+    th.classList.add(dir > 0 ? "sort-asc" : "sort-desc");
+    th.setAttribute("aria-sort", dir > 0 ? "ascending" : "descending");
+
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll("tr"));
+    rows.sort(function (ra, rb) {
+      return compareSortValues(
+        cellSortRaw(ra.children[colIdx]),
+        cellSortRaw(rb.children[colIdx]),
+        type,
+        dir
+      );
+    });
+    rows.forEach(function (row) { tbody.appendChild(row); });
   }
 
   function render(data) {
@@ -269,6 +366,11 @@
       if (ev.target === $("mxLogEditModal")) closeEdit();
     });
     $("mxLogRoot").addEventListener("click", function (ev) {
+      var sortThEl = ev.target.closest("th.mx-log-sortable");
+      if (sortThEl) {
+        sortLogTable(sortThEl);
+        return;
+      }
       var editBtn = ev.target.closest("[data-act='edit']");
       if (editBtn) {
         openEdit(editBtn);
@@ -281,6 +383,13 @@
           displaySymbol: chartBtn.getAttribute("data-sym"),
         });
       }
+    });
+    $("mxLogRoot").addEventListener("keydown", function (ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      var sortThEl = ev.target.closest("th.mx-log-sortable");
+      if (!sortThEl) return;
+      ev.preventDefault();
+      sortLogTable(sortThEl);
     });
   }
 

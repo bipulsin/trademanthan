@@ -675,6 +675,25 @@ body.momentx-page .mobile-logo { height: 28px; width: auto; }
   background: rgba(255, 255, 255, 0.03);
 }
 
+.mx-log-table th.mx-log-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.mx-log-table th.mx-log-sortable:hover {
+  color: var(--text);
+}
+
+.mx-log-table th.mx-log-sortable.sort-asc::after,
+.mx-log-table th.mx-log-sortable.sort-desc::after {
+  font-size: 0.75em;
+  color: var(--accent);
+  margin-left: 4px;
+}
+
+.mx-log-table th.mx-log-sortable.sort-asc::after { content: " ▲"; }
+.mx-log-table th.mx-log-sortable.sort-desc::after { content: " ▼"; }
+
 .mx-pnl-pos { color: #86efac; }
 .mx-pnl-neg { color: #fca5a5; }
 
