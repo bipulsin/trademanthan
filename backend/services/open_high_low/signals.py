@@ -57,13 +57,15 @@ def detect_setup(
     if vwap is None:
         return None
 
+    # Gate 1: first candle extreme vs previous day H/L (not close-only),
+    # so a wick through PDH/PDL still qualifies if other gates pass.
     bullish = (
-        first.close > prev_high
+        first.high > prev_high
         and first.close > vwap
         and second.close > first.high
     )
     bearish = (
-        first.close < prev_low
+        first.low < prev_low
         and first.close < vwap
         and first.close < first.open  # red
         and second.close < first.low

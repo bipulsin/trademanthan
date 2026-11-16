@@ -54,7 +54,7 @@ def test_vwap_first_candle():
 
 
 def test_bullish_signal_and_open_eq_extreme():
-    # prev high 100; first close 101 > 100 and > vwap; second close > first high
+    # prev high 100; first high 101.5 > 100 and close > vwap; second close > first high
     first = _bar(9, 15, 99, 101.5, 99, 101, vol=1000)  # open==low → YES
     second = _bar(9, 20, 101.5, 103, 101, 102.5, vol=1000)
     third = _bar(9, 25, 102.5, 104, 102, 103, vol=1000)
@@ -66,11 +66,43 @@ def test_bullish_signal_and_open_eq_extreme():
     assert open_eq_extreme_flag("BULLISH", first) == "YES"
 
 
+def test_bullish_gate_uses_high_not_only_close():
+    # high > PDH but close <= PDH; still bullish if VWAP + 2nd-candle confirm pass
+    # VWAP typical = (101.5+99+99.5)/3 ≈ 100.0; close 99.5 < PDH 100 but > VWAP? need close > vwap
+    # Use high=100.5 > PDH=100, close=99.8 > vwap≈(100.5+99+99.8)/3=99.766..., second closes above first.high
+    first = _bar(9, 15, 99, 100.5, 99, 99.8, vol=1000)  # open==low → YES; close <= PDH
+    second = _bar(9, 20, 100.5, 102, 100, 101.5, vol=1000)
+    third = _bar(9, 25, 101.5, 103, 101, 102, vol=1000)
+    bars = [first, second, third]
+    assert first.close <= 100.0
+    assert first.high > 100.0
+    setup = detect_setup(bars, SESSION, prev_high=100.0, prev_low=95.0)
+    assert setup is not None
+    assert setup.side == "BULLISH"
+    assert setup.open_eq_extreme == "YES"
+
+
 def test_bearish_signal_and_open_eq_high():
     first = _bar(9, 15, 100, 100, 97, 98, vol=1000)  # red, open==high → YES
     second = _bar(9, 20, 98, 98.5, 96, 96.5, vol=1000)  # close < first.low
     third = _bar(9, 25, 96.5, 97, 95, 95.5, vol=1000)
     bars = [first, second, third]
+    setup = detect_setup(bars, SESSION, prev_high=105.0, prev_low=99.0)
+    assert setup is not None
+    assert setup.side == "BEARISH"
+    assert setup.open_eq_extreme == "YES"
+
+
+def test_bearish_gate_uses_low_not_only_close():
+    # low < PDL but close >= PDL; still bearish if VWAP + red + 2nd-candle confirm pass
+    # PDL=99; low=98.5 < 99, close=99.2 >= 99; red (close < open); close < vwap
+    # VWAP typical = (100+98.5+99.2)/3 ≈ 99.233; close 99.2 < vwap
+    first = _bar(9, 15, 100, 100, 98.5, 99.2, vol=1000)  # open==high → YES
+    second = _bar(9, 20, 99, 99.2, 97.5, 98.0, vol=1000)  # close < first.low
+    third = _bar(9, 25, 98, 98.5, 97, 97.5, vol=1000)
+    bars = [first, second, third]
+    assert first.close >= 99.0
+    assert first.low < 99.0
     setup = detect_setup(bars, SESSION, prev_high=105.0, prev_low=99.0)
     assert setup is not None
     assert setup.side == "BEARISH"
