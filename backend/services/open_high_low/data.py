@@ -551,6 +551,33 @@ def daily_hl_for(
     return None
 
 
+def daily_atr_asof(
+    daily_bars: Sequence[Bar],
+    session: date,
+    *,
+    period: int = 14,
+    holidays: Optional[Set[date]] = None,
+) -> Optional[float]:
+    """Daily ATR(period) as of the previous session's close on this contract.
+
+    Uses bars with ``session_date <= previous_trading_day(session)``, sorted
+    ascending. Returns None when history is insufficient for Wilder ATR.
+    """
+    from backend.services.open_high_low.indicators import wilder_atr
+
+    prev = previous_trading_day(session, holidays)
+    hist = [b for b in daily_bars if b.session_date <= prev]
+    hist.sort(key=lambda b: b.ts)
+    if len(hist) < period + 1:
+        return None
+    return wilder_atr(
+        [b.high for b in hist],
+        [b.low for b in hist],
+        [b.close for b in hist],
+        period=period,
+    )
+
+
 def resolve_lot(resolved: Dict[str, Any], fallback: int = LOT_SIZE_FALLBACK) -> int:
     try:
         n = int(resolved.get("lot_size") or 0)

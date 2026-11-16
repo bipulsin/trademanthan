@@ -25,6 +25,8 @@ SESSION_CLOSE = time(15, 30)
 TICK_EPS = 1e-6  # float-safe tick equality for open_eq_extreme
 
 
+ATR_PERIOD = 14
+
 TRADE_FIELDS: List[str] = [
     "date",
     "symbol",
@@ -42,6 +44,7 @@ TRADE_FIELDS: List[str] = [
     "second_close",
     "entry_time",
     "entry_price",
+    "atr",
     "initial_sl",
     "exit_time",
     "exit_price",

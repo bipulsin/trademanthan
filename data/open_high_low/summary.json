@@ -4,8 +4,8 @@
   "skips": 0,
   "stocks_scanned": 145,
   "trading_days": 18,
-  "win_rate": 38.52813852813853,
-  "net_pnl": -480683.25000000076,
+  "win_rate": 37.66233766233766,
+  "net_pnl": -482395.75000000076,
   "csv": "/home/ubuntu/trademanthan/data/open_high_low/trades.csv",
   "html": "/home/ubuntu/trademanthan/data/open_high_low/report.html",
   "public": "/app/frontend/public/open-high-low.html",
@@ -19,23 +19,25 @@
     "lot_fallback": 1,
     "stocks_scanned": 145,
     "trading_days": 18,
-    "note": "Lot size from Upstox expired-future contract when available; else fallback."
+    "note": "ATR-step trailing SL from daily ATR(14) as of prior session close; initial SL = first-candle extreme; lot size from Upstox when available.",
+    "sl_mode": "atr_step_trail",
+    "atr_period": 14
   },
   "summary": {
     "trades": 231,
-    "wins": 89,
-    "losses": 142,
-    "win_rate": 38.52813852813853,
-    "net_pnl": -480683.25000000076,
-    "points_pnl": -919.960000000001,
-    "avg_r": -0.16415667557411243,
-    "max_drawdown": -521298.25000000047,
+    "wins": 87,
+    "losses": 144,
+    "win_rate": 37.66233766233766,
+    "net_pnl": -482395.75000000076,
+    "points_pnl": -933.460000000001,
+    "avg_r": -0.16462168553487766,
+    "max_drawdown": -523010.75000000047,
     "by_side": {
       "BULLISH": {
         "trades": 112,
-        "wins": 61,
-        "win_rate": 54.46428571428571,
-        "net_pnl": 152729.50000000003
+        "wins": 59,
+        "win_rate": 52.67857142857143,
+        "net_pnl": 151017.00000000003
       },
       "BEARISH": {
         "trades": 119,
@@ -45,8 +47,9 @@
       }
     },
     "by_exit": {
-      "EOD": 136,
-      "SL": 95
+      "EOD": 134,
+      "SL": 95,
+      "Trailing SL": 2
     },
     "by_weekday": {
       "Wednesday": 43,
@@ -70,8 +73,8 @@
       "2026-11-05": 47962.74999999996,
       "2026-11-06": -161181.99999999997,
       "2026-11-09": 11905.000000000215,
-      "2026-11-11": -40934.99999999973,
-      "2026-11-12": 1401.9999999999873,
+      "2026-11-11": -41022.49999999973,
+      "2026-11-12": -223.00000000001273,
       "2026-11-13": -42457.49999999993,
       "2026-11-16": 15032.699999999995
     },
@@ -151,29 +154,29 @@
         "pnl": -22625.00000000003
       },
       {
-        "symbol": "TATACONSUM",
-        "pnl": -21257.50000000005
+        "symbol": "POLYCAB",
+        "pnl": -21937.5
       },
       {
-        "symbol": "POLYCAB",
-        "pnl": -20312.5
+        "symbol": "TATACONSUM",
+        "pnl": -21257.50000000005
       }
     ],
     "flag_comparison": {
       "YES": {
         "all": {
           "trades": 76,
-          "wins": 24,
-          "win_rate": 31.57894736842105,
-          "net_pnl": -302903.25000000105,
-          "avg_r": -0.3433630195781891
+          "wins": 23,
+          "win_rate": 30.263157894736842,
+          "net_pnl": -302990.75000000105,
+          "avg_r": -0.3434400564326203
         },
         "BULLISH": {
           "trades": 19,
-          "wins": 13,
-          "win_rate": 68.42105263157895,
-          "net_pnl": 25807.749999999753,
-          "avg_r": 0.2967919237203491
+          "wins": 12,
+          "win_rate": 63.1578947368421,
+          "net_pnl": 25720.249999999753,
+          "avg_r": 0.29648377630262446
         },
         "BEARISH": {
           "trades": 57,
@@ -186,17 +189,17 @@
       "NO": {
         "all": {
           "trades": 155,
-          "wins": 65,
-          "win_rate": 41.935483870967744,
-          "net_pnl": -177779.9999999997,
-          "avg_r": -0.076287758514049
+          "wins": 64,
+          "win_rate": 41.29032258064516,
+          "net_pnl": -179404.9999999997,
+          "avg_r": -0.07694300044953287
         },
         "BULLISH": {
           "trades": 93,
-          "wins": 48,
-          "win_rate": 51.61290322580645,
-          "net_pnl": 126921.75000000028,
-          "avg_r": 0.16308522334093825
+          "wins": 47,
+          "win_rate": 50.53763440860215,
+          "net_pnl": 125296.75000000028,
+          "avg_r": 0.16199315344846513
         },
         "BEARISH": {
           "trades": 62,

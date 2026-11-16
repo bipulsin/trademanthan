@@ -7,8 +7,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from backend.services.open_high_low.config import OHLConfig
+from backend.services.open_high_low.config import ATR_PERIOD, OHLConfig
 from backend.services.open_high_low.data import (
+    daily_atr_asof,
     daily_hl_for,
     data_dir,
     fetch_contract_bars,
@@ -96,14 +97,15 @@ def run_backtest(
                 continue
             lot = resolve_lot(resolved, cfg.lot_fallback)
             # Fetch 5m + daily covering prev-day through end for this contract.
-            # Expand a few days before expiry window for prev-day daily bars.
-            c_start = fetch_start - timedelta(days=5)
+            # Warm daily history for ATR(14) (~1 month calendar lookback).
+            c_start_5m = fetch_start - timedelta(days=5)
+            c_start_day = fetch_start - timedelta(days=45)
             c_end = fetch_end
             bars_5m = fetch_contract_bars(
-                upstox, key, c_start, c_end, "5m", use_cache=cfg.use_cache
+                upstox, key, c_start_5m, c_end, "5m", use_cache=cfg.use_cache
             )
             bars_day = fetch_contract_bars(
-                upstox, key, c_start, c_end, "day", use_cache=cfg.use_cache
+                upstox, key, c_start_day, c_end, "day", use_cache=cfg.use_cache
             )
             contracts[exp] = {
                 "instrument_key": key,
@@ -145,6 +147,12 @@ def run_backtest(
             if setup is None:
                 continue
 
+            atr = daily_atr_asof(
+                cinfo["bars_day"],
+                session,
+                period=ATR_PERIOD,
+                holidays=holidays,
+            )
             trade = simulate_trade(
                 setup,
                 cinfo["bars_5m"],
@@ -153,6 +161,7 @@ def run_backtest(
                 expiry=exp,
                 lot_size=int(cinfo["lot_size"]),
                 cfg=cfg,
+                atr=atr,
             )
             trades.append(trade)
 
@@ -170,7 +179,12 @@ def run_backtest(
         "lot_fallback": cfg.lot_fallback,
         "stocks_scanned": len(universe),
         "trading_days": len(days),
-        "note": "Lot size from Upstox expired-future contract when available; else fallback.",
+        "note": (
+            "ATR-step trailing SL from daily ATR(14) as of prior session close; "
+            "initial SL = first-candle extreme; lot size from Upstox when available."
+        ),
+        "sl_mode": "atr_step_trail",
+        "atr_period": ATR_PERIOD,
     }
 
     csv_path = write_trades_csv(trades, out / "trades.csv")

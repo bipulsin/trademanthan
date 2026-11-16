@@ -115,7 +115,7 @@ tr.loss td.pnl { color:var(--loss); }
 <body>
 <div class="wrap">
   <h1>OpenHighLow Intraday Backtest</h1>
-  <p class="lede" id="lede">Front-month stock futures · previous-day H/L break + VWAP · fixed first-candle SL · EOD square-off</p>
+  <p class="lede" id="lede">Front-month stock futures · previous-day H/L break + VWAP · ATR-step trailing SL · EOD square-off</p>
 
   <div class="kpis" id="kpis"></div>
 
@@ -180,6 +180,7 @@ function renderKpis(){
   const meta = DATA.meta || {};
   document.getElementById("lede").textContent =
     `Period ${meta.start||"?"} → ${meta.end||"?"} · ${meta.stocks_scanned||"?"} stocks · ` +
+    `ATR-step trailing SL (daily ATR${meta.atr_period||14} prior close) · ` +
     `square-off ${meta.square_off||"15:15"} · lot fallback ${meta.lot_fallback||1}`;
   const items = [
     ["Trades", s.trades],
