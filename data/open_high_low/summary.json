@@ -1,0 +1,214 @@
+{
+  "ok": true,
+  "trades": 196,
+  "skips": 0,
+  "stocks_scanned": 145,
+  "trading_days": 18,
+  "win_rate": 36.224489795918366,
+  "net_pnl": 44768.75000000018,
+  "csv": "/home/ubuntu/trademanthan/data/open_high_low/trades.csv",
+  "html": "/home/ubuntu/trademanthan/data/open_high_low/report.html",
+  "public": "/app/frontend/public/open-high-low.html",
+  "downloads": null,
+  "meta": {
+    "start": "2026-10-20",
+    "end": "2026-11-16",
+    "square_off": "15:15",
+    "brokerage_per_lot": 0.0,
+    "slippage_points": 0.0,
+    "lot_fallback": 1,
+    "stocks_scanned": 145,
+    "trading_days": 18,
+    "note": "Lot size from Upstox expired-future contract when available; else fallback."
+  },
+  "summary": {
+    "trades": 196,
+    "wins": 71,
+    "losses": 125,
+    "win_rate": 36.224489795918366,
+    "net_pnl": 44768.75000000018,
+    "points_pnl": 642.3600000000004,
+    "avg_r": 0.012719123784228471,
+    "max_drawdown": -135400.7500000002,
+    "by_side": {
+      "BULLISH": {
+        "trades": 95,
+        "wins": 47,
+        "win_rate": 49.473684210526315,
+        "net_pnl": 141623.00000000038
+      },
+      "BEARISH": {
+        "trades": 101,
+        "wins": 24,
+        "win_rate": 23.762376237623762,
+        "net_pnl": -96854.25000000019
+      }
+    },
+    "by_exit": {
+      "Trailing SL": 196
+    },
+    "by_weekday": {
+      "Wednesday": 34,
+      "Thursday": 66,
+      "Friday": 37,
+      "Monday": 34,
+      "Tuesday": 25
+    },
+    "daily_pnl": {
+      "2026-10-21": -7670.000000000021,
+      "2026-10-22": -127730.7500000002,
+      "2026-10-23": 61279.99999999993,
+      "2026-10-26": -45487.50000000009,
+      "2026-10-27": 15225.750000000062,
+      "2026-10-28": -207.24999999993452,
+      "2026-10-29": 2664.999999999941,
+      "2026-10-30": -15025.75000000003,
+      "2026-11-02": 3062.000000000031,
+      "2026-11-03": 32132.49999999999,
+      "2026-11-04": 10810.00000000001,
+      "2026-11-05": 18981.999999999964,
+      "2026-11-06": 5525.249999999891,
+      "2026-11-09": 7456.250000000315,
+      "2026-11-11": 48451.75000000023,
+      "2026-11-12": 28909.999999999978,
+      "2026-11-13": 2452.500000000134,
+      "2026-11-16": 3936.9999999999777
+    },
+    "top10": [
+      {
+        "symbol": "POLYCAB",
+        "pnl": 22750.0
+      },
+      {
+        "symbol": "LAURUSLABS",
+        "pnl": 20357.500000000036
+      },
+      {
+        "symbol": "CDSL",
+        "pnl": 14629.999999999978
+      },
+      {
+        "symbol": "APOLLOHOSP",
+        "pnl": 14125.0
+      },
+      {
+        "symbol": "M&M",
+        "pnl": 13459.999999999945
+      },
+      {
+        "symbol": "WAAREEENER",
+        "pnl": 13352.500000000031
+      },
+      {
+        "symbol": "KALYANKJIL",
+        "pnl": 12622.500000000186
+      },
+      {
+        "symbol": "DIVISLAB",
+        "pnl": 12100.0
+      },
+      {
+        "symbol": "GODREJPROP",
+        "pnl": 11050.0
+      },
+      {
+        "symbol": "BHEL",
+        "pnl": 10237.499999999942
+      }
+    ],
+    "bottom10": [
+      {
+        "symbol": "ADANIENSOL",
+        "pnl": -11002.499999999969
+      },
+      {
+        "symbol": "JINDALSTEL",
+        "pnl": -8062.499999999985
+      },
+      {
+        "symbol": "ADANIPOWER",
+        "pnl": -8022.999999999967
+      },
+      {
+        "symbol": "ABCAPITAL",
+        "pnl": -7672.500000000071
+      },
+      {
+        "symbol": "HINDALCO",
+        "pnl": -7385.000000000047
+      },
+      {
+        "symbol": "BAJAJ-AUTO",
+        "pnl": -7350.0
+      },
+      {
+        "symbol": "MOTILALOFS",
+        "pnl": -7323.7500000000355
+      },
+      {
+        "symbol": "TATACONSUM",
+        "pnl": -7205.000000000013
+      },
+      {
+        "symbol": "SBIN",
+        "pnl": -6712.500000000035
+      },
+      {
+        "symbol": "IDEA",
+        "pnl": -6432.749999999991
+      }
+    ],
+    "flag_comparison": {
+      "YES": {
+        "all": {
+          "trades": 64,
+          "wins": 17,
+          "win_rate": 26.5625,
+          "net_pnl": -33639.00000000008,
+          "avg_r": -0.07393288264796351
+        },
+        "BULLISH": {
+          "trades": 16,
+          "wins": 7,
+          "win_rate": 43.75,
+          "net_pnl": 20582.500000000047,
+          "avg_r": 0.12274034776368525
+        },
+        "BEARISH": {
+          "trades": 48,
+          "wins": 10,
+          "win_rate": 20.833333333333336,
+          "net_pnl": -54221.500000000124,
+          "avg_r": -0.1394906261185131
+        }
+      },
+      "NO": {
+        "all": {
+          "trades": 132,
+          "wins": 54,
+          "win_rate": 40.909090909090914,
+          "net_pnl": 78407.75000000026,
+          "avg_r": 0.05473221781195792
+        },
+        "BULLISH": {
+          "trades": 79,
+          "wins": 40,
+          "win_rate": 50.63291139240506,
+          "net_pnl": 121040.50000000033,
+          "avg_r": 0.13745804524412863
+        },
+        "BEARISH": {
+          "trades": 53,
+          "wins": 14,
+          "win_rate": 26.41509433962264,
+          "net_pnl": -42632.750000000065,
+          "avg_r": -0.0685760910020324
+        }
+      }
+    },
+    "skip_count": 0,
+    "stocks_scanned": 145,
+    "trading_days": 18
+  },
+  "skip_sample": []
+}

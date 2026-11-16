@@ -89,6 +89,14 @@ data/mtf_swing/cache/**
 data/mtf_swing/progress.json
 data/mtf_swing/state_*.json
 data/mtf_swing/*.tmp
+!data/open_high_low/
+!data/open_high_low/trades.csv
+!data/open_high_low/report.html
+!data/open_high_low/summary.json
+data/open_high_low/cache/
+data/open_high_low/cache/**
+data/open_high_low/run.log
+data/open_high_low/run.pid
 
 
 # Local DB exports (keep exports/ via .gitkeep)
