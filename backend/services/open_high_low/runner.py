@@ -223,9 +223,10 @@ def _run_month(
             if not key:
                 continue
             lot = resolve_lot(resolved, cfg.lot_fallback)
-            # Warm daily for ATR + 5m for EMA lookback (~40 sessions of 5m ≈ 75 calendar days)
-            c_start_5m = fetch_start - timedelta(days=90)
-            c_start_day = fetch_start - timedelta(days=60)
+            # Warm daily for ATR + 5m for EMA30/rvol(~20 sessions). Keep windows
+            # close to prior cache shards to maximize reuse.
+            c_start_5m = fetch_start - timedelta(days=40)
+            c_start_day = fetch_start - timedelta(days=45)
             bars_5m = fetch_contract_bars(
                 upstox, key, c_start_5m, fetch_end, "5m", use_cache=cfg.use_cache
             )

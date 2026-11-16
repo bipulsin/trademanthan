@@ -364,6 +364,47 @@ def _cache_file(interval: str, instrument_key: str, start: date, end: date) -> P
     return cache_dir() / interval / f"{safe}_{start.isoformat()}_{end.isoformat()}.json"
 
 
+def _instrument_cache_prefix(instrument_key: str) -> str:
+    return instrument_key.replace("|", "_").replace(":", "_").replace("/", "_") + "_"
+
+
+def _load_overlapping_cache_rows(
+    timeframe: str,
+    instrument_key: str,
+    start: date,
+    end: date,
+) -> List[Dict[str, Any]]:
+    """Merge any on-disk cache shards for this instrument that overlap [start, end]."""
+    folder = cache_dir() / timeframe
+    if not folder.is_dir():
+        return []
+    prefix = _instrument_cache_prefix(instrument_key)
+    merged: List[Dict[str, Any]] = []
+    for path in folder.glob(f"{prefix}*.json"):
+        name = path.name
+        # Expect ``{prefix}{start}_{end}.json`` with ISO dates.
+        rest = name[len(prefix) : -5] if name.endswith(".json") else ""
+        parts = rest.split("_")
+        if len(parts) < 2:
+            continue
+        try:
+            file_start = date.fromisoformat(parts[-2])
+            file_end = date.fromisoformat(parts[-1])
+        except ValueError:
+            continue
+        if file_end < start or file_start > end:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, list) and payload:
+            merged.extend(payload)
+    if not merged:
+        return []
+    return _dedupe_rows(merged, start, end)
+
+
 def _rows_to_bars(rows: Sequence[Dict[str, Any]], contract: str) -> List[Bar]:
     out: List[Bar] = []
     for row in rows or []:
@@ -504,6 +545,20 @@ def fetch_contract_bars(
                 return _rows_to_bars(payload, instrument_key)
         except Exception as exc:
             logger.info("ohl cache read miss %s: %s", cache.name, exc)
+
+    # Reuse overlapping shards from prior runs (date windows often differ).
+    if use_cache:
+        overlap = _load_overlapping_cache_rows(timeframe, instrument_key, start, end)
+        if overlap:
+            # Accept if we cover most of the window for daily, or have a usable
+            # intraday mass for 5m (EMA/rvol warm-up does not need every day).
+            bars = _rows_to_bars(overlap, instrument_key)
+            if timeframe == "day" and bars:
+                span_days = (end - start).days + 1
+                if len(bars) >= max(5, min(span_days // 2, 10)):
+                    return bars
+            if timeframe == "5m" and len(bars) >= 50:
+                return bars
 
     expired_key = instrument_key.count("|") >= 2
     api_interval = "minutes/5" if timeframe == "5m" else "days/1"
