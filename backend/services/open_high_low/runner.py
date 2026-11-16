@@ -173,24 +173,23 @@ def _fetch_nifty_bars(
     )
 
 
-def _run_month(
+def _run_window(
     cfg: OHLConfig,
-    month_start: date,
-    month_end: date,
+    days: List[date],
     *,
     universe: List[Dict[str, str]],
     holidays: Set[date],
     upstox: Any,
     nifty_bars: List[Any],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    days = trading_days(month_start, month_end, holidays)
+    """Single-pass over ``days``: one candle fetch per contract for the full window."""
     trades: List[Dict[str, Any]] = []
     skips: List[Dict[str, Any]] = []
     if not days:
         return trades, skips
 
-    fetch_start = previous_trading_day(month_start, holidays)
-    fetch_end = month_end
+    fetch_start = previous_trading_day(days[0], holidays)
+    fetch_end = days[-1]
 
     expiries_needed: Set[date] = set()
     for d in days:
@@ -198,17 +197,16 @@ def _run_month(
         prev = previous_trading_day(d, holidays)
         expiries_needed.add(front_month_expiry(prev, holidays))
 
-    # Collect setups first (for same_side_count), then simulate all modes.
     pending: List[Dict[str, Any]] = []
 
     for i, row in enumerate(universe, start=1):
         symbol = row["symbol"]
         underlying = row.get("underlying_key") or ""
-        if i % 25 == 1 or i == len(universe):
+        if i % 10 == 1 or i == len(universe):
             logger.info(
-                "ohl month %s..%s progress %s/%s %s",
-                month_start,
-                month_end,
+                "ohl window %s..%s progress %s/%s %s",
+                days[0],
+                days[-1],
                 i,
                 len(universe),
                 symbol,
@@ -223,10 +221,9 @@ def _run_month(
             if not key:
                 continue
             lot = resolve_lot(resolved, cfg.lot_fallback)
-            # Warm daily for ATR + 5m for EMA30/rvol(~20 sessions). Keep windows
-            # close to prior cache shards to maximize reuse.
-            c_start_5m = fetch_start - timedelta(days=40)
-            c_start_day = fetch_start - timedelta(days=45)
+            # One fetch per contract covering EMA/rvol warm-up through window end.
+            c_start_5m = fetch_start - timedelta(days=90)
+            c_start_day = fetch_start - timedelta(days=60)
             bars_5m = fetch_contract_bars(
                 upstox, key, c_start_5m, fetch_end, "5m", use_cache=cfg.use_cache
             )
@@ -301,7 +298,6 @@ def _run_month(
                 }
             )
 
-    # same_side_count across the month's pending signals (by calendar day)
     feature_rows = [
         {"date": p["date"], "side": p["side"], **p["features"]} for p in pending
     ]
@@ -329,6 +325,44 @@ def _run_month(
             trades.append(trade)
 
     return trades, skips
+
+
+def _write_month_caches(
+    trades: List[Dict[str, Any]],
+    skips: List[Dict[str, Any]],
+    *,
+    month_cache: Path,
+    modes: List[str],
+    start: date,
+    end: date,
+) -> None:
+    """Persist per-month shards for resume / inspection."""
+    by_month_t: Dict[str, List[Dict[str, Any]]] = {}
+    by_month_s: Dict[str, List[Dict[str, Any]]] = {}
+    for t in trades:
+        mk = str(t.get("date") or "")[:7]
+        by_month_t.setdefault(mk, []).append(t)
+    for s in skips:
+        mk = str(s.get("date") or "")[:7]
+        by_month_s.setdefault(mk, []).append(s)
+    for m_start, m_end in _months_in_range(start, end):
+        mk = _month_key(m_start)
+        path = month_cache / f"{mk}.json"
+        try:
+            path.write_text(
+                json.dumps(
+                    {
+                        "sl_modes": list(modes),
+                        "trades": by_month_t.get(mk, []),
+                        "skips": by_month_s.get(mk, []),
+                        "window": [m_start.isoformat(), m_end.isoformat()],
+                    },
+                    default=str,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            logger.info("ohl month cache write fail %s: %s", mk, exc)
 
 
 def _pick_sl_path_samples(
@@ -501,48 +535,61 @@ def run_backtest(
     all_trades: List[Dict[str, Any]] = []
     all_skips: List[Dict[str, Any]] = []
 
-    for m_start, m_end in _months_in_range(actual_start, cfg.end):
-        mk = _month_key(m_start)
-        cache_file = month_cache / f"{mk}.json"
-        if cfg.resume_months and cache_file.is_file():
+    # Resume from month shards when every month in range is already cached.
+    months = _months_in_range(actual_start, cfg.end)
+    resumed_all = False
+    if cfg.resume_months and months:
+        loaded: List[Dict[str, Any]] = []
+        loaded_skips: List[Dict[str, Any]] = []
+        ok = True
+        for m_start, _m_end in months:
+            mk = _month_key(m_start)
+            cache_file = month_cache / f"{mk}.json"
+            if not cache_file.is_file():
+                ok = False
+                break
             try:
                 payload = json.loads(cache_file.read_text(encoding="utf-8"))
-                cached_trades = payload.get("trades") or []
-                cached_skips = payload.get("skips") or []
-                # Invalidate if SL mode set changed
-                if set(payload.get("sl_modes") or []) == set(modes) and cached_trades:
-                    logger.info(
-                        "ohl resume month %s trades=%s", mk, len(cached_trades)
-                    )
-                    all_trades.extend(cached_trades)
-                    all_skips.extend(cached_skips)
-                    continue
+                if set(payload.get("sl_modes") or []) != set(modes):
+                    ok = False
+                    break
+                loaded.extend(payload.get("trades") or [])
+                loaded_skips.extend(payload.get("skips") or [])
             except Exception as exc:
                 logger.info("ohl month cache read fail %s: %s", mk, exc)
+                ok = False
+                break
+        if ok:
+            logger.info(
+                "ohl resume all %s months trades=%s", len(months), len(loaded)
+            )
+            all_trades = loaded
+            all_skips = loaded_skips
+            resumed_all = True
 
-        m_trades, m_skips = _run_month(
+    if not resumed_all:
+        # Single fetch-per-contract pass over the full window (fast + cache-friendly).
+        all_trades, all_skips = _run_window(
             cfg,
-            m_start,
-            m_end,
+            days,
             universe=universe,
             holidays=holidays,
             upstox=upstox,
             nifty_bars=nifty_bars,
         )
-        try:
-            cache_file.write_text(
-                json.dumps(
-                    {"sl_modes": list(modes), "trades": m_trades, "skips": m_skips},
-                    default=str,
-                ),
-                encoding="utf-8",
-            )
-        except Exception as exc:
-            logger.info("ohl month cache write fail %s: %s", mk, exc)
-        all_trades.extend(m_trades)
-        all_skips.extend(m_skips)
+        _write_month_caches(
+            all_trades,
+            all_skips,
+            month_cache=month_cache,
+            modes=list(modes),
+            start=actual_start,
+            end=cfg.end,
+        )
         logger.info(
-            "ohl month done %s trades=%s skips=%s", mk, len(m_trades), len(m_skips)
+            "ohl window done trades=%s skips=%s months=%s",
+            len(all_trades),
+            len(all_skips),
+            len(months),
         )
 
     all_trades.sort(
