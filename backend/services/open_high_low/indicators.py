@@ -1,4 +1,4 @@
-"""Indicator helpers for OpenHighLow (Wilder ATR)."""
+"""Indicator helpers for OpenHighLow (Wilder ATR, EMA)."""
 from __future__ import annotations
 
 from typing import List, Optional, Sequence
@@ -28,3 +28,21 @@ def wilder_atr(
     for i in range(p, len(trs)):
         atr = (atr * (p - 1) + trs[i]) / float(p)
     return float(atr)
+
+
+def ema_last(closes: Sequence[float], period: int = 30) -> Optional[float]:
+    """EMA of the last value (SMA seed over first ``period`` closes).
+
+    Needs at least ``period`` closes. Returns None when insufficient.
+    """
+    p = int(period)
+    if p <= 0 or len(closes) < p:
+        return None
+    seed = sum(float(c) for c in closes[:p]) / float(p)
+    if len(closes) == p:
+        return float(seed)
+    alpha = 2.0 / (p + 1.0)
+    ema = float(seed)
+    for c in closes[p:]:
+        ema = alpha * float(c) + (1.0 - alpha) * ema
+    return float(ema)

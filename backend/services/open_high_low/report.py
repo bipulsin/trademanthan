@@ -1,4 +1,4 @@
-"""Self-contained HTML report + CSV writer for OpenHighLow."""
+"""Self-contained HTML report + CSV / JSON writers for OpenHighLow."""
 from __future__ import annotations
 
 import csv
@@ -16,8 +16,83 @@ def write_trades_csv(trades: Sequence[Dict[str, Any]], path: Path) -> Path:
         writer = csv.DictWriter(fh, fieldnames=TRADE_FIELDS, extrasaction="ignore")
         writer.writeheader()
         for t in trades:
-            writer.writerow({k: t.get(k, "") for k in TRADE_FIELDS})
+            row = {k: t.get(k, "") for k in TRADE_FIELDS}
+            writer.writerow(row)
     return path
+
+
+def write_sl_path_dump(samples: Sequence[Dict[str, Any]], path: Path) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "description": (
+            "Per-candle SL path for candle_trail mode proving SL ratchets "
+            "from preceding candle extremes (causal hit-then-update)."
+        ),
+        "samples": list(samples),
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path
+
+
+def write_selection_summary(
+    selection: Dict[str, Any],
+    summary: Dict[str, Any],
+    path: Path,
+    *,
+    meta: Dict[str, Any] | None = None,
+) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Compact: drop picks_by_day full dump if huge — keep percentiles + meta + mode metrics
+    by_mode = summary.get("by_sl_mode") or {}
+    compact_modes: Dict[str, Any] = {}
+    for mode, block in by_mode.items():
+        compact_modes[mode] = {
+            "baseline": _slim(block.get("baseline_one_lot")),
+            "baseline_fixed_risk": _slim(block.get("baseline_fixed_risk")),
+            "filtered": _slim(block.get("filtered_one_lot")),
+            "rules": {
+                rule: {
+                    "one_lot": _slim(rb.get("one_lot")),
+                    "fixed_risk": _slim(rb.get("fixed_risk")),
+                    "by_side": {
+                        s: _slim(v) for s, v in (rb.get("by_side") or {}).items()
+                    },
+                }
+                for rule, rb in (block.get("rules") or {}).items()
+            },
+        }
+    payload = {
+        "meta": meta or {},
+        "selection_meta": selection.get("meta"),
+        "random_percentiles": selection.get("random_percentiles"),
+        "by_sl_mode": compact_modes,
+        "picks_by_day_sample": dict(
+            list((selection.get("picks_by_day") or {}).items())[:10]
+        ),
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return path
+
+
+def _slim(m: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not m:
+        return m
+    keys = (
+        "trades",
+        "wins",
+        "win_rate",
+        "net_pnl",
+        "profit_factor",
+        "avg_r",
+        "max_drawdown",
+        "trades_per_day",
+        "by_side",
+        "by_month",
+        "by_exit",
+    )
+    return {k: m.get(k) for k in keys}
 
 
 def build_html(
@@ -71,7 +146,7 @@ body {
 }
 .wrap { max-width:1280px; margin:0 auto; padding:1.25rem 1rem 3rem; }
 h1 { font-size:1.6rem; margin:0 0 .35rem; letter-spacing:.02em; }
-.lede { color:var(--muted); margin:0 0 1.25rem; max-width:70ch; font-size:.95rem; }
+.lede { color:var(--muted); margin:0 0 1.25rem; max-width:75ch; font-size:.95rem; }
 .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.75rem; margin-bottom:1.25rem; }
 .kpi { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:.85rem 1rem; }
 .kpi .l { display:block; color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.04em; }
@@ -106,22 +181,52 @@ tr.loss td.pnl { color:var(--loss); }
 }
 .badge-yes { background:rgba(245,158,11,.2); color:var(--flag); }
 .badge-no { background:rgba(139,155,180,.15); color:var(--muted); }
-.breakdown { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:.75rem; margin-bottom:1rem; }
+.breakdown { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.75rem; margin-bottom:1rem; }
 .breakdown ul { margin:0; padding-left:1.1rem; color:var(--muted); font-size:.85rem; }
 .skips { font-size:.8rem; color:var(--muted); max-height:160px; overflow:auto; }
 .count { color:var(--muted); font-size:.85rem; margin-left:.5rem; }
+.study table { font-size:.8rem; }
+.study th, .study td { padding:.35rem .45rem; }
+.section-title { margin:1.5rem 0 .5rem; font-size:1.1rem; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>OpenHighLow Intraday Backtest</h1>
-  <p class="lede" id="lede">Front-month stock futures · previous-day H/L break + VWAP · ATR-step trailing SL · EOD square-off</p>
+  <p class="lede" id="lede">Front-month stock futures · selection study · three SL modes</p>
 
   <div class="kpis" id="kpis"></div>
+
+  <div class="filters" style="margin-top:0">
+    <label>SL mode (dashboard)
+      <select id="dashMode"></select>
+    </label>
+    <label>Sizing
+      <select id="dashSize">
+        <option value="one_lot">One lot</option>
+        <option value="fixed_risk">Fixed risk</option>
+      </select>
+    </label>
+  </div>
 
   <div class="grid2">
     <div class="card"><h2>Equity curve (₹)</h2><canvas id="eqChart" width="600" height="220"></canvas></div>
     <div class="card"><h2>Daily P&amp;L (₹)</h2><canvas id="dayChart" width="600" height="220"></canvas></div>
+  </div>
+
+  <h2 class="section-title">SL mode × selection rules</h2>
+  <div class="card study" style="margin-bottom:1rem; overflow:auto">
+    <div id="studyTable"></div>
+  </div>
+
+  <h2 class="section-title">Random baseline percentiles</h2>
+  <div class="card study" style="margin-bottom:1rem">
+    <div id="pctTable"></div>
+  </div>
+
+  <h2 class="section-title">Per-month (selected SL mode / baseline)</h2>
+  <div class="card study" style="margin-bottom:1rem">
+    <div id="monthTable"></div>
   </div>
 
   <div class="breakdown" id="breakdowns"></div>
@@ -132,6 +237,9 @@ tr.loss td.pnl { color:var(--loss); }
   </div>
 
   <div class="filters">
+    <label>SL mode
+      <select id="fMode"><option value="">All</option></select>
+    </label>
     <label>Side
       <select id="fSide"><option value="">All</option><option>BULLISH</option><option>BEARISH</option></select>
     </label>
@@ -140,6 +248,15 @@ tr.loss td.pnl { color:var(--loss); }
     </label>
     <label>Flag
       <select id="fFlag"><option value="">All</option><option>YES</option><option>NO</option></select>
+    </label>
+    <label>Selected
+      <select id="fSel">
+        <option value="">All</option>
+        <option value="ema">EMA top-2</option>
+        <option value="range">Range top-2</option>
+        <option value="composite">Composite top-2</option>
+        <option value="filter">Passed move filter</option>
+      </select>
     </label>
     <label>Symbol
       <input type="search" id="fSym" placeholder="e.g. RELIANCE">
@@ -174,62 +291,129 @@ function fmt(n, d=2){
   return x.toLocaleString(undefined,{maximumFractionDigits:d, minimumFractionDigits:0});
 }
 function money(n){ return "₹" + fmt(n,0); }
+function pf(n, inf){
+  if (inf) return "∞";
+  if (n==null) return "—";
+  return fmt(n,2);
+}
+
+function modes(){
+  const meta = DATA.meta || {};
+  return meta.sl_modes || Object.keys((DATA.summary||{}).by_sl_mode||{}) || ["atr_trail"];
+}
+
+function modeBlock(mode){
+  return ((DATA.summary||{}).by_sl_mode||{})[mode] || {};
+}
+
+function activeMetrics(){
+  const mode = document.getElementById("dashMode").value || modes()[0];
+  const size = document.getElementById("dashSize").value || "one_lot";
+  const b = modeBlock(mode);
+  if (size === "fixed_risk") return b.baseline_fixed_risk || {};
+  return b.baseline_one_lot || DATA.summary || {};
+}
 
 function renderKpis(){
-  const s = DATA.summary || {};
+  const s = activeMetrics();
   const meta = DATA.meta || {};
+  const mode = document.getElementById("dashMode").value || "";
   document.getElementById("lede").textContent =
     `Period ${meta.start||"?"} → ${meta.end||"?"} · ${meta.stocks_scanned||"?"} stocks · ` +
-    `ATR-step trailing SL (daily ATR${meta.atr_period||14} prior close) · ` +
-    `square-off ${meta.square_off||"15:15"} · lot fallback ${meta.lot_fallback||1}`;
+    `SL modes: ${(meta.sl_modes||[]).join(", ")} · viewing ${mode} · ` +
+    `square-off ${meta.square_off||"15:15"} · risk ₹${fmt(meta.risk_rupees,0)} · ` +
+    `move filter ${meta.move_filter_pct||3}% · top ${meta.selection_top_n||2}/side`;
   const items = [
     ["Trades", s.trades],
     ["Win rate", fmt(s.win_rate,1)+"%"],
     ["Net P&L", money(s.net_pnl)],
+    ["Profit factor", pf(s.profit_factor, s.profit_factor_inf)],
     ["Avg R", fmt(s.avg_r,2)],
     ["Max DD", money(s.max_drawdown)],
-    ["Skips", s.skip_count||0],
+    ["Trades/day", fmt(s.trades_per_day,2)],
+    ["Skips", (DATA.summary||{}).skip_count||0],
   ];
   document.getElementById("kpis").innerHTML = items.map(([l,v])=>
     `<div class="kpi"><span class="l">${l}</span><span class="v">${v}</span></div>`
   ).join("");
 }
 
+function renderStudy(){
+  const by = (DATA.summary||{}).by_sl_mode || {};
+  const size = document.getElementById("dashSize").value || "one_lot";
+  const key = size === "fixed_risk" ? "fixed_risk" : "one_lot";
+  let html = `<table><thead><tr>
+    <th>SL mode</th><th>Slice</th><th>Trades</th><th>WR%</th><th>Net P&L</th>
+    <th>PF</th><th>Avg R</th><th>Max DD</th><th>T/day</th>
+  </tr></thead><tbody>`;
+  Object.keys(by).sort().forEach(mode=>{
+    const b = by[mode]||{};
+    const rows = [
+      ["baseline", size==="fixed_risk" ? b.baseline_fixed_risk : b.baseline_one_lot],
+      ["filtered", b.filtered_one_lot],
+      ["rule:ema", (b.rules&&b.rules.ema||{})[key]],
+      ["rule:range", (b.rules&&b.rules.range||{})[key]],
+      ["rule:composite", (b.rules&&b.rules.composite||{})[key]],
+    ];
+    rows.forEach(([label, m])=>{
+      m = m || {};
+      html += `<tr>
+        <td>${mode}</td><td>${label}</td><td>${m.trades??"—"}</td>
+        <td>${fmt(m.win_rate,1)}</td><td>${money(m.net_pnl)}</td>
+        <td>${pf(m.profit_factor, m.profit_factor_inf)}</td>
+        <td>${fmt(m.avg_r,2)}</td><td>${money(m.max_drawdown)}</td>
+        <td>${fmt(m.trades_per_day,2)}</td>
+      </tr>`;
+    });
+  });
+  html += "</tbody></table>";
+  document.getElementById("studyTable").innerHTML = html;
+}
+
+function renderPercentiles(){
+  const pct = ((DATA.summary||{}).selection||{}).random_percentiles || {};
+  let html = `<table><thead><tr><th>SL mode</th><th>Rule</th><th>Mean percentile vs ${((DATA.meta||{}).random_baseline_samples)||2000} random 2+2</th><th>Days scored</th></tr></thead><tbody>`;
+  Object.keys(pct).sort().forEach(mode=>{
+    Object.keys(pct[mode]||{}).sort().forEach(rule=>{
+      const r = pct[mode][rule]||{};
+      html += `<tr><td>${mode}</td><td>${rule}</td><td>${fmt(r.mean_percentile,1)}</td><td>${r.days_scored??"—"}</td></tr>`;
+    });
+  });
+  html += "</tbody></table>";
+  const meta = ((DATA.summary||{}).selection||{}).meta || {};
+  html += `<p style="color:var(--muted);font-size:.85rem;margin:.5rem 0 0">${meta.filter||""}</p>`;
+  document.getElementById("pctTable").innerHTML = html;
+}
+
+function renderMonths(){
+  const s = activeMetrics();
+  const by = s.by_month || {};
+  let html = `<table><thead><tr><th>Month</th><th>Trades</th><th>WR%</th><th>Net P&L</th><th>Avg R</th></tr></thead><tbody>`;
+  Object.keys(by).sort().forEach(m=>{
+    const r = by[m]||{};
+    html += `<tr><td>${m}</td><td>${r.trades??0}</td><td>${fmt(r.win_rate,1)}</td><td>${money(r.net_pnl)}</td><td>${fmt(r.avg_r,2)}</td></tr>`;
+  });
+  html += "</tbody></table>";
+  document.getElementById("monthTable").innerHTML = html || "—";
+}
+
 function renderBreakdowns(){
-  const s = DATA.summary || {};
+  const s = activeMetrics();
   const side = s.by_side || {};
   const exits = s.by_exit || {};
-  const wd = s.by_weekday || {};
-  const fc = s.flag_comparison || {};
-  const top = s.top10 || [];
-  const bot = s.bottom10 || [];
   const card = (title, html) => `<div class="card"><h2>${title}</h2>${html}</div>`;
   const ul = (obj) => `<ul>${Object.entries(obj).map(([k,v])=>{
     if (typeof v === "object") return `<li><strong>${k}</strong>: ${v.trades||0} trades, WR ${fmt(v.win_rate,1)}%, ${money(v.net_pnl)}</li>`;
     return `<li><strong>${k}</strong>: ${v}</li>`;
   }).join("")}</ul>`;
-  const listPairs = (arr) => `<ul>${arr.map(r=>`<li>${r.symbol}: ${money(r.pnl)}</li>`).join("")||"<li>—</li>"}</ul>`;
-  const flagHtml = (key) => {
-    const block = (fc[key]||{});
-    return ul({All: block.all||{}, Bullish: block.BULLISH||{}, Bearish: block.BEARISH||{}});
-  };
   document.getElementById("breakdowns").innerHTML = [
-    card("By side", ul(side)),
+    card("By side (dashboard slice)", ul(side)),
     card("By exit reason", ul(exits)),
-    card("By weekday", ul(wd)),
-    card("Flag YES", flagHtml("YES")),
-    card("Flag NO", flagHtml("NO")),
-    card("Top 10 stocks", listPairs(top)),
-    card("Bottom 10 stocks", listPairs(bot)),
   ].join("");
-  const skips = s.skips || [];
+  const skips = (DATA.summary||{}).skips || [];
   document.getElementById("skips").innerHTML = skips.length
     ? `<ul>${skips.slice(0,200).map(x=>`<li>${x.date||""} ${x.symbol||""}: ${x.reason||JSON.stringify(x)}</li>`).join("")}</ul>`
     : "None";
-  const exitSel = document.getElementById("fExit");
-  Object.keys(exits).sort().forEach(k=>{
-    const o=document.createElement("option"); o.value=k; o.textContent=k; exitSel.appendChild(o);
-  });
 }
 
 function drawLine(canvas, points, color){
@@ -273,24 +457,32 @@ function drawBars(canvas, points){
 }
 
 function renderCharts(){
-  const eq = (DATA.summary.equity||[]).map(e=>({y:Number(e.cum_pnl)||0}));
+  const s = activeMetrics();
+  const eq = (s.equity||[]).map(e=>({y:Number(e.cum_pnl)||0}));
   drawLine(document.getElementById("eqChart"), eq, "#38bdf8");
-  const daily = DATA.summary.daily_pnl || {};
+  const daily = s.daily_pnl || {};
   const bars = Object.keys(daily).sort().map(k=>({y:Number(daily[k])||0}));
   drawBars(document.getElementById("dayChart"), bars);
 }
 
 function applyFilters(){
+  const mode = document.getElementById("fMode").value;
   const side = document.getElementById("fSide").value;
   const exit = document.getElementById("fExit").value;
   const flag = document.getElementById("fFlag").value;
+  const sel = document.getElementById("fSel").value;
   const sym = document.getElementById("fSym").value.trim().toUpperCase();
   const from = document.getElementById("fFrom").value;
   const to = document.getElementById("fTo").value;
   filtered = DATA.trades.filter(t=>{
+    if (mode && t.sl_mode!==mode) return false;
     if (side && t.side!==side) return false;
     if (exit && t.exit_reason!==exit) return false;
     if (flag && t.open_eq_extreme!==flag) return false;
+    if (sel==="ema" && !t.selected_ema) return false;
+    if (sel==="range" && !t.selected_range) return false;
+    if (sel==="composite" && !t.selected_composite) return false;
+    if (sel==="filter" && !t.passed_move_filter) return false;
     if (sym && !(String(t.symbol||"").toUpperCase().includes(sym))) return false;
     if (from && String(t.date) < from) return false;
     if (to && String(t.date) > to) return false;
@@ -322,6 +514,7 @@ function renderTable(){
     };
   });
   const tb = document.getElementById("tbody");
+  const boolFields = new Set(["selected_ema","selected_range","selected_composite","passed_move_filter"]);
   tb.innerHTML = filtered.map(t=>{
     const win = Number(t.rupee_pnl)>0;
     return `<tr class="${win?"win":"loss"}">` + FIELDS.map(f=>{
@@ -330,8 +523,12 @@ function renderTable(){
         const yes = v==="YES";
         return `<td><span class="badge ${yes?"badge-yes":"badge-no"}">${v||"NO"}</span></td>`;
       }
-      if (f==="rupee_pnl" || f==="points_pnl" || f==="r_multiple" || f==="pct_return"){
-        return `<td class="pnl">${fmt(v, f==="rupee_pnl"?0:2)}</td>`;
+      if (boolFields.has(f)){
+        const yes = v===true || v==="True" || v==="true";
+        return `<td><span class="badge ${yes?"badge-yes":"badge-no"}">${yes?"YES":"NO"}</span></td>`;
+      }
+      if (f==="rupee_pnl" || f==="rupee_pnl_fixed_risk" || f==="points_pnl" || f==="r_multiple" || f==="pct_return"){
+        return `<td class="pnl">${fmt(v, (f.startsWith("rupee")?0:2))}</td>`;
       }
       return `<td>${v??""}</td>`;
     }).join("") + "</tr>";
@@ -357,9 +554,38 @@ function download(name, text){
   URL.revokeObjectURL(a.href);
 }
 
+function refreshDash(){
+  renderKpis();
+  renderStudy();
+  renderPercentiles();
+  renderMonths();
+  renderBreakdowns();
+  renderCharts();
+}
+
+function initSelectors(){
+  const ms = modes();
+  const dash = document.getElementById("dashMode");
+  const fMode = document.getElementById("fMode");
+  ms.forEach(m=>{
+    const o1=document.createElement("option"); o1.value=m; o1.textContent=m; dash.appendChild(o1);
+    const o2=document.createElement("option"); o2.value=m; o2.textContent=m; fMode.appendChild(o2);
+  });
+  if (ms.includes("candle_trail")) dash.value = "candle_trail";
+  else if (ms.length) dash.value = ms[0];
+  const exits = {};
+  DATA.trades.forEach(t=>{ if(t.exit_reason) exits[t.exit_reason]=1; });
+  const exitSel = document.getElementById("fExit");
+  Object.keys(exits).sort().forEach(k=>{
+    const o=document.createElement("option"); o.value=k; o.textContent=k; exitSel.appendChild(o);
+  });
+}
+
+document.getElementById("dashMode").onchange = refreshDash;
+document.getElementById("dashSize").onchange = refreshDash;
 document.getElementById("btnApply").onclick = applyFilters;
 document.getElementById("btnReset").onclick = ()=>{
-  ["fSide","fExit","fFlag","fSym","fFrom","fTo"].forEach(id=>{
+  ["fMode","fSide","fExit","fFlag","fSel","fSym","fFrom","fTo"].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value="";
   });
   applyFilters();
@@ -367,9 +593,8 @@ document.getElementById("btnReset").onclick = ()=>{
 document.getElementById("btnCsv").onclick = ()=> download("open_high_low_filtered.csv", toCsv(filtered));
 document.getElementById("btnCsvAll").onclick = ()=> download("open_high_low_all.csv", toCsv(DATA.trades));
 
-renderKpis();
-renderBreakdowns();
-renderCharts();
+initSelectors();
+refreshDash();
 applyFilters();
 </script>
 </body>
