@@ -188,21 +188,23 @@ def _run_window(
     if not days:
         return trades, skips
 
-    fetch_start = previous_trading_day(days[0], holidays)
-    fetch_end = days[-1]
-
-    expiries_needed: Set[date] = set()
+    # Map each expiry → sessions that use it as front-month (plus prior-day
+    # contract for PDH/PDL on roll). Fetch candles only over that span — never
+    # the full multi-month window (empty post-expiry API chunks hang/waste RL).
+    sessions_by_exp: Dict[date, List[date]] = {}
     for d in days:
-        expiries_needed.add(front_month_expiry(d, holidays))
+        exp = front_month_expiry(d, holidays)
+        sessions_by_exp.setdefault(exp, []).append(d)
         prev = previous_trading_day(d, holidays)
-        expiries_needed.add(front_month_expiry(prev, holidays))
+        prev_exp = front_month_expiry(prev, holidays)
+        sessions_by_exp.setdefault(prev_exp, [])
 
     pending: List[Dict[str, Any]] = []
 
     for i, row in enumerate(universe, start=1):
         symbol = row["symbol"]
         underlying = row.get("underlying_key") or ""
-        if i % 10 == 1 or i == len(universe):
+        if i % 5 == 1 or i == len(universe):
             logger.info(
                 "ohl window %s..%s progress %s/%s %s",
                 days[0],
@@ -213,7 +215,7 @@ def _run_window(
             )
 
         contracts: Dict[date, Dict[str, Any]] = {}
-        for exp in sorted(expiries_needed):
+        for exp in sorted(sessions_by_exp.keys()):
             resolved = resolve_contract(
                 upstox, symbol, exp, underlying, universe_row=row
             )
@@ -221,14 +223,31 @@ def _run_window(
             if not key:
                 continue
             lot = resolve_lot(resolved, cfg.lot_fallback)
-            # One fetch per contract covering EMA/rvol warm-up through window end.
-            c_start_5m = fetch_start - timedelta(days=90)
-            c_start_day = fetch_start - timedelta(days=60)
+            sess = sessions_by_exp.get(exp) or []
+            # Sessions that need this contract's bars (front-month days).
+            # Always include expiry itself as a bound so we don't request past it.
+            if sess:
+                first_s, last_s = sess[0], sess[-1]
+            else:
+                # Only needed as prior-day contract around a roll — pull a short
+                # window ending at expiry (or window start, whichever earlier).
+                first_s = min(days[0], exp)
+                last_s = min(days[-1], exp)
+            c_end = min(last_s, exp, days[-1])
+            c_start_5m = first_s - timedelta(days=40)
+            c_start_day = first_s - timedelta(days=45)
+            logger.debug(
+                "ohl fetch %s exp=%s %s..%s",
+                symbol,
+                exp.isoformat(),
+                c_start_5m.isoformat(),
+                c_end.isoformat(),
+            )
             bars_5m = fetch_contract_bars(
-                upstox, key, c_start_5m, fetch_end, "5m", use_cache=cfg.use_cache
+                upstox, key, c_start_5m, c_end, "5m", use_cache=cfg.use_cache
             )
             bars_day = fetch_contract_bars(
-                upstox, key, c_start_day, fetch_end, "day", use_cache=cfg.use_cache
+                upstox, key, c_start_day, c_end, "day", use_cache=cfg.use_cache
             )
             contracts[exp] = {
                 "instrument_key": key,
