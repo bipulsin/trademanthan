@@ -115,7 +115,7 @@ tr.loss td.pnl { color:var(--loss); }
 <body>
 <div class="wrap">
   <h1>OpenHighLow Intraday Backtest</h1>
-  <p class="lede" id="lede">Front-month stock futures · previous-day H/L break + VWAP · 5m trail · EOD square-off</p>
+  <p class="lede" id="lede">Front-month stock futures · previous-day H/L break + VWAP · fixed first-candle SL · EOD square-off</p>
 
   <div class="kpis" id="kpis"></div>
 

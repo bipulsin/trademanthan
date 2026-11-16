@@ -1,10 +1,10 @@
-"""Trade simulation: entry at third candle open, trailing SL, EOD square-off."""
+"""Trade simulation: entry at third candle open, fixed first-candle SL, EOD square-off."""
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from datetime import date, datetime, time
+from typing import Any, Dict, Optional, Sequence
 
-from backend.services.open_high_low.bars import Bar, session_bars
+from backend.services.open_high_low.bars import Bar
 from backend.services.open_high_low.config import (
     SQUARE_OFF_TIME,
     THIRD_CANDLE,
@@ -27,7 +27,12 @@ def simulate_trade(
     lot_size: int,
     cfg: Optional[OHLConfig] = None,
 ) -> Dict[str, Any]:
-    """Simulate one trade from a detected setup. Always returns a trade record."""
+    """Simulate one trade from a detected setup. Always returns a trade record.
+
+    SL is fixed at the first (09:15) candle extreme for the whole trade:
+    bullish → first.low, bearish → first.high. Never ratchets.
+    Exit reasons are only ``SL`` or ``EOD``.
+    """
     cfg = cfg or OHLConfig()
     square_off = cfg.square_off or SQUARE_OFF_TIME
     slip = float(cfg.slippage_points or 0.0)
@@ -38,11 +43,10 @@ def simulate_trade(
     if setup.side == "BULLISH":
         entry_price = entry_bar.open + slip
         initial_sl = setup.first.low
-        sl = initial_sl
     else:
         entry_price = entry_bar.open - slip
         initial_sl = setup.first.high
-        sl = initial_sl
+    sl = initial_sl
 
     path = bars_from_entry(bars_5m, setup.session, THIRD_CANDLE)
     if not path:
@@ -55,23 +59,12 @@ def simulate_trade(
     mfe = 0.0
     mae = 0.0
 
-    for i, bar in enumerate(path):
-        # Trail at start of each subsequent candle (not on entry candle itself).
-        if i > 0:
-            prev = path[i - 1]
-            if setup.side == "BULLISH":
-                sl = max(sl, prev.low)
-            else:
-                sl = min(sl, prev.high)
-            final_sl = sl
-
-        # SL check (entry candle can hit SL).
+    for bar in path:
+        # Fixed SL check (entry candle can hit SL). Never ratchet.
         hit = False
-        gap_through = False
         if setup.side == "BULLISH":
             if bar.open <= sl:
                 hit = True
-                gap_through = True
                 exit_price = bar.open - slip
             elif bar.low <= sl:
                 hit = True
@@ -79,7 +72,6 @@ def simulate_trade(
         else:
             if bar.open >= sl:
                 hit = True
-                gap_through = True
                 exit_price = bar.open + slip
             elif bar.high >= sl:
                 hit = True
@@ -95,17 +87,11 @@ def simulate_trade(
 
         if hit:
             exit_time = bar.ts
-            # Distinguish initial SL vs trailing ratchet.
-            if abs(sl - initial_sl) > 1e-9:
-                exit_reason = "Trailing SL"
-            else:
-                exit_reason = "SL"
-            if gap_through and exit_reason == "SL":
-                exit_reason = "SL"  # gap-through still SL
+            exit_reason = "SL"
             final_sl = sl
             break
 
-        # EOD square-off on the configured candle close.
+        # EOD square-off on the configured candle close (default 15:15).
         if bar.ts.time() == square_off:
             exit_time = bar.ts
             exit_price = bar.close - slip if setup.side == "BULLISH" else bar.close + slip

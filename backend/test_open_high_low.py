@@ -148,10 +148,8 @@ def test_eod_exit():
     first = _bar(9, 15, 100, 102, 100, 101.5, vol=1000)
     second = _bar(9, 20, 102, 103.5, 101.5, 103, vol=1000)
     third = _bar(9, 25, 103, 104, 102.5, 103.5, vol=1000)
-    # Path that never hits SL; square-off at 15:15
+    # Path that never hits fixed SL; square-off at 15:15
     path = [first, second, third]
-    t = time(9, 30)
-    # Generate bars until 15:15 with rising lows (SL trails up but stays below)
     from datetime import timedelta
 
     cur = IST.localize(datetime(SESSION.year, SESSION.month, SESSION.day, 9, 30))
@@ -163,7 +161,7 @@ def test_eod_exit():
                 ts=cur,
                 open=px,
                 high=px + 1,
-                low=px - 0.2,
+                low=px - 0.2,  # stays above fixed SL=100
                 close=px + 0.5,
                 volume=500,
                 contract="T",
@@ -184,26 +182,51 @@ def test_eod_exit():
     )
     assert trade["exit_reason"] == "EOD"
     assert "15:15" in trade["exit_time"]
+    assert abs(trade["final_sl"] - trade["initial_sl"]) < 1e-9
 
 
-def test_trailing_ratchet_bullish():
-    first = _bar(9, 15, 100, 102, 100, 101.5, vol=1000)
+def test_fixed_sl_bullish_never_ratchets():
+    """Price pulls back below prior lows but above first.low — stay in; exit only on fixed SL."""
+    first = _bar(9, 15, 100, 102, 100, 101.5, vol=1000)  # SL = 100
     second = _bar(9, 20, 102, 103.5, 101.5, 103, vol=1000)
     third = _bar(9, 25, 103, 105, 102.8, 104, vol=1000)  # entry
-    # Next candle low 103.5 → trail SL up from 100 to 103.5? Wait trail uses
-    # preceding candle low at start of subsequent: at start of 09:30, SL=max(100, third.low=102.8)
     c930 = _bar(9, 30, 104, 106, 103.0, 105, vol=1000)
-    # At start of 09:35, SL=max(102.8, 103.0)=103.0; then this bar hits 102.5 → trailing SL
+    # Under trailing rules this would ratchet SL to ~103 and exit; fixed SL stays at 100.
     c935 = _bar(9, 35, 105, 105.5, 102.5, 103, vol=1000)
-    bars = [first, second, third, c930, c935]
+    c940 = _bar(9, 40, 103, 103.5, 99.5, 100, vol=1000)  # hits fixed SL=100
+    bars = [first, second, third, c930, c935, c940]
     setup = detect_setup([first, second, third], SESSION, prev_high=100.0, prev_low=90.0)
     assert setup is not None
     trade = simulate_trade(
         setup, bars, symbol="T", contract="C", expiry=date(2026, 10, 27), lot_size=1
     )
-    assert trade["exit_reason"] == "Trailing SL"
-    assert trade["final_sl"] >= trade["initial_sl"]
-    assert abs(trade["exit_price"] - trade["final_sl"]) < 1e-9
+    assert trade["exit_reason"] == "SL"
+    assert abs(trade["initial_sl"] - 100.0) < 1e-9
+    assert abs(trade["final_sl"] - 100.0) < 1e-9
+    assert abs(trade["exit_price"] - 100.0) < 1e-9
+    assert "09:40" in trade["exit_time"]  # held through 09:35 pullback
+
+
+def test_fixed_sl_bearish_never_ratchets():
+    """Price rallies above prior highs but below first.high — stay in; exit on fixed SL."""
+    first = _bar(9, 15, 100, 100, 97, 98, vol=1000)  # SL = 100 (first.high)
+    second = _bar(9, 20, 98, 98.5, 96, 96.5, vol=1000)
+    third = _bar(9, 25, 96.5, 97, 95, 95.5, vol=1000)  # entry
+    c930 = _bar(9, 30, 95.5, 96.2, 94.5, 95, vol=1000)
+    # Under trailing, SL would ratchet down to ~96.2; fixed stays at 100.
+    c935 = _bar(9, 35, 95, 97.5, 94.8, 97, vol=1000)
+    c940 = _bar(9, 40, 97, 100.5, 96.5, 100, vol=1000)  # high >= fixed SL=100
+    bars = [first, second, third, c930, c935, c940]
+    setup = detect_setup([first, second, third], SESSION, prev_high=105.0, prev_low=99.0)
+    assert setup is not None
+    trade = simulate_trade(
+        setup, bars, symbol="T", contract="C", expiry=date(2026, 10, 27), lot_size=1
+    )
+    assert trade["exit_reason"] == "SL"
+    assert abs(trade["initial_sl"] - 100.0) < 1e-9
+    assert abs(trade["final_sl"] - 100.0) < 1e-9
+    assert abs(trade["exit_price"] - 100.0) < 1e-9
+    assert "09:40" in trade["exit_time"]
 
 
 def test_open_eq_extreme_no():
