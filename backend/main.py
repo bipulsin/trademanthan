@@ -47,6 +47,7 @@ import backend.routers.crypto_options_report as crypto_options_report
 import backend.routers.multi_leg_options as multi_leg_options
 import backend.routers.momentx as momentx
 import backend.routers.mtf_swing as mtf_swing
+import backend.routers.open_low_high as open_low_high
 import backend.routers.nk_vm_bull_backtest as nk_vm_bull_backtest
 import backend.routers.security_chart as security_chart
 import backend.routers.relative_strength as relative_strength
@@ -120,6 +121,10 @@ from backend.services.crypto_options_report.scheduler import (
 from backend.services.momentx.scheduler import (
     start_momentx_scheduler,
     stop_momentx_scheduler,
+)
+from backend.services.open_low_high.scheduler import (
+    start_open_low_high_scheduler,
+    stop_open_low_high_scheduler,
 )
 # Configure logging with file handler - MUST be done before any loggers are created
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
@@ -318,6 +323,14 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ MomentX scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without MomentX scheduler")
 
+        try:
+            logger.info("Starting Open Low High screener scheduler (09:20:30 IST)...")
+            start_open_low_high_scheduler()
+            logger.info("✅ Open Low High scheduler: STARTED (09:20:30 / 09:21:45 IST)")
+        except Exception as e:
+            logger.error(f"❌ Open Low High scheduler: FAILED - {e}", exc_info=True)
+            logger.warning("⚠️ Continuing without Open Low High scheduler")
+
         # Iron Condor: run DDL + instrument-key warm once per worker before traffic (avoids ~minute first picker load)
         try:
             from backend.services import iron_condor_service as _ic_warm
@@ -463,6 +476,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"⚠️ Error stopping MomentX scheduler: {e}", exc_info=True)
 
+    try:
+        stop_open_low_high_scheduler()
+        logger.info("✅ Open Low High scheduler stopped")
+    except Exception as e:
+        logger.error(f"⚠️ Error stopping Open Low High scheduler: {e}", exc_info=True)
+
     logger.info("✅ Shutdown complete")
 
 app = FastAPI(
@@ -549,6 +568,8 @@ app.include_router(momentx.router, prefix="/api")
 app.include_router(momentx.router, prefix="")
 app.include_router(mtf_swing.router, prefix="/api")
 app.include_router(mtf_swing.router, prefix="")
+app.include_router(open_low_high.router, prefix="/api")
+app.include_router(open_low_high.router, prefix="")
 app.include_router(nk_vm_bull_backtest.router, prefix="/api")
 app.include_router(nk_vm_bull_backtest.router, prefix="")
 app.include_router(security_chart.router, prefix="/api")
@@ -586,8 +607,13 @@ def _create_tables_background() -> None:
     try:
         create_tables()
         from backend.services.ticker_live import ensure_ticker_tables
+        from backend.services.open_low_high.persistence import ensure_tables as ensure_olh_tables
 
         ensure_ticker_tables()
+        try:
+            ensure_olh_tables()
+        except Exception as olh_exc:
+            logger.warning("Open Low High tables ensure skipped: %s", olh_exc)
         logger.info("✅ Database tables created successfully (background)")
     except Exception as e:
         logger.warning(f"⚠️ Could not create database tables: {e}")

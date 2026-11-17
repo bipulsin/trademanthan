@@ -1,0 +1,445 @@
+/**
+ * Open Low High — charcoal / green theme (aligned with commDiv)
+ */
+
+body.olh-page,
+body.olh-page[data-theme="dark"],
+body.olh-page.theme-page {
+    --bg0: #0c1210;
+    --bg1: #121a17;
+    --bg2: #1a2621;
+    --line: rgba(180, 210, 190, 0.14);
+    --text: #e7f0ea;
+    --muted: #8fa398;
+    --accent: #3dba7a;
+    --accent-dim: #2a8f5c;
+    --danger: #e06b6b;
+    --warn: #d4a017;
+    --card: rgba(22, 34, 29, 0.92);
+    --card-inner: #121a17;
+    --font-display: "Syne", sans-serif;
+    --font-body: "DM Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+
+    --theme-bg: transparent;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: var(--text);
+    --theme-muted: var(--muted);
+    --theme-accent: var(--accent);
+    --theme-accent-hover: #4fd48c;
+    --theme-success: var(--accent);
+    --theme-danger: var(--danger);
+
+    --left-menu-bg: rgba(12, 18, 16, 0.96);
+    --left-menu-border: var(--line);
+    --left-menu-accent: var(--accent);
+    --left-menu-text: var(--text);
+    --left-menu-muted: var(--muted);
+
+    margin: 0;
+    min-height: 100%;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    background-color: var(--bg0) !important;
+    background-image:
+        repeating-linear-gradient(
+            -18deg,
+            transparent,
+            transparent 12px,
+            rgba(143, 163, 152, 0.045) 12px,
+            rgba(143, 163, 152, 0.045) 13px
+        ),
+        radial-gradient(1200px 600px at 10% -10%, rgba(61, 186, 122, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(40, 90, 70, 0.25), transparent 55%),
+        linear-gradient(180deg, #0e1613 0%, #0c1210 40%, #0a100e 100%) !important;
+}
+
+body.olh-page .main-content-area,
+body.olh-page .right-panel {
+    background: transparent !important;
+    color: var(--theme-text) !important;
+    font-family: var(--font-body);
+    flex: 1;
+    min-width: 0;
+}
+
+body.olh-page .olh-wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+body.olh-page .olh-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.1rem;
+}
+
+body.olh-page .olh-title {
+    font-family: var(--font-display) !important;
+    font-weight: 800 !important;
+    font-size: clamp(1.35rem, 2.8vw, 1.75rem) !important;
+    color: var(--accent) !important;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px !important;
+}
+
+body.olh-page .olh-title i { margin-right: 0.25rem; }
+
+body.olh-page .olh-subtitle {
+    color: var(--muted) !important;
+    font-size: 0.95rem !important;
+    margin: 0 !important;
+    max-width: 40rem;
+    line-height: 1.4;
+}
+
+body.olh-page .olh-header-aside {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    justify-content: flex-end;
+}
+
+body.olh-page .olh-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.28rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--card-inner);
+    color: var(--text);
+    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    font-weight: 500;
+}
+
+body.olh-page .olh-pill-muted { color: var(--muted); }
+body.olh-page .olh-pill.is-frozen {
+    border-color: rgba(61, 186, 122, 0.45);
+    color: var(--accent);
+}
+body.olh-page .olh-pill.is-waiting { color: var(--warn); border-color: rgba(212, 160, 23, 0.4); }
+
+body.olh-page .olh-btn {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: var(--bg2);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 0.4rem 0.7rem;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+body.olh-page .olh-btn:hover { border-color: var(--accent); color: var(--accent); }
+body.olh-page .olh-btn-accent {
+    background: rgba(61, 186, 122, 0.18);
+    border-color: rgba(61, 186, 122, 0.45);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+body.olh-page .olh-banner {
+    margin: 0 0 1rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+body.olh-page .olh-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.35rem;
+}
+
+body.olh-page .olh-tab {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0.45rem 0.85rem;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+}
+body.olh-page .olh-tab.active,
+body.olh-page .olh-tab[aria-selected="true"] {
+    color: var(--accent);
+    background: rgba(61, 186, 122, 0.12);
+}
+
+body.olh-page .olh-section { margin-bottom: 1.75rem; }
+
+body.olh-page .olh-section-title {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0 0 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text);
+}
+body.olh-page .olh-section-title.olh-bull { color: var(--accent); }
+body.olh-page .olh-section-title.olh-bear { color: var(--danger); }
+
+body.olh-page .olh-count {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-weight: 500;
+}
+
+body.olh-page .olh-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.85rem;
+}
+
+body.olh-page .olh-card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    box-sizing: border-box;
+}
+body.olh-page .olh-card.is-bullish {
+    border-color: rgba(61, 186, 122, 0.45);
+    background: linear-gradient(165deg, rgba(34, 197, 94, 0.08), var(--card) 48%);
+}
+body.olh-page .olh-card.is-bearish {
+    border-color: rgba(224, 107, 107, 0.5);
+    background: linear-gradient(165deg, rgba(224, 107, 107, 0.1), var(--card) 48%);
+}
+
+body.olh-page .olh-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+body.olh-page .olh-sym {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+
+body.olh-page .olh-side-chip {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.18rem 0.45rem;
+    border-radius: 6px;
+    font-family: var(--font-mono);
+}
+body.olh-page .olh-side-chip.bull {
+    background: rgba(61, 186, 122, 0.2);
+    color: #7dffb0;
+}
+body.olh-page .olh-side-chip.bear {
+    background: rgba(224, 107, 107, 0.22);
+    color: #ffb0b0;
+}
+
+body.olh-page .olh-contract {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 0.55rem;
+    font-family: var(--font-mono);
+}
+
+body.olh-page .olh-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+}
+body.olh-page .olh-stats dt {
+    color: var(--muted);
+    margin: 0;
+    font-weight: 500;
+}
+body.olh-page .olh-stats dd {
+    margin: 0 0 0.25rem;
+    font-family: var(--font-mono);
+    color: var(--text);
+    font-weight: 600;
+}
+
+body.olh-page .olh-badges {
+    margin-top: 0.55rem;
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+body.olh-page .olh-sector-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.55rem;
+    height: 1.55rem;
+    padding: 0 0.28rem;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    font-family: var(--font-mono);
+    line-height: 1;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+body.olh-page .olh-sector-badge.is-strong {
+    color: #1a0a00;
+    background: #ff7a1a;
+}
+body.olh-page .olh-sector-badge.is-weak {
+    color: #fff7f7;
+    background: #e11d48;
+}
+
+body.olh-page .olh-empty {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0.25rem 0 0;
+}
+
+body.olh-page .olh-log-toolbar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-end;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+body.olh-page .olh-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+body.olh-page .olh-select {
+    background: var(--bg2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    font-family: var(--font-body);
+}
+
+body.olh-page .olh-log-date {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 1.25rem 0 0.5rem;
+}
+body.olh-page .olh-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+}
+body.olh-page .olh-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+body.olh-page .olh-table th,
+body.olh-page .olh-table td {
+    padding: 0.5rem 0.65rem;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+body.olh-page .olh-table th {
+    background: var(--bg2);
+    color: var(--muted);
+    font-weight: 600;
+}
+body.olh-page .olh-table td {
+    color: var(--text);
+    font-family: var(--font-mono);
+}
+body.olh-page .olh-table tr:last-child td { border-bottom: none; }
+
+/* Light theme — high contrast readable text */
+body.olh-page[data-theme="light"] {
+    --bg0: #f4f7f5;
+    --bg1: #eef3f0;
+    --bg2: #e4ebe6;
+    --line: rgba(40, 70, 55, 0.18);
+    --text: #14201a;
+    --muted: #3d5248;
+    --accent: #1f7a4d;
+    --accent-dim: #2a8f5c;
+    --danger: #b91c1c;
+    --warn: #a16207;
+    --card: rgba(255, 255, 255, 0.98);
+    --card-inner: #f0f4f1;
+    --theme-bg: #f4f7f5;
+    --theme-card: var(--card);
+    --theme-card-alt: var(--card-inner);
+    --theme-border: var(--line);
+    --theme-text: #14201a;
+    --theme-muted: #3d5248;
+    --theme-accent: #1f7a4d;
+    --left-menu-bg: rgba(255, 255, 255, 0.98);
+    --left-menu-text: #14201a;
+    --left-menu-muted: #3d5248;
+    --left-menu-accent: #1f7a4d;
+    --left-menu-border: rgba(40, 70, 55, 0.18);
+    background-color: #f4f7f5 !important;
+    background-image: none !important;
+    color: #14201a !important;
+}
+
+body.olh-page[data-theme="light"] .olh-title { color: var(--accent) !important; }
+body.olh-page[data-theme="light"] .olh-subtitle { color: #3d5248 !important; }
+body.olh-page[data-theme="light"] .olh-empty { color: #3d5248; }
+body.olh-page[data-theme="light"] .olh-card {
+    box-shadow: 0 4px 16px rgba(20, 40, 30, 0.08);
+}
+body.olh-page[data-theme="light"] .olh-side-chip.bull {
+    background: rgba(31, 122, 77, 0.14);
+    color: #14532d;
+}
+body.olh-page[data-theme="light"] .olh-side-chip.bear {
+    background: rgba(185, 28, 28, 0.12);
+    color: #7f1d1d;
+}
+body.olh-page[data-theme="light"] .olh-btn-accent {
+    background: rgba(31, 122, 77, 0.14);
+    color: #14532d;
+}
+body.olh-page[data-theme="light"] .olh-tab.active {
+    color: #1f7a4d;
+    background: rgba(31, 122, 77, 0.1);
+}
+body.olh-page[data-theme="light"] .olh-table th { background: #eef3f0; color: #3d5248; }
+body.olh-page[data-theme="light"] .mobile-title-bar { background: #eef3f0 !important; }
+body.olh-page[data-theme="light"] .mobile-title { color: #14201a !important; }
+
+@media (max-width: 720px) {
+    body.olh-page .olh-wrap { padding: 16px 12px 48px; }
+    body.olh-page .olh-stats { grid-template-columns: 1fr; }
+}
