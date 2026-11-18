@@ -276,10 +276,11 @@ def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
 def _hist_range_end(session: date) -> date:
     """Upstox ``range_end_date`` often omits that calendar day's candles.
 
-    After the IST day rolls past ``session``, request ``session+1`` (or today)
-    so the session's 5m/daily bars are included.
+    Equity usually appears with ``session+1``; index (NIFTY) can need
+    ``session+2``. Use the later of those floors so overnight force screens
+    still see the session's 5m bars.
     """
-    return max(session + timedelta(days=1), _today())
+    return max(session + timedelta(days=2), _today() + timedelta(days=1))
 
 
 def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
