@@ -178,12 +178,12 @@ def test_phase_b_bearish_keep_when_second_low_below_first_low():
 
 
 def test_wick_filter_bullish_upper_wick_ratio():
-    # body=10, upper wick=2 → 0.20 pass; upper wick=3 → fail
+    # body=10, upper wick=3.5 → 0.35 pass; upper wick=4 → fail
     assert (
         passes_second_candle_wick_filter(
             "BULLISH",
             second_open=100.0,
-            second_high=112.0,
+            second_high=113.5,
             second_low=99.0,
             second_close=110.0,
         )
@@ -193,7 +193,7 @@ def test_wick_filter_bullish_upper_wick_ratio():
         passes_second_candle_wick_filter(
             "BULLISH",
             second_open=100.0,
-            second_high=113.0,
+            second_high=114.0,
             second_low=99.0,
             second_close=110.0,
         )
@@ -202,13 +202,13 @@ def test_wick_filter_bullish_upper_wick_ratio():
 
 
 def test_wick_filter_bearish_lower_wick_ratio():
-    # body=17, lower wick=3.4 → 0.20 pass; 4.4 → fail (INDIGO REST-like)
+    # body=17, lower wick=4.4 → ~0.26 (INDIGO REST-like) pass at 0.35; wick=6 → fail
     assert (
         passes_second_candle_wick_filter(
             "BEARISH",
             second_open=5606.9,
             second_high=5606.9,
-            second_low=5586.5,
+            second_low=5585.5,
             second_close=5589.9,
         )
         is True
@@ -218,7 +218,7 @@ def test_wick_filter_bearish_lower_wick_ratio():
             "BEARISH",
             second_open=5606.9,
             second_high=5606.9,
-            second_low=5585.5,
+            second_low=5583.9,
             second_close=5589.9,
         )
         is False

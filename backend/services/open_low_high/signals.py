@@ -116,13 +116,13 @@ def passes_second_candle_wick_filter(
     second_high: float,
     second_low: float,
     second_close: float,
-    max_wick_body_ratio: float = 0.20,
+    max_wick_body_ratio: float = 0.35,
 ) -> bool:
     """09:20 wick/body filter — True to KEEP, False to REMOVE.
 
     Body = abs(close - open). Zero-body (doji) fails the filter.
-    Bullish: upper_wick / body <= max ratio (default 0.20).
-    Bearish: lower_wick / body <= max ratio (default 0.20).
+    Bullish: upper_wick / body <= max ratio (default 0.35).
+    Bearish: lower_wick / body <= max ratio (default 0.35).
     """
     o = float(second_open)
     h = float(second_high)
