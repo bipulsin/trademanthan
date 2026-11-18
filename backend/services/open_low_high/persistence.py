@@ -14,6 +14,8 @@ from backend.database import SessionLocal
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
+# Base table (legacy columns). New fields are added via _MIGRATE_COLS so
+# CREATE TABLE IF NOT EXISTS does not skip ALTERs on an existing table.
 _DDL = """
 CREATE TABLE IF NOT EXISTS open_low_high_screen (
     id BIGSERIAL PRIMARY KEY,
@@ -32,12 +34,6 @@ CREATE TABLE IF NOT EXISTS open_low_high_screen (
     first_close DOUBLE PRECISION,
     second_close DOUBLE PRECISION,
     vwap_0915 DOUBLE PRECISION,
-    active BOOLEAN NOT NULL DEFAULT FALSE,
-    phase_b_ok BOOLEAN NOT NULL DEFAULT FALSE,
-    sl DOUBLE PRECISION,
-    entry DOUBLE PRECISION,
-    t1 DOUBLE PRECISION,
-    t2 DOUBLE PRECISION,
     sector_badge VARCHAR(8),
     sector_star BOOLEAN NOT NULL DEFAULT FALSE,
     sector_badge_display VARCHAR(16),
@@ -47,14 +43,23 @@ CREATE TABLE IF NOT EXISTS open_low_high_screen (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ux_open_low_high_screen_date_symbol_side UNIQUE (trade_date, symbol, side)
-);
-CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_trade_date
-    ON open_low_high_screen (trade_date DESC);
-CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_instrument
-    ON open_low_high_screen (trade_date, instrument_key);
-CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_active
-    ON open_low_high_screen (trade_date, active);
+)
 """
+
+_INDEX_DDL = [
+    """
+    CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_trade_date
+        ON open_low_high_screen (trade_date DESC)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_instrument
+        ON open_low_high_screen (trade_date, instrument_key)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_active
+        ON open_low_high_screen (trade_date, active)
+    """,
+]
 
 _META_DDL = """
 CREATE TABLE IF NOT EXISTS open_low_high_day_meta (
@@ -69,7 +74,7 @@ CREATE TABLE IF NOT EXISTS open_low_high_day_meta (
     notes TEXT,
     meta_json TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+)
 """
 
 _MIGRATE_COLS = [
@@ -88,6 +93,8 @@ def ensure_tables() -> None:
         db.execute(text(_DDL))
         db.execute(text(_META_DDL))
         for stmt in _MIGRATE_COLS:
+            db.execute(text(stmt))
+        for stmt in _INDEX_DDL:
             db.execute(text(stmt))
         db.commit()
     except Exception:
