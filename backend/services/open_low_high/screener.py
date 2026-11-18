@@ -731,12 +731,16 @@ def run_screen(
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
         bearish = [c for c in tagged if c.get("side") == "BEARISH"]
         active_n = sum(1 for c in tagged if c.get("active"))
-        candidate_n = len(tagged) - active_n
+        wait_n = sum(1 for c in tagged if c.get("wait_list") and not c.get("active"))
+        non_active_n = len(tagged) - active_n - wait_n
+        candidate_n = wait_n + non_active_n
         phase_ts = _now()
         day_meta = {
             "window": win,
             "expiry": expiry.isoformat(),
             "active": active_n,
+            "wait": wait_n,
+            "non_active": non_active_n,
             "candidates": candidate_n,
             **nifty_cue,
         }
@@ -750,7 +754,8 @@ def run_screen(
             phase_b_at=phase_ts,
             notes=(
                 f"screened={len(universe)} phase_a={len(tagged)} "
-                f"active={active_n} grey={candidate_n} errors={errors} force={force}"
+                f"active={active_n} wait={wait_n} non_active={non_active_n} "
+                f"errors={errors} force={force}"
             ),
             meta=day_meta,
         )
@@ -766,24 +771,27 @@ def run_screen(
             "kept": active_n,
             "phase_a": len(tagged),
             "active": active_n,
+            "wait": wait_n,
+            "non_active": non_active_n,
             "candidates": candidate_n,
             "errors": errors,
             "nifty_gap": nifty_cue.get("nifty_gap"),
             "nifty_bias": nifty_cue.get("nifty_bias"),
             "nifty_show_on": nifty_cue.get("nifty_show_on"),
             "message": (
-                f"Screen complete — {active_n} active, {candidate_n} Phase A "
-                f"candidates (grey). Frozen for the day."
+                f"Screen complete — {active_n} active, {wait_n} wait, "
+                f"{non_active_n} non-active. Frozen for the day."
             ),
         }
         global _last_run
         _last_run = dict(payload)
         _last_run["at"] = phase_ts.isoformat()
         logger.info(
-            "olh screen done phase_a=%s active=%s grey=%s bull=%s bear=%s",
+            "olh screen done phase_a=%s active=%s wait=%s non_active=%s bull=%s bear=%s",
             len(tagged),
             active_n,
-            candidate_n,
+            wait_n,
+            non_active_n,
             len(bullish),
             len(bearish),
         )
@@ -861,13 +869,15 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
     bullish = [r for r in rows if str(r.get("side") or "").upper() == "BULLISH"]
     bearish = [r for r in rows if str(r.get("side") or "").upper() == "BEARISH"]
     active_n = sum(1 for r in rows if r.get("active"))
-    grey_n = len(rows) - active_n
+    wait_n = sum(1 for r in rows if r.get("wait_list") and not r.get("active"))
+    non_active_n = len(rows) - active_n - wait_n
+    grey_n = wait_n + non_active_n
 
     if frozen:
         status = "frozen"
         message = (
-            f"Frozen for today — {active_n} active, {grey_n} Phase A candidates. "
-            "Cards and sector tags will not change."
+            f"Frozen for today — {active_n} active, {wait_n} wait, "
+            f"{non_active_n} non-active. Cards and sector tags will not change."
         )
     elif win == "waiting":
         status = "waiting"
@@ -892,6 +902,8 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
         "bullish": bullish,
         "bearish": bearish,
         "active": active_n,
+        "wait": wait_n,
+        "non_active": non_active_n,
         "candidates": grey_n,
         "meta": meta,
         "nifty_gap": nifty.get("nifty_gap"),
