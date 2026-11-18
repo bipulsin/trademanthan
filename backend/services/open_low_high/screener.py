@@ -2,12 +2,12 @@
 
 Schedule (IST):
   ~09:25:10  Phase A on completed 09:15 bar + Phase B on completed 09:20 bar
-             (WS preferred; REST intraday fallback). Freeze by ~09:27.
+             (Upstox REST 5m preferred; WS 1m→5m fills gaps only). Freeze by ~09:27.
   After freeze: card list + S1–S3/W1–W3 tags are immutable for the day.
 
-Phase B needs the *close* of the 09:20 five-minute candle, which is only final
-at 09:25. Screening at 09:20:30 on a forming bar false-negatives confirms that
-arrive later in the 09:20–09:25 window (seen 2026-11-18 POLYCAB).
+Phase B uses 09:20 high/low extremes vs 09:15 (not close), then a 09:20
+wick/body filter. The 09:20 bar is only final at 09:25 — screening earlier on a
+forming bar false-negatives confirms that arrive later (seen 2026-11-18 POLYCAB).
 """
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ from backend.services.open_low_high.signals import (
     confirm_phase_b,
     evaluate_phase_a,
     freeze_tags_immutable,
+    passes_second_candle_wick_filter,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ def _bars_from_rows(rows: List[Dict[str, Any]], contract: str) -> List[Bar]:
 
 
 def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
-    """Aggregate Upstox WS 1m candles into 5m bars for today's session (preferred for 09:20)."""
+    """Aggregate Upstox WS 1m candles into 5m bars for today's session (gap-fill only)."""
     from sqlalchemy import text
 
     from backend.database import SessionLocal
@@ -232,6 +233,7 @@ def _fetch_daily_prev(
 
 
 def _merge_bars(primary: List[Bar], fallback: List[Bar]) -> List[Bar]:
+    """Merge by timestamp; ``primary`` wins on conflicts."""
     by_ts: Dict[datetime, Bar] = {b.ts: b for b in fallback}
     for b in primary:
         by_ts[b.ts] = b
@@ -258,9 +260,11 @@ def _screen_one(
     if not ik:
         return None
 
+    # Prefer official Upstox REST 5m OHLC (matches Pro charts). WS 1m→5m can
+    # disagree on open/close (seen 2026-11-18 INDIGO) — use it only as gap-fill.
     ws_bars = _fetch_ws_5m_bars(ik, session)
     rest_bars = _fetch_rest_5m(upstox, ik, session)
-    bars_5m = _merge_bars(ws_bars, rest_bars)
+    bars_5m = _merge_bars(rest_bars, ws_bars)
     if not bars_5m:
         return None
 
@@ -291,14 +295,22 @@ def _screen_one(
     if phase_a is None:
         return None
 
-    # Phase B: require completed 09:20 bar close (screen window starts ~09:25:05).
-    # Interpretation: remove cards that FAIL confirmation; missing second = fail.
+    # Phase B: 09:20 extremes vs 09:15, then wick/body filter (window ~09:25:05).
     if second is None:
         return None
     if not confirm_phase_b(
         phase_a.side,
         first_high=phase_a.first_high,
         first_low=phase_a.first_low,
+        second_high=second.high,
+        second_low=second.low,
+    ):
+        return None
+    if not passes_second_candle_wick_filter(
+        phase_a.side,
+        second_open=second.open,
+        second_high=second.high,
+        second_low=second.low,
         second_close=second.close,
     ):
         return None

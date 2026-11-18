@@ -5,6 +5,7 @@ from backend.services.open_low_high.signals import (
     confirm_phase_b,
     evaluate_phase_a,
     freeze_tags_immutable,
+    passes_second_candle_wick_filter,
 )
 
 
@@ -37,6 +38,20 @@ def test_phase_a_bullish_rejects_red_candle():
     assert r is None
 
 
+def test_phase_a_bullish_accepts_doji():
+    r = evaluate_phase_a(
+        first_open=102.5,
+        first_high=103.0,
+        first_low=101.5,
+        first_close=102.5,  # doji above PDH + VWAP
+        vwap_0915=101.0,
+        prev_high=101.0,
+        prev_low=95.0,
+    )
+    assert r is not None
+    assert r.side == "BULLISH"
+
+
 def test_phase_a_bullish_rejects_close_not_above_pdh():
     # Wick above PDH but close at/below — live screener uses close, not wick.
     r = evaluate_phase_a(
@@ -66,6 +81,21 @@ def test_phase_a_bearish_close_below_pdl_vwap_red():
     assert r.side == "BEARISH"
 
 
+def test_phase_a_bearish_accepts_doji():
+    # INDIGO-style: close == open below PDL and below VWAP.
+    r = evaluate_phase_a(
+        first_open=5600.0,
+        first_high=5614.2,
+        first_low=5587.7,
+        first_close=5600.0,
+        vwap_0915=5600.633,
+        prev_high=5672.2,
+        prev_low=5608.7,
+    )
+    assert r is not None
+    assert r.side == "BEARISH"
+
+
 def test_phase_a_bearish_rejects_green():
     r = evaluate_phase_a(
         first_open=96.0,
@@ -79,16 +109,143 @@ def test_phase_a_bearish_rejects_green():
     assert r is None
 
 
-def test_phase_b_bullish_keep_when_second_closes_above_first_high():
-    assert confirm_phase_b("BULLISH", first_high=102.0, first_low=99.0, second_close=102.5) is True
-    assert confirm_phase_b("BULLISH", first_high=102.0, first_low=99.0, second_close=102.0) is False
-    assert confirm_phase_b("BULLISH", first_high=102.0, first_low=99.0, second_close=101.0) is False
+def test_phase_b_bullish_keep_when_second_high_above_first_high():
+    assert (
+        confirm_phase_b(
+            "BULLISH",
+            first_high=102.0,
+            first_low=99.0,
+            second_high=102.5,
+            second_low=100.0,
+        )
+        is True
+    )
+    assert (
+        confirm_phase_b(
+            "BULLISH",
+            first_high=102.0,
+            first_low=99.0,
+            second_high=102.0,
+            second_low=100.0,
+        )
+        is False
+    )
+    # Close above first high is not enough if high does not exceed.
+    assert (
+        confirm_phase_b(
+            "BULLISH",
+            first_high=102.0,
+            first_low=99.0,
+            second_high=101.5,
+            second_low=100.0,
+        )
+        is False
+    )
 
 
-def test_phase_b_bearish_keep_when_second_closes_below_first_low():
-    assert confirm_phase_b("BEARISH", first_high=100.0, first_low=97.0, second_close=96.5) is True
-    assert confirm_phase_b("BEARISH", first_high=100.0, first_low=97.0, second_close=97.0) is False
-    assert confirm_phase_b("BEARISH", first_high=100.0, first_low=97.0, second_close=97.5) is False
+def test_phase_b_bearish_keep_when_second_low_below_first_low():
+    assert (
+        confirm_phase_b(
+            "BEARISH",
+            first_high=100.0,
+            first_low=97.0,
+            second_high=99.0,
+            second_low=96.5,
+        )
+        is True
+    )
+    assert (
+        confirm_phase_b(
+            "BEARISH",
+            first_high=100.0,
+            first_low=97.0,
+            second_high=99.0,
+            second_low=97.0,
+        )
+        is False
+    )
+    # Close below first low without a lower low fails (old close-based rule).
+    assert (
+        confirm_phase_b(
+            "BEARISH",
+            first_high=100.0,
+            first_low=97.0,
+            second_high=99.0,
+            second_low=97.2,
+        )
+        is False
+    )
+
+
+def test_wick_filter_bullish_upper_wick_ratio():
+    # body=10, upper wick=2 → 0.20 pass; upper wick=3 → fail
+    assert (
+        passes_second_candle_wick_filter(
+            "BULLISH",
+            second_open=100.0,
+            second_high=112.0,
+            second_low=99.0,
+            second_close=110.0,
+        )
+        is True
+    )
+    assert (
+        passes_second_candle_wick_filter(
+            "BULLISH",
+            second_open=100.0,
+            second_high=113.0,
+            second_low=99.0,
+            second_close=110.0,
+        )
+        is False
+    )
+
+
+def test_wick_filter_bearish_lower_wick_ratio():
+    # body=17, lower wick=3.4 → 0.20 pass; 4.4 → fail (INDIGO REST-like)
+    assert (
+        passes_second_candle_wick_filter(
+            "BEARISH",
+            second_open=5606.9,
+            second_high=5606.9,
+            second_low=5586.5,
+            second_close=5589.9,
+        )
+        is True
+    )
+    assert (
+        passes_second_candle_wick_filter(
+            "BEARISH",
+            second_open=5606.9,
+            second_high=5606.9,
+            second_low=5585.5,
+            second_close=5589.9,
+        )
+        is False
+    )
+
+
+def test_wick_filter_rejects_zero_body():
+    assert (
+        passes_second_candle_wick_filter(
+            "BEARISH",
+            second_open=100.0,
+            second_high=101.0,
+            second_low=99.0,
+            second_close=100.0,
+        )
+        is False
+    )
+    assert (
+        passes_second_candle_wick_filter(
+            "BULLISH",
+            second_open=100.0,
+            second_high=101.0,
+            second_low=99.0,
+            second_close=100.0,
+        )
+        is False
+    )
 
 
 def test_freeze_tags_immutable_snapshots_display():

@@ -35,7 +35,7 @@ def start_open_low_high_scheduler() -> None:
     if _scheduler is not None:
         return
     sched = BackgroundScheduler(timezone="Asia/Kolkata")
-    # Phase A+B after 09:20 five-minute bar closes (needs final close for Phase B).
+    # Phase A+B after 09:20 five-minute bar closes (needs final OHLC for Phase B + wick).
     sched.add_job(
         _run_olh_screen,
         CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=10, timezone="Asia/Kolkata"),
