@@ -8,7 +8,8 @@
 
   const POLL_MS = 20000;
   const LTP_POLL_MS = 15000;
-  const ENGINE_SRC = 'security-chart/security-chart-engine.js?v=18';
+  const ENGINE_SRC = 'security-chart/security-chart-engine.js?v=19';
+  const BADGE_ORDER = { S1: 0, S2: 1, S3: 2, W1: 3, W2: 4, W3: 5 };
 
   let pollTimer = null;
   let ltpTimer = null;
@@ -70,11 +71,33 @@
     );
   }
 
+  function badgeSortRank(card) {
+    const raw = String((card && (card.sector_badge || card.sector_badge_display)) || '')
+      .trim()
+      .toUpperCase()
+      .replace(/\*$/, '');
+    return Object.prototype.hasOwnProperty.call(BADGE_ORDER, raw) ? BADGE_ORDER[raw] : 99;
+  }
+
+  function hasOlhStar(card) {
+    const b = String((card && card.olh_badge) || '').trim().toUpperCase();
+    return b === 'O=L' || b === 'O=H';
+  }
+
+  /** Actives first; non-actives: O=L/O=H star, then S1…W3, then symbol. */
   function sortCards(list) {
     return (list || []).slice().sort(function (a, b) {
       const aa = a.active ? 0 : 1;
       const ba = b.active ? 0 : 1;
       if (aa !== ba) return aa - ba;
+      if (!a.active && !b.active) {
+        const as = hasOlhStar(a) ? 0 : 1;
+        const bs = hasOlhStar(b) ? 0 : 1;
+        if (as !== bs) return as - bs;
+      }
+      const ab = badgeSortRank(a);
+      const bb = badgeSortRank(b);
+      if (ab !== bb) return ab - bb;
       return String(a.symbol || '').localeCompare(String(b.symbol || ''));
     });
   }
@@ -101,7 +124,7 @@
   function phaseBReason(card) {
     if (card.active || card.phase_b_ok) return 'Phase B OK';
     const r = String(card.phase_b_fail_reason || '').trim();
-    return r || 'Phase B failed';
+    return r || '';
   }
 
   function splitActiveGrey(list) {
@@ -134,8 +157,7 @@
   }
 
   function entryValue(card) {
-    // Live Entry = FUT LTP; screen snapshot = FUT entry. Equity first_*/second_* are audit-only.
-    if (card.ltp != null && Number.isFinite(Number(card.ltp))) return Number(card.ltp);
+    // Frozen screen Entry only — never live LTP. Equity first_*/second_* are audit-only.
     if (card.entry != null && Number.isFinite(Number(card.entry))) return Number(card.entry);
     if (usesEquityLogic(card)) return null;
     if (card.second_close != null) return Number(card.second_close);
@@ -211,14 +233,14 @@
       const on = showOn === 'BULLISH';
       bullEl.hidden = !on;
       bullEl.title = on
-        ? 'NIFTY bullish + gap up (09:20 close > 09:15 close; open > prev close)'
+        ? 'NIFTY bullish + gap up (09:20 close > prev close; 09:15 open > prev close)'
         : '';
     }
     if (bearEl) {
       const on = showOn === 'BEARISH';
       bearEl.hidden = !on;
       bearEl.title = on
-        ? 'NIFTY bearish + gap down (09:20 close < 09:15 close; open < prev close)'
+        ? 'NIFTY bearish + gap down (09:20 close < prev close; 09:15 open < prev close)'
         : '';
     }
   }
@@ -277,7 +299,8 @@
     setBanner(data.message || '', true);
   }
 
-  function patchLiveEntry(bySymbol) {
+  function patchLiveLtp(bySymbol) {
+    // Keep LTP on the card object for reference; never mutate frozen Entry display.
     if (!bySymbol) return;
     Object.keys(cardByKey).forEach(function (key) {
       const card = cardByKey[key];
@@ -285,10 +308,6 @@
       const live = bySymbol[sym];
       if (!live || live.ltp == null) return;
       card.ltp = live.ltp;
-      card.entry = live.ltp;
-      const cardEl = document.querySelector('.olh-card[data-olh-key="' + key.replace(/"/g, '') + '"]');
-      const el = cardEl && cardEl.querySelector('[data-olh-entry]');
-      if (el) el.textContent = fmt(live.ltp);
     });
   }
 
@@ -304,7 +323,7 @@
   async function pollLtp() {
     try {
       const data = await api('/api/open-low-high/ltp');
-      patchLiveEntry(data.by_symbol || {});
+      patchLiveLtp(data.by_symbol || {});
     } catch (err) {
       /* soft-fail — full poll will refresh */
     }
@@ -377,8 +396,9 @@
 
   function openOlhChart(card) {
     if (!card) return;
-    const ik = String(card.instrument_key || '').trim();
-    if (!ik) {
+    const futIk = String(card.instrument_key || '').trim();
+    const eqIk = String(card.equity_instrument_key || '').trim();
+    if (!futIk && !eqIk) {
       window.alert('No instrument key for chart');
       return;
     }
@@ -386,6 +406,9 @@
     const side = String(card.side || '').toUpperCase();
     const direction = side === 'BEARISH' ? 'SHORT' : 'LONG';
     const active = !!card.active;
+    // Default = Future; Equity toggle available when equity key exists.
+    const defaultIk = futIk || eqIk;
+    const defaultType = futIk ? 'FUT' : 'EQ';
     ensureChartEngine()
       .then(function (eng) {
         if (!eng || typeof eng.openSecurityChart !== 'function') {
@@ -393,9 +416,9 @@
         }
         return eng.openSecurityChart({
           symbol: sym,
-          instrumentType: 'FUT',
-          instrumentKey: ik,
-          displaySymbol: card.contract || sym,
+          instrumentType: defaultType,
+          instrumentKey: defaultIk,
+          displaySymbol: defaultType === 'FUT' ? (card.contract || sym) : sym,
           exchange: 'NSE',
           timeframe: '5m',
           direction: direction,
@@ -404,12 +427,29 @@
           ema2Enabled: false,
           ema3Enabled: false,
           vwapEnabled: true,
+          vwapColor: '#9ca3af',
+          vwapLineWidth: 1,
           volumeEnabled: true,
           rsiEnabled: false,
           williamsEnabled: false,
           hmEnabled: false,
           macdDivergenceEnabled: false,
-          priceLines: active ? buildPriceLines(card) : [],
+          instrumentToggle: futIk && eqIk
+            ? {
+                future: {
+                  instrumentType: 'FUT',
+                  instrumentKey: futIk,
+                  displaySymbol: card.contract || sym,
+                },
+                equity: {
+                  instrumentType: 'EQ',
+                  instrumentKey: eqIk,
+                  displaySymbol: sym,
+                },
+                default: 'future',
+              }
+            : null,
+          priceLines: active && defaultType === 'FUT' ? buildPriceLines(card) : [],
           screenerData: {
             direction: direction,
             insight: (active ? 'ACTIVE' : 'PHASE A') + ' · ' + side,
@@ -457,7 +497,7 @@
 
     host.innerHTML = sections
       .map(function (sec) {
-        const rows = (sec.rows || [])
+        const rows = sortCards(sec.rows || [])
           .map(function (r) {
             const row = Object.assign({}, r, { trade_date: sec.date });
             const key = cardKey(row);

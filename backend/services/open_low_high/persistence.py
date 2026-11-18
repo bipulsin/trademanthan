@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pytz
@@ -354,8 +354,39 @@ def is_day_frozen(trade_date: date) -> bool:
         db.close()
 
 
+_BADGE_RANK = {"S1": 0, "S2": 1, "S3": 2, "W1": 3, "W2": 4, "W3": 5}
+
+
+def _badge_rank(row: Dict[str, Any]) -> int:
+    raw = str(row.get("sector_badge") or row.get("sector_badge_display") or "").strip().upper()
+    if raw.endswith("*"):
+        raw = raw[:-1]
+    return _BADGE_RANK.get(raw, 99)
+
+
+def _has_olh_star(row: Dict[str, Any]) -> bool:
+    badge = str(row.get("olh_badge") or "").strip().upper()
+    return badge in ("O=L", "O=H")
+
+
+def sort_screen_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Actives first; non-actives: O=L/O=H star, then S1…W3, then symbol."""
+
+    def key(r: Dict[str, Any]) -> tuple:
+        is_active = bool(r.get("active"))
+        return (
+            0 if str(r.get("side") or "").upper() == "BULLISH" else 1,
+            0 if is_active else 1,
+            0 if (not is_active and _has_olh_star(r)) else 1,
+            _badge_rank(r),
+            str(r.get("symbol") or ""),
+        )
+
+    return sorted(list(rows or []), key=key)
+
+
 def list_screen_for_date(trade_date: date) -> List[Dict[str, Any]]:
-    """Screen rows for a date: actives first, then symbol within each side group (caller splits)."""
+    """Screen rows for a date: actives first, then star / S1…W3 / symbol."""
     ensure_tables()
     db = SessionLocal()
     try:
@@ -364,14 +395,11 @@ def list_screen_for_date(trade_date: date) -> List[Dict[str, Any]]:
                 """
                 SELECT * FROM open_low_high_screen
                 WHERE trade_date = :d
-                ORDER BY side ASC,
-                         CASE WHEN active THEN 0 ELSE 1 END ASC,
-                         symbol ASC
                 """
             ),
             {"d": trade_date},
         ).mappings().all()
-        return [_row_to_dict(r) for r in rows]
+        return sort_screen_rows([_row_to_dict(r) for r in rows])
     finally:
         db.close()
 
@@ -385,7 +413,10 @@ def list_trade_log(
     ensure_tables()
     db = SessionLocal()
     try:
-        params: Dict[str, Any] = {"lim": max(1, int(limit_days))}
+        # Compute cutoff in Python — avoid SQLAlchemy ``:lim::int`` cast clash.
+        lim = max(1, int(limit_days))
+        cutoff = _aware().date() - timedelta(days=lim)
+        params: Dict[str, Any] = {"cutoff": cutoff}
         side_clause = ""
         if side:
             side_clause = "AND side = :side"
@@ -394,16 +425,22 @@ def list_trade_log(
             text(
                 f"""
                 SELECT * FROM open_low_high_screen
-                WHERE trade_date >= (CURRENT_DATE - (:lim::int))
+                WHERE trade_date >= :cutoff
                 {side_clause}
-                ORDER BY trade_date DESC,
-                         side ASC,
-                         CASE WHEN active THEN 0 ELSE 1 END ASC,
-                         symbol ASC
+                ORDER BY trade_date DESC
                 """
             ),
             params,
         ).mappings().all()
-        return [_row_to_dict(r) for r in rows]
+        parsed = [_row_to_dict(r) for r in rows]
+        # Keep date DESC grouping; within each date apply screen sort.
+        by_date: Dict[str, List[Dict[str, Any]]] = {}
+        for r in parsed:
+            d = str(r.get("trade_date") or "")[:10]
+            by_date.setdefault(d, []).append(r)
+        out: List[Dict[str, Any]] = []
+        for d in sorted(by_date.keys(), reverse=True):
+            out.extend(sort_screen_rows(by_date[d]))
+        return out
     finally:
         db.close()

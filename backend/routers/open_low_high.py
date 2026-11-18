@@ -83,7 +83,7 @@ def run_now(
 
 @router.get("/ltp")
 def get_ltp(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    """Live LTPs for today's screen instrument keys (Entry overlay)."""
+    """Live LTPs for today's screen keys (reference only — Entry stays frozen)."""
     from backend.services.open_low_high.persistence import list_screen_for_date
     from backend.services.open_low_high.screener import _enrich_ltp, _today
 
@@ -93,7 +93,7 @@ def get_ltp(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
             "symbol": r.get("symbol"),
             "instrument_key": r.get("instrument_key"),
             "ltp": r.get("ltp"),
-            "entry": r.get("entry"),
+            "entry": r.get("entry"),  # frozen screen snapshot; not live LTP
             "active": bool(r.get("active")),
             "side": r.get("side"),
         }

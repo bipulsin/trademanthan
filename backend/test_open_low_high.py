@@ -178,9 +178,10 @@ def test_evaluate_phase_b_fail_reasons():
         second_close=None,
     )
     assert missing.ok is False
-    assert missing.fail_reason == "missing 09:20 bar"
+    assert missing.fail_reason == "missing 9:20 candle"
 
-    close_fail = evaluate_phase_b(
+    # Red 9:20 + close below 9:15 → reverse-direction wording
+    reverse = evaluate_phase_b(
         "BULLISH",
         first_close=100.0,
         second_open=100.0,
@@ -188,8 +189,31 @@ def test_evaluate_phase_b_fail_reasons():
         second_low=99.0,
         second_close=99.5,
     )
+    assert reverse.ok is False
+    assert reverse.fail_reason == "9:20 candle is in reverse direction of 9:15 candle"
+
+    # Green-ish 9:20 but still closes below 9:15
+    close_fail = evaluate_phase_b(
+        "BULLISH",
+        first_close=100.0,
+        second_open=99.0,
+        second_high=100.5,
+        second_low=98.5,
+        second_close=99.5,
+    )
     assert close_fail.ok is False
-    assert close_fail.fail_reason == "close not confirming"
+    assert close_fail.fail_reason == "9:20 candle closes below 9:15 candle"
+
+    bear_close = evaluate_phase_b(
+        "BEARISH",
+        first_close=100.0,
+        second_open=100.5,
+        second_high=101.0,
+        second_low=100.0,
+        second_close=100.2,
+    )
+    assert bear_close.ok is False
+    assert bear_close.fail_reason == "9:20 candle closes above 9:15 candle"
 
     wick_fail = evaluate_phase_b(
         "BULLISH",
@@ -200,7 +224,7 @@ def test_evaluate_phase_b_fail_reasons():
         second_close=110.0,
     )
     assert wick_fail.ok is False
-    assert wick_fail.fail_reason == "wick too large"
+    assert wick_fail.fail_reason == "9:20 candle has wick longer than 35% of candle body"
 
     ok = evaluate_phase_b(
         "BULLISH",
@@ -234,6 +258,7 @@ def test_open_extreme_badge_ol_oh():
 
 
 def test_nifty_cue_gap_and_bias():
+    # Bias = session close vs PDC (prefer 09:20); gap = 09:15 open vs PDC
     bull = evaluate_nifty_cue(
         prev_close=100.0,
         first_open=101.0,
@@ -254,16 +279,26 @@ def test_nifty_cue_gap_and_bias():
     assert bear["nifty_bias"] == "bearish"
     assert bear["nifty_show_on"] == "BEARISH"
 
-    # Gap up but bearish bias → no header badge
+    # Gap up but 09:20 close below PDC → bearish bias, no header badge
     mixed = evaluate_nifty_cue(
         prev_close=100.0,
         first_open=101.0,
         first_close=102.0,
-        second_close=101.0,
+        second_close=99.0,
     )
     assert mixed["nifty_gap"] == "up"
     assert mixed["nifty_bias"] == "bearish"
     assert mixed["nifty_show_on"] is None
+
+    # Before 09:20: bias from 09:15 close vs PDC
+    early = evaluate_nifty_cue(
+        prev_close=100.0,
+        first_open=101.0,
+        first_close=101.5,
+        second_close=None,
+    )
+    assert early["nifty_bias"] == "bullish"
+    assert early["nifty_show_on"] == "BULLISH"
 
 
 def test_wick_filter_bullish_upper_wick_ratio():

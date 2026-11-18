@@ -17,9 +17,10 @@ O=L / O=H badge (equity 09:15 only):
   - Bullish & open == low  → "O=L"
   - Bearish & open == high → "O=H"
 
-NIFTY header cue (index as of ~09:20):
+NIFTY header cue (index):
   - Gap: 09:15 open vs prior session close (up / down / flat).
-  - Bias: 09:20 close vs 09:15 close (bullish / bearish / flat).
+  - Bias: 09:15 close vs prior day close first; at 09:20 freeze using
+    09:20 close vs the same prior day close (no further updates).
   - Show green "NIFTY" on Bullish header when bias=bullish and gap=up.
   - Show red "NIFTY" on Bearish header when bias=bearish and gap=down.
 """
@@ -141,29 +142,49 @@ def evaluate_phase_b(
     second_close: Optional[float],
     max_wick_body_ratio: float = 0.35,
 ) -> PhaseBResult:
-    """Full Phase B gate with a Trade Log–friendly fail reason."""
+    """Full Phase B gate with a concise Trade Log fail reason."""
     if (
         second_open is None
         or second_high is None
         or second_low is None
         or second_close is None
     ):
-        return PhaseBResult(ok=False, fail_reason="missing 09:20 bar")
+        return PhaseBResult(ok=False, fail_reason="missing 9:20 candle")
+    side_u = str(side or "").upper()
+    so = float(second_open)
+    sc = float(second_close)
     if not confirm_phase_b(
-        side,
+        side_u,
         first_close=float(first_close),
-        second_close=float(second_close),
+        second_close=sc,
     ):
-        return PhaseBResult(ok=False, fail_reason="close not confirming")
+        # Adverse candle color vs side → reverse-direction wording; else close-level.
+        if side_u == "BULLISH":
+            if sc < so:
+                reason = "9:20 candle is in reverse direction of 9:15 candle"
+            else:
+                reason = "9:20 candle closes below 9:15 candle"
+        elif side_u == "BEARISH":
+            if sc > so:
+                reason = "9:20 candle is in reverse direction of 9:15 candle"
+            else:
+                reason = "9:20 candle closes above 9:15 candle"
+        else:
+            reason = "9:20 candle close does not confirm"
+        return PhaseBResult(ok=False, fail_reason=reason)
     if not passes_second_candle_wick_filter(
-        side,
-        second_open=float(second_open),
+        side_u,
+        second_open=so,
         second_high=float(second_high),
         second_low=float(second_low),
-        second_close=float(second_close),
+        second_close=sc,
         max_wick_body_ratio=max_wick_body_ratio,
     ):
-        return PhaseBResult(ok=False, fail_reason="wick too large")
+        pct = int(round(float(max_wick_body_ratio) * 100))
+        return PhaseBResult(
+            ok=False,
+            fail_reason=f"9:20 candle has wick longer than {pct}% of candle body",
+        )
     return PhaseBResult(ok=True, fail_reason=None)
 
 
@@ -226,15 +247,15 @@ def evaluate_nifty_cue(
     first_close: Optional[float],
     second_close: Optional[float],
 ) -> Dict[str, Any]:
-    """NIFTY gap + bias as of ~09:20 for subsection header badges.
+    """NIFTY gap + bias for subsection header badges.
 
     Rules:
-      gap_up   → 09:15 open > prior close
-      gap_down → 09:15 open < prior close
+      gap_up   → 09:15 open > prior day close
+      gap_down → 09:15 open < prior day close
       flat     → open == prior close (or missing inputs)
-      bullish  → 09:20 close > 09:15 close
-      bearish  → 09:20 close < 09:15 close
-      flat     → equal closes (or missing)
+      bias     → compare session close vs prior day close:
+                   prefer frozen 09:20 close when present; else 09:15 close
+                   (close > PDC → bullish; close < PDC → bearish)
 
     Badge:
       show on Bullish header when bullish + gap_up
@@ -242,23 +263,24 @@ def evaluate_nifty_cue(
     """
     gap = "flat"
     bias = "flat"
-    if (
-        prev_close is not None
-        and first_open is not None
-        and float(prev_close) != 0
-    ):
+    pc: Optional[float] = float(prev_close) if prev_close is not None else None
+    if pc is not None and first_open is not None and pc != 0:
         o = float(first_open)
-        pc = float(prev_close)
         if o > pc:
             gap = "up"
         elif o < pc:
             gap = "down"
-    if first_close is not None and second_close is not None:
-        c15 = float(first_close)
-        c20 = float(second_close)
-        if c20 > c15:
+
+    # Freeze bias on 09:20 close vs PDC when available; else 09:15 close vs PDC.
+    bias_close: Optional[float] = None
+    if second_close is not None:
+        bias_close = float(second_close)
+    elif first_close is not None:
+        bias_close = float(first_close)
+    if pc is not None and bias_close is not None:
+        if bias_close > pc:
             bias = "bullish"
-        elif c20 < c15:
+        elif bias_close < pc:
             bias = "bearish"
 
     show_on: Optional[str] = None
@@ -271,7 +293,7 @@ def evaluate_nifty_cue(
         "nifty_gap": gap,
         "nifty_bias": bias,
         "nifty_show_on": show_on,
-        "nifty_prev_close": float(prev_close) if prev_close is not None else None,
+        "nifty_prev_close": pc,
         "nifty_0915_open": float(first_open) if first_open is not None else None,
         "nifty_0915_close": float(first_close) if first_close is not None else None,
         "nifty_0920_close": float(second_close) if second_close is not None else None,

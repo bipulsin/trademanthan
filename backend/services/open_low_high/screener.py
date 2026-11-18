@@ -8,12 +8,12 @@ Schedule (IST):
 Data split (equity vs stock future):
   - **Algo filters** (Phase A/B, PDH/PDL/prev close, VWAP, doji, wick/body,
     extremes): evaluated on the **underlying NSE equity** 5m + daily bars.
-  - **Trade display** (Entry LTP, SL, T1/T2, chart levels): expressed on the
-    **front-month stock future**. SL = future 09:15 open; Entry = future LTP
-    (live) with screen-time snapshot = future 09:20 close; T1/T2 = traditional
-    pivots from **future** prior-day H/L/C (same price scale as Entry/SL —
-    no equity→future basis shift). Stored ``first_*`` / ``prev_*`` / VWAP
-    remain equity values for audit.
+  - **Trade display** (Entry, SL, T1/T2, chart levels): expressed on the
+    **front-month stock future**. SL = future 09:15 open; Entry is **frozen**
+    at screen time (prefer ~09:22 future 1m close; else 09:20 future close
+    ± small directional slippage) and is never overwritten by live LTP;
+    T1/T2 = traditional pivots from **future** prior-day H/L/C. Stored
+    ``first_*`` / ``prev_*`` / VWAP remain equity values for audit.
 
 Phase A passers always persist (Screen + Trade Log). Phase B passers are
 ``active=True`` (golden border, sorted to top); Phase A-only are greyed
@@ -48,6 +48,7 @@ from backend.services.open_low_high.persistence import (
     is_day_frozen,
     list_screen_for_date,
     list_trade_log,
+    sort_screen_rows,
     upsert_day_meta,
     upsert_screen_rows,
 )
@@ -65,6 +66,9 @@ IST = pytz.timezone("Asia/Kolkata")
 
 FIRST_CANDLE = time(9, 15)
 SECOND_CANDLE = time(9, 20)
+ENTRY_QUOTE_MINUTE = time(9, 22)
+# Small directional slip when freezing from 09:20 future close (fallback).
+ENTRY_SLIPPAGE_FRAC = 0.0002  # 2 bps
 # Window opens once the 09:20 bar has closed (09:25:00); small buffer for WS/REST.
 SCREEN_AFTER = time(9, 25, 5)
 FREEZE_BY = time(9, 27, 0)
@@ -129,8 +133,8 @@ def _bars_from_rows(rows: List[Dict[str, Any]], contract: str) -> List[Bar]:
     return out
 
 
-def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
-    """Aggregate Upstox WS 1m candles into 5m bars for today's session (gap-fill only)."""
+def _fetch_ws_1m_rows(instrument_key: str, session: date) -> List[Dict[str, Any]]:
+    """Raw WS 1m rows for today's session (empty on miss)."""
     from sqlalchemy import text
 
     from backend.database import SessionLocal
@@ -152,28 +156,95 @@ def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
             ),
             {"ik": instrument_key, "start": start, "end": end},
         ).mappings().all()
+        return [dict(r) for r in rows]
     except Exception:
         logger.debug("olh ws 1m fetch miss %s", instrument_key, exc_info=True)
         return []
     finally:
         db.close()
 
+
+def _parse_bar_ts(raw: Any) -> Optional[datetime]:
+    ts = raw
+    if isinstance(ts, str):
+        from backend.services.open_high_low.bars import parse_ts
+
+        ts = parse_ts(ts)
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            return IST.localize(ts)
+        return ts.astimezone(IST)
+    return None
+
+
+def _fetch_1m_close_at(
+    instrument_key: str, session: date, at: time
+) -> Optional[float]:
+    """Close of the 1m bar whose IST minute matches ``at`` (e.g. 09:22)."""
+    rows = _fetch_ws_1m_rows(instrument_key, session)
+    target_h, target_m = at.hour, at.minute
+    for r in rows:
+        ts = _parse_bar_ts(r.get("timestamp"))
+        if ts is None:
+            continue
+        if ts.hour == target_h and ts.minute == target_m:
+            try:
+                px = float(r["close"])
+            except (TypeError, ValueError, KeyError):
+                return None
+            return px if px > 0 else None
+    return None
+
+
+def _freeze_fut_entry(
+    *,
+    side: str,
+    fut_ik: str,
+    session: date,
+    fut_second_close: Optional[float],
+    fut_first_close: Optional[float],
+) -> Tuple[Optional[float], Optional[str]]:
+    """Frozen future Entry: prefer ~09:22 1m close; else 09:20 close ± slip.
+
+    Returns ``(price, method)`` where method is one of
+    ``09:22_1m``, ``09:20_close+slip``, ``09:20_close-slip``, ``09:20_close``,
+    ``09:15_close``, or None.
+    """
+    px_922 = _fetch_1m_close_at(fut_ik, session, ENTRY_QUOTE_MINUTE)
+    if px_922 is not None:
+        return px_922, "09:22_1m"
+
+    base = fut_second_close
+    method_base = "09:20_close"
+    if base is None and fut_first_close is not None:
+        base = fut_first_close
+        method_base = "09:15_close"
+    if base is None:
+        return None, None
+
+    side_u = str(side or "").upper()
+    slip = float(ENTRY_SLIPPAGE_FRAC)
+    if method_base == "09:20_close" and slip > 0:
+        if side_u == "BULLISH":
+            return float(base) * (1.0 + slip), "09:20_close+slip"
+        if side_u == "BEARISH":
+            return float(base) * (1.0 - slip), "09:20_close-slip"
+    return float(base), method_base
+
+
+def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
+    """Aggregate Upstox WS 1m candles into 5m bars for today's session (gap-fill only)."""
+    rows = _fetch_ws_1m_rows(instrument_key, session)
     if not rows:
         return []
     # Aggregate 1m → 5m aligned to :00/:05/:10… IST
     buckets: Dict[datetime, Dict[str, float]] = {}
     for r in rows:
-        ts = r["timestamp"]
-        if isinstance(ts, str):
-            from backend.services.open_high_low.bars import parse_ts
-
-            ts = parse_ts(ts)
+        ts = _parse_bar_ts(r.get("timestamp"))
         if ts is None:
             continue
-        if ts.tzinfo is None:
-            ts = IST.localize(ts)
-        else:
-            ts = ts.astimezone(IST)
         minute = (ts.minute // 5) * 5
         bucket = ts.replace(minute=minute, second=0, microsecond=0)
         o, h, l, c = float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])
@@ -383,11 +454,16 @@ def _screen_one(
     fut_second_close: Optional[float] = (
         float(fut_second.close) if fut_second is not None else None
     )
-    fut_entry_snap: Optional[float] = None
-    if fut_second_close is not None:
-        fut_entry_snap = fut_second_close
-    elif fut_first is not None:
-        fut_entry_snap = float(fut_first.close)
+    fut_first_close: Optional[float] = (
+        float(fut_first.close) if fut_first is not None else None
+    )
+    fut_entry_snap, entry_method = _freeze_fut_entry(
+        side=phase_a.side,
+        fut_ik=fut_ik,
+        session=session,
+        fut_second_close=fut_second_close,
+        fut_first_close=fut_first_close,
+    )
 
     # T1/T2: pivots from future prior-day H/L/C; reference = future entry snapshot.
     t1: Optional[float] = None
@@ -435,9 +511,10 @@ def _screen_one(
         "phase_b_ok": phase_b_ok,
         "phase_b_fail_reason": phase_b_fail_reason,
         "olh_badge": olh_badge,
-        # Future trade levels (Entry overlaid with live FUT LTP in API)
+        # Future trade levels — Entry frozen at screen (never live-LTP overwritten)
         "sl": sl,
         "entry": fut_entry_snap,
+        "entry_method": entry_method,
         "t1": t1,
         "t2": t2,
         "data_source_logic": "equity",
@@ -601,14 +678,7 @@ def run_screen(
 
         nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
 
-        # Sort: actives first within each side (matches list_screen_for_date).
-        tagged.sort(
-            key=lambda c: (
-                0 if str(c.get("side") or "").upper() == "BULLISH" else 1,
-                0 if c.get("active") else 1,
-                str(c.get("symbol") or ""),
-            )
-        )
+        tagged = sort_screen_rows(tagged)
 
         upsert_screen_rows(trade_date, tagged, frozen=True)
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
@@ -685,7 +755,7 @@ def run_screen(
 
 
 def _enrich_ltp(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Attach live LTP as ``ltp`` / live ``entry`` when Upstox quotes are available."""
+    """Attach live FUT ``ltp`` only — never overwrite frozen ``entry``."""
     if not rows:
         return rows
     keys = []
@@ -718,9 +788,8 @@ def _enrich_ltp(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ltp = ltp_map.get(ik)
         if ltp is not None:
             card["ltp"] = ltp
-            # Live Entry on Screen = FUT LTP (stored entry remains FUT screen-time snapshot).
-            card["entry"] = ltp
-        elif card.get("entry") is None and not card.get("equity_instrument_key"):
+        # Entry stays frozen from screen-time snapshot (09:22 / 09:20±slip).
+        if card.get("entry") is None and not card.get("equity_instrument_key"):
             # Legacy future-only rows: first_*/second_* were FUT OHLC.
             if card.get("second_close") is not None:
                 card["entry"] = card.get("second_close")

@@ -686,6 +686,75 @@
                 ? 'Qual: ' + this.config.metadata.qualification
                 : '';
         root.querySelector('[data-uscm-footer-meta]').textContent = qual;
+        this._syncInstrumentToggleUi();
+    };
+
+    SecurityChartModal.prototype._syncInstrumentToggleUi = function () {
+        const root = modalRoot;
+        if (!root) return;
+        const host = root.querySelector('[data-uscm-inst]');
+        if (!host) return;
+        const tog = this._instrumentToggle;
+        const hasBoth =
+            tog &&
+            tog.future &&
+            tog.future.instrumentKey &&
+            tog.equity &&
+            tog.equity.instrumentKey;
+        if (!hasBoth) {
+            host.innerHTML = '';
+            host.hidden = true;
+            host._uscmInstBound = false;
+            return;
+        }
+        host.hidden = false;
+        const cur = String(this.config.instrumentType || '').toUpperCase();
+        const isFut = isFutureInstrument(cur);
+        if (!host._uscmInstBound) {
+            host.innerHTML =
+                '<button type="button" class="uscm-tf-btn" data-uscm-inst-kind="future">Future</button>' +
+                '<button type="button" class="uscm-tf-btn" data-uscm-inst-kind="equity">Equity</button>';
+            const self = this;
+            host.querySelectorAll('[data-uscm-inst-kind]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    self.switchInstrumentKind(btn.getAttribute('data-uscm-inst-kind'));
+                });
+            });
+            host._uscmInstBound = true;
+        }
+        host.querySelectorAll('[data-uscm-inst-kind]').forEach(function (btn) {
+            const kind = btn.getAttribute('data-uscm-inst-kind');
+            const on = (kind === 'future' && isFut) || (kind === 'equity' && !isFut);
+            btn.classList.toggle('active', on);
+        });
+    };
+
+    SecurityChartModal.prototype.switchInstrumentKind = function (kind) {
+        const tog = this._instrumentToggle;
+        if (!tog) return;
+        const key = String(kind || '').toLowerCase() === 'equity' ? 'equity' : 'future';
+        const spec = tog[key];
+        if (!spec || !spec.instrumentKey) return;
+        const nextType = String(spec.instrumentType || (key === 'equity' ? 'EQ' : 'FUT')).toUpperCase();
+        if (
+            String(this.config.instrumentType || '').toUpperCase() === nextType &&
+            String(this.instrumentKey || '') === String(spec.instrumentKey)
+        ) {
+            return;
+        }
+        this.config.instrumentType = nextType;
+        this.config.instrumentKey = spec.instrumentKey;
+        this.instrumentKey = spec.instrumentKey;
+        this.displaySymbol = spec.displaySymbol || this.config.symbol;
+        this.config.displaySymbol = this.displaySymbol;
+        // Price lines (Entry/SL/T1/T2) are future-scale — hide on equity.
+        this._priceLinesActive =
+            isFutureInstrument(nextType) && Array.isArray(this._priceLinesConfig)
+                ? this._priceLinesConfig
+                : [];
+        this._renderHeader();
+        this._loadFutureLotSize();
+        this._loadHistorical();
     };
 
     SecurityChartModal.prototype._setQtyLot = function (lot) {
@@ -889,6 +958,7 @@
             '</div>' +
             '<div class="uscm-chg" data-uscm-chg></div>' +
             '</div></div>' +
+            '<div class="uscm-tf-group" data-uscm-inst hidden></div>' +
             '<div class="uscm-tf-group" data-uscm-tf></div>' +
             '<button type="button" class="uscm-fs-btn" data-uscm-fullscreen aria-label="Full screen" title="Full screen">⛶</button>' +
             '<button type="button" class="uscm-close" data-uscm-close aria-label="Close">&times;</button>' +
@@ -1048,6 +1118,17 @@
             );
             overlays._uscmOverlayBound = false;
             bindOverlayControls(root, this);
+        }
+        let instHost = root.querySelector('[data-uscm-inst]');
+        if (!instHost) {
+            const tfExisting = root.querySelector('[data-uscm-tf]');
+            if (tfExisting && tfExisting.parentNode) {
+                instHost = document.createElement('div');
+                instHost.className = 'uscm-tf-group';
+                instHost.setAttribute('data-uscm-inst', '');
+                instHost.hidden = true;
+                tfExisting.parentNode.insertBefore(instHost, tfExisting);
+            }
         }
         const tfHost = root.querySelector('[data-uscm-tf]');
         if (tfHost) {
@@ -2135,7 +2216,8 @@
         this._clearPriceLines();
         if (!this.candleSeries || typeof this.candleSeries.createPriceLine !== 'function') return;
         const LWC = global.LightweightCharts;
-        const raw = this._priceLinesConfig;
+        const raw =
+            this._priceLinesActive != null ? this._priceLinesActive : this._priceLinesConfig;
         if (!raw || !raw.length) return;
         const handles = [];
         const self = this;
@@ -2511,8 +2593,8 @@
             });
         });
         this.vwapSeries = this.chart.addLineSeries({
-            color: colors.vwap,
-            lineWidth: 2,
+            color: this._vwapColor || colors.vwap,
+            lineWidth: this._vwapLineWidth != null ? this._vwapLineWidth : 2,
             title: 'VWAP',
             priceLineVisible: false,
             lastValueVisible: true,
@@ -2712,6 +2794,13 @@
             : Array.isArray(config.levels)
               ? config.levels
               : [];
+        this._priceLinesActive = this._priceLinesConfig;
+        this._instrumentToggle = config.instrumentToggle || null;
+        this._vwapColor = config.vwapColor || null;
+        this._vwapLineWidth =
+            config.vwapLineWidth != null && Number.isFinite(Number(config.vwapLineWidth))
+                ? Math.max(1, Math.floor(Number(config.vwapLineWidth)))
+                : null;
         this._skipSavedPrefs = !!config.skipSavedPrefs;
         this.emaSlots = normalizeEmaSlots(config);
         this.vwapEnabled = config.vwapEnabled != null ? !!config.vwapEnabled : true;
