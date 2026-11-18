@@ -907,7 +907,14 @@ def get_trade_log_payload(
     rows = list_trade_log(limit_days=limit_days, side=side)
     by_date: Dict[str, List[Dict[str, Any]]] = {}
     for r in rows:
+        # Chart modal needs these on every log row (same as Screen cards).
         d = str(r.get("trade_date") or "")[:10]
+        r["trade_date"] = d
+        r["symbol"] = str(r.get("symbol") or "").upper()
+        r["instrument_key"] = str(r.get("instrument_key") or "").strip() or None
+        r["equity_instrument_key"] = (
+            str(r.get("equity_instrument_key") or "").strip() or None
+        )
         by_date.setdefault(d, []).append(r)
     sections = [{"date": d, "rows": by_date[d]} for d in sorted(by_date.keys(), reverse=True)]
     return {

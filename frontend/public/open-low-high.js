@@ -14,8 +14,12 @@
   let pollTimer = null;
   let ltpTimer = null;
   let logLoaded = false;
+  /** Screen tab cards (replaced on each /today poll). */
   /** @type {Record<string, object>} */
-  let cardByKey = {};
+  let screenByKey = {};
+  /** Trade Log rows (must survive Screen poll wipes). */
+  /** @type {Record<string, object>} */
+  let logByKey = {};
 
   function token() {
     return localStorage.getItem('trademanthan_token') || '';
@@ -219,10 +223,16 @@
   }
 
   function indexCards(bull, bear) {
-    cardByKey = {};
+    // Only reset Screen index — never clear logByKey (polls would break Trade Log chart clicks).
+    screenByKey = {};
     (bull || []).concat(bear || []).forEach(function (c) {
-      cardByKey[cardKey(c)] = c;
+      screenByKey[cardKey(c)] = c;
     });
+  }
+
+  function cardForChartKey(key) {
+    if (!key) return null;
+    return logByKey[key] || screenByKey[key] || null;
   }
 
   function renderNiftyCue(data) {
@@ -246,8 +256,14 @@
   }
 
   function renderScreen(data) {
-    const bull = sortCards(data.bullish || []);
-    const bear = sortCards(data.bearish || []);
+    const tradeDate = String(data.trade_date || '').slice(0, 10);
+    const stamp = function (c) {
+      if (!c) return c;
+      if (!c.trade_date && tradeDate) c.trade_date = tradeDate;
+      return c;
+    };
+    const bull = sortCards((data.bullish || []).map(stamp));
+    const bear = sortCards((data.bearish || []).map(stamp));
     indexCards(bull, bear);
 
     const bullGrid = document.getElementById('olhBullGrid');
@@ -302,8 +318,8 @@
   function patchLiveLtp(bySymbol) {
     // Keep LTP on the card object for reference; never mutate frozen Entry display.
     if (!bySymbol) return;
-    Object.keys(cardByKey).forEach(function (key) {
-      const card = cardByKey[key];
+    Object.keys(screenByKey).forEach(function (key) {
+      const card = screenByKey[key];
       const sym = String(card.symbol || '').toUpperCase();
       const live = bySymbol[sym];
       if (!live || live.ltp == null) return;
@@ -487,11 +503,14 @@
     }
     if (empty) empty.hidden = true;
 
-    // Index log rows for chart clicks (include trade_date in key).
+    // Index log rows for chart clicks (separate from Screen so /today polls cannot wipe them).
+    logByKey = {};
     sections.forEach(function (sec) {
       (sec.rows || []).forEach(function (r) {
-        const row = Object.assign({}, r, { trade_date: sec.date });
-        cardByKey[cardKey(row)] = row;
+        const row = Object.assign({}, r, {
+          trade_date: String(r.trade_date || sec.date || '').slice(0, 10),
+        });
+        logByKey[cardKey(row)] = row;
       });
     });
 
@@ -499,7 +518,9 @@
       .map(function (sec) {
         const rows = sortCards(sec.rows || [])
           .map(function (r) {
-            const row = Object.assign({}, r, { trade_date: sec.date });
+            const row = Object.assign({}, r, {
+              trade_date: String(r.trade_date || sec.date || '').slice(0, 10),
+            });
             const key = cardKey(row);
             const active = !!r.active;
             return `<tr class="${active ? 'olh-log-active' : 'olh-log-grey'}">
@@ -558,8 +579,12 @@
     if (!btn) return;
     ev.preventDefault();
     const key = btn.getAttribute('data-olh-chart');
-    const card = cardByKey[key];
-    if (card) openOlhChart(card);
+    const card = cardForChartKey(key);
+    if (!card) {
+      window.alert('Chart data unavailable for this row');
+      return;
+    }
+    openOlhChart(card);
   }
 
   function bind() {
