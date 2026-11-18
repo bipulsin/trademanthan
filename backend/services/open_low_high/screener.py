@@ -5,6 +5,10 @@ Schedule (IST):
              (Upstox REST 5m preferred; WS 1m→5m fills gaps only). Freeze by ~09:27.
   After freeze: card list + S1–S3/W1–W3 tags are immutable for the day.
 
+Phase A passers always persist (Screen + Trade Log). Phase B passers are
+``active=True`` (golden border, sorted to top); Phase A-only are greyed
+candidates. SL = 09:15 open. T1/T2 = next traditional pivot levels (prior day).
+
 Phase B uses 09:20 high/low extremes vs 09:15 (not close), then a 09:20
 wick/body filter. The 09:20 bar is only final at 09:25 — screening earlier on a
 forming bar false-negatives confirms that arrive later (seen 2026-11-18 POLYCAB).
@@ -40,6 +44,7 @@ from backend.services.open_low_high.signals import (
     confirm_phase_b,
     evaluate_phase_a,
     freeze_tags_immutable,
+    next_pivot_targets,
     passes_second_candle_wick_filter,
 )
 
@@ -246,6 +251,7 @@ def _screen_one(
     session: date,
     expiry: date,
 ) -> Optional[Dict[str, Any]]:
+    """Return a Phase A candidate. ``active`` is True only when Phase B also passes."""
     symbol = str(row.get("symbol") or "").upper()
     if not symbol:
         return None
@@ -296,24 +302,45 @@ def _screen_one(
         return None
 
     # Phase B: 09:20 extremes vs 09:15, then wick/body filter (window ~09:25:05).
-    if second is None:
-        return None
-    if not confirm_phase_b(
-        phase_a.side,
-        first_high=phase_a.first_high,
-        first_low=phase_a.first_low,
-        second_high=second.high,
-        second_low=second.low,
-    ):
-        return None
-    if not passes_second_candle_wick_filter(
-        phase_a.side,
-        second_open=second.open,
-        second_high=second.high,
-        second_low=second.low,
-        second_close=second.close,
-    ):
-        return None
+    # Failures stay as greyed Phase A candidates (active=False).
+    phase_b_ok = False
+    second_close: Optional[float] = None
+    if second is not None:
+        second_close = float(second.close)
+        if confirm_phase_b(
+            phase_a.side,
+            first_high=phase_a.first_high,
+            first_low=phase_a.first_low,
+            second_high=second.high,
+            second_low=second.low,
+        ) and passes_second_candle_wick_filter(
+            phase_a.side,
+            second_open=second.open,
+            second_high=second.high,
+            second_low=second.low,
+            second_close=second.close,
+        ):
+            phase_b_ok = True
+
+    # SL available immediately from Phase A (09:15 open).
+    sl = float(phase_a.first_open)
+    # Entry snapshot: prefer 09:20 close when present; live LTP overlaid in API.
+    entry = float(second_close) if second_close is not None else float(phase_a.first_close)
+
+    # Pivot T1/T2 from prior day — computed after activate/grey decision (non-blocking).
+    t1: Optional[float] = None
+    t2: Optional[float] = None
+    if prev_close is not None:
+        try:
+            t1, t2 = next_pivot_targets(
+                phase_a.side,
+                prev_high=float(prev_high),
+                prev_low=float(prev_low),
+                prev_close=float(prev_close),
+                reference=float(entry),
+            )
+        except Exception:
+            logger.debug("olh pivot targets failed %s", symbol, exc_info=True)
 
     contract_sym = (
         str(row.get("currmth_symbol") or "").strip()
@@ -332,8 +359,14 @@ def _screen_one(
         "first_high": phase_a.first_high,
         "first_low": phase_a.first_low,
         "first_close": phase_a.first_close,
-        "second_close": float(second.close),
+        "second_close": second_close,
         "vwap_0915": phase_a.vwap_0915,
+        "active": phase_b_ok,
+        "phase_b_ok": phase_b_ok,
+        "sl": sl,
+        "entry": entry,
+        "t1": t1,
+        "t2": t2,
     }
 
 
@@ -462,9 +495,20 @@ def run_screen(
         for c in tagged:
             c["frozen"] = True
 
+        # Sort: actives first within each side (matches list_screen_for_date).
+        tagged.sort(
+            key=lambda c: (
+                0 if str(c.get("side") or "").upper() == "BULLISH" else 1,
+                0 if c.get("active") else 1,
+                str(c.get("symbol") or ""),
+            )
+        )
+
         upsert_screen_rows(trade_date, tagged, frozen=True)
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
         bearish = [c for c in tagged if c.get("side") == "BEARISH"]
+        active_n = sum(1 for c in tagged if c.get("active"))
+        candidate_n = len(tagged) - active_n
         phase_ts = _now()
         upsert_day_meta(
             trade_date,
@@ -474,8 +518,16 @@ def run_screen(
             bearish_count=len(bearish),
             phase_a_at=phase_ts,
             phase_b_at=phase_ts,
-            notes=f"screened={len(universe)} kept={len(tagged)} errors={errors} force={force}",
-            meta={"window": win, "expiry": expiry.isoformat()},
+            notes=(
+                f"screened={len(universe)} phase_a={len(tagged)} "
+                f"active={active_n} grey={candidate_n} errors={errors} force={force}"
+            ),
+            meta={
+                "window": win,
+                "expiry": expiry.isoformat(),
+                "active": active_n,
+                "candidates": candidate_n,
+            },
         )
         payload = {
             "ok": True,
@@ -486,16 +538,24 @@ def run_screen(
             "bullish": bullish,
             "bearish": bearish,
             "scanned": len(universe),
-            "kept": len(tagged),
+            "kept": active_n,
+            "phase_a": len(tagged),
+            "active": active_n,
+            "candidates": candidate_n,
             "errors": errors,
-            "message": "Screen complete — set frozen for the day.",
+            "message": (
+                f"Screen complete — {active_n} active, {candidate_n} Phase A "
+                f"candidates (grey). Frozen for the day."
+            ),
         }
         global _last_run
         _last_run = dict(payload)
         _last_run["at"] = phase_ts.isoformat()
         logger.info(
-            "olh screen done kept=%s bull=%s bear=%s",
+            "olh screen done phase_a=%s active=%s grey=%s bull=%s bear=%s",
             len(tagged),
+            active_n,
+            candidate_n,
             len(bullish),
             len(bearish),
         )
@@ -513,6 +573,51 @@ def run_screen(
         _run_lock.release()
 
 
+def _enrich_ltp(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Attach live LTP as ``ltp`` / live ``entry`` when Upstox quotes are available."""
+    if not rows:
+        return rows
+    keys = []
+    for r in rows:
+        ik = str(r.get("instrument_key") or "").strip()
+        if ik:
+            keys.append(ik)
+    if not keys:
+        return rows
+    ltp_map: Dict[str, float] = {}
+    try:
+        upstox = _upstox()
+        uniq = list(dict.fromkeys(keys))
+        batch = upstox.get_market_quotes_batch_by_keys(uniq) or {}
+        for k, v in batch.items():
+            try:
+                px = float(v)
+            except (TypeError, ValueError):
+                continue
+            if px > 0:
+                ltp_map[str(k)] = px
+    except Exception:
+        logger.debug("olh ltp enrich failed", exc_info=True)
+        return rows
+
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        card = dict(r)
+        ik = str(card.get("instrument_key") or "").strip()
+        ltp = ltp_map.get(ik)
+        if ltp is not None:
+            card["ltp"] = ltp
+            # Live Entry on Screen = LTP (stored entry remains the screen-time snapshot).
+            card["entry"] = ltp
+        elif card.get("entry") is None:
+            if card.get("second_close") is not None:
+                card["entry"] = card.get("second_close")
+            elif card.get("first_close") is not None:
+                card["entry"] = card.get("first_close")
+        out.append(card)
+    return out
+
+
 def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
     """API payload for the live page. Optionally triggers screen inside the window."""
     ensure_tables()
@@ -524,13 +629,18 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
     if auto_run and not frozen and win == "open":
         return run_screen(force=False, session=trade_date)
 
-    rows = list_screen_for_date(trade_date)
+    rows = _enrich_ltp(list_screen_for_date(trade_date))
     bullish = [r for r in rows if str(r.get("side") or "").upper() == "BULLISH"]
     bearish = [r for r in rows if str(r.get("side") or "").upper() == "BEARISH"]
+    active_n = sum(1 for r in rows if r.get("active"))
+    grey_n = len(rows) - active_n
 
     if frozen:
         status = "frozen"
-        message = "Frozen for today — cards and sector tags will not change."
+        message = (
+            f"Frozen for today — {active_n} active, {grey_n} Phase A candidates. "
+            "Cards and sector tags will not change."
+        )
     elif win == "waiting":
         status = "waiting"
         message = "Waiting for 09:15 + 09:20 candles to complete — screen runs ~09:25 IST."
@@ -552,6 +662,8 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
         "frozen": frozen,
         "bullish": bullish,
         "bearish": bearish,
+        "active": active_n,
+        "candidates": grey_n,
         "meta": meta,
         "server_time": _now().isoformat(),
         "message": message,

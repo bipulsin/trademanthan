@@ -2112,8 +2112,64 @@
         });
     };
 
+    SecurityChartModal.prototype._clearPriceLines = function () {
+        if (this._priceLineHandles && this.candleSeries) {
+            const series = this.candleSeries;
+            this._priceLineHandles.forEach(function (h) {
+                try {
+                    if (h && series.removePriceLine) series.removePriceLine(h);
+                } catch (e) {
+                    /* ignore */
+                }
+            });
+        }
+        this._priceLineHandles = [];
+    };
+
+    /**
+     * Draw horizontal levels from config.priceLines / config.levels.
+     * Each item: { price|value, title|label, color, lineWidth, lineStyle }.
+     * Labels appear on the right price scale (axisLabelVisible).
+     */
+    SecurityChartModal.prototype._applyPriceLines = function () {
+        this._clearPriceLines();
+        if (!this.candleSeries || typeof this.candleSeries.createPriceLine !== 'function') return;
+        const LWC = global.LightweightCharts;
+        const raw = this._priceLinesConfig;
+        if (!raw || !raw.length) return;
+        const handles = [];
+        const self = this;
+        raw.forEach(function (item) {
+            if (!item) return;
+            const price = Number(item.price != null ? item.price : item.value);
+            if (!Number.isFinite(price)) return;
+            const title = String(item.title || item.label || '').trim();
+            let lineStyle = 0;
+            if (item.lineStyle != null && Number.isFinite(Number(item.lineStyle))) {
+                lineStyle = Number(item.lineStyle);
+            } else if (LWC && LWC.LineStyle && item.dashed) {
+                lineStyle = LWC.LineStyle.Dashed;
+            }
+            try {
+                const h = self.candleSeries.createPriceLine({
+                    price: price,
+                    color: item.color || '#d4a017',
+                    lineWidth: item.lineWidth != null ? Number(item.lineWidth) || 1 : 1,
+                    lineStyle: lineStyle,
+                    axisLabelVisible: item.axisLabelVisible != null ? !!item.axisLabelVisible : true,
+                    title: title,
+                });
+                if (h) handles.push(h);
+            } catch (e) {
+                /* ignore bad levels */
+            }
+        });
+        this._priceLineHandles = handles;
+    };
+
     SecurityChartModal.prototype._destroyChart = function () {
         this._clearCrosshairHandlers();
+        this._clearPriceLines();
         this._destroyHmIndicator();
         this._destroyMdIndicator();
         this._destroyRsiIndicator();
@@ -2195,6 +2251,8 @@
         this.instrumentKey = null;
         this._screenerData = null;
         this._direction = '';
+        this._priceLinesConfig = [];
+        this._priceLineHandles = [];
     };
 
     SecurityChartModal.prototype._readOverlayPrefs = function () {
@@ -2481,6 +2539,7 @@
         this.volumeSeries.setData(vols);
         this._applyVolumeVisibility();
         this._rebuildOverlays();
+        this._applyPriceLines();
         const last = candles[candles.length - 1];
         this._lastBarTime = last ? last.time : null;
         this._lastOhlc = last
@@ -2648,6 +2707,11 @@
             config.direction ||
             (this._screenerData && this._screenerData.direction) ||
             '';
+        this._priceLinesConfig = Array.isArray(config.priceLines)
+            ? config.priceLines
+            : Array.isArray(config.levels)
+              ? config.levels
+              : [];
         this._skipSavedPrefs = !!config.skipSavedPrefs;
         this.emaSlots = normalizeEmaSlots(config);
         this.vwapEnabled = config.vwapEnabled != null ? !!config.vwapEnabled : true;

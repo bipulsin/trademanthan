@@ -16,7 +16,7 @@ first.high/low wick.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -195,3 +195,68 @@ def apply_confirmation_filter(
     ):
         return None
     return phase_a
+
+
+def traditional_pivot_levels(
+    prev_high: float,
+    prev_low: float,
+    prev_close: float,
+) -> Dict[str, float]:
+    """Classic floor trader pivots from prior-day H/L/C.
+
+    PP = (H + L + C) / 3
+    R1 = 2*PP - L;  R2 = PP + (H - L);  R3 = H + 2*(PP - L)
+    S1 = 2*PP - H;  S2 = PP - (H - L);  S3 = L - 2*(H - PP)
+    """
+    h, l, c = float(prev_high), float(prev_low), float(prev_close)
+    pp = (h + l + c) / 3.0
+    r1 = 2.0 * pp - l
+    s1 = 2.0 * pp - h
+    r2 = pp + (h - l)
+    s2 = pp - (h - l)
+    r3 = h + 2.0 * (pp - l)
+    s3 = l - 2.0 * (h - pp)
+    return {
+        "pp": pp,
+        "r1": r1,
+        "r2": r2,
+        "r3": r3,
+        "s1": s1,
+        "s2": s2,
+        "s3": s3,
+    }
+
+
+def next_pivot_targets(
+    side: str,
+    *,
+    prev_high: float,
+    prev_low: float,
+    prev_close: float,
+    reference: float,
+    count: int = 2,
+) -> Tuple[Optional[float], Optional[float]]:
+    """Next ``count`` traditional pivot levels in the trade direction.
+
+    Bullish (long): ascending levels strictly above ``reference`` (resistances / PP).
+    Bearish (short): descending levels strictly below ``reference`` (supports / PP).
+    Returns (t1, t2) — missing slots are None when fewer levels remain.
+    """
+    levels = traditional_pivot_levels(prev_high, prev_low, prev_close)
+    ordered = sorted(
+        {round(v, 6) for v in levels.values()},
+        key=lambda x: x,
+    )
+    ref = float(reference)
+    side_u = str(side or "").upper()
+    if side_u == "BULLISH":
+        ahead = [v for v in ordered if v > ref]
+    elif side_u == "BEARISH":
+        ahead = [v for v in reversed(ordered) if v < ref]
+    else:
+        return None, None
+    t1 = ahead[0] if len(ahead) >= 1 else None
+    t2 = ahead[1] if len(ahead) >= 2 else None
+    if count <= 1:
+        return t1, None
+    return t1, t2

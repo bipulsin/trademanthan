@@ -1,12 +1,20 @@
 /**
  * Open Low High — live screener UI (polls /api/open-low-high/today).
+ * Screen: two columns (Bullish | Bearish), 2-card grid, active golden / Phase A grey.
+ * Chart: SecurityChartEngine 5m + VWAP; Entry/SL/T1/T2 lines for actives.
  */
 (function () {
   'use strict';
 
   const POLL_MS = 20000;
+  const LTP_POLL_MS = 15000;
+  const ENGINE_SRC = 'security-chart/security-chart-engine.js?v=18';
+
   let pollTimer = null;
+  let ltpTimer = null;
   let logLoaded = false;
+  /** @type {Record<string, object>} */
+  let cardByKey = {};
 
   function token() {
     return localStorage.getItem('trademanthan_token') || '';
@@ -44,6 +52,33 @@
     return x.toLocaleString('en-IN', { maximumFractionDigits: 2 });
   }
 
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function cardKey(card) {
+    return (
+      String(card.symbol || '').toUpperCase() +
+      '|' +
+      String(card.side || '').toUpperCase() +
+      '|' +
+      String(card.trade_date || '')
+    );
+  }
+
+  function sortCards(list) {
+    return (list || []).slice().sort(function (a, b) {
+      const aa = a.active ? 0 : 1;
+      const ba = b.active ? 0 : 1;
+      if (aa !== ba) return aa - ba;
+      return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+    });
+  }
+
   function badgeHtml(card) {
     const raw = String(card.sector_badge_display || card.sector_badge || '').trim();
     if (!raw) return '';
@@ -51,37 +86,53 @@
     const isStrong = /^S[123]$/i.test(base);
     const isWeak = /^W[123]$/i.test(base);
     const cls = isStrong ? 'is-strong' : isWeak ? 'is-weak' : '';
-    return `<span class="olh-sector-badge ${cls}" title="${card.nifty_sector_label || ''}">${raw}</span>`;
+    return `<span class="olh-sector-badge ${cls}" title="${escapeHtml(card.nifty_sector_label || '')}">${escapeHtml(raw)}</span>`;
+  }
+
+  function entryValue(card) {
+    if (card.ltp != null && Number.isFinite(Number(card.ltp))) return Number(card.ltp);
+    if (card.entry != null && Number.isFinite(Number(card.entry))) return Number(card.entry);
+    if (card.second_close != null) return Number(card.second_close);
+    if (card.first_close != null) return Number(card.first_close);
+    return null;
+  }
+
+  function slValue(card) {
+    if (card.sl != null && Number.isFinite(Number(card.sl))) return Number(card.sl);
+    if (card.first_open != null) return Number(card.first_open);
+    return null;
   }
 
   function cardHtml(card) {
     const side = String(card.side || '').toUpperCase();
     const bull = side === 'BULLISH';
+    const active = !!card.active;
+    const key = cardKey(card);
+    const entry = entryValue(card);
+    const sl = slValue(card);
+    const stateCls = active ? 'is-active' : 'is-grey';
     return `
-      <article class="olh-card ${bull ? 'is-bullish' : 'is-bearish'}">
-        <div class="olh-card-top">
-          <span class="olh-sym">${escapeHtml(card.symbol || '')}</span>
-          <span class="olh-side-chip ${bull ? 'bull' : 'bear'}">${bull ? 'BULL' : 'BEAR'}</span>
+      <article class="olh-card ${bull ? 'is-bullish' : 'is-bearish'} ${stateCls}" data-olh-key="${escapeHtml(key)}">
+        <div class="olh-card-row olh-card-row1">
+          <button type="button" class="olh-sym-btn" data-olh-chart="${escapeHtml(key)}" title="Open chart">
+            ${escapeHtml(card.symbol || '')}
+          </button>
+          <div class="olh-entry-wrap">
+            <span class="olh-k">Entry</span>
+            <span class="olh-v olh-entry" data-olh-entry>${fmt(entry)}</span>
+          </div>
         </div>
-        <div class="olh-contract">${escapeHtml(card.contract || card.instrument_key || '')}</div>
-        <dl class="olh-stats">
-          <div><dt>Prev close</dt><dd>${fmt(card.prev_close)}</dd></div>
-          <div><dt>VWAP 09:15</dt><dd>${fmt(card.vwap_0915)}</dd></div>
-          <div><dt>09:15 close</dt><dd>${fmt(card.first_close)}</dd></div>
-          <div><dt>09:20 close</dt><dd>${fmt(card.second_close)}</dd></div>
-          <div><dt>Prev high</dt><dd>${fmt(card.prev_high)}</dd></div>
-          <div><dt>Prev low</dt><dd>${fmt(card.prev_low)}</dd></div>
-        </dl>
-        <div class="olh-badges">${badgeHtml(card)}</div>
+        <div class="olh-card-row olh-card-row2">
+          <div><span class="olh-k">SL</span> <span class="olh-v">${fmt(sl)}</span></div>
+          <div><span class="olh-k">T1</span> <span class="olh-v">${fmt(card.t1)}</span></div>
+          <div><span class="olh-k">T2</span> <span class="olh-v">${fmt(card.t2)}</span></div>
+        </div>
+        <div class="olh-card-meta">
+          <span class="olh-side-chip ${bull ? 'bull' : 'bear'}">${bull ? 'BULL' : 'BEAR'}</span>
+          ${active ? '<span class="olh-active-chip">ACTIVE</span>' : '<span class="olh-grey-chip">PHASE A</span>'}
+          ${badgeHtml(card)}
+        </div>
       </article>`;
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
   }
 
   function setBanner(msg, show) {
@@ -96,15 +147,28 @@
     el.textContent = msg;
   }
 
+  function indexCards(bull, bear) {
+    cardByKey = {};
+    (bull || []).concat(bear || []).forEach(function (c) {
+      cardByKey[cardKey(c)] = c;
+    });
+  }
+
   function renderScreen(data) {
-    const bull = data.bullish || [];
-    const bear = data.bearish || [];
+    const bull = sortCards(data.bullish || []);
+    const bear = sortCards(data.bearish || []);
+    indexCards(bull, bear);
+
     const bullGrid = document.getElementById('olhBullGrid');
     const bearGrid = document.getElementById('olhBearGrid');
     const bullEmpty = document.getElementById('olhBullEmpty');
     const bearEmpty = document.getElementById('olhBearEmpty');
-    document.getElementById('olhBullCount').textContent = String(bull.length);
-    document.getElementById('olhBearCount').textContent = String(bear.length);
+    const bullActive = bull.filter(function (c) { return c.active; }).length;
+    const bearActive = bear.filter(function (c) { return c.active; }).length;
+    document.getElementById('olhBullCount').textContent =
+      bull.length + (bull.length ? ` (${bullActive} active)` : '');
+    document.getElementById('olhBearCount').textContent =
+      bear.length + (bear.length ? ` (${bearActive} active)` : '');
 
     if (bullGrid) {
       bullGrid.innerHTML = bull.map(cardHtml).join('');
@@ -134,12 +198,36 @@
     setBanner(data.message || '', true);
   }
 
+  function patchLiveEntry(bySymbol) {
+    if (!bySymbol) return;
+    Object.keys(cardByKey).forEach(function (key) {
+      const card = cardByKey[key];
+      const sym = String(card.symbol || '').toUpperCase();
+      const live = bySymbol[sym];
+      if (!live || live.ltp == null) return;
+      card.ltp = live.ltp;
+      card.entry = live.ltp;
+      const cardEl = document.querySelector('.olh-card[data-olh-key="' + key.replace(/"/g, '') + '"]');
+      const el = cardEl && cardEl.querySelector('[data-olh-entry]');
+      if (el) el.textContent = fmt(live.ltp);
+    });
+  }
+
   async function loadToday() {
     try {
       const data = await api('/api/open-low-high/today');
       renderScreen(data);
     } catch (err) {
       setBanner('Failed to load: ' + (err && err.message ? err.message : err), true);
+    }
+  }
+
+  async function pollLtp() {
+    try {
+      const data = await api('/api/open-low-high/ltp');
+      patchLiveEntry(data.by_symbol || {});
+    } catch (err) {
+      /* soft-fail — full poll will refresh */
     }
   }
 
@@ -151,11 +239,121 @@
         body: JSON.stringify({ force: true }),
       });
       setBanner(res.message || 'Queued. Polling…', true);
-      setTimeout(loadToday, 3000);
-      setTimeout(loadToday, 12000);
+      setTimeout(loadToday, 4000);
+      setTimeout(loadToday, 20000);
+      setTimeout(loadToday, 45000);
     } catch (err) {
       setBanner('Force run failed: ' + (err && err.message ? err.message : err), true);
     }
+  }
+
+  function ensureChartEngine() {
+    if (window.SecurityChartEngine) return Promise.resolve(window.SecurityChartEngine);
+    return new Promise(function (resolve, reject) {
+      const existing = document.querySelector('script[data-uscm-engine="1"]');
+      if (existing) {
+        existing.addEventListener('load', function () {
+          if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+          else reject(new Error('Chart module unavailable'));
+        });
+        existing.addEventListener('error', function () {
+          reject(new Error('Failed to load chart module'));
+        });
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = ENGINE_SRC;
+      s.async = true;
+      s.setAttribute('data-uscm-engine', '1');
+      s.onload = function () {
+        if (window.SecurityChartEngine) resolve(window.SecurityChartEngine);
+        else reject(new Error('Chart module unavailable'));
+      };
+      s.onerror = function () {
+        reject(new Error('Failed to load chart module'));
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  function buildPriceLines(card) {
+    if (!card || !card.active) return [];
+    const lines = [];
+    const entry = entryValue(card);
+    const sl = slValue(card);
+    if (entry != null) {
+      lines.push({ price: entry, title: 'Entry', color: '#3dba7a', lineWidth: 2 });
+    }
+    if (sl != null) {
+      lines.push({ price: sl, title: 'SL', color: '#e06b6b', lineWidth: 2 });
+    }
+    if (card.t1 != null && Number.isFinite(Number(card.t1))) {
+      lines.push({ price: Number(card.t1), title: 'T1', color: '#d4a017', lineWidth: 1, dashed: true });
+    }
+    if (card.t2 != null && Number.isFinite(Number(card.t2))) {
+      lines.push({ price: Number(card.t2), title: 'T2', color: '#c084fc', lineWidth: 1, dashed: true });
+    }
+    return lines;
+  }
+
+  function openOlhChart(card) {
+    if (!card) return;
+    const ik = String(card.instrument_key || '').trim();
+    if (!ik) {
+      window.alert('No instrument key for chart');
+      return;
+    }
+    const sym = String(card.symbol || '').toUpperCase();
+    const side = String(card.side || '').toUpperCase();
+    const direction = side === 'BEARISH' ? 'SHORT' : 'LONG';
+    const active = !!card.active;
+    ensureChartEngine()
+      .then(function (eng) {
+        if (!eng || typeof eng.openSecurityChart !== 'function') {
+          throw new Error('Chart module unavailable');
+        }
+        return eng.openSecurityChart({
+          symbol: sym,
+          instrumentType: 'FUT',
+          instrumentKey: ik,
+          displaySymbol: card.contract || sym,
+          exchange: 'NSE',
+          timeframe: '5m',
+          direction: direction,
+          skipSavedPrefs: true,
+          emaEnabled: false,
+          ema2Enabled: false,
+          ema3Enabled: false,
+          vwapEnabled: true,
+          volumeEnabled: true,
+          rsiEnabled: false,
+          williamsEnabled: false,
+          hmEnabled: false,
+          macdDivergenceEnabled: false,
+          priceLines: active ? buildPriceLines(card) : [],
+          screenerData: {
+            direction: direction,
+            insight: (active ? 'ACTIVE' : 'PHASE A') + ' · ' + side,
+            sections: [
+              {
+                title: 'OPEN LOW HIGH',
+                metrics: [
+                  { key: 'entry', label: 'Entry', value: fmt(entryValue(card)) },
+                  { key: 'sl', label: 'SL', value: fmt(slValue(card)) },
+                  { key: 't1', label: 'T1', value: fmt(card.t1) },
+                  { key: 't2', label: 'T2', value: fmt(card.t2) },
+                  { key: 'state', label: 'State', value: active ? 'Active' : 'Phase A (grey)' },
+                ],
+              },
+            ],
+          },
+          metadata: { algo: 'open_low_high' },
+        });
+      })
+      .catch(function (err) {
+        if (window.console && window.console.warn) window.console.warn('OLH chart:', err);
+        window.alert((err && err.message) || 'Chart failed');
+      });
   }
 
   function renderLog(data) {
@@ -169,27 +367,40 @@
       return;
     }
     if (empty) empty.hidden = true;
+
+    // Index log rows for chart clicks (include trade_date in key).
+    sections.forEach(function (sec) {
+      (sec.rows || []).forEach(function (r) {
+        const row = Object.assign({}, r, { trade_date: sec.date });
+        cardByKey[cardKey(row)] = row;
+      });
+    });
+
     host.innerHTML = sections
-      .map((sec) => {
+      .map(function (sec) {
         const rows = (sec.rows || [])
-          .map(
-            (r) => `<tr>
-            <td>${escapeHtml(r.symbol || '')}</td>
+          .map(function (r) {
+            const row = Object.assign({}, r, { trade_date: sec.date });
+            const key = cardKey(row);
+            const active = !!r.active;
+            return `<tr class="${active ? 'olh-log-active' : 'olh-log-grey'}">
+            <td><button type="button" class="olh-sym-btn olh-sym-btn--table" data-olh-chart="${escapeHtml(key)}">${escapeHtml(r.symbol || '')}</button></td>
             <td>${escapeHtml(r.side || '')}</td>
+            <td>${active ? 'Active' : 'Phase A'}</td>
             <td>${escapeHtml(r.contract || '')}</td>
-            <td>${fmt(r.prev_close)}</td>
-            <td>${fmt(r.first_close)}</td>
-            <td>${fmt(r.second_close)}</td>
-            <td>${fmt(r.vwap_0915)}</td>
+            <td>${fmt(entryValue(r))}</td>
+            <td>${fmt(slValue(r))}</td>
+            <td>${fmt(r.t1)}</td>
+            <td>${fmt(r.t2)}</td>
             <td>${escapeHtml(r.sector_badge_display || r.sector_badge || '')}</td>
-          </tr>`
-          )
+          </tr>`;
+          })
           .join('');
         return `<h3 class="olh-log-date">${escapeHtml(sec.date)}</h3>
           <div class="olh-table-wrap"><table class="olh-table">
             <thead><tr>
-              <th>Symbol</th><th>Side</th><th>Contract</th>
-              <th>Prev close</th><th>09:15</th><th>09:20</th><th>VWAP</th><th>Tag</th>
+              <th>Symbol</th><th>Side</th><th>State</th><th>Contract</th>
+              <th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>Tag</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`;
@@ -210,37 +421,55 @@
   }
 
   function switchTab(name) {
-    document.querySelectorAll('.olh-tab').forEach((btn) => {
+    document.querySelectorAll('.olh-tab').forEach(function (btn) {
       const on = btn.getAttribute('data-olh-tab') === name;
       btn.classList.toggle('active', on);
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    document.querySelectorAll('[data-olh-panel]').forEach((panel) => {
+    document.querySelectorAll('[data-olh-panel]').forEach(function (panel) {
       panel.hidden = panel.getAttribute('data-olh-panel') !== name;
     });
     if (name === 'log' && !logLoaded) loadLog();
   }
 
+  function onChartClick(ev) {
+    const btn = ev.target.closest('[data-olh-chart]');
+    if (!btn) return;
+    ev.preventDefault();
+    const key = btn.getAttribute('data-olh-chart');
+    const card = cardByKey[key];
+    if (card) openOlhChart(card);
+  }
+
   function bind() {
-    document.querySelectorAll('.olh-tab').forEach((btn) => {
-      btn.addEventListener('click', () => switchTab(btn.getAttribute('data-olh-tab')));
+    document.querySelectorAll('.olh-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        switchTab(btn.getAttribute('data-olh-tab'));
+      });
     });
     const refresh = document.getElementById('olhRefreshBtn');
-    if (refresh) refresh.addEventListener('click', () => loadToday());
+    if (refresh) refresh.addEventListener('click', function () { loadToday(); });
     const force = document.getElementById('olhForceBtn');
-    if (force) force.addEventListener('click', () => forceRun());
+    if (force) force.addEventListener('click', function () { forceRun(); });
     const logReload = document.getElementById('olhLogReload');
-    if (logReload) logReload.addEventListener('click', () => loadLog());
+    if (logReload) logReload.addEventListener('click', function () { loadLog(); });
     const logSide = document.getElementById('olhLogSide');
-    if (logSide) logSide.addEventListener('change', () => loadLog());
+    if (logSide) logSide.addEventListener('change', function () { loadLog(); });
+
+    const screen = document.getElementById('olhPanelScreen');
+    if (screen) screen.addEventListener('click', onChartClick);
+    const logHost = document.getElementById('olhLogHost');
+    if (logHost) logHost.addEventListener('click', onChartClick);
   }
 
   function startPoll() {
     if (pollTimer) clearInterval(pollTimer);
+    if (ltpTimer) clearInterval(ltpTimer);
     pollTimer = setInterval(loadToday, POLL_MS);
+    ltpTimer = setInterval(pollLtp, LTP_POLL_MS);
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', function () {
     bind();
     loadToday();
     startPoll();

@@ -81,6 +81,27 @@ def run_now(
     }
 
 
+@router.get("/ltp")
+def get_ltp(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
+    """Live LTPs for today's screen instrument keys (Entry overlay)."""
+    from backend.services.open_low_high.persistence import list_screen_for_date
+    from backend.services.open_low_high.screener import _enrich_ltp, _today
+
+    rows = _enrich_ltp(list_screen_for_date(_today()))
+    by_symbol = {
+        str(r.get("symbol") or "").upper(): {
+            "symbol": r.get("symbol"),
+            "instrument_key": r.get("instrument_key"),
+            "ltp": r.get("ltp"),
+            "entry": r.get("entry"),
+            "active": bool(r.get("active")),
+            "side": r.get("side"),
+        }
+        for r in rows
+    }
+    return {"ok": True, "trade_date": _today().isoformat(), "by_symbol": by_symbol}
+
+
 @router.get("/health")
 def health() -> Dict[str, Any]:
     from backend.services.open_low_high.persistence import ensure_tables, get_day_meta

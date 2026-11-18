@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS open_low_high_screen (
     first_close DOUBLE PRECISION,
     second_close DOUBLE PRECISION,
     vwap_0915 DOUBLE PRECISION,
+    active BOOLEAN NOT NULL DEFAULT FALSE,
+    phase_b_ok BOOLEAN NOT NULL DEFAULT FALSE,
+    sl DOUBLE PRECISION,
+    entry DOUBLE PRECISION,
+    t1 DOUBLE PRECISION,
+    t2 DOUBLE PRECISION,
     sector_badge VARCHAR(8),
     sector_star BOOLEAN NOT NULL DEFAULT FALSE,
     sector_badge_display VARCHAR(16),
@@ -46,6 +52,8 @@ CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_trade_date
     ON open_low_high_screen (trade_date DESC);
 CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_instrument
     ON open_low_high_screen (trade_date, instrument_key);
+CREATE INDEX IF NOT EXISTS ix_open_low_high_screen_active
+    ON open_low_high_screen (trade_date, active);
 """
 
 _META_DDL = """
@@ -64,12 +72,23 @@ CREATE TABLE IF NOT EXISTS open_low_high_day_meta (
 );
 """
 
+_MIGRATE_COLS = [
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS phase_b_ok BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS sl DOUBLE PRECISION",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS entry DOUBLE PRECISION",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS t1 DOUBLE PRECISION",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS t2 DOUBLE PRECISION",
+]
+
 
 def ensure_tables() -> None:
     db = SessionLocal()
     try:
         db.execute(text(_DDL))
         db.execute(text(_META_DDL))
+        for stmt in _MIGRATE_COLS:
+            db.execute(text(stmt))
         db.commit()
     except Exception:
         db.rollback()
@@ -100,6 +119,14 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
             d[k] = _aware(v).isoformat()
         elif isinstance(v, date):
             d[k] = v.isoformat()
+    # Normalize booleans / derived card fields for API consumers.
+    if "active" in d:
+        d["active"] = bool(d.get("active"))
+    if "phase_b_ok" in d:
+        d["phase_b_ok"] = bool(d.get("phase_b_ok"))
+    # SL defaults to 09:15 open when column empty (legacy rows).
+    if d.get("sl") is None and d.get("first_open") is not None:
+        d["sl"] = d.get("first_open")
     return d
 
 
@@ -115,6 +142,14 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
         )
         n = 0
         for row in rows:
+            active = bool(row.get("active") if row.get("active") is not None else row.get("phase_b_ok"))
+            phase_b_ok = bool(row.get("phase_b_ok") if row.get("phase_b_ok") is not None else active)
+            sl = row.get("sl")
+            if sl is None:
+                sl = row.get("first_open")
+            entry = row.get("entry")
+            if entry is None:
+                entry = row.get("second_close") if row.get("second_close") is not None else row.get("first_close")
             db.execute(
                 text(
                     """
@@ -123,6 +158,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         prev_close, prev_high, prev_low,
                         first_open, first_high, first_low, first_close,
                         second_close, vwap_0915,
+                        active, phase_b_ok, sl, entry, t1, t2,
                         sector_badge, sector_star, sector_badge_display, nifty_sector_label,
                         frozen, frozen_at, updated_at
                     ) VALUES (
@@ -130,6 +166,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         :prev_close, :prev_high, :prev_low,
                         :first_open, :first_high, :first_low, :first_close,
                         :second_close, :vwap_0915,
+                        :active, :phase_b_ok, :sl, :entry, :t1, :t2,
                         :sector_badge, :sector_star, :sector_badge_display, :nifty_sector_label,
                         :frozen, :frozen_at, NOW()
                     )
@@ -151,6 +188,12 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                     "first_close": row.get("first_close"),
                     "second_close": row.get("second_close"),
                     "vwap_0915": row.get("vwap_0915"),
+                    "active": active,
+                    "phase_b_ok": phase_b_ok,
+                    "sl": sl,
+                    "entry": entry,
+                    "t1": row.get("t1"),
+                    "t2": row.get("t2"),
                     "sector_badge": row.get("sector_badge"),
                     "sector_star": bool(row.get("sector_star")),
                     "sector_badge_display": row.get("sector_badge_display"),
@@ -277,6 +320,7 @@ def is_day_frozen(trade_date: date) -> bool:
 
 
 def list_screen_for_date(trade_date: date) -> List[Dict[str, Any]]:
+    """Screen rows for a date: actives first, then symbol within each side group (caller splits)."""
     ensure_tables()
     db = SessionLocal()
     try:
@@ -285,7 +329,9 @@ def list_screen_for_date(trade_date: date) -> List[Dict[str, Any]]:
                 """
                 SELECT * FROM open_low_high_screen
                 WHERE trade_date = :d
-                ORDER BY side ASC, symbol ASC
+                ORDER BY side ASC,
+                         CASE WHEN active THEN 0 ELSE 1 END ASC,
+                         symbol ASC
                 """
             ),
             {"d": trade_date},
@@ -315,7 +361,10 @@ def list_trade_log(
                 SELECT * FROM open_low_high_screen
                 WHERE trade_date >= (CURRENT_DATE - (:lim::int))
                 {side_clause}
-                ORDER BY trade_date DESC, side ASC, symbol ASC
+                ORDER BY trade_date DESC,
+                         side ASC,
+                         CASE WHEN active THEN 0 ELSE 1 END ASC,
+                         symbol ASC
                 """
             ),
             params,

@@ -16,7 +16,7 @@
     <link rel="stylesheet" href="settings.css?v=2" />
     <link rel="stylesheet" href="left-menu.css?v=3.48" />
     <link rel="stylesheet" href="theme.css?v=1.4" />
-    <link rel="stylesheet" href="open-low-high.css?v=1" />
+    <link rel="stylesheet" href="open-low-high.css?v=2" />
 </head>
 <body class="olh-page theme-page left-menu-web-hamburger" data-theme="dark">
     <div class="mobile-title-bar">
@@ -33,7 +33,7 @@
                 <header class="olh-header">
                     <div>
                         <h1 class="olh-title"><i class="fas fa-crosshairs" aria-hidden="true"></i> Open Low High</h1>
-                        <p class="olh-subtitle">Stock futures screener — 09:15 setup + 09:20 confirmation · freezes by 09:22 IST</p>
+                        <p class="olh-subtitle">Stock futures — Phase A 09:15 candidates + Phase B 09:20 actives · freezes by 09:27 IST</p>
                     </div>
                     <div class="olh-header-aside">
                         <span class="olh-pill" id="olhStatus">—</span>
@@ -52,15 +52,17 @@
                 </nav>
 
                 <section class="olh-panel" id="olhPanelScreen" role="tabpanel" aria-labelledby="olhTabScreen" data-olh-panel="screen">
-                    <div class="olh-section">
-                        <h2 class="olh-section-title olh-bull"><i class="fas fa-arrow-trend-up"></i> Bullish <span class="olh-count" id="olhBullCount">0</span></h2>
-                        <div class="olh-grid" id="olhBullGrid"></div>
-                        <p class="olh-empty" id="olhBullEmpty">No bullish cards yet.</p>
-                    </div>
-                    <div class="olh-section">
-                        <h2 class="olh-section-title olh-bear"><i class="fas fa-arrow-trend-down"></i> Bearish <span class="olh-count" id="olhBearCount">0</span></h2>
-                        <div class="olh-grid" id="olhBearGrid"></div>
-                        <p class="olh-empty" id="olhBearEmpty">No bearish cards yet.</p>
+                    <div class="olh-columns">
+                        <div class="olh-section olh-col olh-col-bull">
+                            <h2 class="olh-section-title olh-bull"><i class="fas fa-arrow-trend-up"></i> Bullish <span class="olh-count" id="olhBullCount">0</span></h2>
+                            <div class="olh-grid" id="olhBullGrid"></div>
+                            <p class="olh-empty" id="olhBullEmpty">No bullish cards yet.</p>
+                        </div>
+                        <div class="olh-section olh-col olh-col-bear">
+                            <h2 class="olh-section-title olh-bear"><i class="fas fa-arrow-trend-down"></i> Bearish <span class="olh-count" id="olhBearCount">0</span></h2>
+                            <div class="olh-grid" id="olhBearGrid"></div>
+                            <p class="olh-empty" id="olhBearEmpty">No bearish cards yet.</p>
+                        </div>
                     </div>
                 </section>
 
@@ -84,6 +86,6 @@
 
     <script src="theme.js?v=1.4"></script>
     <script src="left-menu.js?v=3.59"></script>
-    <script src="open-low-high.js?v=1"></script>
+    <script src="open-low-high.js?v=2"></script>
 </body>
 </html>

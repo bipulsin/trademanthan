@@ -5,7 +5,9 @@ from backend.services.open_low_high.signals import (
     confirm_phase_b,
     evaluate_phase_a,
     freeze_tags_immutable,
+    next_pivot_targets,
     passes_second_candle_wick_filter,
+    traditional_pivot_levels,
 )
 
 
@@ -262,6 +264,38 @@ def test_freeze_tags_immutable_snapshots_display():
     live["sector_badge"] = "S3"
     assert frozen["sector_badge"] == "W2"
     assert frozen["sector_badge_display"] == "W2"
+
+
+def test_traditional_pivot_levels_basic():
+    # H=110, L=100, C=105 → PP=105; R1=110; S1=100
+    lv = traditional_pivot_levels(110.0, 100.0, 105.0)
+    assert abs(lv["pp"] - 105.0) < 1e-9
+    assert abs(lv["r1"] - 110.0) < 1e-9
+    assert abs(lv["s1"] - 100.0) < 1e-9
+    assert abs(lv["r2"] - 115.0) < 1e-9
+    assert abs(lv["s2"] - 95.0) < 1e-9
+
+
+def test_next_pivot_targets_bullish_and_bearish():
+    # reference between S1 and PP → bullish next = PP, R1; bearish next = S1, S2
+    t1, t2 = next_pivot_targets(
+        "BULLISH",
+        prev_high=110.0,
+        prev_low=100.0,
+        prev_close=105.0,
+        reference=102.0,
+    )
+    assert t1 == 105.0
+    assert t2 == 110.0
+    t1b, t2b = next_pivot_targets(
+        "BEARISH",
+        prev_high=110.0,
+        prev_low=100.0,
+        prev_close=105.0,
+        reference=102.0,
+    )
+    assert t1b == 100.0
+    assert t2b == 95.0
 
 
 def test_window_status_boundaries():
