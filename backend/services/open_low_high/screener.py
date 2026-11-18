@@ -5,9 +5,19 @@ Schedule (IST):
              (Upstox REST 5m preferred; WS 1m→5m fills gaps only). Freeze by ~09:27.
   After freeze: card list + S1–S3/W1–W3 tags are immutable for the day.
 
+Data split (equity vs stock future):
+  - **Algo filters** (Phase A/B, PDH/PDL/prev close, VWAP, doji, wick/body,
+    extremes): evaluated on the **underlying NSE equity** 5m + daily bars.
+  - **Trade display** (Entry LTP, SL, T1/T2, chart levels): expressed on the
+    **front-month stock future**. SL = future 09:15 open; Entry = future LTP
+    (live) with screen-time snapshot = future 09:20 close; T1/T2 = traditional
+    pivots from **future** prior-day H/L/C (same price scale as Entry/SL —
+    no equity→future basis shift). Stored ``first_*`` / ``prev_*`` / VWAP
+    remain equity values for audit.
+
 Phase A passers always persist (Screen + Trade Log). Phase B passers are
 ``active=True`` (golden border, sorted to top); Phase A-only are greyed
-candidates. SL = 09:15 open. T1/T2 = next traditional pivot levels (prior day).
+candidates.
 
 Phase B uses 09:20 high/low extremes vs 09:15 (not close), then a 09:20
 wick/body filter. The 09:20 bar is only final at 09:25 — screening earlier on a
@@ -245,46 +255,81 @@ def _merge_bars(primary: List[Bar], fallback: List[Bar]) -> List[Bar]:
     return [by_ts[k] for k in sorted(by_ts)]
 
 
+def _resolve_equity_key(upstox: Any, row: Dict[str, str], symbol: str) -> str:
+    """NSE cash instrument key for algo bars (``NSE_EQ|ISIN``).
+
+    Prefer ``arbitrage_master.stock_instrument_key`` (universe ``underlying_key``);
+    fall back to Upstox/ISIN mapping via ``get_instrument_key``.
+    """
+    raw = str(row.get("underlying_key") or "").strip().replace(":", "|")
+    if raw.upper().startswith("NSE_EQ|"):
+        return raw
+    try:
+        key = upstox.get_instrument_key(symbol)
+        if key:
+            return str(key).replace(":", "|")
+    except Exception:
+        logger.debug("olh equity key resolve failed %s", symbol, exc_info=True)
+    # Accept a bare ISIN token if master only stored the ISIN portion.
+    if raw.upper().startswith("INE") and "|" not in raw:
+        return f"NSE_EQ|{raw}"
+    return raw if raw.upper().startswith("NSE_EQ") else ""
+
+
+def _session_5m_bars(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
+    """REST 5m preferred; WS 1m→5m gap-fill only (same merge as future path)."""
+    if not instrument_key:
+        return []
+    ws_bars = _fetch_ws_5m_bars(instrument_key, session)
+    rest_bars = _fetch_rest_5m(upstox, instrument_key, session)
+    return _merge_bars(rest_bars, ws_bars)
+
+
 def _screen_one(
     upstox: Any,
     row: Dict[str, str],
     session: date,
     expiry: date,
 ) -> Optional[Dict[str, Any]]:
-    """Return a Phase A candidate. ``active`` is True only when Phase B also passes."""
+    """Return a Phase A candidate. ``active`` is True only when Phase B also passes.
+
+    Screening uses **equity** OHLC; Entry/SL/T1/T2 use the **stock future**.
+    """
     symbol = str(row.get("symbol") or "").upper()
     if not symbol:
         return None
+
+    equity_ik = _resolve_equity_key(upstox, row, symbol)
+    if not equity_ik:
+        logger.info("olh skip %s: no equity instrument key", symbol)
+        return None
+
     resolved = resolve_contract(
         upstox,
         symbol,
         expiry,
-        str(row.get("underlying_key") or ""),
+        equity_ik,
         universe_row=row,
     )
-    ik = str(resolved.get("instrument_key") or "").strip()
-    if not ik:
+    fut_ik = str(resolved.get("instrument_key") or "").strip()
+    if not fut_ik:
         return None
 
-    # Prefer official Upstox REST 5m OHLC (matches Pro charts). WS 1m→5m can
-    # disagree on open/close (seen 2026-11-18 INDIGO) — use it only as gap-fill.
-    ws_bars = _fetch_ws_5m_bars(ik, session)
-    rest_bars = _fetch_rest_5m(upstox, ik, session)
-    bars_5m = _merge_bars(rest_bars, ws_bars)
-    if not bars_5m:
+    # --- Algo path: underlying equity ---
+    eq_bars = _session_5m_bars(upstox, equity_ik, session)
+    if not eq_bars:
         return None
 
-    first = bar_at(bars_5m, session, FIRST_CANDLE)
-    second = bar_at(bars_5m, session, SECOND_CANDLE)
+    first = bar_at(eq_bars, session, FIRST_CANDLE)
+    second = bar_at(eq_bars, session, SECOND_CANDLE)
     if first is None:
         return None
 
-    vwap = first_vwap(bars_5m, session, FIRST_CANDLE)
+    vwap = first_vwap(eq_bars, session, FIRST_CANDLE)
     if vwap is None:
-        # Single-bar typical as VWAP of first candle
         vwap = first.typical
 
-    prev_high, prev_low, prev_close = _fetch_daily_prev(upstox, ik, session)
+    prev_high, prev_low, prev_close = _fetch_daily_prev(upstox, equity_ik, session)
     if prev_high is None or prev_low is None:
         return None
 
@@ -301,8 +346,7 @@ def _screen_one(
     if phase_a is None:
         return None
 
-    # Phase B: 09:20 extremes vs 09:15, then wick/body filter (window ~09:25:05).
-    # Failures stay as greyed Phase A candidates (active=False).
+    # Phase B on equity 09:20 extremes + wick/body (window ~09:25:05).
     phase_b_ok = False
     second_close: Optional[float] = None
     if second is not None:
@@ -322,22 +366,45 @@ def _screen_one(
         ):
             phase_b_ok = True
 
-    # SL available immediately from Phase A (09:15 open).
-    sl = float(phase_a.first_open)
-    # Entry snapshot: prefer 09:20 close when present; live LTP overlaid in API.
-    entry = float(second_close) if second_close is not None else float(phase_a.first_close)
+    # --- Display path: front-month stock future ---
+    fut_bars = _session_5m_bars(upstox, fut_ik, session)
+    fut_first = bar_at(fut_bars, session, FIRST_CANDLE) if fut_bars else None
+    fut_second = bar_at(fut_bars, session, SECOND_CANDLE) if fut_bars else None
 
-    # Pivot T1/T2 from prior day — computed after activate/grey decision (non-blocking).
+    # SL = future 09:15 open (required for trade levels on the FUT chart).
+    if fut_first is not None:
+        sl = float(fut_first.open)
+    else:
+        # Rare: future 09:15 missing — refuse to invent equity SL on FUT scale.
+        logger.info("olh %s: no future 09:15 bar for SL; skip display levels", symbol)
+        sl = None
+
+    fut_second_close: Optional[float] = (
+        float(fut_second.close) if fut_second is not None else None
+    )
+    fut_entry_snap: Optional[float] = None
+    if fut_second_close is not None:
+        fut_entry_snap = fut_second_close
+    elif fut_first is not None:
+        fut_entry_snap = float(fut_first.close)
+
+    # T1/T2: pivots from future prior-day H/L/C; reference = future entry snapshot.
     t1: Optional[float] = None
     t2: Optional[float] = None
-    if prev_close is not None:
+    fut_prev_h, fut_prev_l, fut_prev_c = _fetch_daily_prev(upstox, fut_ik, session)
+    if (
+        fut_entry_snap is not None
+        and fut_prev_h is not None
+        and fut_prev_l is not None
+        and fut_prev_c is not None
+    ):
         try:
             t1, t2 = next_pivot_targets(
                 phase_a.side,
-                prev_high=float(prev_high),
-                prev_low=float(prev_low),
-                prev_close=float(prev_close),
-                reference=float(entry),
+                prev_high=float(fut_prev_h),
+                prev_low=float(fut_prev_l),
+                prev_close=float(fut_prev_c),
+                reference=float(fut_entry_snap),
             )
         except Exception:
             logger.debug("olh pivot targets failed %s", symbol, exc_info=True)
@@ -351,7 +418,9 @@ def _screen_one(
         "side": phase_a.side,
         "contract": contract_sym,
         "expiry": expiry,
-        "instrument_key": ik,
+        "instrument_key": fut_ik,
+        "equity_instrument_key": equity_ik,
+        # Equity audit fields (algo inputs)
         "prev_close": prev_close,
         "prev_high": prev_high,
         "prev_low": prev_low,
@@ -363,10 +432,13 @@ def _screen_one(
         "vwap_0915": phase_a.vwap_0915,
         "active": phase_b_ok,
         "phase_b_ok": phase_b_ok,
+        # Future trade levels (Entry overlaid with live FUT LTP in API)
         "sl": sl,
-        "entry": entry,
+        "entry": fut_entry_snap,
         "t1": t1,
         "t2": t2,
+        "data_source_logic": "equity",
+        "data_source_levels": "future",
     }
 
 
@@ -607,9 +679,10 @@ def _enrich_ltp(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ltp = ltp_map.get(ik)
         if ltp is not None:
             card["ltp"] = ltp
-            # Live Entry on Screen = LTP (stored entry remains the screen-time snapshot).
+            # Live Entry on Screen = FUT LTP (stored entry remains FUT screen-time snapshot).
             card["entry"] = ltp
-        elif card.get("entry") is None:
+        elif card.get("entry") is None and not card.get("equity_instrument_key"):
+            # Legacy future-only rows: first_*/second_* were FUT OHLC.
             if card.get("second_close") is not None:
                 card["entry"] = card.get("second_close")
             elif card.get("first_close") is not None:

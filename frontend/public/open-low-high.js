@@ -89,9 +89,15 @@
     return `<span class="olh-sector-badge ${cls}" title="${escapeHtml(card.nifty_sector_label || '')}">${escapeHtml(raw)}</span>`;
   }
 
+  function usesEquityLogic(card) {
+    return !!(card && (card.equity_instrument_key || card.data_source_logic === 'equity'));
+  }
+
   function entryValue(card) {
+    // Live Entry = FUT LTP; screen snapshot = FUT entry. Equity first_*/second_* are audit-only.
     if (card.ltp != null && Number.isFinite(Number(card.ltp))) return Number(card.ltp);
     if (card.entry != null && Number.isFinite(Number(card.entry))) return Number(card.entry);
+    if (usesEquityLogic(card)) return null;
     if (card.second_close != null) return Number(card.second_close);
     if (card.first_close != null) return Number(card.first_close);
     return null;
@@ -99,6 +105,8 @@
 
   function slValue(card) {
     if (card.sl != null && Number.isFinite(Number(card.sl))) return Number(card.sl);
+    // Legacy future-only rows: first_open was FUT. Equity-logic rows must not use equity open.
+    if (usesEquityLogic(card)) return null;
     if (card.first_open != null) return Number(card.first_open);
     return null;
   }

@@ -312,3 +312,47 @@ def test_window_status_boundaries():
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 26, 0))) == "open"
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 0))) == "open"
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 1))) == "past"
+
+
+def test_resolve_equity_key_prefers_universe_nse_eq():
+    from backend.services.open_low_high.screener import _resolve_equity_key
+
+    class _Ux:
+        def get_instrument_key(self, symbol):
+            return "NSE_EQ|FALLBACK"
+
+    row = {"underlying_key": "NSE_EQ|INE123A01016"}
+    assert _resolve_equity_key(_Ux(), row, "FOO") == "NSE_EQ|INE123A01016"
+
+
+def test_resolve_equity_key_falls_back_to_upstox():
+    from backend.services.open_low_high.screener import _resolve_equity_key
+
+    class _Ux:
+        def get_instrument_key(self, symbol):
+            assert symbol == "INDIGO"
+            return "NSE_EQ:INE646L01027"
+
+    assert _resolve_equity_key(_Ux(), {"underlying_key": ""}, "INDIGO") == "NSE_EQ|INE646L01027"
+
+
+def test_row_to_dict_does_not_copy_equity_open_as_sl():
+    from backend.services.open_low_high.persistence import _row_to_dict
+
+    legacy = _row_to_dict(
+        {"first_open": 100.0, "sl": None, "active": True, "phase_b_ok": True}
+    )
+    assert legacy["sl"] == 100.0
+
+    equity = _row_to_dict(
+        {
+            "first_open": 100.0,
+            "sl": None,
+            "equity_instrument_key": "NSE_EQ|INE123A01016",
+            "active": True,
+            "phase_b_ok": True,
+        }
+    )
+    assert equity["sl"] is None
+    assert equity["data_source_logic"] == "equity"
+    assert equity["data_source_levels"] == "future"

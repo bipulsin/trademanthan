@@ -84,6 +84,7 @@ _MIGRATE_COLS = [
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS entry DOUBLE PRECISION",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS t1 DOUBLE PRECISION",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS t2 DOUBLE PRECISION",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS equity_instrument_key VARCHAR(128)",
 ]
 
 
@@ -131,9 +132,14 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         d["active"] = bool(d.get("active"))
     if "phase_b_ok" in d:
         d["phase_b_ok"] = bool(d.get("phase_b_ok"))
-    # SL defaults to 09:15 open when column empty (legacy rows).
+    # Legacy rows (future-only OHLC): SL fell back to first_open.
+    # Equity-logic rows store equity first_* — never use them as FUT SL.
     if d.get("sl") is None and d.get("first_open") is not None:
-        d["sl"] = d.get("first_open")
+        if not d.get("equity_instrument_key"):
+            d["sl"] = d.get("first_open")
+    if d.get("equity_instrument_key"):
+        d["data_source_logic"] = "equity"
+        d["data_source_levels"] = "future"
     return d
 
 
@@ -151,17 +157,25 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
         for row in rows:
             active = bool(row.get("active") if row.get("active") is not None else row.get("phase_b_ok"))
             phase_b_ok = bool(row.get("phase_b_ok") if row.get("phase_b_ok") is not None else active)
+            equity_ik = str(row.get("equity_instrument_key") or "").strip() or None
             sl = row.get("sl")
-            if sl is None:
+            # Legacy future-only rows: SL defaulted to first_open. Equity-logic
+            # rows must keep SL on the future scale (do not copy equity open).
+            if sl is None and not equity_ik:
                 sl = row.get("first_open")
             entry = row.get("entry")
-            if entry is None:
-                entry = row.get("second_close") if row.get("second_close") is not None else row.get("first_close")
+            if entry is None and not equity_ik:
+                entry = (
+                    row.get("second_close")
+                    if row.get("second_close") is not None
+                    else row.get("first_close")
+                )
             db.execute(
                 text(
                     """
                     INSERT INTO open_low_high_screen (
                         trade_date, symbol, side, contract, expiry, instrument_key,
+                        equity_instrument_key,
                         prev_close, prev_high, prev_low,
                         first_open, first_high, first_low, first_close,
                         second_close, vwap_0915,
@@ -170,6 +184,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         frozen, frozen_at, updated_at
                     ) VALUES (
                         :trade_date, :symbol, :side, :contract, :expiry, :instrument_key,
+                        :equity_instrument_key,
                         :prev_close, :prev_high, :prev_low,
                         :first_open, :first_high, :first_low, :first_close,
                         :second_close, :vwap_0915,
@@ -186,6 +201,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                     "contract": row.get("contract"),
                     "expiry": row.get("expiry"),
                     "instrument_key": row.get("instrument_key"),
+                    "equity_instrument_key": equity_ik,
                     "prev_close": row.get("prev_close"),
                     "prev_high": row.get("prev_high"),
                     "prev_low": row.get("prev_low"),
