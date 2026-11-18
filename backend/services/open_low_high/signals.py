@@ -2,16 +2,26 @@
 
 Interpretation of confirmation (documented per product spec):
   Keep only confirmed setups after the completed 09:20 five-minute candle:
-  - Bullish: KEEP if 09:20 **high** > 09:15 **high**; REMOVE otherwise.
-  - Bearish: KEEP if 09:20 **low** < 09:15 **low**; REMOVE otherwise.
+  - Bullish: KEEP if 09:20 **close** >= 09:15 **close**; REMOVE otherwise.
+  - Bearish: KEEP if 09:20 **close** <= 09:15 **close**; REMOVE otherwise.
 
-  After confirmation, a 09:20 wick/body filter applies (see
+  After close confirmation, a 09:20 wick/body filter applies (see
   ``passes_second_candle_wick_filter``).
 
 Phase A uses close-vs-prev-day extreme (not wick) plus VWAP + candle color.
 Doji (close == open) is allowed: bearish accepts close <= open, bullish
 close >= open. This differs from the OpenHighLow *backtest* gates that use
 first.high/low wick.
+
+O=L / O=H badge (equity 09:15 only):
+  - Bullish & open == low  → "O=L"
+  - Bearish & open == high → "O=H"
+
+NIFTY header cue (index as of ~09:20):
+  - Gap: 09:15 open vs prior session close (up / down / flat).
+  - Bias: 09:20 close vs 09:15 close (bullish / bearish / flat).
+  - Show green "NIFTY" on Bullish header when bias=bullish and gap=up.
+  - Show red "NIFTY" on Bearish header when bias=bearish and gap=down.
 """
 from __future__ import annotations
 
@@ -30,6 +40,12 @@ class PhaseAResult:
     prev_high: float
     prev_low: float
     prev_close: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class PhaseBResult:
+    ok: bool
+    fail_reason: Optional[str] = None
 
 
 def evaluate_phase_a(
@@ -91,22 +107,64 @@ def evaluate_phase_a(
 def confirm_phase_b(
     side: str,
     *,
-    first_high: float,
-    first_low: float,
-    second_high: float,
-    second_low: float,
+    first_close: float,
+    second_close: float,
+    # Legacy kwargs ignored (kept so older call sites don't explode during rollout).
+    first_high: Optional[float] = None,
+    first_low: Optional[float] = None,
+    second_high: Optional[float] = None,
+    second_low: Optional[float] = None,
 ) -> bool:
-    """Return True to KEEP the card; False to REMOVE (failed extreme confirmation).
+    """Return True to KEEP the card; False to REMOVE (failed close confirmation).
 
-    Bullish: 09:20 high must make a higher high vs 09:15 high.
-    Bearish: 09:20 low must make a lower low vs 09:15 low.
+    Bullish: 09:20 close must be >= 09:15 close.
+    Bearish: 09:20 close must be <= 09:15 close.
     """
+    del first_high, first_low, second_high, second_low
     side_u = str(side or "").upper()
+    c15 = float(first_close)
+    c20 = float(second_close)
     if side_u == "BULLISH":
-        return float(second_high) > float(first_high)
+        return c20 >= c15
     if side_u == "BEARISH":
-        return float(second_low) < float(first_low)
+        return c20 <= c15
     return False
+
+
+def evaluate_phase_b(
+    side: str,
+    *,
+    first_close: float,
+    second_open: Optional[float],
+    second_high: Optional[float],
+    second_low: Optional[float],
+    second_close: Optional[float],
+    max_wick_body_ratio: float = 0.35,
+) -> PhaseBResult:
+    """Full Phase B gate with a Trade Log–friendly fail reason."""
+    if (
+        second_open is None
+        or second_high is None
+        or second_low is None
+        or second_close is None
+    ):
+        return PhaseBResult(ok=False, fail_reason="missing 09:20 bar")
+    if not confirm_phase_b(
+        side,
+        first_close=float(first_close),
+        second_close=float(second_close),
+    ):
+        return PhaseBResult(ok=False, fail_reason="close not confirming")
+    if not passes_second_candle_wick_filter(
+        side,
+        second_open=float(second_open),
+        second_high=float(second_high),
+        second_low=float(second_low),
+        second_close=float(second_close),
+        max_wick_body_ratio=max_wick_body_ratio,
+    ):
+        return PhaseBResult(ok=False, fail_reason="wick too large")
+    return PhaseBResult(ok=True, fail_reason=None)
 
 
 def passes_second_candle_wick_filter(
@@ -142,6 +200,84 @@ def passes_second_candle_wick_filter(
     return False
 
 
+def open_extreme_badge(
+    side: str,
+    *,
+    first_open: float,
+    first_high: float,
+    first_low: float,
+) -> Optional[str]:
+    """Equity 09:15 O=L (bullish) / O=H (bearish) marker, else None."""
+    side_u = str(side or "").upper()
+    o = float(first_open)
+    h = float(first_high)
+    l = float(first_low)
+    if side_u == "BULLISH" and o == l:
+        return "O=L"
+    if side_u == "BEARISH" and o == h:
+        return "O=H"
+    return None
+
+
+def evaluate_nifty_cue(
+    *,
+    prev_close: Optional[float],
+    first_open: Optional[float],
+    first_close: Optional[float],
+    second_close: Optional[float],
+) -> Dict[str, Any]:
+    """NIFTY gap + bias as of ~09:20 for subsection header badges.
+
+    Rules:
+      gap_up   → 09:15 open > prior close
+      gap_down → 09:15 open < prior close
+      flat     → open == prior close (or missing inputs)
+      bullish  → 09:20 close > 09:15 close
+      bearish  → 09:20 close < 09:15 close
+      flat     → equal closes (or missing)
+
+    Badge:
+      show on Bullish header when bullish + gap_up
+      show on Bearish header when bearish + gap_down
+    """
+    gap = "flat"
+    bias = "flat"
+    if (
+        prev_close is not None
+        and first_open is not None
+        and float(prev_close) != 0
+    ):
+        o = float(first_open)
+        pc = float(prev_close)
+        if o > pc:
+            gap = "up"
+        elif o < pc:
+            gap = "down"
+    if first_close is not None and second_close is not None:
+        c15 = float(first_close)
+        c20 = float(second_close)
+        if c20 > c15:
+            bias = "bullish"
+        elif c20 < c15:
+            bias = "bearish"
+
+    show_on: Optional[str] = None
+    if bias == "bullish" and gap == "up":
+        show_on = "BULLISH"
+    elif bias == "bearish" and gap == "down":
+        show_on = "BEARISH"
+
+    return {
+        "nifty_gap": gap,
+        "nifty_bias": bias,
+        "nifty_show_on": show_on,
+        "nifty_prev_close": float(prev_close) if prev_close is not None else None,
+        "nifty_0915_open": float(first_open) if first_open is not None else None,
+        "nifty_0915_close": float(first_close) if first_close is not None else None,
+        "nifty_0920_close": float(second_close) if second_close is not None else None,
+    }
+
+
 def freeze_tags_immutable(
     tags: Dict[str, Any],
     *,
@@ -170,31 +306,16 @@ def apply_confirmation_filter(
     second_low: Optional[float],
     second_close: Optional[float],
 ) -> Optional[PhaseAResult]:
-    """Keep phase-A result only when Phase B extremes + 09:20 wick filter pass."""
-    if (
-        second_open is None
-        or second_high is None
-        or second_low is None
-        or second_close is None
-    ):
-        return None
-    if not confirm_phase_b(
+    """Keep phase-A result only when Phase B close confirm + 09:20 wick filter pass."""
+    pb = evaluate_phase_b(
         phase_a.side,
-        first_high=phase_a.first_high,
-        first_low=phase_a.first_low,
-        second_high=float(second_high),
-        second_low=float(second_low),
-    ):
-        return None
-    if not passes_second_candle_wick_filter(
-        phase_a.side,
-        second_open=float(second_open),
-        second_high=float(second_high),
-        second_low=float(second_low),
-        second_close=float(second_close),
-    ):
-        return None
-    return phase_a
+        first_close=phase_a.first_close,
+        second_open=second_open,
+        second_high=second_high,
+        second_low=second_low,
+        second_close=second_close,
+    )
+    return phase_a if pb.ok else None
 
 
 def traditional_pivot_levels(

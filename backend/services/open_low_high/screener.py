@@ -19,8 +19,8 @@ Phase A passers always persist (Screen + Trade Log). Phase B passers are
 ``active=True`` (golden border, sorted to top); Phase A-only are greyed
 candidates.
 
-Phase B uses 09:20 high/low extremes vs 09:15 (not close), then a 09:20
-wick/body filter. The 09:20 bar is only final at 09:25 — screening earlier on a
+Phase B uses 09:20 close vs 09:15 close, then a 09:20 wick/body filter
+(≤0.35). The 09:20 bar is only final at 09:25 — screening earlier on a
 forming bar false-negatives confirms that arrive later (seen 2026-11-18 POLYCAB).
 """
 from __future__ import annotations
@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytz
 
 from backend.services.open_high_low.bars import Bar, bar_at, first_vwap
+from backend.services.open_high_low.config import NIFTY_INDEX_KEY
 from backend.services.open_high_low.data import (
     front_month_expiry,
     load_universe,
@@ -51,11 +52,12 @@ from backend.services.open_low_high.persistence import (
     upsert_screen_rows,
 )
 from backend.services.open_low_high.signals import (
-    confirm_phase_b,
+    evaluate_nifty_cue,
     evaluate_phase_a,
+    evaluate_phase_b,
     freeze_tags_immutable,
     next_pivot_targets,
-    passes_second_candle_wick_filter,
+    open_extreme_badge,
 )
 
 logger = logging.getLogger(__name__)
@@ -346,25 +348,24 @@ def _screen_one(
     if phase_a is None:
         return None
 
-    # Phase B on equity 09:20 extremes + wick/body (window ~09:25:05).
-    phase_b_ok = False
-    second_close: Optional[float] = None
-    if second is not None:
-        second_close = float(second.close)
-        if confirm_phase_b(
-            phase_a.side,
-            first_high=phase_a.first_high,
-            first_low=phase_a.first_low,
-            second_high=second.high,
-            second_low=second.low,
-        ) and passes_second_candle_wick_filter(
-            phase_a.side,
-            second_open=second.open,
-            second_high=second.high,
-            second_low=second.low,
-            second_close=second.close,
-        ):
-            phase_b_ok = True
+    # Phase B on equity 09:20 close confirm + wick/body (window ~09:25:05).
+    second_close: Optional[float] = float(second.close) if second is not None else None
+    phase_b = evaluate_phase_b(
+        phase_a.side,
+        first_close=phase_a.first_close,
+        second_open=float(second.open) if second is not None else None,
+        second_high=float(second.high) if second is not None else None,
+        second_low=float(second.low) if second is not None else None,
+        second_close=second_close,
+    )
+    phase_b_ok = bool(phase_b.ok)
+    phase_b_fail_reason = None if phase_b_ok else (phase_b.fail_reason or "Phase B failed")
+    olh_badge = open_extreme_badge(
+        phase_a.side,
+        first_open=phase_a.first_open,
+        first_high=phase_a.first_high,
+        first_low=phase_a.first_low,
+    )
 
     # --- Display path: front-month stock future ---
     fut_bars = _session_5m_bars(upstox, fut_ik, session)
@@ -432,6 +433,8 @@ def _screen_one(
         "vwap_0915": phase_a.vwap_0915,
         "active": phase_b_ok,
         "phase_b_ok": phase_b_ok,
+        "phase_b_fail_reason": phase_b_fail_reason,
+        "olh_badge": olh_badge,
         # Future trade levels (Entry overlaid with live FUT LTP in API)
         "sl": sl,
         "entry": fut_entry_snap,
@@ -440,6 +443,31 @@ def _screen_one(
         "data_source_logic": "equity",
         "data_source_levels": "future",
     }
+
+
+def _evaluate_nifty_header_cue(upstox: Any, session: date) -> Dict[str, Any]:
+    """NIFTY 50 gap + bias at ~09:20 for Bullish/Bearish subsection badges."""
+    try:
+        bars = _session_5m_bars(upstox, NIFTY_INDEX_KEY, session)
+        first = bar_at(bars, session, FIRST_CANDLE) if bars else None
+        second = bar_at(bars, session, SECOND_CANDLE) if bars else None
+        _ph, _pl, prev_close = _fetch_daily_prev(upstox, NIFTY_INDEX_KEY, session)
+        cue = evaluate_nifty_cue(
+            prev_close=prev_close,
+            first_open=float(first.open) if first is not None else None,
+            first_close=float(first.close) if first is not None else None,
+            second_close=float(second.close) if second is not None else None,
+        )
+        cue["nifty_instrument_key"] = NIFTY_INDEX_KEY
+        return cue
+    except Exception:
+        logger.exception("olh nifty cue failed")
+        return {
+            "nifty_gap": "flat",
+            "nifty_bias": "flat",
+            "nifty_show_on": None,
+            "nifty_instrument_key": NIFTY_INDEX_KEY,
+        }
 
 
 def _apply_sector_badges(cards: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -494,6 +522,7 @@ def run_screen(
     if is_day_frozen(trade_date) and not force:
         rows = list_screen_for_date(trade_date)
         meta = get_day_meta(trade_date) or {}
+        nifty = (meta.get("meta") if isinstance(meta.get("meta"), dict) else None) or {}
         return {
             "ok": True,
             "status": "frozen",
@@ -503,6 +532,9 @@ def run_screen(
             "bullish": [r for r in rows if r.get("side") == "BULLISH"],
             "bearish": [r for r in rows if r.get("side") == "BEARISH"],
             "meta": meta,
+            "nifty_gap": nifty.get("nifty_gap"),
+            "nifty_bias": nifty.get("nifty_bias"),
+            "nifty_show_on": nifty.get("nifty_show_on"),
             "message": "Already frozen for today — cards and sector tags immutable.",
         }
 
@@ -567,6 +599,8 @@ def run_screen(
         for c in tagged:
             c["frozen"] = True
 
+        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
+
         # Sort: actives first within each side (matches list_screen_for_date).
         tagged.sort(
             key=lambda c: (
@@ -582,6 +616,13 @@ def run_screen(
         active_n = sum(1 for c in tagged if c.get("active"))
         candidate_n = len(tagged) - active_n
         phase_ts = _now()
+        day_meta = {
+            "window": win,
+            "expiry": expiry.isoformat(),
+            "active": active_n,
+            "candidates": candidate_n,
+            **nifty_cue,
+        }
         upsert_day_meta(
             trade_date,
             status="frozen",
@@ -594,12 +635,7 @@ def run_screen(
                 f"screened={len(universe)} phase_a={len(tagged)} "
                 f"active={active_n} grey={candidate_n} errors={errors} force={force}"
             ),
-            meta={
-                "window": win,
-                "expiry": expiry.isoformat(),
-                "active": active_n,
-                "candidates": candidate_n,
-            },
+            meta=day_meta,
         )
         payload = {
             "ok": True,
@@ -615,6 +651,9 @@ def run_screen(
             "active": active_n,
             "candidates": candidate_n,
             "errors": errors,
+            "nifty_gap": nifty_cue.get("nifty_gap"),
+            "nifty_bias": nifty_cue.get("nifty_bias"),
+            "nifty_show_on": nifty_cue.get("nifty_show_on"),
             "message": (
                 f"Screen complete — {active_n} active, {candidate_n} Phase A "
                 f"candidates (grey). Frozen for the day."
@@ -727,6 +766,7 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
         status = "waiting"
         message = "No qualifiers yet."
 
+    nifty = (meta.get("meta") if isinstance(meta, dict) and isinstance(meta.get("meta"), dict) else None) or {}
     return {
         "ok": True,
         "status": status,
@@ -738,6 +778,9 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
         "active": active_n,
         "candidates": grey_n,
         "meta": meta,
+        "nifty_gap": nifty.get("nifty_gap"),
+        "nifty_bias": nifty.get("nifty_bias"),
+        "nifty_show_on": nifty.get("nifty_show_on"),
         "server_time": _now().isoformat(),
         "message": message,
         "last_run": _last_run or None,

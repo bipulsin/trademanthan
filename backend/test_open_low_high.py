@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from backend.services.open_low_high.signals import (
     confirm_phase_b,
+    evaluate_nifty_cue,
     evaluate_phase_a,
+    evaluate_phase_b,
     freeze_tags_immutable,
     next_pivot_targets,
+    open_extreme_badge,
     passes_second_candle_wick_filter,
     traditional_pivot_levels,
 )
@@ -111,72 +114,156 @@ def test_phase_a_bearish_rejects_green():
     assert r is None
 
 
-def test_phase_b_bullish_keep_when_second_high_above_first_high():
+def test_phase_b_bullish_keep_when_second_close_ge_first_close():
     assert (
         confirm_phase_b(
             "BULLISH",
-            first_high=102.0,
-            first_low=99.0,
-            second_high=102.5,
-            second_low=100.0,
+            first_close=102.0,
+            second_close=102.5,
         )
         is True
     )
     assert (
         confirm_phase_b(
             "BULLISH",
-            first_high=102.0,
-            first_low=99.0,
-            second_high=102.0,
-            second_low=100.0,
+            first_close=102.0,
+            second_close=102.0,
         )
-        is False
+        is True
     )
-    # Close above first high is not enough if high does not exceed.
     assert (
         confirm_phase_b(
             "BULLISH",
-            first_high=102.0,
-            first_low=99.0,
-            second_high=101.5,
-            second_low=100.0,
+            first_close=102.0,
+            second_close=101.5,
         )
         is False
     )
 
 
-def test_phase_b_bearish_keep_when_second_low_below_first_low():
+def test_phase_b_bearish_keep_when_second_close_le_first_close():
     assert (
         confirm_phase_b(
             "BEARISH",
-            first_high=100.0,
-            first_low=97.0,
-            second_high=99.0,
-            second_low=96.5,
+            first_close=97.0,
+            second_close=96.5,
         )
         is True
     )
     assert (
         confirm_phase_b(
             "BEARISH",
-            first_high=100.0,
-            first_low=97.0,
-            second_high=99.0,
-            second_low=97.0,
+            first_close=97.0,
+            second_close=97.0,
         )
-        is False
+        is True
     )
-    # Close below first low without a lower low fails (old close-based rule).
     assert (
         confirm_phase_b(
             "BEARISH",
-            first_high=100.0,
-            first_low=97.0,
-            second_high=99.0,
-            second_low=97.2,
+            first_close=97.0,
+            second_close=97.2,
         )
         is False
     )
+
+
+def test_evaluate_phase_b_fail_reasons():
+    missing = evaluate_phase_b(
+        "BULLISH",
+        first_close=100.0,
+        second_open=None,
+        second_high=None,
+        second_low=None,
+        second_close=None,
+    )
+    assert missing.ok is False
+    assert missing.fail_reason == "missing 09:20 bar"
+
+    close_fail = evaluate_phase_b(
+        "BULLISH",
+        first_close=100.0,
+        second_open=100.0,
+        second_high=101.0,
+        second_low=99.0,
+        second_close=99.5,
+    )
+    assert close_fail.ok is False
+    assert close_fail.fail_reason == "close not confirming"
+
+    wick_fail = evaluate_phase_b(
+        "BULLISH",
+        first_close=100.0,
+        second_open=100.0,
+        second_high=114.0,
+        second_low=99.0,
+        second_close=110.0,
+    )
+    assert wick_fail.ok is False
+    assert wick_fail.fail_reason == "wick too large"
+
+    ok = evaluate_phase_b(
+        "BULLISH",
+        first_close=100.0,
+        second_open=100.0,
+        second_high=113.5,
+        second_low=99.0,
+        second_close=110.0,
+    )
+    assert ok.ok is True
+    assert ok.fail_reason is None
+
+
+def test_open_extreme_badge_ol_oh():
+    assert (
+        open_extreme_badge("BULLISH", first_open=100.0, first_high=105.0, first_low=100.0)
+        == "O=L"
+    )
+    assert (
+        open_extreme_badge("BULLISH", first_open=100.0, first_high=105.0, first_low=99.0)
+        is None
+    )
+    assert (
+        open_extreme_badge("BEARISH", first_open=105.0, first_high=105.0, first_low=100.0)
+        == "O=H"
+    )
+    assert (
+        open_extreme_badge("BEARISH", first_open=104.0, first_high=105.0, first_low=100.0)
+        is None
+    )
+
+
+def test_nifty_cue_gap_and_bias():
+    bull = evaluate_nifty_cue(
+        prev_close=100.0,
+        first_open=101.0,
+        first_close=101.5,
+        second_close=102.0,
+    )
+    assert bull["nifty_gap"] == "up"
+    assert bull["nifty_bias"] == "bullish"
+    assert bull["nifty_show_on"] == "BULLISH"
+
+    bear = evaluate_nifty_cue(
+        prev_close=100.0,
+        first_open=99.0,
+        first_close=99.5,
+        second_close=98.5,
+    )
+    assert bear["nifty_gap"] == "down"
+    assert bear["nifty_bias"] == "bearish"
+    assert bear["nifty_show_on"] == "BEARISH"
+
+    # Gap up but bearish bias → no header badge
+    mixed = evaluate_nifty_cue(
+        prev_close=100.0,
+        first_open=101.0,
+        first_close=102.0,
+        second_close=101.0,
+    )
+    assert mixed["nifty_gap"] == "up"
+    assert mixed["nifty_bias"] == "bearish"
+    assert mixed["nifty_show_on"] is None
 
 
 def test_wick_filter_bullish_upper_wick_ratio():

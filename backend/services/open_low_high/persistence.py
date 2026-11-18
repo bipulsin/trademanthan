@@ -85,6 +85,8 @@ _MIGRATE_COLS = [
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS t1 DOUBLE PRECISION",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS t2 DOUBLE PRECISION",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS equity_instrument_key VARCHAR(128)",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS phase_b_fail_reason TEXT",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS olh_badge VARCHAR(8)",
 ]
 
 
@@ -179,7 +181,8 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         prev_close, prev_high, prev_low,
                         first_open, first_high, first_low, first_close,
                         second_close, vwap_0915,
-                        active, phase_b_ok, sl, entry, t1, t2,
+                        active, phase_b_ok, phase_b_fail_reason, olh_badge,
+                        sl, entry, t1, t2,
                         sector_badge, sector_star, sector_badge_display, nifty_sector_label,
                         frozen, frozen_at, updated_at
                     ) VALUES (
@@ -188,7 +191,8 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         :prev_close, :prev_high, :prev_low,
                         :first_open, :first_high, :first_low, :first_close,
                         :second_close, :vwap_0915,
-                        :active, :phase_b_ok, :sl, :entry, :t1, :t2,
+                        :active, :phase_b_ok, :phase_b_fail_reason, :olh_badge,
+                        :sl, :entry, :t1, :t2,
                         :sector_badge, :sector_star, :sector_badge_display, :nifty_sector_label,
                         :frozen, :frozen_at, NOW()
                     )
@@ -213,6 +217,14 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                     "vwap_0915": row.get("vwap_0915"),
                     "active": active,
                     "phase_b_ok": phase_b_ok,
+                    "phase_b_fail_reason": (
+                        None
+                        if active
+                        else (str(row.get("phase_b_fail_reason") or "").strip() or None)
+                    ),
+                    "olh_badge": (
+                        str(row.get("olh_badge") or "").strip().upper() or None
+                    ),
                     "sl": sl,
                     "entry": entry,
                     "t1": row.get("t1"),

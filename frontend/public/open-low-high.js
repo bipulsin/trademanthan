@@ -89,6 +89,46 @@
     return `<span class="olh-sector-badge ${cls}" title="${escapeHtml(card.nifty_sector_label || '')}">${escapeHtml(raw)}</span>`;
   }
 
+  function olhBadgeHtml(card) {
+    const raw = String(card.olh_badge || '').trim().toUpperCase();
+    if (raw !== 'O=L' && raw !== 'O=H') return '';
+    if (card.active) {
+      return `<span class="olh-extreme-badge is-glow" title="Open equals ${raw === 'O=L' ? 'Low' : 'High'}">${escapeHtml(raw)}</span>`;
+    }
+    return `<span class="olh-extreme-badge is-star" title="Open equals ${raw === 'O=L' ? 'Low' : 'High'} (Phase A)">★</span>`;
+  }
+
+  function phaseBReason(card) {
+    if (card.active || card.phase_b_ok) return 'Phase B OK';
+    const r = String(card.phase_b_fail_reason || '').trim();
+    return r || 'Phase B failed';
+  }
+
+  function splitActiveGrey(list) {
+    const active = [];
+    const grey = [];
+    (list || []).forEach(function (c) {
+      if (c.active) active.push(c);
+      else grey.push(c);
+    });
+    return { active: active, grey: grey };
+  }
+
+  function columnHtml(list) {
+    const parts = splitActiveGrey(sortCards(list));
+    const chunks = [];
+    if (parts.active.length) {
+      chunks.push('<div class="olh-grid olh-grid-active">' + parts.active.map(cardHtml).join('') + '</div>');
+    }
+    if (parts.active.length && parts.grey.length) {
+      chunks.push('<div class="olh-row-divider" aria-hidden="true"></div>');
+    }
+    if (parts.grey.length) {
+      chunks.push('<div class="olh-grid olh-grid-grey">' + parts.grey.map(cardHtml).join('') + '</div>');
+    }
+    return chunks.join('');
+  }
+
   function usesEquityLogic(card) {
     return !!(card && (card.equity_instrument_key || card.data_source_logic === 'equity'));
   }
@@ -138,6 +178,7 @@
         <div class="olh-card-meta">
           <span class="olh-side-chip ${bull ? 'bull' : 'bear'}">${bull ? 'BULL' : 'BEAR'}</span>
           ${active ? '<span class="olh-active-chip">ACTIVE</span>' : '<span class="olh-grey-chip">PHASE A</span>'}
+          ${olhBadgeHtml(card)}
           ${badgeHtml(card)}
         </div>
       </article>`;
@@ -162,6 +203,26 @@
     });
   }
 
+  function renderNiftyCue(data) {
+    const showOn = String(data.nifty_show_on || '').toUpperCase();
+    const bullEl = document.getElementById('olhNiftyBull');
+    const bearEl = document.getElementById('olhNiftyBear');
+    if (bullEl) {
+      const on = showOn === 'BULLISH';
+      bullEl.hidden = !on;
+      bullEl.title = on
+        ? 'NIFTY bullish + gap up (09:20 close > 09:15 close; open > prev close)'
+        : '';
+    }
+    if (bearEl) {
+      const on = showOn === 'BEARISH';
+      bearEl.hidden = !on;
+      bearEl.title = on
+        ? 'NIFTY bearish + gap down (09:20 close < 09:15 close; open < prev close)'
+        : '';
+    }
+  }
+
   function renderScreen(data) {
     const bull = sortCards(data.bullish || []);
     const bear = sortCards(data.bearish || []);
@@ -179,15 +240,25 @@
       bear.length + (bear.length ? ` (${bearActive} active)` : '');
 
     if (bullGrid) {
-      bullGrid.innerHTML = bull.map(cardHtml).join('');
-      bullGrid.hidden = bull.length === 0;
+      bullGrid.outerHTML =
+        '<div class="olh-col-body" id="olhBullGrid"' +
+        (bull.length === 0 ? ' hidden' : '') +
+        '>' +
+        columnHtml(bull) +
+        '</div>';
     }
     if (bearGrid) {
-      bearGrid.innerHTML = bear.map(cardHtml).join('');
-      bearGrid.hidden = bear.length === 0;
+      bearGrid.outerHTML =
+        '<div class="olh-col-body" id="olhBearGrid"' +
+        (bear.length === 0 ? ' hidden' : '') +
+        '>' +
+        columnHtml(bear) +
+        '</div>';
     }
     if (bullEmpty) bullEmpty.hidden = bull.length > 0;
     if (bearEmpty) bearEmpty.hidden = bear.length > 0;
+
+    renderNiftyCue(data);
 
     const statusEl = document.getElementById('olhStatus');
     if (statusEl) {
@@ -395,11 +466,13 @@
             <td><button type="button" class="olh-sym-btn olh-sym-btn--table" data-olh-chart="${escapeHtml(key)}">${escapeHtml(r.symbol || '')}</button></td>
             <td>${escapeHtml(r.side || '')}</td>
             <td>${active ? 'Active' : 'Phase A'}</td>
+            <td class="olh-log-reason">${escapeHtml(phaseBReason(r))}</td>
             <td>${escapeHtml(r.contract || '')}</td>
             <td>${fmt(entryValue(r))}</td>
             <td>${fmt(slValue(r))}</td>
             <td>${fmt(r.t1)}</td>
             <td>${fmt(r.t2)}</td>
+            <td>${escapeHtml(r.olh_badge || '')}</td>
             <td>${escapeHtml(r.sector_badge_display || r.sector_badge || '')}</td>
           </tr>`;
           })
@@ -407,8 +480,8 @@
         return `<h3 class="olh-log-date">${escapeHtml(sec.date)}</h3>
           <div class="olh-table-wrap"><table class="olh-table">
             <thead><tr>
-              <th>Symbol</th><th>Side</th><th>State</th><th>Contract</th>
-              <th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>Tag</th>
+              <th>Symbol</th><th>Side</th><th>State</th><th>Reason</th><th>Contract</th>
+              <th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>O=L/H</th><th>Tag</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`;
