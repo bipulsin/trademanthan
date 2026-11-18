@@ -29,7 +29,7 @@ class RunBody(BaseModel):
 
 @router.get("/today")
 def get_today(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
-    """Today's live/frozen screen state. Auto-runs inside 09:20:30–09:22 IST."""
+    """Today's live/frozen screen state. Auto-runs inside 09:25:05–09:27 IST."""
     from backend.services.open_low_high.screener import get_today_state
 
     return get_today_state(auto_run=True)

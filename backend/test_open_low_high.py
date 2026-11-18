@@ -115,8 +115,9 @@ def test_window_status_boundaries():
     from backend.services.open_low_high.screener import window_status
 
     IST = pytz.timezone("Asia/Kolkata")
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 20, 0))) == "waiting"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 20, 30))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 21, 0))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 22, 0))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 22, 1))) == "past"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 20, 30))) == "waiting"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 0))) == "waiting"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 5))) == "open"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 26, 0))) == "open"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 0))) == "open"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 1))) == "past"

@@ -1,4 +1,4 @@
-"""APScheduler job: Open Low High screen at 09:20:30 IST on trading days."""
+"""APScheduler job: Open Low High screen after 09:20 candle completes (~09:25 IST)."""
 from __future__ import annotations
 
 import logging
@@ -35,12 +35,12 @@ def start_open_low_high_scheduler() -> None:
     if _scheduler is not None:
         return
     sched = BackgroundScheduler(timezone="Asia/Kolkata")
-    # Phase A+B at ~09:20:30; freeze completes inside run_screen.
+    # Phase A+B after 09:20 five-minute bar closes (needs final close for Phase B).
     sched.add_job(
         _run_olh_screen,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=20, second=30, timezone="Asia/Kolkata"),
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=10, timezone="Asia/Kolkata"),
         id="open_low_high_screen",
-        name="Open Low High screen 09:20:30 IST",
+        name="Open Low High screen 09:25:10 IST",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -49,9 +49,9 @@ def start_open_low_high_scheduler() -> None:
     # Safety catch-up near freeze deadline if first job misfired.
     sched.add_job(
         _run_olh_screen,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=21, second=45, timezone="Asia/Kolkata"),
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=26, second=30, timezone="Asia/Kolkata"),
         id="open_low_high_screen_catchup",
-        name="Open Low High screen catch-up 09:21:45 IST",
+        name="Open Low High screen catch-up 09:26:30 IST",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -59,7 +59,7 @@ def start_open_low_high_scheduler() -> None:
     )
     sched.start()
     _scheduler = sched
-    logger.info("open_low_high scheduler started (09:20:30 + 09:21:45 IST)")
+    logger.info("open_low_high scheduler started (09:25:10 + 09:26:30 IST)")
 
 
 def stop_open_low_high_scheduler() -> None:

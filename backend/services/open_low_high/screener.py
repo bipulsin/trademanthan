@@ -1,9 +1,13 @@
 """Live Open Low High screener — universe scan, Phase A/B, freeze + sector tags.
 
 Schedule (IST):
-  ~09:20:30  Phase A on completed 09:15 bar + Phase B on forming/complete 09:20 bar
-             (WS preferred for 09:20; REST intraday fallback). Freeze by 09:22.
+  ~09:25:10  Phase A on completed 09:15 bar + Phase B on completed 09:20 bar
+             (WS preferred; REST intraday fallback). Freeze by ~09:27.
   After freeze: card list + S1–S3/W1–W3 tags are immutable for the day.
+
+Phase B needs the *close* of the 09:20 five-minute candle, which is only final
+at 09:25. Screening at 09:20:30 on a forming bar false-negatives confirms that
+arrive later in the 09:20–09:25 window (seen 2026-11-18 POLYCAB).
 """
 from __future__ import annotations
 
@@ -43,8 +47,9 @@ IST = pytz.timezone("Asia/Kolkata")
 
 FIRST_CANDLE = time(9, 15)
 SECOND_CANDLE = time(9, 20)
-SCREEN_AFTER = time(9, 20, 30)
-FREEZE_BY = time(9, 22, 0)
+# Window opens once the 09:20 bar has closed (09:25:00); small buffer for WS/REST.
+SCREEN_AFTER = time(9, 25, 5)
+FREEZE_BY = time(9, 27, 0)
 
 _run_lock = threading.Lock()
 _last_run: Dict[str, Any] = {}
@@ -66,7 +71,7 @@ def _upstox():
 
 
 def window_status(now: Optional[datetime] = None) -> str:
-    """waiting | open | past — relative to the 09:20:30–09:22 screen window."""
+    """waiting | open | past — relative to the 09:25:05–09:27 screen window."""
     t = now or _now()
     if t.tzinfo is None:
         t = IST.localize(t)
@@ -286,7 +291,7 @@ def _screen_one(
     if phase_a is None:
         return None
 
-    # Phase B: without a second candle we cannot confirm — skip (will not keep).
+    # Phase B: require completed 09:20 bar close (screen window starts ~09:25:05).
     # Interpretation: remove cards that FAIL confirmation; missing second = fail.
     if second is None:
         return None
@@ -361,7 +366,7 @@ def run_screen(
 ) -> Dict[str, Any]:
     """Run Phase A+B screen and freeze today's set.
 
-    Outside the 09:20:30–09:22 window, refuses unless ``force=True`` (manual/test).
+    Outside the 09:25:05–09:27 window, refuses unless ``force=True`` (manual/test).
     If already frozen for the day, returns stored rows without re-scanning.
     """
     ensure_tables()
@@ -393,7 +398,7 @@ def run_screen(
             "frozen": False,
             "bullish": [],
             "bearish": [],
-            "message": "Waiting for 09:20:30 IST screen window.",
+            "message": "Waiting for 09:25 IST screen window (09:20 candle must complete).",
         }
 
     if not _run_lock.acquire(blocking=False):
@@ -516,7 +521,7 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
         message = "Frozen for today — cards and sector tags will not change."
     elif win == "waiting":
         status = "waiting"
-        message = "Waiting for first candle (09:15) to complete — screen runs ~09:20:30 IST."
+        message = "Waiting for 09:15 + 09:20 candles to complete — screen runs ~09:25 IST."
     elif win == "past" and not rows:
         status = "empty"
         message = "No screen stored for today. Use Refresh (force) or wait for tomorrow's window."
