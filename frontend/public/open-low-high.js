@@ -8,8 +8,21 @@
 
   const POLL_MS = 20000;
   const LTP_POLL_MS = 15000;
-  const ENGINE_SRC = 'security-chart/security-chart-engine.js?v=19';
+  const ENGINE_SRC = 'security-chart/security-chart-engine.js?v=20';
   const BADGE_ORDER = { S1: 0, S2: 1, S3: 2, W1: 3, W2: 4, W3: 5 };
+  const LOG_COLS = [
+    { key: 'symbol', label: 'Symbol' },
+    { key: 'side', label: 'Side' },
+    { key: 'state', label: 'State' },
+    { key: 'reason', label: 'Reason' },
+    { key: 'contract', label: 'Contract' },
+    { key: 'entry', label: 'Entry' },
+    { key: 'sl', label: 'SL' },
+    { key: 't1', label: 'T1' },
+    { key: 't2', label: 'T2' },
+    { key: 'olh_badge', label: 'O=L/H' },
+    { key: 'tag', label: 'Tag' },
+  ];
 
   let pollTimer = null;
   let ltpTimer = null;
@@ -20,6 +33,10 @@
   /** Trade Log rows (must survive Screen poll wipes). */
   /** @type {Record<string, object>} */
   let logByKey = {};
+  /** @type {{ sections: Array<{ date: string, rows: object[] }> } | null} */
+  let logDataCache = null;
+  /** @type {{ key: string, dir: 'asc' | 'desc' } | null} */
+  let logSort = null;
 
   function token() {
     return localStorage.getItem('trademanthan_token') || '';
@@ -125,10 +142,115 @@
     return `<span class="olh-extreme-badge is-star" title="Open equals ${raw === 'O=L' ? 'Low' : 'High'} (Phase A)">★</span>`;
   }
 
+  function formatWickPct(ratio) {
+    const n = Number(ratio);
+    if (!Number.isFinite(n)) return '';
+    const pct = n * 100;
+    const r1 = Math.round(pct * 10) / 10;
+    if (Math.abs(r1 - Math.round(r1)) < 1e-9) return String(Math.round(r1)) + '%';
+    return r1.toFixed(1) + '%';
+  }
+
   function phaseBReason(card) {
     if (card.active || card.phase_b_ok) return 'Phase B OK';
-    const r = String(card.phase_b_fail_reason || '').trim();
-    return r || '';
+    let r = String(card.phase_b_fail_reason || '').trim();
+    if (!r) return '';
+    // Legacy rows: append wick % when ratio is stored but not yet in the reason.
+    if (
+      /wick longer than/i.test(r) &&
+      !/\(\d+(\.\d+)?%\)\s*$/.test(r) &&
+      card.wick_body_ratio != null
+    ) {
+      const pct = formatWickPct(card.wick_body_ratio);
+      if (pct) r = r + ' (' + pct + ')';
+    }
+    return r;
+  }
+
+  function phaseBPanelValue(card) {
+    if (card.active || card.phase_b_ok) return 'Phase B OK · Active';
+    const r = phaseBReason(card);
+    return r || 'Phase A (not active)';
+  }
+
+  function logCellSortValue(row, key) {
+    switch (key) {
+      case 'symbol':
+        return String(row.symbol || '').toUpperCase();
+      case 'side':
+        return String(row.side || '').toUpperCase();
+      case 'state':
+        return row.active ? 'Active' : 'Phase A';
+      case 'reason':
+        return phaseBReason(row).toLowerCase();
+      case 'contract':
+        return String(row.contract || '').toUpperCase();
+      case 'entry': {
+        const e = entryValue(row);
+        return e == null ? Number.NEGATIVE_INFINITY : e;
+      }
+      case 'sl': {
+        const s = slValue(row);
+        return s == null ? Number.NEGATIVE_INFINITY : s;
+      }
+      case 't1':
+        return row.t1 == null || !Number.isFinite(Number(row.t1))
+          ? Number.NEGATIVE_INFINITY
+          : Number(row.t1);
+      case 't2':
+        return row.t2 == null || !Number.isFinite(Number(row.t2))
+          ? Number.NEGATIVE_INFINITY
+          : Number(row.t2);
+      case 'olh_badge':
+        return String(row.olh_badge || '').toUpperCase();
+      case 'tag':
+        return String(row.sector_badge_display || row.sector_badge || '').toUpperCase();
+      default:
+        return '';
+    }
+  }
+
+  function sortLogRows(rows, sortState) {
+    const list = (rows || []).slice();
+    if (!sortState || !sortState.key) return sortCards(list);
+    const key = sortState.key;
+    const dir = sortState.dir === 'desc' ? -1 : 1;
+    list.sort(function (a, b) {
+      const av = logCellSortValue(a, key);
+      const bv = logCellSortValue(b, key);
+      let cmp = 0;
+      if (typeof av === 'number' && typeof bv === 'number') {
+        cmp = av === bv ? 0 : av < bv ? -1 : 1;
+      } else {
+        cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
+      }
+      if (cmp !== 0) return cmp * dir;
+      return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+    });
+    return list;
+  }
+
+  function logHeaderHtml(sortState) {
+    return LOG_COLS.map(function (col) {
+      const on = sortState && sortState.key === col.key;
+      const ind = on ? (sortState.dir === 'asc' ? ' ▲' : ' ▼') : '';
+      const aria = on ? ' aria-sort="' + (sortState.dir === 'asc' ? 'ascending' : 'descending') + '"' : '';
+      return (
+        '<th class="olh-th-sort' +
+        (on ? ' is-sorted' : '') +
+        '" data-olh-sort="' +
+        escapeHtml(col.key) +
+        '" role="columnheader" tabindex="0"' +
+        aria +
+        ' title="Sort by ' +
+        escapeHtml(col.label) +
+        '">' +
+        escapeHtml(col.label) +
+        '<span class="olh-sort-ind" aria-hidden="true">' +
+        ind +
+        '</span></th>'
+      );
+    }).join('');
   }
 
   function splitActiveGrey(list) {
@@ -468,7 +590,11 @@
           priceLines: active && defaultType === 'FUT' ? buildPriceLines(card) : [],
           screenerData: {
             direction: direction,
-            insight: (active ? 'ACTIVE' : 'PHASE A') + ' · ' + side,
+            insight:
+              (active ? 'ACTIVE' : 'PHASE A') +
+              ' · ' +
+              side +
+              (active ? '' : phaseBReason(card) ? ' · ' + phaseBReason(card) : ''),
             sections: [
               {
                 title: 'OPEN LOW HIGH',
@@ -478,10 +604,12 @@
                   { key: 't1', label: 'T1', value: fmt(card.t1) },
                   { key: 't2', label: 'T2', value: fmt(card.t2) },
                   { key: 'state', label: 'State', value: active ? 'Active' : 'Phase A (grey)' },
+                  { key: 'phase_b', label: 'Phase B', value: phaseBPanelValue(card) },
                 ],
               },
             ],
           },
+          sessionSeparators: true,
           metadata: { algo: 'open_low_high' },
         });
       })
@@ -495,7 +623,10 @@
     const host = document.getElementById('olhLogHost');
     const empty = document.getElementById('olhLogEmpty');
     if (!host) return;
-    const sections = data.sections || [];
+    if (data) logDataCache = data;
+    const src = data || logDataCache;
+    if (!src) return;
+    const sections = src.sections || [];
     if (!sections.length) {
       host.innerHTML = '';
       if (empty) empty.hidden = false;
@@ -514,9 +645,10 @@
       });
     });
 
+    const head = logHeaderHtml(logSort);
     host.innerHTML = sections
       .map(function (sec) {
-        const rows = sortCards(sec.rows || [])
+        const rows = sortLogRows(sec.rows || [], logSort)
           .map(function (r) {
             const row = Object.assign({}, r, {
               trade_date: String(r.trade_date || sec.date || '').slice(0, 10),
@@ -540,14 +672,27 @@
           .join('');
         return `<h3 class="olh-log-date">${escapeHtml(sec.date)}</h3>
           <div class="olh-table-wrap"><table class="olh-table">
-            <thead><tr>
-              <th>Symbol</th><th>Side</th><th>State</th><th>Reason</th><th>Contract</th>
-              <th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>O=L/H</th><th>Tag</th>
-            </tr></thead>
+            <thead><tr>${head}</tr></thead>
             <tbody>${rows}</tbody>
           </table></div>`;
       })
       .join('');
+  }
+
+  function onLogSortClick(ev) {
+    const th = ev.target.closest('[data-olh-sort]');
+    if (!th || !document.getElementById('olhLogHost') || !document.getElementById('olhLogHost').contains(th)) {
+      return;
+    }
+    ev.preventDefault();
+    const key = th.getAttribute('data-olh-sort');
+    if (!key) return;
+    if (logSort && logSort.key === key) {
+      logSort = { key: key, dir: logSort.dir === 'asc' ? 'desc' : 'asc' };
+    } else {
+      logSort = { key: key, dir: 'asc' };
+    }
+    renderLog(null);
   }
 
   async function loadLog() {
@@ -605,7 +750,17 @@
     const screen = document.getElementById('olhPanelScreen');
     if (screen) screen.addEventListener('click', onChartClick);
     const logHost = document.getElementById('olhLogHost');
-    if (logHost) logHost.addEventListener('click', onChartClick);
+    if (logHost) {
+      logHost.addEventListener('click', onChartClick);
+      logHost.addEventListener('click', onLogSortClick);
+      logHost.addEventListener('keydown', function (ev) {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        const th = ev.target.closest('[data-olh-sort]');
+        if (!th) return;
+        ev.preventDefault();
+        th.click();
+      });
+    }
   }
 
   function startPoll() {

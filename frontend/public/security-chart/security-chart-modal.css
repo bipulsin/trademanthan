@@ -335,6 +335,27 @@ body[data-theme="light"] .uscm-tf-btn {
     position: relative;
 }
 
+.uscm-session-seps {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.uscm-session-sep {
+    position: absolute;
+    top: 0;
+    bottom: 22px; /* leave room for time axis */
+    width: 0;
+    border-left: 1px dotted rgba(148, 163, 184, 0.85);
+    transform: translateX(-0.5px);
+}
+
+body[data-theme="light"] .uscm-session-sep {
+    border-left-color: rgba(71, 85, 105, 0.75);
+}
+
 .uscm-crosshair-time {
     position: absolute;
     left: 8px;

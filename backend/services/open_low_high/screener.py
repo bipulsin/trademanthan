@@ -441,6 +441,7 @@ def _screen_one(
     )
     phase_b_ok = bool(phase_b.ok)
     phase_b_fail_reason = None if phase_b_ok else (phase_b.fail_reason or "Phase B failed")
+    wick_body_ratio = getattr(phase_b, "wick_body_ratio", None)
     olh_badge = open_extreme_badge(
         phase_a.side,
         first_open=phase_a.first_open,
@@ -520,6 +521,7 @@ def _screen_one(
         "active": phase_b_ok,
         "phase_b_ok": phase_b_ok,
         "phase_b_fail_reason": phase_b_fail_reason,
+        "wick_body_ratio": wick_body_ratio,
         "olh_badge": olh_badge,
         # Future trade levels — Entry frozen at screen (never live-LTP overwritten)
         "sl": sl,

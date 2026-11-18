@@ -542,6 +542,21 @@ body.olh-page .olh-table td {
     border-bottom: 1px solid var(--line);
     white-space: nowrap;
 }
+body.olh-page .olh-table th.olh-th-sort {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+body.olh-page .olh-table th.olh-th-sort:hover {
+    color: var(--accent);
+}
+body.olh-page .olh-table th.olh-th-sort.is-sorted {
+    color: var(--accent);
+}
+body.olh-page .olh-sort-ind {
+    font-size: 0.7em;
+    opacity: 0.85;
+}
 body.olh-page .olh-table th {
     background: var(--bg2);
     color: var(--muted);

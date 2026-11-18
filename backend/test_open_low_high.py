@@ -224,7 +224,10 @@ def test_evaluate_phase_b_fail_reasons():
         second_close=110.0,
     )
     assert wick_fail.ok is False
-    assert wick_fail.fail_reason == "9:20 candle has wick longer than 35% of candle body"
+    assert wick_fail.fail_reason == (
+        "9:20 candle has wick longer than 35% of candle body (40%)"
+    )
+    assert wick_fail.wick_body_ratio == 0.4
 
     ok = evaluate_phase_b(
         "BULLISH",
@@ -236,6 +239,7 @@ def test_evaluate_phase_b_fail_reasons():
     )
     assert ok.ok is True
     assert ok.fail_reason is None
+    assert ok.wick_body_ratio == 0.35
 
 
 def test_open_extreme_badge_ol_oh():

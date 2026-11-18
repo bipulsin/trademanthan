@@ -87,6 +87,7 @@ _MIGRATE_COLS = [
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS equity_instrument_key VARCHAR(128)",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS phase_b_fail_reason TEXT",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS olh_badge VARCHAR(8)",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS wick_body_ratio DOUBLE PRECISION",
 ]
 
 
@@ -181,7 +182,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         prev_close, prev_high, prev_low,
                         first_open, first_high, first_low, first_close,
                         second_close, vwap_0915,
-                        active, phase_b_ok, phase_b_fail_reason, olh_badge,
+                        active, phase_b_ok, phase_b_fail_reason, wick_body_ratio, olh_badge,
                         sl, entry, t1, t2,
                         sector_badge, sector_star, sector_badge_display, nifty_sector_label,
                         frozen, frozen_at, updated_at
@@ -191,7 +192,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         :prev_close, :prev_high, :prev_low,
                         :first_open, :first_high, :first_low, :first_close,
                         :second_close, :vwap_0915,
-                        :active, :phase_b_ok, :phase_b_fail_reason, :olh_badge,
+                        :active, :phase_b_ok, :phase_b_fail_reason, :wick_body_ratio, :olh_badge,
                         :sl, :entry, :t1, :t2,
                         :sector_badge, :sector_star, :sector_badge_display, :nifty_sector_label,
                         :frozen, :frozen_at, NOW()
@@ -221,6 +222,11 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         None
                         if active
                         else (str(row.get("phase_b_fail_reason") or "").strip() or None)
+                    ),
+                    "wick_body_ratio": (
+                        float(row["wick_body_ratio"])
+                        if row.get("wick_body_ratio") is not None
+                        else None
                     ),
                     "olh_badge": (
                         str(row.get("olh_badge") or "").strip().upper() or None

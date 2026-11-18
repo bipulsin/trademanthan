@@ -13,7 +13,7 @@
     const TF_OPTIONS = ['5m', '10m', '15m', '30m', '1hr', '2h', '1d'];
     const LWC_URL =
         'https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js';
-    const CSS_HREF = 'security-chart/security-chart-modal.css?v=14';
+    const CSS_HREF = 'security-chart/security-chart-modal.css?v=15';
     const INTEL_JS = 'security-chart/trade-intelligence-panel.js?v=2';
     const HM_SCRIPTS = [
         'security-chart/indicators/rsi.js?v=1',
@@ -117,6 +117,21 @@
 
     function sessionDayKeyUtc(utcSec) {
         return new Date(utcSec * 1000).toLocaleDateString('en-CA', { timeZone: CHART_TZ });
+    }
+
+    /** Logical indices where a new IST trading session starts (after overnight/weekend gap). */
+    function sessionBreakLogicalIndexes(bars) {
+        const out = [];
+        if (!bars || bars.length < 2) return out;
+        for (let i = 1; i < bars.length; i++) {
+            const prevUtc = bars[i - 1].utcTime != null ? bars[i - 1].utcTime : bars[i - 1].time;
+            const curUtc = bars[i].utcTime != null ? bars[i].utcTime : bars[i].time;
+            if (!Number.isFinite(prevUtc) || !Number.isFinite(curUtc)) continue;
+            if (sessionDayKeyUtc(prevUtc) !== sessionDayKeyUtc(curUtc)) {
+                out.push(i);
+            }
+        }
+        return out;
     }
 
     function isDailyTimeframe(tf) {
@@ -2207,6 +2222,90 @@
         this._priceLineHandles = [];
     };
 
+    SecurityChartModal.prototype._clearSessionSeparators = function () {
+        if (this._sessionSepUnsub && typeof this._sessionSepUnsub === 'function') {
+            try {
+                this._sessionSepUnsub();
+            } catch (e) {
+                /* ignore */
+            }
+        }
+        this._sessionSepUnsub = null;
+        this._sessionBreakIndexes = [];
+        const root = modalRoot;
+        if (!root) return;
+        const host = root.querySelector('[data-uscm-session-seps]');
+        if (host) host.innerHTML = '';
+    };
+
+    SecurityChartModal.prototype._ensureSessionSepHost = function () {
+        const root = this._ensureDom();
+        const pane = root.querySelector('[data-uscm-main-pane]');
+        if (!pane) return null;
+        let host = pane.querySelector('[data-uscm-session-seps]');
+        if (!host) {
+            host = document.createElement('div');
+            host.className = 'uscm-session-seps';
+            host.setAttribute('data-uscm-session-seps', '');
+            host.setAttribute('aria-hidden', 'true');
+            pane.appendChild(host);
+        }
+        return host;
+    };
+
+    SecurityChartModal.prototype._positionSessionSeparators = function () {
+        if (!this._sessionSeparatorsEnabled || !this.chart) return;
+        const host = this._ensureSessionSepHost();
+        if (!host) return;
+        const indexes = this._sessionBreakIndexes || [];
+        if (!indexes.length) {
+            host.innerHTML = '';
+            return;
+        }
+        const ts = this.chart.timeScale();
+        const parts = [];
+        indexes.forEach(function (idx) {
+            // Midpoint between last bar of previous session and first of next.
+            const x0 = ts.logicalToCoordinate(idx - 1);
+            const x1 = ts.logicalToCoordinate(idx);
+            if (x0 == null || x1 == null) return;
+            const x = (x0 + x1) / 2;
+            if (!Number.isFinite(x)) return;
+            parts.push(
+                '<div class="uscm-session-sep" style="left:' +
+                    Math.round(x) +
+                    'px" title="Session break"></div>'
+            );
+        });
+        host.innerHTML = parts.join('');
+    };
+
+    SecurityChartModal.prototype._applySessionSeparators = function () {
+        this._clearSessionSeparators();
+        if (!this._sessionSeparatorsEnabled || isDailyTimeframe(this.timeframe)) return;
+        if (!this.chart || !this._barsCache || !this._barsCache.length) return;
+        this._sessionBreakIndexes = sessionBreakLogicalIndexes(this._barsCache);
+        if (!this._sessionBreakIndexes.length) return;
+        this._ensureSessionSepHost();
+        this._positionSessionSeparators();
+        const self = this;
+        const handler = function () {
+            self._positionSessionSeparators();
+        };
+        try {
+            this.chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
+            this._sessionSepUnsub = function () {
+                try {
+                    self.chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
+                } catch (e) {
+                    /* ignore */
+                }
+            };
+        } catch (e) {
+            this._sessionSepUnsub = null;
+        }
+    };
+
     /**
      * Draw horizontal levels from config.priceLines / config.levels.
      * Each item: { price|value, title|label, color, lineWidth, lineStyle }.
@@ -2252,6 +2351,7 @@
     SecurityChartModal.prototype._destroyChart = function () {
         this._clearCrosshairHandlers();
         this._clearPriceLines();
+        this._clearSessionSeparators();
         this._destroyHmIndicator();
         this._destroyMdIndicator();
         this._destroyRsiIndicator();
@@ -2628,6 +2728,7 @@
             ? { open: last.open, high: last.high, low: last.low, close: last.close }
             : null;
         setInitialVisibleBars(this.chart, candles.length);
+        this._applySessionSeparators();
         this._seedLtpFromBars();
         this._applyHmIndicator();
         this._applyMdIndicator();
@@ -2642,6 +2743,7 @@
                     width: chartEl.clientWidth,
                     height: chartEl.clientHeight,
                 });
+                self._positionSessionSeparators();
             });
             this.resizeObs.observe(chartEl);
         }
@@ -2649,6 +2751,7 @@
             width: chartEl.clientWidth,
             height: chartEl.clientHeight,
         });
+        self._positionSessionSeparators();
     };
 
     SecurityChartModal.prototype._loadHistorical = function () {
@@ -2795,6 +2898,9 @@
               ? config.levels
               : [];
         this._priceLinesActive = this._priceLinesConfig;
+        // Session separators on by default for intraday (Equity + Future).
+        this._sessionSeparatorsEnabled =
+            config.sessionSeparators != null ? !!config.sessionSeparators : true;
         this._instrumentToggle = config.instrumentToggle || null;
         this._vwapColor = config.vwapColor || null;
         this._vwapLineWidth =

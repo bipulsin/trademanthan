@@ -47,6 +47,40 @@ class PhaseAResult:
 class PhaseBResult:
     ok: bool
     fail_reason: Optional[str] = None
+    wick_body_ratio: Optional[float] = None
+
+
+def format_wick_body_pct(ratio: float) -> str:
+    """Percent for Trade Log / chart: integer when whole, else 1 decimal."""
+    pct = float(ratio) * 100.0
+    rounded1 = round(pct, 1)
+    if abs(rounded1 - round(rounded1)) < 1e-9:
+        return f"{int(round(rounded1))}%"
+    return f"{rounded1:.1f}%"
+
+
+def second_candle_wick_body_ratio(
+    side: str,
+    *,
+    second_open: float,
+    second_high: float,
+    second_low: float,
+    second_close: float,
+) -> Optional[float]:
+    """Relevant wick / body for the 09:20 candle, or None when body is zero."""
+    o = float(second_open)
+    h = float(second_high)
+    l = float(second_low)
+    c = float(second_close)
+    body = abs(c - o)
+    if body == 0:
+        return None
+    side_u = str(side or "").upper()
+    if side_u == "BULLISH":
+        return (h - max(o, c)) / body
+    if side_u == "BEARISH":
+        return (min(o, c) - l) / body
+    return None
 
 
 def evaluate_phase_a(
@@ -172,6 +206,13 @@ def evaluate_phase_b(
         else:
             reason = "9:20 candle close does not confirm"
         return PhaseBResult(ok=False, fail_reason=reason)
+    wick_ratio = second_candle_wick_body_ratio(
+        side_u,
+        second_open=so,
+        second_high=float(second_high),
+        second_low=float(second_low),
+        second_close=sc,
+    )
     if not passes_second_candle_wick_filter(
         side_u,
         second_open=so,
@@ -181,11 +222,15 @@ def evaluate_phase_b(
         max_wick_body_ratio=max_wick_body_ratio,
     ):
         pct = int(round(float(max_wick_body_ratio) * 100))
+        reason = f"9:20 candle has wick longer than {pct}% of candle body"
+        if wick_ratio is not None:
+            reason = f"{reason} ({format_wick_body_pct(wick_ratio)})"
         return PhaseBResult(
             ok=False,
-            fail_reason=f"9:20 candle has wick longer than {pct}% of candle body",
+            fail_reason=reason,
+            wick_body_ratio=wick_ratio,
         )
-    return PhaseBResult(ok=True, fail_reason=None)
+    return PhaseBResult(ok=True, fail_reason=None, wick_body_ratio=wick_ratio)
 
 
 def passes_second_candle_wick_filter(
@@ -203,22 +248,16 @@ def passes_second_candle_wick_filter(
     Bullish: upper_wick / body <= max ratio (default 0.35).
     Bearish: lower_wick / body <= max ratio (default 0.35).
     """
-    o = float(second_open)
-    h = float(second_high)
-    l = float(second_low)
-    c = float(second_close)
-    body = abs(c - o)
-    if body == 0:
+    ratio = second_candle_wick_body_ratio(
+        side,
+        second_open=second_open,
+        second_high=second_high,
+        second_low=second_low,
+        second_close=second_close,
+    )
+    if ratio is None:
         return False
-    side_u = str(side or "").upper()
-    limit = float(max_wick_body_ratio)
-    if side_u == "BULLISH":
-        upper_wick = h - max(o, c)
-        return (upper_wick / body) <= limit
-    if side_u == "BEARISH":
-        lower_wick = min(o, c) - l
-        return (lower_wick / body) <= limit
-    return False
+    return float(ratio) <= float(max_wick_body_ratio)
 
 
 def open_extreme_badge(
