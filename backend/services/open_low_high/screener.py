@@ -273,13 +273,22 @@ def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
     return out
 
 
+def _hist_range_end(session: date) -> date:
+    """Upstox ``range_end_date`` often omits that calendar day's candles.
+
+    After the IST day rolls past ``session``, request ``session+1`` (or today)
+    so the session's 5m/daily bars are included.
+    """
+    return max(session + timedelta(days=1), _today())
+
+
 def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
     try:
         raw = upstox.get_historical_candles_by_instrument_key(
             instrument_key,
             interval="minutes/5",
-            days_back=3,
-            range_end_date=session,
+            days_back=5,
+            range_end_date=_hist_range_end(session),
         )
     except Exception as exc:
         logger.info("olh rest 5m %s: %s", instrument_key, exc)
@@ -303,7 +312,7 @@ def _fetch_daily_prev(
             instrument_key,
             interval="days/1",
             days_back=10,
-            range_end_date=session,
+            range_end_date=_hist_range_end(session),
         )
     except Exception as exc:
         logger.info("olh daily %s: %s", instrument_key, exc)
@@ -679,6 +688,39 @@ def run_screen(
         nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
 
         tagged = sort_screen_rows(tagged)
+
+        # Never replace a non-empty frozen day with an empty force scan
+        # (e.g. Upstox historical lag overnight).
+        if not tagged:
+            existing = list_screen_for_date(trade_date)
+            if existing:
+                logger.warning(
+                    "olh force/screen returned 0 rows; keeping existing %s for %s",
+                    len(existing),
+                    trade_date,
+                )
+                meta = get_day_meta(trade_date) or {}
+                nifty = (
+                    (meta.get("meta") if isinstance(meta.get("meta"), dict) else None) or {}
+                )
+                return {
+                    "ok": True,
+                    "status": "frozen",
+                    "trade_date": trade_date.isoformat(),
+                    "window": win,
+                    "frozen": True,
+                    "bullish": [r for r in existing if r.get("side") == "BULLISH"],
+                    "bearish": [r for r in existing if r.get("side") == "BEARISH"],
+                    "meta": meta,
+                    "nifty_gap": nifty.get("nifty_gap"),
+                    "nifty_bias": nifty.get("nifty_bias"),
+                    "nifty_show_on": nifty.get("nifty_show_on"),
+                    "message": (
+                        f"Screen returned 0 qualifiers — kept existing "
+                        f"{len(existing)} rows (data lag?)."
+                    ),
+                    "kept_existing": True,
+                }
 
         upsert_screen_rows(trade_date, tagged, frozen=True)
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
