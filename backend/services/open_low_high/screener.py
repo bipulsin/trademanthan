@@ -440,6 +440,7 @@ def _screen_one(
         second_close=second_close,
     )
     phase_b_ok = bool(phase_b.ok)
+    wait_list = bool(getattr(phase_b, "wait_list", False)) and not phase_b_ok
     phase_b_fail_reason = None if phase_b_ok else (phase_b.fail_reason or "Phase B failed")
     wick_body_ratio = getattr(phase_b, "wick_body_ratio", None)
     olh_badge = open_extreme_badge(
@@ -520,6 +521,7 @@ def _screen_one(
         "vwap_0915": phase_a.vwap_0915,
         "active": phase_b_ok,
         "phase_b_ok": phase_b_ok,
+        "wait_list": wait_list,
         "phase_b_fail_reason": phase_b_fail_reason,
         "wick_body_ratio": wick_body_ratio,
         "olh_badge": olh_badge,

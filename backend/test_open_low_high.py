@@ -224,10 +224,36 @@ def test_evaluate_phase_b_fail_reasons():
         second_close=110.0,
     )
     assert wick_fail.ok is False
+    assert wick_fail.wait_list is True  # 40% is in Wait band (35–90%)
     assert wick_fail.fail_reason == (
         "9:20 candle has wick longer than 35% of candle body (40%)"
     )
     assert wick_fail.wick_body_ratio == 0.4
+
+    # POLYCAB-like ~71% → Wait List (body=10, lower wick=7.1)
+    wait_71 = evaluate_phase_b(
+        "BEARISH",
+        first_close=100.0,
+        second_open=100.0,
+        second_high=100.5,
+        second_low=82.9,
+        second_close=90.0,
+    )
+    assert wait_71.ok is False
+    assert wait_71.wait_list is True
+    assert abs(float(wait_71.wick_body_ratio) - 0.71) < 1e-9
+
+    hard_wick = evaluate_phase_b(
+        "BULLISH",
+        first_close=100.0,
+        second_open=100.0,
+        second_high=120.0,  # body=10 → upper=10 → 100% > 90%
+        second_low=99.0,
+        second_close=110.0,
+    )
+    assert hard_wick.ok is False
+    assert hard_wick.wait_list is False
+    assert hard_wick.wick_body_ratio == 1.0
 
     ok = evaluate_phase_b(
         "BULLISH",
@@ -239,6 +265,7 @@ def test_evaluate_phase_b_fail_reasons():
     )
     assert ok.ok is True
     assert ok.fail_reason is None
+    assert ok.wait_list is False
     assert ok.wick_body_ratio == 0.35
 
 

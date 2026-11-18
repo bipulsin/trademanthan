@@ -43,11 +43,20 @@ class PhaseAResult:
     prev_close: Optional[float] = None
 
 
+# Phase B wick bands (trend wick / body):
+#   ≤ ACTIVE_WICK_MAX  → Active (Phase B OK)
+#   > ACTIVE … ≤ WAIT  → Wait List
+#   > WAIT_WICK_MAX    → Non-Active (hard wick fail)
+ACTIVE_WICK_MAX = 0.35
+WAIT_WICK_MAX = 0.90
+
+
 @dataclass(frozen=True)
 class PhaseBResult:
     ok: bool
     fail_reason: Optional[str] = None
     wick_body_ratio: Optional[float] = None
+    wait_list: bool = False
 
 
 def format_wick_body_pct(ratio: float) -> str:
@@ -174,9 +183,16 @@ def evaluate_phase_b(
     second_high: Optional[float],
     second_low: Optional[float],
     second_close: Optional[float],
-    max_wick_body_ratio: float = 0.35,
+    max_wick_body_ratio: float = ACTIVE_WICK_MAX,
+    wait_wick_max: float = WAIT_WICK_MAX,
 ) -> PhaseBResult:
-    """Full Phase B gate with a concise Trade Log fail reason."""
+    """Full Phase B gate with Active / Wait List / Non-Active banding.
+
+    After close confirmation:
+      wick ≤ max_wick_body_ratio → Active (ok)
+      max < wick ≤ wait_wick_max → Wait List (ok=False, wait_list=True)
+      wick > wait_wick_max or zero-body → Non-Active
+    """
     if (
         second_open is None
         or second_high is None
@@ -213,24 +229,35 @@ def evaluate_phase_b(
         second_low=float(second_low),
         second_close=sc,
     )
-    if not passes_second_candle_wick_filter(
-        side_u,
-        second_open=so,
-        second_high=float(second_high),
-        second_low=float(second_low),
-        second_close=sc,
-        max_wick_body_ratio=max_wick_body_ratio,
-    ):
-        pct = int(round(float(max_wick_body_ratio) * 100))
-        reason = f"9:20 candle has wick longer than {pct}% of candle body"
-        if wick_ratio is not None:
-            reason = f"{reason} ({format_wick_body_pct(wick_ratio)})"
+    active_limit = float(max_wick_body_ratio)
+    wait_limit = float(wait_wick_max)
+    pct = int(round(active_limit * 100))
+    if wick_ratio is None:
+        return PhaseBResult(
+            ok=False,
+            fail_reason=f"9:20 candle has wick longer than {pct}% of candle body",
+            wick_body_ratio=None,
+            wait_list=False,
+        )
+    if wick_ratio <= active_limit:
+        return PhaseBResult(
+            ok=True, fail_reason=None, wick_body_ratio=wick_ratio, wait_list=False
+        )
+    reason = f"9:20 candle has wick longer than {pct}% of candle body"
+    reason = f"{reason} ({format_wick_body_pct(wick_ratio)})"
+    if wick_ratio <= wait_limit:
         return PhaseBResult(
             ok=False,
             fail_reason=reason,
             wick_body_ratio=wick_ratio,
+            wait_list=True,
         )
-    return PhaseBResult(ok=True, fail_reason=None, wick_body_ratio=wick_ratio)
+    return PhaseBResult(
+        ok=False,
+        fail_reason=reason,
+        wick_body_ratio=wick_ratio,
+        wait_list=False,
+    )
 
 
 def passes_second_candle_wick_filter(

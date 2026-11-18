@@ -1,6 +1,6 @@
 /**
  * Open Low High — live screener UI (polls /api/open-low-high/today).
- * Screen: two columns (Bullish | Bearish), 2-card grid, active golden / Phase A grey.
+ * Screen: two columns (Bullish | Bearish), Active → Wait → Non-Active bands.
  * Chart: SecurityChartEngine 5m + VWAP; Entry/SL/T1/T2 lines for actives.
  */
 (function () {
@@ -105,13 +105,26 @@
     return b === 'O=L' || b === 'O=H';
   }
 
-  /** Actives first; non-actives: O=L/O=H star, then S1…W3, then symbol. */
+  function isWaitList(card) {
+    if (!card || card.active) return false;
+    if (card.wait_list) return true;
+    const wr = Number(card.wick_body_ratio);
+    return Number.isFinite(wr) && wr > 0.35 && wr <= 0.9;
+  }
+
+  function bandRank(card) {
+    if (card && card.active) return 0;
+    if (isWaitList(card)) return 1;
+    return 2;
+  }
+
+  /** Active → Wait → Non-Active; within band: O=L/O=H star, S1…W3, symbol. */
   function sortCards(list) {
     return (list || []).slice().sort(function (a, b) {
-      const aa = a.active ? 0 : 1;
-      const ba = b.active ? 0 : 1;
+      const aa = bandRank(a);
+      const ba = bandRank(b);
       if (aa !== ba) return aa - ba;
-      if (!a.active && !b.active) {
+      if (aa > 0) {
         const as = hasOlhStar(a) ? 0 : 1;
         const bs = hasOlhStar(b) ? 0 : 1;
         if (as !== bs) return as - bs;
@@ -121,6 +134,12 @@
       if (ab !== bb) return ab - bb;
       return String(a.symbol || '').localeCompare(String(b.symbol || ''));
     });
+  }
+
+  function stateLabel(card) {
+    if (card.active) return 'Active';
+    if (isWaitList(card)) return 'Wait';
+    return 'Non-Active';
   }
 
   function badgeHtml(card) {
@@ -170,7 +189,10 @@
   function phaseBPanelValue(card) {
     if (card.active || card.phase_b_ok) return 'Phase B OK · Active';
     const r = phaseBReason(card);
-    return r || 'Phase A (not active)';
+    if (isWaitList(card)) {
+      return r ? 'Wait List · ' + r : 'Wait List (wick 35–90%)';
+    }
+    return r || 'Non-Active';
   }
 
   function logCellSortValue(row, key) {
@@ -180,7 +202,7 @@
       case 'side':
         return String(row.side || '').toUpperCase();
       case 'state':
-        return row.active ? 'Active' : 'Phase A';
+        return stateLabel(row);
       case 'reason':
         return phaseBReason(row).toLowerCase();
       case 'contract':
@@ -253,27 +275,44 @@
     }).join('');
   }
 
-  function splitActiveGrey(list) {
+  function splitBands(list) {
     const active = [];
+    const wait = [];
     const grey = [];
     (list || []).forEach(function (c) {
       if (c.active) active.push(c);
+      else if (isWaitList(c)) wait.push(c);
       else grey.push(c);
     });
-    return { active: active, grey: grey };
+    return { active: active, wait: wait, grey: grey };
   }
 
   function columnHtml(list) {
-    const parts = splitActiveGrey(sortCards(list));
+    const parts = splitBands(sortCards(list));
     const chunks = [];
+    function pushDivider() {
+      chunks.push('<div class="olh-row-divider" aria-hidden="true"></div>');
+    }
     if (parts.active.length) {
       chunks.push('<div class="olh-grid olh-grid-active">' + parts.active.map(cardHtml).join('') + '</div>');
     }
-    if (parts.active.length && parts.grey.length) {
-      chunks.push('<div class="olh-row-divider" aria-hidden="true"></div>');
+    if (parts.wait.length) {
+      if (chunks.length) pushDivider();
+      chunks.push(
+        '<div class="olh-band-label olh-band-wait">Wait List</div>' +
+          '<div class="olh-grid olh-grid-wait">' +
+          parts.wait.map(cardHtml).join('') +
+          '</div>'
+      );
     }
     if (parts.grey.length) {
-      chunks.push('<div class="olh-grid olh-grid-grey">' + parts.grey.map(cardHtml).join('') + '</div>');
+      if (chunks.length) pushDivider();
+      chunks.push(
+        '<div class="olh-band-label olh-band-grey">Non-Active</div>' +
+          '<div class="olh-grid olh-grid-grey">' +
+          parts.grey.map(cardHtml).join('') +
+          '</div>'
+      );
     }
     return chunks.join('');
   }
@@ -303,10 +342,16 @@
     const side = String(card.side || '').toUpperCase();
     const bull = side === 'BULLISH';
     const active = !!card.active;
+    const wait = isWaitList(card);
     const key = cardKey(card);
     const entry = entryValue(card);
     const sl = slValue(card);
-    const stateCls = active ? 'is-active' : 'is-grey';
+    const stateCls = active ? 'is-active' : wait ? 'is-wait' : 'is-grey';
+    const stateChip = active
+      ? '<span class="olh-active-chip">ACTIVE</span>'
+      : wait
+        ? '<span class="olh-wait-chip">WAIT</span>'
+        : '<span class="olh-grey-chip">NON-ACTIVE</span>';
     return `
       <article class="olh-card ${bull ? 'is-bullish' : 'is-bearish'} ${stateCls}" data-olh-key="${escapeHtml(key)}">
         <div class="olh-card-row olh-card-row1">
@@ -325,7 +370,7 @@
         </div>
         <div class="olh-card-meta">
           <span class="olh-side-chip ${bull ? 'bull' : 'bear'}">${bull ? 'BULL' : 'BEAR'}</span>
-          ${active ? '<span class="olh-active-chip">ACTIVE</span>' : '<span class="olh-grey-chip">PHASE A</span>'}
+          ${stateChip}
           ${olhBadgeHtml(card)}
           ${badgeHtml(card)}
         </div>
@@ -392,12 +437,32 @@
     const bearGrid = document.getElementById('olhBearGrid');
     const bullEmpty = document.getElementById('olhBullEmpty');
     const bearEmpty = document.getElementById('olhBearEmpty');
-    const bullActive = bull.filter(function (c) { return c.active; }).length;
-    const bearActive = bear.filter(function (c) { return c.active; }).length;
-    document.getElementById('olhBullCount').textContent =
-      bull.length + (bull.length ? ` (${bullActive} active)` : '');
-    document.getElementById('olhBearCount').textContent =
-      bear.length + (bear.length ? ` (${bearActive} active)` : '');
+    function bandCounts(list) {
+      let a = 0;
+      let w = 0;
+      let g = 0;
+      (list || []).forEach(function (c) {
+        if (c.active) a += 1;
+        else if (isWaitList(c)) w += 1;
+        else g += 1;
+      });
+      return { a: a, w: w, g: g };
+    }
+    function countText(list) {
+      if (!list.length) return '0';
+      const c = bandCounts(list);
+      return (
+        list.length +
+        ' (' +
+        c.a +
+        ' active' +
+        (c.w ? ', ' + c.w + ' wait' : '') +
+        (c.g ? ', ' + c.g + ' non-active' : '') +
+        ')'
+      );
+    }
+    document.getElementById('olhBullCount').textContent = countText(bull);
+    document.getElementById('olhBearCount').textContent = countText(bear);
 
     if (bullGrid) {
       bullGrid.outerHTML =
@@ -591,7 +656,7 @@
           screenerData: {
             direction: direction,
             insight:
-              (active ? 'ACTIVE' : 'PHASE A') +
+              stateLabel(card).toUpperCase() +
               ' · ' +
               side +
               (active ? '' : phaseBReason(card) ? ' · ' + phaseBReason(card) : ''),
@@ -603,7 +668,7 @@
                   { key: 'sl', label: 'SL', value: fmt(slValue(card)) },
                   { key: 't1', label: 'T1', value: fmt(card.t1) },
                   { key: 't2', label: 'T2', value: fmt(card.t2) },
-                  { key: 'state', label: 'State', value: active ? 'Active' : 'Phase A (grey)' },
+                  { key: 'state', label: 'State', value: stateLabel(card) },
                   { key: 'phase_b', label: 'Phase B', value: phaseBPanelValue(card) },
                 ],
               },
@@ -655,10 +720,12 @@
             });
             const key = cardKey(row);
             const active = !!r.active;
-            return `<tr class="${active ? 'olh-log-active' : 'olh-log-grey'}">
+            const wait = isWaitList(r);
+            const rowCls = active ? 'olh-log-active' : wait ? 'olh-log-wait' : 'olh-log-grey';
+            return `<tr class="${rowCls}">
             <td><button type="button" class="olh-sym-btn olh-sym-btn--table" data-olh-chart="${escapeHtml(key)}">${escapeHtml(r.symbol || '')}</button></td>
             <td>${escapeHtml(r.side || '')}</td>
-            <td>${active ? 'Active' : 'Phase A'}</td>
+            <td>${escapeHtml(stateLabel(r))}</td>
             <td class="olh-log-reason">${escapeHtml(phaseBReason(r))}</td>
             <td>${escapeHtml(r.contract || '')}</td>
             <td>${fmt(entryValue(r))}</td>

@@ -88,6 +88,7 @@ _MIGRATE_COLS = [
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS phase_b_fail_reason TEXT",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS olh_badge VARCHAR(8)",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS wick_body_ratio DOUBLE PRECISION",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS wait_list BOOLEAN NOT NULL DEFAULT FALSE",
 ]
 
 
@@ -135,6 +136,17 @@ def _row_to_dict(r: Any) -> Dict[str, Any]:
         d["active"] = bool(d.get("active"))
     if "phase_b_ok" in d:
         d["phase_b_ok"] = bool(d.get("phase_b_ok"))
+    if "wait_list" in d:
+        d["wait_list"] = bool(d.get("wait_list")) and not bool(d.get("active"))
+    elif d.get("wick_body_ratio") is not None and not d.get("active"):
+        # Derive Wait band for pre-column rows: wick in (0.35, 0.90].
+        try:
+            wr = float(d["wick_body_ratio"])
+            d["wait_list"] = 0.35 < wr <= 0.90
+        except (TypeError, ValueError):
+            d["wait_list"] = False
+    else:
+        d["wait_list"] = False
     # Legacy rows (future-only OHLC): SL fell back to first_open.
     # Equity-logic rows store equity first_* — never use them as FUT SL.
     if d.get("sl") is None and d.get("first_open") is not None:
@@ -160,6 +172,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
         for row in rows:
             active = bool(row.get("active") if row.get("active") is not None else row.get("phase_b_ok"))
             phase_b_ok = bool(row.get("phase_b_ok") if row.get("phase_b_ok") is not None else active)
+            wait_list = bool(row.get("wait_list")) and not active
             equity_ik = str(row.get("equity_instrument_key") or "").strip() or None
             sl = row.get("sl")
             # Legacy future-only rows: SL defaulted to first_open. Equity-logic
@@ -182,7 +195,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         prev_close, prev_high, prev_low,
                         first_open, first_high, first_low, first_close,
                         second_close, vwap_0915,
-                        active, phase_b_ok, phase_b_fail_reason, wick_body_ratio, olh_badge,
+                        active, phase_b_ok, wait_list, phase_b_fail_reason, wick_body_ratio, olh_badge,
                         sl, entry, t1, t2,
                         sector_badge, sector_star, sector_badge_display, nifty_sector_label,
                         frozen, frozen_at, updated_at
@@ -192,7 +205,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                         :prev_close, :prev_high, :prev_low,
                         :first_open, :first_high, :first_low, :first_close,
                         :second_close, :vwap_0915,
-                        :active, :phase_b_ok, :phase_b_fail_reason, :wick_body_ratio, :olh_badge,
+                        :active, :phase_b_ok, :wait_list, :phase_b_fail_reason, :wick_body_ratio, :olh_badge,
                         :sl, :entry, :t1, :t2,
                         :sector_badge, :sector_star, :sector_badge_display, :nifty_sector_label,
                         :frozen, :frozen_at, NOW()
@@ -218,6 +231,7 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
                     "vwap_0915": row.get("vwap_0915"),
                     "active": active,
                     "phase_b_ok": phase_b_ok,
+                    "wait_list": wait_list,
                     "phase_b_fail_reason": (
                         None
                         if active
@@ -375,15 +389,24 @@ def _has_olh_star(row: Dict[str, Any]) -> bool:
     return badge in ("O=L", "O=H")
 
 
+def _band_rank(row: Dict[str, Any]) -> int:
+    """Active → Wait List → Non-Active."""
+    if bool(row.get("active")):
+        return 0
+    if bool(row.get("wait_list")):
+        return 1
+    return 2
+
+
 def sort_screen_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Actives first; non-actives: O=L/O=H star, then S1…W3, then symbol."""
+    """Active → Wait → Non-Active; within band: O=L/O=H star, S1…W3, symbol."""
 
     def key(r: Dict[str, Any]) -> tuple:
-        is_active = bool(r.get("active"))
+        band = _band_rank(r)
         return (
             0 if str(r.get("side") or "").upper() == "BULLISH" else 1,
-            0 if is_active else 1,
-            0 if (not is_active and _has_olh_star(r)) else 1,
+            band,
+            0 if (band > 0 and _has_olh_star(r)) else 1,
             _badge_rank(r),
             str(r.get("symbol") or ""),
         )

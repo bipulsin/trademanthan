@@ -323,7 +323,39 @@ body.olh-page .olh-card.is-active.is-bearish {
     background: linear-gradient(165deg, rgba(255, 180, 180, 0.32), rgba(150, 55, 55, 0.16) 55%, var(--card));
 }
 
-/* Phase A only — greyed, still visible (keep muted pastel tint) */
+/* Wait List — wick 35–90%, amber band between Active and Non-Active */
+body.olh-page .olh-card.is-wait {
+    opacity: 0.92;
+    border-color: rgba(212, 160, 23, 0.7);
+    box-shadow: 0 0 0 1px rgba(212, 160, 23, 0.22);
+}
+body.olh-page .olh-card.is-wait.is-bullish {
+    background: linear-gradient(165deg, rgba(232, 197, 71, 0.22), rgba(34, 120, 80, 0.1) 55%, var(--card));
+}
+body.olh-page .olh-card.is-wait.is-bearish {
+    background: linear-gradient(165deg, rgba(232, 197, 71, 0.2), rgba(140, 50, 50, 0.1) 55%, var(--card));
+}
+body.olh-page .olh-wait-chip {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.12rem 0.4rem;
+    border-radius: 4px;
+    color: #1a1408;
+    background: #e8c547;
+}
+body.olh-page .olh-band-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0.15rem 0 0.35rem;
+}
+body.olh-page .olh-band-wait { color: #d4a017; }
+body.olh-page .olh-band-grey { color: var(--muted); }
+
+/* Non-Active — greyed, still visible (keep muted pastel tint) */
 body.olh-page .olh-card.is-grey {
     opacity: 0.58;
     filter: grayscale(0.28);
@@ -644,9 +676,13 @@ body.olh-page[data-theme="light"] .olh-active-chip {
 }
 body.olh-page[data-theme="light"] .olh-entry { color: #1f7a4d; }
 body.olh-page[data-theme="light"] .olh-log-active td { background: rgba(232, 197, 71, 0.12); }
+body.olh-page[data-theme="light"] .olh-log-wait td { background: rgba(212, 160, 23, 0.1); }
 body.olh-page[data-theme="light"] .olh-log-grey td { opacity: 0.65; }
+body.olh-page[data-theme="light"] .olh-wait-chip { color: #1a1408; background: #e8c547; }
+body.olh-page[data-theme="light"] .olh-band-wait { color: #a16207; }
 
 body.olh-page .olh-log-active td { background: rgba(232, 197, 71, 0.08); }
+body.olh-page .olh-log-wait td { background: rgba(212, 160, 23, 0.1); }
 body.olh-page .olh-log-grey td { opacity: 0.7; }
 
 body.olh-page .olh-log-reason {
