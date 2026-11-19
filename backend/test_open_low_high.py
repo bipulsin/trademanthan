@@ -1183,3 +1183,137 @@ def test_drop_unclosed_bars_fetch_092005_excludes_0920():
     after_920_close = IST.localize(datetime(2026, 11, 20, 9, 25, 0))
     out3 = _drop_unclosed_bars([b915, b920], fetch_time=after_920_close)
     assert len(out3) == 2
+
+
+# --- Startup catch-up after restart (Phase A/B) ---
+
+
+def test_phase_job_misfire_grace_is_short():
+    """Document current APScheduler grace: restart past ~90–120s silently skips."""
+    import inspect
+
+    from backend.services.open_low_high import scheduler as sch
+
+    src = inspect.getsource(sch.start_open_low_high_scheduler)
+    assert "misfire_grace_time=90" in src  # Phase A primary + refill
+    assert "misfire_grace_time=120" in src  # Phase B 09:25:03
+    assert "misfire_grace_time=60" in src  # Phase B retries
+    assert "coalesce=True" in src
+    assert "max_instances=1" in src
+    assert "replace_existing=True" in src
+    assert "_spawn_startup_catchup" in src
+
+
+def test_startup_catchup_0922_runs_phase_a(monkeypatch):
+    """Restart at 09:22 with no Phase A → immediate Phase A; Phase B not yet due."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 22, 0))
+    calls = {"a": 0, "b": 0}
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: False)
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: False)
+    monkeypatch.setattr(sch, "_run_phase_a", lambda: calls.__setitem__("a", calls["a"] + 1))
+    monkeypatch.setattr(sch, "_run_phase_b", lambda: calls.__setitem__("b", calls["b"] + 1))
+
+    # After Phase A runs, treat it as valid so we don't re-query DB.
+    def _has_a_after(_d):
+        return calls["a"] > 0
+
+    monkeypatch.setattr(sch, "has_valid_phase_a", _has_a_after)
+
+    out = sch.run_startup_catchup(now=now)
+    assert out["ok"] is True
+    assert out["actions"] == ["phase_a"]
+    assert calls["a"] == 1
+    assert calls["b"] == 0
+
+
+def test_startup_catchup_0927_runs_phase_b_and_missing_a(monkeypatch):
+    """Restart at 09:27: catch up Phase A if still missing, then Phase B."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 27, 0))
+    calls = {"a": 0, "b": 0}
+    phase_a_ok = {"v": False}
+    phase_b_ok = {"v": False}
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: phase_a_ok["v"])
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: phase_b_ok["v"])
+
+    def _run_a():
+        calls["a"] += 1
+        phase_a_ok["v"] = True
+
+    def _run_b():
+        calls["b"] += 1
+        phase_b_ok["v"] = True
+
+    monkeypatch.setattr(sch, "_run_phase_a", _run_a)
+    monkeypatch.setattr(sch, "_run_phase_b", _run_b)
+
+    out = sch.run_startup_catchup(now=now)
+    assert out["ok"] is True
+    assert out["actions"] == ["phase_a", "phase_b"]
+    assert calls["a"] == 1
+    assert calls["b"] == 1
+
+    # Phase A already valid → only Phase B.
+    calls["a"] = calls["b"] = 0
+    phase_a_ok["v"] = True
+    phase_b_ok["v"] = False
+    out2 = sch.run_startup_catchup(now=now)
+    assert out2["actions"] == ["phase_b"]
+    assert calls["a"] == 0
+    assert calls["b"] == 1
+
+
+def test_startup_catchup_after_0929_marks_degraded(monkeypatch):
+    """Restart after 09:29 with missing phases → DEGRADED + alert, no auto-run."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 30, 0))
+    calls = {"a": 0, "b": 0, "meta": 0, "alert": 0}
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: False)
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: False)
+    monkeypatch.setattr(sch, "_run_phase_a", lambda: calls.__setitem__("a", calls["a"] + 1))
+    monkeypatch.setattr(sch, "_run_phase_b", lambda: calls.__setitem__("b", calls["b"] + 1))
+
+    import backend.services.open_low_high.alerts as alerts_mod
+    import backend.services.open_low_high.persistence as pers
+
+    monkeypatch.setattr(
+        pers,
+        "upsert_day_meta",
+        lambda *a, **k: calls.__setitem__("meta", calls["meta"] + 1),
+    )
+    monkeypatch.setattr(
+        alerts_mod,
+        "alert_degraded",
+        lambda *a, **k: calls.__setitem__("alert", calls["alert"] + 1) or True,
+    )
+
+    out = sch.run_startup_catchup(now=now)
+    assert out["ok"] is True
+    assert out["actions"] == ["degraded"]
+    assert calls["a"] == 0 and calls["b"] == 0
+    assert calls["meta"] == 1 and calls["alert"] == 1
