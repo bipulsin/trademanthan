@@ -973,3 +973,90 @@ def test_freeze_gate_and_config_defaults():
     assert ok is True
     ok2, _ = freeze_gate(coverage=0.899, nifty_present=True)
     assert ok2 is False
+
+
+def test_fetch_rest_5m_today_uses_intraday_only(monkeypatch):
+    """Today session must call V3 intraday and never historical."""
+    from datetime import date
+
+    from backend.services.open_low_high import screener as scr
+
+    calls = {"intra": 0, "hist": 0}
+
+    class FakeUx:
+        def _fetch_intraday_candles_v3(self, ik, interval):
+            calls["intra"] += 1
+            assert interval == "minutes/5"
+            return [
+                {
+                    "timestamp": "2026-11-20T09:15:00+05:30",
+                    "open": 1,
+                    "high": 2,
+                    "low": 1,
+                    "close": 1.5,
+                    "volume": 10,
+                }
+            ]
+
+        def get_historical_candles_by_instrument_key(self, *a, **k):
+            calls["hist"] += 1
+            raise AssertionError("historical must not be called for today")
+
+    monkeypatch.setattr(scr, "_today", lambda: date(2026, 11, 20))
+    monkeypatch.setattr(scr, "_bars_from_rows", lambda rows, ik: rows)
+    out = scr._fetch_rest_5m(FakeUx(), "NSE_EQ|X", date(2026, 11, 20))
+    assert calls["intra"] == 1
+    assert calls["hist"] == 0
+    assert len(out) == 1
+
+
+def test_fetch_rest_5m_past_uses_historical(monkeypatch):
+    """Previous days use historical endpoint."""
+    from datetime import date
+
+    from backend.services.open_low_high import screener as scr
+
+    calls = {"intra": 0, "hist": 0}
+
+    class FakeUx:
+        def _fetch_intraday_candles_v3(self, *a, **k):
+            calls["intra"] += 1
+            return None
+
+        def get_historical_candles_by_instrument_key(self, *a, **k):
+            calls["hist"] += 1
+            return [
+                {
+                    "timestamp": "2026-11-18T09:15:00+05:30",
+                    "open": 1,
+                    "high": 2,
+                    "low": 1,
+                    "close": 1.5,
+                    "volume": 10,
+                }
+            ]
+
+    monkeypatch.setattr(scr, "_today", lambda: date(2026, 11, 20))
+    monkeypatch.setattr(scr, "_bars_from_rows", lambda rows, ik: rows)
+    monkeypatch.setattr(scr, "_hist_range_end", lambda s: s)
+    out = scr._fetch_rest_5m(FakeUx(), "NSE_EQ|X", date(2026, 11, 18))
+    assert calls["hist"] == 1
+    assert len(out) == 1
+
+
+def test_rest_canary_date_gate():
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high.rest_canary import (
+        CANARY_DATE,
+        CANARY_TIMES,
+        canary_should_run_today,
+    )
+
+    IST = pytz.timezone("Asia/Kolkata")
+    assert CANARY_DATE.isoformat() == "2026-11-20"
+    assert len(CANARY_TIMES) == 5
+    assert canary_should_run_today(IST.localize(datetime(2026, 11, 20, 9, 20, 5)))
+    assert not canary_should_run_today(IST.localize(datetime(2026, 11, 19, 9, 20, 5)))

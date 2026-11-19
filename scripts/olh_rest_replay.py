@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Safe off-prod OLH REST replay: today's 5m for 3 NSE_EQ + Nifty 50.
 
-Uses the same code path as Phase A (``_fetch_rest_5m`` / Upstox historical+intraday).
-Does not write screen rows or restart services. Prefer local/dev credentials.
+Uses the same code path as Phase A/B (``_fetch_rest_5m``): today → V3 intraday only;
+previous days → historical. Does not write screen rows or restart services.
 
 Usage (from repo root):
   python scripts/olh_rest_replay.py
