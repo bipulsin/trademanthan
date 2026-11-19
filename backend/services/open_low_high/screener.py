@@ -257,6 +257,39 @@ def _bars_from_rows(rows: List[Dict[str, Any]], contract: str) -> List[Bar]:
     return out
 
 
+def _bar_end(ts: datetime, bar_minutes: int = 5) -> datetime:
+    """Exchange 5m bar end = open + interval (09:15 → 09:20, 09:20 → 09:25)."""
+    return ts + timedelta(minutes=int(bar_minutes))
+
+
+def _drop_unclosed_bars(
+    bars: List[Bar],
+    fetch_time: Optional[datetime] = None,
+    *,
+    bar_minutes: int = 5,
+) -> List[Bar]:
+    """Phase A/B REST+WS path: drop candles whose bar_end is still after fetch_time.
+
+    Example: fetch at 09:20:05 must NOT return the 09:20 bar (bar_end 09:25).
+    """
+    if not bars:
+        return []
+    ft = fetch_time if fetch_time is not None else _now()
+    if ft.tzinfo is None:
+        ft = IST.localize(ft)
+    else:
+        ft = ft.astimezone(IST)
+    kept: List[Bar] = []
+    for b in bars:
+        if not isinstance(b, Bar):
+            # Tests may stub ``_bars_from_rows`` with raw dicts — pass through.
+            kept.append(b)  # type: ignore[arg-type]
+            continue
+        if _bar_end(b.ts, bar_minutes) <= ft:
+            kept.append(b)
+    return kept
+
+
 def _fetch_ws_1m_rows(instrument_key: str, session: date) -> List[Dict[str, Any]]:
     """Raw WS 1m rows for today's session (empty on miss)."""
     from sqlalchemy import text
@@ -431,6 +464,10 @@ def _fetch_ws_5m_bars(
         )
     if not out:
         return [], "none"
+    # Same closed-bar rule as REST: never hand Phase A/B a forming 5m bucket.
+    out = _drop_unclosed_bars(out)
+    if not out:
+        return [], "none"
     return out, ("UNTRUSTED" if untrusted else "TRUSTED")
 
 
@@ -471,7 +508,7 @@ def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]
                 exc,
             )
             raw = None
-        return _bars_from_rows(list(raw or []), instrument_key)
+        return _drop_unclosed_bars(_bars_from_rows(list(raw or []), instrument_key))
 
     # Previous calendar sessions: historical is authoritative.
     try:
@@ -501,7 +538,8 @@ def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]
             )
         except Exception:
             raw = None
-    return _bars_from_rows(list(raw or []), instrument_key)
+    # Historical sessions are fully closed; still apply filter for safety.
+    return _drop_unclosed_bars(_bars_from_rows(list(raw or []), instrument_key))
 
 
 def _fetch_daily_prev(

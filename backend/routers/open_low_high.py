@@ -104,15 +104,69 @@ def get_ltp(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
 
 @router.get("/health")
 def health() -> Dict[str, Any]:
+    """OLH-specific health (token, WS EQ+INDEX, PDC 145+Nifty, scheduler jobs).
+
+    Webhook / IntradayStockOption alert volume stays on ``/scan/health`` only.
+    """
     from backend.services.open_low_high.persistence import ensure_tables, get_day_meta
+    from backend.services.open_low_high.pdc import pdc_completeness
     from backend.services.open_low_high.scheduler import _scheduler
     from backend.services.open_low_high.screener import _today, window_status
+    from backend.services.open_low_high.ws_feed import check_equity_index_ws_warm
 
     try:
         ensure_tables()
-        meta = get_day_meta(_today())
+        trade_date = _today()
+        meta = get_day_meta(trade_date)
+
+        token: Dict[str, Any] = {"ok": False, "last4": "none"}
+        try:
+            from backend.config import settings
+            from backend.services.upstox_service import UpstoxService
+
+            ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            ux.reload_token_from_storage()
+            tok = str(getattr(ux, "access_token", None) or "")
+            token = {
+                "ok": bool(tok),
+                "last4": tok[-4:] if len(tok) >= 4 else ("****" if tok else "none"),
+            }
+        except Exception as tok_exc:
+            token = {"ok": False, "last4": "none", "error": str(tok_exc)[:160]}
+
+        ws_coverage: Dict[str, Any] = {"ok": False}
+        try:
+            warm = check_equity_index_ws_warm(session=trade_date)
+            ws_coverage = {
+                "ok": bool(warm.get("warm")),
+                "token_ok": warm.get("token_ok"),
+                "equity_keys": warm.get("equity_keys"),
+                "index_keys": warm.get("index_keys"),
+                "equity_with_bars": warm.get("equity_with_bars"),
+                "equity_share": warm.get("equity_share"),
+                "nifty_1m_bars": warm.get("nifty_1m_bars"),
+                "feed_alive": warm.get("feed_alive"),
+                "provider_keys": warm.get("provider_keys"),
+                "reason": warm.get("reason"),
+            }
+        except Exception as ws_exc:
+            ws_coverage = {"ok": False, "error": str(ws_exc)[:160]}
+
+        pdc: Dict[str, Any] = {"ok": False}
+        try:
+            pdc = pdc_completeness(session=trade_date)
+        except Exception as pdc_exc:
+            pdc = {"ok": False, "error": str(pdc_exc)[:160]}
+
         jobs: list[Dict[str, Any]] = []
         scheduler_running = False
+        required_job_prefixes = (
+            "open_low_high_pdc_",
+            "open_low_high_ws_",
+            "open_low_high_phase_a_",
+            "open_low_high_phase_b_",
+            "open_low_high_rest_canary_",
+        )
         try:
             if _scheduler is not None:
                 scheduler_running = bool(getattr(_scheduler, "running", False))
@@ -129,16 +183,49 @@ def health() -> Dict[str, Any]:
                     )
         except Exception as sched_exc:
             logger.debug("open_low_high health scheduler dump failed: %s", sched_exc)
+
+        job_ids = {j["id"] for j in jobs}
+        missing_groups = [
+            p for p in required_job_prefixes if not any(jid.startswith(p) for jid in job_ids)
+        ]
+        canary_jobs = sorted(jid for jid in job_ids if jid.startswith("open_low_high_rest_canary_"))
+        scheduler_ok = bool(scheduler_running) and not missing_groups
+
+        olh_ok = bool(token.get("ok")) and bool(pdc.get("ok")) and scheduler_ok
+        # WS coverage is reported always; after hours / weekend warm may be false —
+        # do not fail overall solely on idle WS bars outside the pre-warm window.
         return {
-            "ok": True,
+            "ok": olh_ok,
+            "service": "open_low_high",
             "window": window_status(),
-            "trade_date": _today().isoformat(),
+            "trade_date": trade_date.isoformat(),
             "meta": meta,
+            "token": token,
+            "ws_coverage": ws_coverage,
+            "prev_close": pdc,
             "scheduler": {
                 "running": scheduler_running,
+                "ok": scheduler_ok,
                 "job_count": len(jobs),
+                "missing_groups": missing_groups,
+                "canary_jobs": canary_jobs,
                 "jobs": jobs,
             },
+            "notes": (
+                "OLH health: token + PDC (145+Nifty) + scheduler jobs. "
+                "Webhook/alert volume is on /scan/health only."
+            ),
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+@router.post("/test-alert")
+def test_alert(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
+    """Send a one-shot OLH alert on the TradeWithCTO canary/coverage channel."""
+    from backend.services.open_low_high.alerts import send_olh_alert
+
+    subject = "TEST alert (manual)"
+    body = "Manual OLH channel check — same path as 09:05 canary / 09:21–09:26 coverage."
+    sent = send_olh_alert(subject, body, meta={"source": "test-alert"})
+    return {"ok": bool(sent), "sent": bool(sent), "subject": subject}

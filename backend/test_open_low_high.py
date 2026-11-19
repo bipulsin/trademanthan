@@ -1060,3 +1060,45 @@ def test_rest_canary_date_gate():
     assert len(CANARY_TIMES) == 5
     assert canary_should_run_today(IST.localize(datetime(2026, 11, 20, 9, 20, 5)))
     assert not canary_should_run_today(IST.localize(datetime(2026, 11, 19, 9, 20, 5)))
+
+
+def test_drop_unclosed_bars_fetch_092005_excludes_0920():
+    """Fetch at 09:20:05 must NOT return the forming 09:20 bar (bar_end 09:25)."""
+    from datetime import datetime, time
+
+    import pytz
+
+    from backend.services.open_high_low.bars import Bar
+    from backend.services.open_low_high.screener import _drop_unclosed_bars
+
+    IST = pytz.timezone("Asia/Kolkata")
+    fetch = IST.localize(datetime(2026, 11, 20, 9, 20, 5))
+    b915 = Bar(
+        ts=IST.localize(datetime(2026, 11, 20, 9, 15, 0)),
+        open=100,
+        high=101,
+        low=99,
+        close=100.5,
+        volume=10,
+        contract="NSE_EQ|X",
+    )
+    b920 = Bar(
+        ts=IST.localize(datetime(2026, 11, 20, 9, 20, 0)),
+        open=100.5,
+        high=102,
+        low=100,
+        close=101,
+        volume=12,
+        contract="NSE_EQ|X",
+    )
+    out = _drop_unclosed_bars([b915, b920], fetch_time=fetch)
+    assert len(out) == 1
+    assert out[0].ts.time() == time(9, 15)
+    # Exactly at bar_end 09:20 the 09:15 bar is closed; 09:20 still open until 09:25.
+    at_close = IST.localize(datetime(2026, 11, 20, 9, 20, 0))
+    out2 = _drop_unclosed_bars([b915, b920], fetch_time=at_close)
+    assert len(out2) == 1
+    assert out2[0].ts.time() == time(9, 15)
+    after_920_close = IST.localize(datetime(2026, 11, 20, 9, 25, 0))
+    out3 = _drop_unclosed_bars([b915, b920], fetch_time=after_920_close)
+    assert len(out3) == 2

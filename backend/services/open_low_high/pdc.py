@@ -341,3 +341,83 @@ def fill_pdc_eod(*, session: Optional[date] = None) -> Dict[str, Any]:
     )
     result["action"] = "pdc_eod"
     return result
+
+
+def pdc_completeness(
+    *,
+    session: Optional[date] = None,
+    min_equities: int = 145,
+) -> Dict[str, Any]:
+    """Prev-close readiness for OLH health: ≥``min_equities`` + Nifty present."""
+    ensure_pdc_columns()
+    trade_date = session or _now().date()
+    expected_asof = previous_trading_day(trade_date)
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                f"""
+                SELECT
+                  COUNT(*) FILTER (
+                    WHERE {PDC_COLUMN} IS NOT NULL
+                      AND stock_instrument_key IS NOT NULL
+                      AND TRIM(stock_instrument_key) <> ''
+                      AND UPPER(TRIM(stock)) NOT IN
+                          ('NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY')
+                  ) AS filled_n,
+                  COUNT(*) FILTER (
+                    WHERE stock_instrument_key IS NOT NULL
+                      AND TRIM(stock_instrument_key) <> ''
+                      AND UPPER(TRIM(stock)) NOT IN
+                          ('NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY')
+                  ) AS universe_n,
+                  COUNT(*) FILTER (
+                    WHERE {PDC_COLUMN} IS NULL
+                      AND stock_instrument_key IS NOT NULL
+                      AND TRIM(stock_instrument_key) <> ''
+                      AND UPPER(TRIM(stock)) NOT IN
+                          ('NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY')
+                  ) AS null_n
+                FROM arbitrage_master
+                WHERE stock IS NOT NULL AND TRIM(stock) <> ''
+                """
+            )
+        ).fetchone()
+        filled_n = int((row[0] if row else 0) or 0)
+        universe_n = int((row[1] if row else 0) or 0)
+        null_n = int((row[2] if row else 0) or 0)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc)[:160],
+            "trade_date": trade_date.isoformat(),
+            "expected_asof": expected_asof.isoformat(),
+            "min_equities": int(min_equities),
+        }
+    finally:
+        db.close()
+
+    nifty_pc = get_equity_prev_close("NIFTY")
+    # Nifty may live only in fill result / index path — also accept master row.
+    if nifty_pc is None:
+        try:
+            from backend.services.open_low_high.screener import _fetch_daily_prev, _upstox
+
+            _ph, _pl, nifty_pc = _fetch_daily_prev(_upstox(), NIFTY_INDEX_KEY, trade_date)
+        except Exception:
+            nifty_pc = None
+
+    equities_ok = filled_n >= int(min_equities)
+    nifty_ok = nifty_pc is not None
+    return {
+        "ok": bool(equities_ok and nifty_ok),
+        "trade_date": trade_date.isoformat(),
+        "expected_asof": expected_asof.isoformat(),
+        "min_equities": int(min_equities),
+        "equities_filled": filled_n,
+        "equities_universe": universe_n,
+        "equities_null": null_n,
+        "equities_ok": equities_ok,
+        "nifty_prev_close": float(nifty_pc) if nifty_pc is not None else None,
+        "nifty_ok": nifty_ok,
+    }
