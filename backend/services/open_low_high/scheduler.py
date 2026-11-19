@@ -10,6 +10,9 @@ Timeline:
   09:25:03–09:29  Phase B on Phase A qualifiers only (hard stop 09:29)
   ~12:00  Delete OHL_Log_* older than 3 days
 
+One-day REST canary (2026-11-20 IST): 09:20:05, :30, 09:21:00, 09:25:05, :30
+  — 3 equities + Nifty; logs to OHL_Log / app logger (see ``rest_canary.py``).
+
 WS lock 09:15–09:25: EQ/INDEX provider keys are force-merged and never dropped
 from the OLH sidecar subscribe set (see ``ws_feed.py``).
 """
@@ -190,6 +193,30 @@ def _run_ohl_log_cleanup() -> None:
         logger.exception("open_low_high OHL log cleanup failed")
 
 
+def _run_rest_canary() -> None:
+    """One-day REST lag canary (2026-11-20); no-op on other dates."""
+    try:
+        from backend.services.open_low_high.rest_canary import (
+            canary_should_run_today,
+            run_rest_canary,
+        )
+
+        if not canary_should_run_today():
+            logger.info("open_low_high rest_canary skipped (not canary date)")
+            return
+        if _skip():
+            return
+        result = run_rest_canary()
+        logger.info(
+            "open_low_high rest_canary done probe_at=%s n=%s token_last4=%s",
+            result.get("probe_at"),
+            len(result.get("results") or []),
+            result.get("token_last4"),
+        )
+    except Exception:
+        logger.exception("open_low_high rest_canary failed")
+
+
 def start_open_low_high_scheduler() -> None:
     global _scheduler
     if _scheduler is not None:
@@ -357,6 +384,30 @@ def start_open_low_high_scheduler() -> None:
         misfire_grace_time=600,
     )
 
+    # --- One-day REST lag canary 2026-11-20 (09:20:05/30, 09:21:00, 09:25:05/30 IST) ---
+    from backend.services.open_low_high.rest_canary import CANARY_DATE, CANARY_TIMES
+
+    for tt in CANARY_TIMES:
+        jid = f"open_low_high_rest_canary_{tt.hour:02d}{tt.minute:02d}{tt.second:02d}"
+        sched.add_job(
+            _run_rest_canary,
+            CronTrigger(
+                year=CANARY_DATE.year,
+                month=CANARY_DATE.month,
+                day=CANARY_DATE.day,
+                hour=tt.hour,
+                minute=tt.minute,
+                second=tt.second,
+                timezone="Asia/Kolkata",
+            ),
+            id=jid,
+            name=f"OLH REST canary {CANARY_DATE.isoformat()} {tt.isoformat()} IST",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=45,
+        )
+
     # Remove legacy multi-prewarm / incomplete-freeze job ids if an old process
     # left them in a long-lived scheduler (replace_existing only covers same ids).
     for legacy_id in (
@@ -375,10 +426,17 @@ def start_open_low_high_scheduler() -> None:
 
     sched.start()
     _scheduler = sched
+    canary_ids = [
+        f"open_low_high_rest_canary_{tt.hour:02d}{tt.minute:02d}{tt.second:02d}"
+        for tt in CANARY_TIMES
+    ]
     logger.info(
         "open_low_high scheduler started "
         "(PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
-        "Phase B 09:25:03–09:29; OHL log cleanup 12:00)"
+        "Phase B 09:25:03–09:29; OHL log cleanup 12:00; "
+        "REST canary %s jobs=%s)",
+        CANARY_DATE.isoformat(),
+        canary_ids,
     )
 
 

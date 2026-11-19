@@ -820,6 +820,55 @@ def test_5_1_ws_down_both_tries_falls_back_to_rest(monkeypatch):
     assert bars[0].close == 100.5
 
 
+def test_fetch_rest_5m_today_uses_intraday_only(monkeypatch):
+    """Live session must call V3 intraday only — never historical."""
+    from datetime import date
+
+    from backend.services.open_low_high import screener as scr
+
+    calls = {"intraday": 0, "historical": 0}
+
+    class FakeUx:
+        def _fetch_intraday_candles_v3(self, ik, interval):
+            calls["intraday"] += 1
+            return []
+
+        def get_historical_candles_by_instrument_key(self, *a, **k):
+            calls["historical"] += 1
+            return [{"timestamp": "x"}]
+
+    monkeypatch.setattr(scr, "_today", lambda: date(2026, 11, 20))
+    monkeypatch.setattr(scr, "_bars_from_rows", lambda rows, ik: [])
+    out = scr._fetch_rest_5m(FakeUx(), "NSE_EQ|X", date(2026, 11, 20))
+    assert out == []
+    assert calls["intraday"] == 1
+    assert calls["historical"] == 0
+
+
+def test_fetch_rest_5m_past_uses_historical(monkeypatch):
+    """Previous days use historical (not live intraday-first)."""
+    from datetime import date
+
+    from backend.services.open_low_high import screener as scr
+
+    calls = {"intraday": 0, "historical": 0}
+
+    class FakeUx:
+        def _fetch_intraday_candles_v3(self, ik, interval):
+            calls["intraday"] += 1
+            return []
+
+        def get_historical_candles_by_instrument_key(self, *a, **k):
+            calls["historical"] += 1
+            return []
+
+    monkeypatch.setattr(scr, "_today", lambda: date(2026, 11, 20))
+    monkeypatch.setattr(scr, "_bars_from_rows", lambda rows, ik: [])
+    monkeypatch.setattr(scr, "_hist_range_end", lambda s: s)
+    scr._fetch_rest_5m(FakeUx(), "NSE_EQ|X", date(2026, 11, 18))
+    assert calls["historical"] == 1
+
+
 def test_5_2_freeze_gate_empty_coverage_is_degraded():
     """5.2 REST empty / low coverage → DEGRADED, no locked freeze."""
     from backend.services.open_low_high.screener import freeze_gate

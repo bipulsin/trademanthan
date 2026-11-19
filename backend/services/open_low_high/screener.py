@@ -445,29 +445,60 @@ def _hist_range_end(session: date) -> date:
 
 
 def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
-    """Today's 5m: prefer V3 intraday for the live session, then historical+merge."""
+    """Session 5m bars from Upstox REST.
+
+    - **Today (live):** V3 **intraday** only
+      (``/v3/historical-candle/intraday/{key}/minutes/5``). Never historical.
+    - **Previous days:** V3/V2 **historical**
+      (``get_historical_candles_by_instrument_key``); intraday fallback only if
+      historical returns empty.
+    """
     raw = None
-    # Live session: intraday endpoint is the authoritative source for TODAY's bars.
     if session >= _today():
         try:
             raw = upstox._fetch_intraday_candles_v3(instrument_key, "minutes/5")
-        except Exception as exc:
-            logger.info("olh rest intraday 5m %s: %s", instrument_key, exc)
-            raw = None
-    if not raw:
-        try:
-            raw = upstox.get_historical_candles_by_instrument_key(
+            logger.info(
+                "olh rest 5m endpoint=intraday instrument=%s session=%s bars=%s",
                 instrument_key,
-                interval="minutes/5",
-                days_back=5,
-                range_end_date=_hist_range_end(session),
+                session.isoformat(),
+                len(raw or []),
             )
         except Exception as exc:
-            logger.info("olh rest 5m %s: %s", instrument_key, exc)
+            logger.info(
+                "olh rest intraday 5m %s session=%s: %s",
+                instrument_key,
+                session.isoformat(),
+                exc,
+            )
             raw = None
-    if not raw and session < _today():
+        return _bars_from_rows(list(raw or []), instrument_key)
+
+    # Previous calendar sessions: historical is authoritative.
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            instrument_key,
+            interval="minutes/5",
+            days_back=5,
+            range_end_date=_hist_range_end(session),
+        )
+        logger.info(
+            "olh rest 5m endpoint=historical instrument=%s session=%s bars=%s",
+            instrument_key,
+            session.isoformat(),
+            len(raw or []),
+        )
+    except Exception as exc:
+        logger.info("olh rest 5m %s: %s", instrument_key, exc)
+        raw = None
+    if not raw:
         try:
             raw = upstox._fetch_intraday_candles_v3(instrument_key, "minutes/5")
+            logger.info(
+                "olh rest 5m endpoint=intraday_fallback instrument=%s session=%s bars=%s",
+                instrument_key,
+                session.isoformat(),
+                len(raw or []),
+            )
         except Exception:
             raw = None
     return _bars_from_rows(list(raw or []), instrument_key)
