@@ -4353,12 +4353,33 @@ async def health_check():
 
         pool_stats = get_db_pool_stats()
         log_db_pool_pressure(logger, "scan_health")
-        
-        # Overall health status
-        is_healthy = db_healthy and (now.hour < 11 or today_alerts > 0 or now.weekday() >= 5)
+
+        # Webhook alert volume is only a liveness signal during the cash session
+        # window when TradingView→webhook flow is expected (11:00–15:30 IST,
+        # Mon–Fri). Before 11:00, after 15:30, weekends, and holidays: 0 alerts
+        # must not 503 — so a morning probe (e.g. 09:05 IST) only fails on real
+        # infra faults (DB / pool / Upstox token during probe hours).
+        from datetime import time as dtime
+
+        is_weekday = now.weekday() < 5
+        webhook_expect_window = is_weekday and dtime(11, 0) <= now.time() <= dtime(15, 30)
+        try:
+            from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
+
+            if should_skip_scheduled_market_jobs_ist(now):
+                webhook_expect_window = False
+        except Exception:
+            pass
+        webhooks_ok = (today_alerts > 0) or (not webhook_expect_window)
+        # Upstox probe already skips off-hours (token_valid=True outside 09–16).
+        # During probe hours, a failed token must degrade overall status.
+        upstox_ok = bool(token_valid)
+        is_healthy = bool(db_healthy) and webhooks_ok and upstox_ok
         if pool_stats.get("stressed"):
             is_healthy = False
-        
+        if not instruments_exists:
+            is_healthy = False
+
         health_data = {
             "status": "healthy" if is_healthy else "degraded",
             "timestamp": now.isoformat(),
@@ -4374,8 +4395,13 @@ async def health_check():
                 },
                 "webhooks": {
                     "today_count": today_alerts,
-                    "status": "ok" if (today_alerts > 0 or now.hour < 11 or now.weekday() >= 5) else "warning",
-                    "message": f"{today_alerts} alerts today"
+                    "status": "ok" if webhooks_ok else "warning",
+                    "message": (
+                        f"{today_alerts} alerts today"
+                        if webhooks_ok or webhook_expect_window
+                        else f"{today_alerts} alerts today (off-hours; not required)"
+                    ),
+                    "expect_alerts": webhook_expect_window,
                 },
                 "instruments_file": {
                     "status": "ok" if instruments_exists else "error",
