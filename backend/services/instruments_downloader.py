@@ -95,7 +95,12 @@ class InstrumentsDownloader:
                     except Exception as e2:
                         logger.warning(f"Could not reload ISIN cache: {e2}")
                 
-                logger.info(f"✅ Successfully downloaded {len(instruments_data)} instruments")
+                logger.info(
+                    "✅ Successfully downloaded %s instruments (load_time=%s path=%s)",
+                    len(instruments_data),
+                    __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+                    self.instruments_file,
+                )
                 return True
             else:
                 logger.error(f"Failed to download instruments: {response.status_code}")

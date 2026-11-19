@@ -12,10 +12,27 @@ import pytz
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-_LOG_DIR_CANDIDATES = (
-    Path("/app/logs"),
-    Path(__file__).resolve().parents[3] / "logs",
-)
+def _log_dir_candidates() -> tuple:
+    """Prefer host-mounted / env path so 09:00–09:35 logs survive container rebuilds."""
+    from backend.services.open_low_high.config import OLH_LOG_HOST_DIR
+
+    out = []
+    if OLH_LOG_HOST_DIR:
+        out.append(Path(OLH_LOG_HOST_DIR))
+    # Host bind mounts commonly used on paperclip / local docker.
+    out.extend(
+        [
+            Path("/home/ubuntu/twcto/logs/olh"),
+            Path("/var/log/olh"),
+            Path("/app/logs/olh"),
+            Path("/app/logs"),
+            Path(__file__).resolve().parents[3] / "logs",
+        ]
+    )
+    return tuple(out)
+
+
+_LOG_DIR_CANDIDATES = None  # resolved lazily so env is readable at call time
 _FILENAME_RE = re.compile(r"^OHL_Log_(\d{1,2}[A-Za-z]{3}\d{4})(?:\.txt)?$")
 _MONTHS = (
     "Jan",
@@ -34,9 +51,14 @@ _MONTHS = (
 
 
 def ohl_logs_dir() -> Path:
-    for p in _LOG_DIR_CANDIDATES:
+    candidates = _LOG_DIR_CANDIDATES if _LOG_DIR_CANDIDATES is not None else _log_dir_candidates()
+    for p in candidates:
         try:
-            if p.exists() or str(p).startswith("/app/"):
+            # Prefer already-existing writable dirs (host volume) over creating in-container paths.
+            if p.exists():
+                p.mkdir(parents=True, exist_ok=True)
+                return p
+            if str(p).startswith("/app/") or str(p).endswith("/logs"):
                 p.mkdir(parents=True, exist_ok=True)
                 return p
         except OSError:

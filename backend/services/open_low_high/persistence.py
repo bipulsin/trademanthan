@@ -89,7 +89,29 @@ _MIGRATE_COLS = [
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS olh_badge VARCHAR(8)",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS wick_body_ratio DOUBLE PRECISION",
     "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS wait_list BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE open_low_high_screen ADD COLUMN IF NOT EXISTS data_source VARCHAR(16)",
+    "ALTER TABLE open_low_high_day_meta ADD COLUMN IF NOT EXISTS degraded BOOLEAN NOT NULL DEFAULT FALSE",
 ]
+
+_FETCH_ATTEMPT_DDL = """
+CREATE TABLE IF NOT EXISTS open_low_high_fetch_attempt (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trade_date DATE NOT NULL,
+    symbol VARCHAR(64) NOT NULL DEFAULT '',
+    instrument_key VARCHAR(128) NOT NULL DEFAULT '',
+    source VARCHAR(16) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT '',
+    candle_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    detail TEXT
+)
+"""
+
+_FETCH_ATTEMPT_INDEX = """
+CREATE INDEX IF NOT EXISTS ix_olh_fetch_attempt_date_ts
+    ON open_low_high_fetch_attempt (trade_date, ts DESC)
+"""
 
 
 def ensure_tables() -> None:
@@ -97,10 +119,12 @@ def ensure_tables() -> None:
     try:
         db.execute(text(_DDL))
         db.execute(text(_META_DDL))
+        db.execute(text(_FETCH_ATTEMPT_DDL))
         for stmt in _MIGRATE_COLS:
             db.execute(text(stmt))
         for stmt in _INDEX_DDL:
             db.execute(text(stmt))
+        db.execute(text(_FETCH_ATTEMPT_INDEX))
         db.commit()
     except Exception:
         db.rollback()
@@ -114,6 +138,53 @@ def ensure_tables() -> None:
         ensure_pdc_columns()
     except Exception:
         logger.exception("open_low_high ensure_pdc_columns failed")
+
+
+def record_fetch_attempt(
+    *,
+    trade_date: date,
+    symbol: str = "",
+    instrument_key: str = "",
+    source: str = "",
+    status: str = "",
+    candle_count: int = 0,
+    error: str = "",
+    detail: str = "",
+    when: Optional[datetime] = None,
+) -> None:
+    """Persist one per-symbol fetch try (WS/REST) for 09:00–09:35 diagnostics."""
+    ensure_tables()
+    db = SessionLocal()
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO open_low_high_fetch_attempt (
+                    ts, trade_date, symbol, instrument_key, source, status,
+                    candle_count, error, detail
+                ) VALUES (
+                    :ts, :td, :sym, :ik, :src, :st, :n, :err, :detail
+                )
+                """
+            ),
+            {
+                "ts": _aware(when),
+                "td": trade_date,
+                "sym": str(symbol or "").strip().upper()[:64],
+                "ik": str(instrument_key or "").strip()[:128],
+                "src": str(source or "").strip()[:16],
+                "st": str(status or "").strip()[:32],
+                "n": int(candle_count or 0),
+                "err": (str(error)[:500] if error else None),
+                "detail": (str(detail)[:500] if detail else None),
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.debug("olh fetch_attempt insert failed", exc_info=True)
+    finally:
+        db.close()
 
 
 def _aware(dt: Optional[datetime] = None) -> datetime:
@@ -285,27 +356,36 @@ def upsert_day_meta(
     meta: Optional[Dict[str, Any]] = None,
     phase_a_at: Optional[datetime] = None,
     phase_b_at: Optional[datetime] = None,
+    degraded: bool = False,
 ) -> None:
     ensure_tables()
     db = SessionLocal()
     frozen_at = _aware() if frozen else None
+    # Never store a locked freeze when degraded (coverage/Nifty gate failed).
+    if degraded:
+        frozen = False
+        frozen_at = None
     try:
         db.execute(
             text(
                 """
                 INSERT INTO open_low_high_day_meta (
-                    trade_date, status, frozen, frozen_at,
+                    trade_date, status, frozen, frozen_at, degraded,
                     phase_a_at, phase_b_at,
                     bullish_count, bearish_count, notes, meta_json, updated_at
                 ) VALUES (
-                    :d, :status, :frozen, :frozen_at,
+                    :d, :status, :frozen, :frozen_at, :degraded,
                     :phase_a_at, :phase_b_at,
                     :bullish_count, :bearish_count, :notes, :meta_json, NOW()
                 )
                 ON CONFLICT (trade_date) DO UPDATE SET
                     status = EXCLUDED.status,
                     frozen = EXCLUDED.frozen,
-                    frozen_at = COALESCE(EXCLUDED.frozen_at, open_low_high_day_meta.frozen_at),
+                    degraded = EXCLUDED.degraded,
+                    frozen_at = CASE
+                        WHEN EXCLUDED.degraded THEN NULL
+                        ELSE COALESCE(EXCLUDED.frozen_at, open_low_high_day_meta.frozen_at)
+                    END,
                     phase_a_at = COALESCE(EXCLUDED.phase_a_at, open_low_high_day_meta.phase_a_at),
                     phase_b_at = COALESCE(EXCLUDED.phase_b_at, open_low_high_day_meta.phase_b_at),
                     bullish_count = EXCLUDED.bullish_count,
@@ -320,6 +400,7 @@ def upsert_day_meta(
                 "status": status,
                 "frozen": bool(frozen),
                 "frozen_at": frozen_at,
+                "degraded": bool(degraded),
                 "phase_a_at": phase_a_at,
                 "phase_b_at": phase_b_at,
                 "bullish_count": int(bullish_count),
@@ -360,9 +441,13 @@ def get_day_meta(trade_date: date) -> Optional[Dict[str, Any]]:
 
 
 def is_day_frozen(trade_date: date) -> bool:
+    """True only for a locked freeze — DEGRADED days remain repairable."""
     meta = get_day_meta(trade_date)
-    if meta and meta.get("frozen"):
-        return True
+    if meta:
+        if meta.get("degraded"):
+            return False
+        if meta.get("frozen"):
+            return True
     db = SessionLocal()
     try:
         ensure_tables()

@@ -233,13 +233,18 @@ def check_equity_index_ws_warm(
     *,
     session: Optional[date] = None,
     min_equity_share: float = 0.15,
+    canary: bool = False,
 ) -> Dict[str, Any]:
     """Verify EQ/INDEX appear on the OLH provider and have some WS 1m rows.
 
     ``warm`` is True when Nifty is subscribed and a non-trivial share of equity
     keys already have ≥1 WS 1m candle (or feed thread is up with keys registered
     pre-open when the session has not printed bars yet).
+
+    When ``canary=True`` (09:05), require token + Nifty subscribed + (post-open)
+    ≥ CANARY_EQUITY_SHARE equities ticking; alert on failure.
     """
+    from backend.services.open_low_high.config import CANARY_EQUITY_SHARE
     from backend.services.upstox_market_feed import feed_status
 
     trade_date = session or _now().date()
@@ -254,56 +259,112 @@ def check_equity_index_ws_warm(
     provider_n = int((status.get("provider_keys") or {}).get(PROVIDER_NAME) or 0)
     feed_alive = bool(status.get("thread_alive") or provider_n > 0)
 
-    sample_eq = equity[: min(80, len(equity))]
+    # Full equity set for canary; sample for routine warm.
+    sample_eq = equity if canary else equity[: min(80, len(equity))]
     counts = _ws_1m_counts(sample_eq + index, trade_date)
     eq_with = sum(1 for ik in sample_eq if counts.get(ik, 0) > 0)
     nifty_n = sum(counts.get(ik, 0) for ik in index)
     sample_n = max(len(sample_eq), 1)
     eq_share = float(eq_with) / float(sample_n)
-    # Pre-09:15: bars may be empty — treat provider registration + alive feed as warm.
+
+    token_ok = False
+    token_last4 = "none"
+    try:
+        from backend.config import settings
+        from backend.services.upstox_service import UpstoxService
+
+        ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+        ux.reload_token_from_storage()
+        tok = str(getattr(ux, "access_token", None) or "")
+        token_ok = bool(tok)
+        token_last4 = tok[-4:] if len(tok) >= 4 else ("****" if tok else "none")
+    except Exception:
+        pass
+
     tt = _now().time()
+    thr = float(CANARY_EQUITY_SHARE if canary else min_equity_share)
     if tt < time(9, 15):
-        warm = feed_alive and provider_n > 0 and len(equity) > 0 and len(index) > 0
-        reason = "preopen_provider"
+        # Pre-open canary: token + provider + Nifty key registered + equity keys present.
+        warm = (
+            token_ok
+            and feed_alive
+            and provider_n > 0
+            and len(equity) > 0
+            and len(index) > 0
+        )
+        reason = "preopen_canary" if canary else "preopen_provider"
+        if canary and len(equity) < 100:
+            warm = False
+            reason = "equity_keys_low"
     else:
         warm = (
-            feed_alive
+            token_ok
+            and feed_alive
             and provider_n > 0
             and len(index) > 0
-            and (nifty_n > 0 or eq_share >= float(min_equity_share))
+            and nifty_n > 0
+            and eq_share >= thr
         )
         reason = "bars" if warm else "insufficient_ws_bars"
 
     payload = {
         "ok": True,
         "warm": bool(warm),
+        "canary": bool(canary),
         "reason": reason,
         "equity_keys": len(equity),
         "index_keys": len(index),
         "provider_keys": provider_n,
         "feed_alive": feed_alive,
+        "token_ok": token_ok,
+        "token_last4": token_last4,
         "equity_sample": len(sample_eq),
         "equity_with_bars": eq_with,
         "equity_share": round(eq_share, 4),
+        "equity_share_threshold": thr,
         "nifty_1m_bars": nifty_n,
+        "subscribed": len(bundles.get("all") or []),
         "lock_engaged": is_ws_lock_engaged(),
     }
     ohl_log(
         "success" if warm else "failed",
-        action="ws_warm_check",
+        action="ws_canary" if canary else "ws_warm_check",
         source="ws",
         detail=(
-            f"warm={warm} reason={reason} eq_share={eq_share:.2%} "
-            f"nifty_bars={nifty_n} provider={provider_n}"
+            f"warm={warm} reason={reason} eq_share={eq_share:.2%} thr={thr:.0%} "
+            f"nifty_bars={nifty_n} provider={provider_n} token_last4={token_last4} "
+            f"sub={payload['subscribed']}"
         ),
     )
+    if canary and not warm:
+        try:
+            from backend.services.open_low_high.alerts import alert_degraded
+
+            alert_degraded(
+                f"09:05 WS canary failed: {reason}",
+                trade_date=trade_date.isoformat(),
+                equity_share=round(eq_share, 4),
+                nifty_1m_bars=nifty_n,
+                token_last4=token_last4,
+            )
+        except Exception:
+            logger.debug("ws canary alert failed", exc_info=True)
     return payload
 
 
-def prewarm_ws(*, engage_lock: bool = False) -> Dict[str, Any]:
+def prewarm_ws(*, engage_lock: bool = False, canary: bool = False) -> Dict[str, Any]:
     """09:05 (and 09:15 re-warm): subscribe Equity / Index / Future on Upstox WS."""
     sub = subscribe_olh_ws(include_future=True, engage_lock=engage_lock)
-    warm = check_equity_index_ws_warm()
+    ohl_log(
+        "success" if sub.get("ok") else "failed",
+        action="ws_subscribe_counts",
+        source="ws",
+        detail=(
+            f"equity={sub.get('equity')} index={sub.get('index')} "
+            f"future={sub.get('future')} subscribed={sub.get('subscribed')}"
+        ),
+    )
+    warm = check_equity_index_ws_warm(canary=canary)
     payload = {
         "ok": bool(sub.get("ok")),
         "status": "prewarmed_ws",
@@ -311,7 +372,7 @@ def prewarm_ws(*, engage_lock: bool = False) -> Dict[str, Any]:
         "warm": warm,
         "message": (
             f"WS pre-warm equity={sub.get('equity')} index={sub.get('index')} "
-            f"future={sub.get('future')} warm={warm.get('warm')}"
+            f"future={sub.get('future')} warm={warm.get('warm')} canary={canary}"
         ),
     }
     ohl_log(
@@ -321,6 +382,25 @@ def prewarm_ws(*, engage_lock: bool = False) -> Dict[str, Any]:
         detail=payload["message"],
     )
     return payload
+
+
+def resubscribe_olh_ws_keepalive() -> Dict[str, Any]:
+    """09:05–09:29: re-merge EQ/INDEX/FUT into provider (auto-reconnect companion)."""
+    tt = _now().time()
+    if tt < time(9, 5) or tt >= time(9, 29):
+        return {"ok": True, "status": "skipped", "reason": "outside_window"}
+    engage = in_ws_lock_window()
+    sub = subscribe_olh_ws(include_future=True, engage_lock=engage)
+    # Missed ticks during drop → mark untrusted via warm check (bars gap).
+    warm = check_equity_index_ws_warm()
+    if not warm.get("warm"):
+        ohl_log(
+            "failed",
+            action="ws_keepalive",
+            source="ws",
+            detail="UNTRUSTED/missed ticks after reconnect",
+        )
+    return {"ok": bool(sub.get("ok")), "subscribe": sub, "warm": warm, "status": "keepalive"}
 
 
 def ensure_equity_index_warm_or_rewarm(*, session: Optional[date] = None) -> Dict[str, Any]:

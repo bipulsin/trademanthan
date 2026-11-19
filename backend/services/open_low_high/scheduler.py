@@ -75,15 +75,32 @@ def _run_ws_prewarm_0905() -> None:
     try:
         from backend.services.open_low_high.ws_feed import prewarm_ws
 
-        result = prewarm_ws(engage_lock=False)
+        result = prewarm_ws(engage_lock=False, canary=True)
         logger.info(
-            "open_low_high WS prewarm 09:05 status=%s equity=%s warm=%s",
+            "open_low_high WS prewarm 09:05 status=%s equity=%s warm=%s canary=%s",
             result.get("status"),
             (result.get("subscribe") or {}).get("equity"),
             (result.get("warm") or {}).get("warm"),
+            (result.get("warm") or {}).get("canary"),
         )
     except Exception:
         logger.exception("open_low_high WS prewarm 09:05 failed")
+
+
+def _run_ws_keepalive() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.ws_feed import resubscribe_olh_ws_keepalive
+
+        result = resubscribe_olh_ws_keepalive()
+        logger.info(
+            "open_low_high WS keepalive status=%s warm=%s",
+            result.get("status"),
+            (result.get("warm") or {}).get("warm"),
+        )
+    except Exception:
+        logger.exception("open_low_high WS keepalive failed")
 
 
 def _run_ws_check_0915() -> None:
@@ -177,14 +194,21 @@ def start_open_low_high_scheduler() -> None:
     global _scheduler
     if _scheduler is not None:
         return
+    from backend.services.open_low_high.config import PDC_EOD_HOUR, PDC_EOD_MINUTE
+
     sched = BackgroundScheduler(timezone="Asia/Kolkata")
 
     # --- PDC ---
     sched.add_job(
         _run_pdc_eod,
-        CronTrigger(day_of_week="mon-fri", hour=16, minute=5, timezone="Asia/Kolkata"),
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=int(PDC_EOD_HOUR),
+            minute=int(PDC_EOD_MINUTE),
+            timezone="Asia/Kolkata",
+        ),
         id="open_low_high_pdc_eod",
-        name="Open Low High PDC EOD 16:05 IST",
+        name=f"Open Low High PDC EOD {PDC_EOD_HOUR:02d}:{PDC_EOD_MINUTE:02d} IST",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -221,6 +245,23 @@ def start_open_low_high_scheduler() -> None:
         max_instances=1,
         coalesce=True,
         misfire_grace_time=120,
+    )
+    # Auto-reconnect companion: re-subscribe every 2 min 09:07–09:28.
+    sched.add_job(
+        _run_ws_keepalive,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute="7-28/2",
+            second=0,
+            timezone="Asia/Kolkata",
+        ),
+        id="open_low_high_ws_keepalive",
+        name="Open Low High WS keepalive 09:07–09:28 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
     )
 
     # --- Phase A primary window 09:20:10, 09:21, 09:22, 09:23 ---

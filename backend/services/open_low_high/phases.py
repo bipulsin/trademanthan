@@ -26,11 +26,17 @@ from backend.services.open_low_high.signals import evaluate_phase_b
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-PHASE_A_START = time(9, 20, 10)
+from backend.services.open_low_high.config import (
+    FREEZE_COVERAGE_MIN,
+    PHASE_A_START,
+    PHASE_B_HARD_STOP,
+    PHASE_B_START,
+    REST_MAX_WORKERS,
+    REST_PACING_SLEEP_SEC,
+)
+
 PHASE_A_END = time(9, 23, 0)
 PHASE_A_REFILL = time(9, 24, 0)
-PHASE_B_START = time(9, 25, 3)
-PHASE_B_HARD_STOP = time(9, 29, 0)
 
 _phase_a_lock = threading.Lock()
 _phase_b_lock = threading.Lock()
@@ -89,7 +95,7 @@ def run_phase_a(
     *,
     force: bool = False,
     session: Optional[date] = None,
-    max_workers: int = 6,
+    max_workers: int = REST_MAX_WORKERS,
     refill_only_symbols: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Phase A on fresh 09:15 5m candle — persist grey cards immediately (not frozen)."""
@@ -185,7 +191,7 @@ def run_phase_a(
                     continue
                 if got:
                     results.append(got)
-                time_mod.sleep(0.02)
+                time_mod.sleep(float(REST_PACING_SLEEP_SEC))
 
         existing = list_screen_for_date(trade_date)
         if refill_only_symbols is not None:
@@ -232,12 +238,21 @@ def run_phase_a(
 
         nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
         # Phase A nifty cue: 09:20 not required yet.
-        _ = _nifty_data_ready(nifty_cue, require_0920=False)
+        nifty_ok = _nifty_data_ready(nifty_cue, require_0920=False)
+        from backend.services.open_low_high.screener import (
+            equity_coverage_from_miss,
+            freeze_gate,
+        )
+
+        coverage = equity_coverage_from_miss(scanned=len(universe), miss_stats=miss_stats)
+        may_freeze, gate_reason = freeze_gate(coverage=coverage, nifty_present=nifty_ok)
 
         upsert_screen_rows(trade_date, tagged, frozen=False)
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
         bearish = [c for c in tagged if c.get("side") == "BEARISH"]
         phase_ts = _now()
+        degraded = (not may_freeze) and (len(tagged) == 0 or not nifty_ok)
+        status = "degraded" if degraded else "phase_a"
         day_meta = {
             "window": win,
             "expiry": expiry.isoformat(),
@@ -246,24 +261,31 @@ def run_phase_a(
             "active": 0,
             "wait": 0,
             "candidates": len(tagged),
+            "coverage": round(coverage, 4),
+            "freeze_gate": gate_reason,
+            "nifty_ready": nifty_ok,
+            "degraded": degraded,
             **nifty_cue,
         }
         upsert_day_meta(
             trade_date,
-            status="phase_a",
+            status=status,
             frozen=False,
+            degraded=degraded,
             bullish_count=len(bullish),
             bearish_count=len(bearish),
             phase_a_at=phase_ts,
-            notes=f"phase_a={len(tagged)} scanned={len(universe)} miss={miss_stats}",
+            notes=f"phase_a={len(tagged)} scanned={len(universe)} cov={coverage:.2%} miss={miss_stats}",
             meta=day_meta,
         )
         payload = {
             "ok": True,
-            "status": "phase_a",
+            "status": status,
             "trade_date": trade_date.isoformat(),
             "window": win,
             "frozen": False,
+            "degraded": degraded,
+            "coverage": round(coverage, 4),
             "bullish": bullish,
             "bearish": bearish,
             "phase_a": len(tagged),
@@ -281,11 +303,44 @@ def run_phase_a(
         _last_phase_a = dict(payload)
         _last_phase_a["at"] = phase_ts.isoformat()
         ohl_log(
-            "success",
+            "success" if not degraded else "failed",
             action="phase_a_done",
-            detail=f"phase_a={len(tagged)} scanned={len(universe)}",
+            detail=f"phase_a={len(tagged)} scanned={len(universe)} cov={coverage:.2%} degraded={degraded}",
         )
-        logger.info("OHL phase_a done phase_a=%s scanned=%s", len(tagged), len(universe))
+        try:
+            from backend.services.open_low_high.alerts import alert_degraded, alert_phase_stats
+
+            alert_phase_stats(
+                "Phase A",
+                trade_date=trade_date.isoformat(),
+                phase_a=len(tagged),
+                coverage=coverage,
+                nifty_ready=nifty_ok,
+                status=status,
+                extra=f"miss={miss_stats} gate={gate_reason}",
+            )
+            if len(tagged) == 0:
+                alert_degraded(
+                    "Phase A=0 after scan",
+                    trade_date=trade_date.isoformat(),
+                    coverage=round(coverage, 4),
+                    nifty_ready=nifty_ok,
+                )
+            elif not nifty_ok:
+                alert_degraded(
+                    "Nifty null at Phase A",
+                    trade_date=trade_date.isoformat(),
+                    phase_a=len(tagged),
+                )
+        except Exception:
+            logger.debug("OLH phase_a alert failed", exc_info=True)
+        logger.info(
+            "OHL phase_a done phase_a=%s scanned=%s cov=%.2f degraded=%s",
+            len(tagged),
+            len(universe),
+            coverage,
+            degraded,
+        )
         return payload
     except Exception as exc:
         logger.exception("OHL phase_a failed")
@@ -405,7 +460,9 @@ def _try_0920_bar(
     from backend.services.open_low_high.screener import SECOND_CANDLE, _fetch_rest_5m, _fetch_ws_5m_bars
 
     if source == "ws":
-        bars = _fetch_ws_5m_bars(equity_ik, session)
+        bars, trust = _fetch_ws_5m_bars(equity_ik, session)
+        if trust == "UNTRUSTED":
+            bars = []  # force REST path
     else:
         bars = _fetch_rest_5m(upstox, equity_ik, session)
     b = bar_at(bars, session, SECOND_CANDLE) if bars else None
@@ -423,7 +480,7 @@ def run_phase_b(
     *,
     force: bool = False,
     session: Optional[date] = None,
-    max_workers: int = 4,
+    max_workers: int = REST_MAX_WORKERS,
 ) -> Dict[str, Any]:
     """Phase B only on Phase A qualifiers — WS→REST→wait30→REST until done or 09:29."""
     from backend.services.open_high_low.bars import bar_at
@@ -470,28 +527,45 @@ def run_phase_b(
     try:
         phase_a_rows = list_screen_for_date(trade_date)
         if not phase_a_rows:
-            # Nothing to confirm — optionally empty-freeze if past deadline and data ok.
+            # Never lock an empty Phase A as a valid frozen day (19-Nov scenario).
             msg = "Phase B — no Phase A qualifiers on board."
             ohl_log("skipped", action="phase_b_start", detail="no_phase_a_rows")
             failures = ["No Phase A qualifiers to confirm."]
+            past = past_phase_b_deadline(now)
+            status = "degraded" if past else "phase_a"
             upsert_day_meta(
                 trade_date,
-                status="phase_b_failed" if past_phase_b_deadline(now) else "phase_a",
-                frozen=bool(past_phase_b_deadline(now)),
+                status=status,
+                frozen=False,
+                degraded=bool(past),
                 notes=msg,
                 meta={
                     "phase": "B",
                     "phase_b_failures": failures,
-                    "failure_banner": msg if past_phase_b_deadline(now) else None,
+                    "degraded": bool(past),
+                    "failure_banner": (
+                        "DEGRADED — Phase A=0 at hard stop; not frozen." if past else None
+                    ),
                 },
             )
+            if past:
+                try:
+                    from backend.services.open_low_high.alerts import alert_degraded
+
+                    alert_degraded(msg, trade_date=trade_date.isoformat(), phase_a=0)
+                except Exception:
+                    pass
             return {
                 "ok": True,
-                "status": "phase_b_empty",
+                "status": status,
                 "phase_a": 0,
                 "active": 0,
+                "frozen": False,
+                "degraded": bool(past),
                 "phase_b_failures": len(failures),
-                "failure_banner": msg if past_phase_b_deadline(now) else None,
+                "failure_banner": (
+                    "DEGRADED — Phase A=0 at hard stop; not frozen." if past else None
+                ),
                 "message": msg,
             }
 
@@ -657,7 +731,25 @@ def run_phase_b(
         tagged = _apply_sector_badges(updated)
         complete = len(still_missing) == 0
         past = past_phase_b_deadline() or force
-        should_freeze = complete or past
+
+        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
+        from backend.services.open_low_high.screener import _nifty_data_ready, freeze_gate
+
+        nifty_ok = _nifty_data_ready(nifty_cue, require_0920=True)
+        # Coverage among Phase A cohort that received 09:20.
+        cohort_n = max(len(tagged), 1)
+        got_0920 = cohort_n - len(still_missing)
+        coverage = float(got_0920) / float(cohort_n) if tagged else 0.0
+        # Also require Nifty; when Phase A empty already handled above.
+        may_freeze, gate_reason = freeze_gate(
+            coverage=coverage if tagged else 0.0,
+            nifty_present=nifty_ok,
+            coverage_min=FREEZE_COVERAGE_MIN,
+        )
+        # Freeze only when complete (or past deadline) AND freeze gate passes.
+        want_close = complete or past
+        should_freeze = bool(want_close and may_freeze and len(tagged) > 0)
+        degraded = bool(want_close and not should_freeze)
 
         if should_freeze:
             for c in tagged:
@@ -666,9 +758,10 @@ def run_phase_b(
         else:
             for c in tagged:
                 c["frozen"] = False
-            upsert_screen_rows(trade_date, tagged, frozen=False)
+            # Idempotent: never wipe non-empty board with empty.
+            if tagged:
+                upsert_screen_rows(trade_date, tagged, frozen=False)
 
-        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
         bearish = [c for c in tagged if c.get("side") == "BEARISH"]
         active_n = sum(1 for c in tagged if c.get("active"))
@@ -677,7 +770,14 @@ def run_phase_b(
 
         failure_banner = None
         status = "phase_b"
-        if should_freeze and still_missing:
+        if degraded:
+            status = "degraded"
+            failure_banner = (
+                f"DEGRADED — freeze gate failed ({gate_reason}); "
+                f"coverage={coverage:.0%} nifty={nifty_ok}; repairable, not frozen."
+            )
+            ohl_log("failed", action="phase_b_degraded", detail=failure_banner)
+        elif should_freeze and still_missing:
             failure_banner = (
                 f"Phase B hard stop 09:29 — missing 09:20 data for "
                 f"{len(still_missing)} symbol(s): {', '.join(still_missing[:12])}"
@@ -699,18 +799,23 @@ def run_phase_b(
             "still_missing_0920": still_missing,
             "phase_b_failures": fail_details,
             "failure_banner": failure_banner,
+            "coverage": round(coverage, 4),
+            "freeze_gate": gate_reason,
+            "nifty_ready": nifty_ok,
+            "degraded": degraded,
             **nifty_cue,
         }
         upsert_day_meta(
             trade_date,
             status=status if status != "frozen" else "frozen",
             frozen=bool(should_freeze),
+            degraded=degraded,
             bullish_count=len(bullish),
             bearish_count=len(bearish),
             phase_b_at=_now(),
             notes=(
                 f"phase_b active={active_n} wait={wait_n} missing_0920={len(still_missing)} "
-                f"freeze={should_freeze}"
+                f"freeze={should_freeze} degraded={degraded} cov={coverage:.2%}"
             ),
             meta=day_meta,
         )
@@ -720,6 +825,8 @@ def run_phase_b(
             "trade_date": trade_date.isoformat(),
             "window": win,
             "frozen": bool(should_freeze),
+            "degraded": degraded,
+            "coverage": round(coverage, 4),
             "bullish": bullish,
             "bearish": bearish,
             "phase_a": len(tagged),
@@ -741,12 +848,41 @@ def run_phase_b(
         global _last_phase_b
         _last_phase_b = dict(payload)
         _last_phase_b["at"] = _now().isoformat()
+        try:
+            from backend.services.open_low_high.alerts import alert_degraded, alert_phase_stats
+
+            alert_phase_stats(
+                "Phase B",
+                trade_date=trade_date.isoformat(),
+                phase_a=len(tagged),
+                active=active_n,
+                wait=wait_n,
+                coverage=coverage,
+                nifty_ready=nifty_ok,
+                status=status,
+            )
+            if degraded:
+                alert_degraded(
+                    failure_banner or "DEGRADED",
+                    trade_date=trade_date.isoformat(),
+                    coverage=round(coverage, 4),
+                    nifty_ready=nifty_ok,
+                )
+            if not nifty_ok:
+                alert_degraded(
+                    "Nifty null at Phase B",
+                    trade_date=trade_date.isoformat(),
+                    phase_a=len(tagged),
+                )
+        except Exception:
+            logger.debug("OLH phase_b alert failed", exc_info=True)
         logger.info(
-            "OHL phase_b done status=%s active=%s missing=%s freeze=%s",
+            "OHL phase_b done status=%s active=%s missing=%s freeze=%s degraded=%s",
             status,
             active_n,
             len(still_missing),
             should_freeze,
+            degraded,
         )
         return payload
     except Exception as exc:

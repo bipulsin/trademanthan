@@ -325,9 +325,15 @@ class UpstoxService:
             loaded_token = load_upstox_token()
             self.access_token = loaded_token or access_token
             if loaded_token:
-                logger.info("✅ Using Upstox token from token manager")
+                logger.info(
+                    "✅ Using Upstox token from token manager (…%s)",
+                    loaded_token[-4:] if len(loaded_token) >= 4 else "????",
+                )
             elif access_token:
-                logger.info("✅ Using Upstox token from initialization parameter")
+                logger.info(
+                    "✅ Using Upstox token from initialization parameter (…%s)",
+                    access_token[-4:] if len(access_token) >= 4 else "????",
+                )
             else:
                 logger.warning("⚠️ No Upstox token available")
         except Exception as e:
@@ -336,9 +342,15 @@ class UpstoxService:
                 loaded_token = load_upstox_token()
                 self.access_token = loaded_token or access_token
                 if loaded_token:
-                    logger.info("✅ Using Upstox token from token manager (fallback import)")
+                    logger.info(
+                        "✅ Using Upstox token from token manager (fallback import) (…%s)",
+                        loaded_token[-4:] if len(loaded_token) >= 4 else "????",
+                    )
                 elif access_token:
-                    logger.info("✅ Using Upstox token from initialization parameter")
+                    logger.info(
+                        "✅ Using Upstox token from initialization parameter (…%s)",
+                        access_token[-4:] if len(access_token) >= 4 else "????",
+                    )
                 else:
                     logger.warning("⚠️ No Upstox token available")
             except Exception as fallback_error:
@@ -478,6 +490,10 @@ class UpstoxService:
                         if not acquire_candle_slot():
                             # Shared candle budget exhausted — skip rather than blow
                             # the per-user limit. Caller treats None as "no data".
+                            logger.warning(
+                                "⏱️ Candle rate-limit DENIED (no Upstox call) url=%s",
+                                url[:220],
+                            )
                             return None
                     except Exception:
                         pass
@@ -1429,9 +1445,27 @@ class UpstoxService:
         if data and data.get("status") == "success" and "data" in data:
             raw = data["data"].get("candles", [])
             structured = _candles_rows_to_structured(raw)
-            logger.info("✅ V2 fetched %s candles for %s", len(structured), instrument_key)
-            return structured
-        logger.warning("⚠️ V2 no candle data for %s", instrument_key)
+            if structured:
+                logger.info("✅ V2 fetched %s candles for %s", len(structured), instrument_key)
+                return structured
+            logger.warning(
+                "⚠️ V2 HTTP 200 empty candles instrument_key=%s interval=%s from=%s to=%s body=%s",
+                instrument_key,
+                v2_interval,
+                from_date,
+                to_date,
+                str(data)[:300],
+            )
+            return None
+        body_snip = str(data)[:300] if data is not None else "None (non-200/timeout/429-deny/exception)"
+        logger.warning(
+            "⚠️ V2 no candle data instrument_key=%s interval=%s from=%s to=%s body=%s",
+            instrument_key,
+            v2_interval,
+            from_date,
+            to_date,
+            body_snip,
+        )
         return None
 
     def _fetch_historical_v3_candles(
@@ -1447,9 +1481,27 @@ class UpstoxService:
         if data and data.get("status") == "success" and "data" in data:
             raw = data["data"].get("candles", [])
             structured = _candles_rows_to_structured(raw)
-            logger.info(f"✅ V3 Fetched {len(structured)} candles for {instrument_key}")
-            return structured
-        logger.warning(f"⚠️ V3 No candle data for {instrument_key}")
+            if structured:
+                logger.info(f"✅ V3 Fetched {len(structured)} candles for {instrument_key}")
+                return structured
+            logger.warning(
+                "⚠️ V3 HTTP 200 empty candles instrument_key=%s interval=%s from=%s to=%s body=%s",
+                instrument_key,
+                interval,
+                from_date,
+                to_date,
+                str(data)[:300],
+            )
+            return None
+        body_snip = str(data)[:300] if data is not None else "None (non-200/timeout/429-deny/exception)"
+        logger.warning(
+            "⚠️ V3 No candle data instrument_key=%s interval=%s from=%s to=%s body=%s",
+            instrument_key,
+            interval,
+            from_date,
+            to_date,
+            body_snip,
+        )
         return None
 
     def _fetch_intraday_candles_v3(
@@ -1473,7 +1525,21 @@ class UpstoxService:
                     instrument_key,
                     structured[-1].get("timestamp"),
                 )
-            return structured
+                return structured
+            logger.warning(
+                "⚠️ V3 intraday HTTP 200 empty candles instrument_key=%s interval=%s body=%s",
+                instrument_key,
+                iv,
+                str(data)[:300],
+            )
+            return structured  # empty list
+        body_snip = str(data)[:300] if data is not None else "None (non-200/timeout/429-deny/exception)"
+        logger.warning(
+            "⚠️ V3 intraday no candle data instrument_key=%s interval=%s body=%s",
+            instrument_key,
+            iv,
+            body_snip,
+        )
         return None
 
     def get_historical_candles_by_instrument_key(

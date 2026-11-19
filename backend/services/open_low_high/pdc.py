@@ -132,7 +132,7 @@ def get_equity_prev_close(symbol: str) -> Optional[float]:
         row = db.execute(
             text(
                 f"""
-                SELECT {PDC_COLUMN} FROM arbitrage_master
+                SELECT {PDC_COLUMN}, {PDC_DATE_COLUMN} FROM arbitrage_master
                 WHERE UPPER(TRIM(stock)) = :sym
                 LIMIT 1
                 """
@@ -141,6 +141,21 @@ def get_equity_prev_close(symbol: str) -> Optional[float]:
         ).fetchone()
         if not row or row[0] is None:
             return None
+        # Soft corporate-action / stale check: asof should be previous trading day.
+        try:
+            asof = row[1]
+            if asof is not None:
+                expected = previous_trading_day(_now().date())
+                asof_d = asof if isinstance(asof, date) else date.fromisoformat(str(asof)[:10])
+                if asof_d != expected and asof_d != _now().date():
+                    ohl_log(
+                        "failed",
+                        action="pdc_asof_mismatch",
+                        symbol=str(symbol or "").upper(),
+                        detail=f"stored={asof_d} expected={expected}",
+                    )
+        except Exception:
+            pass
         return float(row[0])
     except Exception:
         return None
@@ -278,7 +293,10 @@ def fill_equity_prev_close(
 
 
 def crosscheck_pdc_at_0900(*, session: Optional[date] = None) -> Dict[str, Any]:
-    """09:00 IST: any null PDC → fetch and fill (keys from latest arbitrage_master)."""
+    """09:00 IST: any null PDC → fetch and fill (keys from latest arbitrage_master).
+
+    Remaining nulls after repair are logged + alerted — never silently used in screen.
+    """
     trade_date = session or _now().date()
     ohl_log("success", action="pdc_crosscheck_start", detail=f"session={trade_date}")
     ensure_pdc_columns()
@@ -286,6 +304,31 @@ def crosscheck_pdc_at_0900(*, session: Optional[date] = None) -> Dict[str, Any]:
         session=trade_date, only_null=True, eod=False, include_index=True
     )
     result["action"] = "pdc_crosscheck_0900"
+    # Re-check remaining nulls after repair.
+    still_null = _load_equity_rows(only_null=True)
+    result["still_null_n"] = len(still_null)
+    result["still_null_symbols"] = [s for s, _ in still_null[:40]]
+    if still_null or result.get("nifty_prev_close") is None:
+        ohl_log(
+            "failed",
+            action="pdc_crosscheck_nulls",
+            detail=(
+                f"still_null={len(still_null)} "
+                f"nifty={result.get('nifty_prev_close')} "
+                f"exclude_from_screen=True"
+            ),
+        )
+        try:
+            from backend.services.open_low_high.alerts import alert_degraded
+
+            alert_degraded(
+                f"PDC null after 09:00 repair: equities={len(still_null)} "
+                f"nifty={result.get('nifty_prev_close')}",
+                trade_date=trade_date.isoformat(),
+                still_null_n=len(still_null),
+            )
+        except Exception:
+            pass
     return result
 
 

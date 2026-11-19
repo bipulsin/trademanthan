@@ -641,3 +641,286 @@ def test_ws_lock_window_and_merge():
     assert "NSE_INDEX|Nifty 50" in merged
     assert "NSE_FO|1" in merged
     wf.release_ws_lock()
+
+
+# ---- Harden suite 5.1–5.6 (off-market unit tests) ----
+
+
+def test_51_ws_down_both_tries_rest_completes(monkeypatch):
+    """5.1 WS down both tries → REST completes."""
+    from datetime import date, datetime
+
+    import pytz
+
+    from backend.services.open_high_low.bars import Bar
+    from backend.services.open_low_high import screener as scr
+
+    IST = pytz.timezone("Asia/Kolkata")
+    session = date(2026, 11, 19)
+    rest_bar = Bar(
+        ts=IST.localize(datetime(2026, 11, 19, 9, 15)),
+        open=100,
+        high=101,
+        low=99,
+        close=100.5,
+        volume=1,
+        contract="NSE_EQ|X",
+    )
+
+    monkeypatch.setattr(scr, "_ws_try_once", lambda *a, **k: ([], "none"))
+    monkeypatch.setattr(scr, "_fetch_rest_5m", lambda *a, **k: [rest_bar])
+    monkeypatch.setattr(scr, "_record_attempt", lambda *a, **k: None)
+
+    bars, src = scr._session_5m_bars_try(
+        object(), "NSE_EQ|X", session, symbol="FOO", action="t51", prefer="ws"
+    )
+    assert src == "rest"
+    assert len(bars) == 1
+    assert bars[0].close == 100.5
+
+
+def test_52_rest_empty_all_degraded_no_freeze():
+    """5.2 REST empty all → DEGRADED + no locked freeze (gate)."""
+    from backend.services.open_low_high.screener import freeze_gate
+
+    ok, reason = freeze_gate(coverage=0.0, nifty_present=False)
+    assert ok is False
+    assert "nifty" in reason or "coverage" in reason
+
+
+def test_53_nifty_missing_equities_ok_degraded():
+    """5.3 Nifty missing, equities OK → DEGRADED (19-Nov scenario)."""
+    from backend.services.open_low_high.screener import freeze_gate
+
+    ok, reason = freeze_gate(coverage=0.95, nifty_present=False)
+    assert ok is False
+    assert reason == "nifty_missing"
+
+
+def test_54_late_ws_first_tick_untrusted():
+    """5.4 Late WS first tick >5s → UNTRUSTED."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high.screener import _ws_bucket_trusted
+
+    IST = pytz.timezone("Asia/Kolkata")
+    bucket = IST.localize(datetime(2026, 11, 19, 9, 15, 0))
+    late = IST.localize(datetime(2026, 11, 19, 9, 15, 6))
+    early = IST.localize(datetime(2026, 11, 19, 9, 15, 2))
+    assert _ws_bucket_trusted(bucket, late) is False
+    assert _ws_bucket_trusted(bucket, early) is True
+
+
+def test_55_ws_keepalive_outside_window_skipped():
+    """5.5 Socket drop/reconnect companion skips outside 09:05–09:29."""
+    from datetime import datetime
+    from unittest.mock import patch
+
+    import pytz
+
+    from backend.services.open_low_high import ws_feed as wf
+
+    IST = pytz.timezone("Asia/Kolkata")
+    with patch.object(wf, "_now", return_value=IST.localize(datetime(2026, 11, 19, 10, 0))):
+        out = wf.resubscribe_olh_ws_keepalive()
+    assert out.get("status") == "skipped"
+
+
+def test_56_null_pdc_crosscheck_flags_still_null(monkeypatch):
+    """5.6 Null PDC at 09:00 verify → still_null reported (exclude + alert path)."""
+    from datetime import date
+
+    from backend.services.open_low_high import pdc as pdc_mod
+
+    monkeypatch.setattr(pdc_mod, "ensure_pdc_columns", lambda: None)
+    monkeypatch.setattr(
+        pdc_mod,
+        "fill_equity_prev_close",
+        lambda **k: {
+            "ok": True,
+            "status": "filled",
+            "ok_n": 1,
+            "fail_n": 1,
+            "nifty_prev_close": None,
+        },
+    )
+    monkeypatch.setattr(
+        pdc_mod,
+        "_load_equity_rows",
+        lambda only_null=False: [("ZZNULL", "NSE_EQ|INE000")] if only_null else [],
+    )
+    alerts = []
+    monkeypatch.setattr(
+        "backend.services.open_low_high.alerts.alert_degraded",
+        lambda *a, **k: alerts.append((a, k)) or True,
+        raising=False,
+    )
+
+    # Patch import inside function by stubbing alerts module path used.
+    import backend.services.open_low_high.alerts as al
+
+    monkeypatch.setattr(al, "alert_degraded", lambda *a, **k: alerts.append(k) or True)
+
+    out = pdc_mod.crosscheck_pdc_at_0900(session=date(2026, 11, 19))
+    assert out.get("still_null_n") == 1
+    assert "ZZNULL" in (out.get("still_null_symbols") or [])
+    assert alerts, "expected alert on remaining nulls"
+
+
+def test_freeze_gate_ok_when_coverage_and_nifty():
+    from backend.services.open_low_high.screener import freeze_gate
+
+    ok, reason = freeze_gate(coverage=0.91, nifty_present=True)
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_deploy_guard_window_constants():
+    from backend.services.open_low_high.config import DEPLOY_GUARD_END, DEPLOY_GUARD_START
+
+    assert DEPLOY_GUARD_START.hour == 8 and DEPLOY_GUARD_START.minute == 45
+    assert DEPLOY_GUARD_END.hour == 9 and DEPLOY_GUARD_END.minute == 35
+
+
+# --- Hardening scenarios 5.1–5.6 (off-market unit tests) ---
+
+
+def test_5_1_ws_down_both_tries_falls_back_to_rest(monkeypatch):
+    """5.1 WS try1+try2 empty → REST completes."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_high_low.bars import Bar
+    from backend.services.open_low_high import screener as sc
+
+    IST = pytz.timezone("Asia/Kolkata")
+    session = datetime(2026, 11, 19, tzinfo=IST).date()
+    rest_bar = Bar(
+        ts=IST.localize(datetime(2026, 11, 19, 9, 15)),
+        open=100,
+        high=101,
+        low=99,
+        close=100.5,
+        volume=1,
+        contract="NSE_EQ|X",
+    )
+
+    monkeypatch.setattr(sc, "_ws_try_once", lambda *a, **k: ([], "none"))
+    monkeypatch.setattr(sc, "_fetch_rest_5m", lambda *a, **k: [rest_bar])
+    monkeypatch.setattr(sc, "_record_attempt", lambda *a, **k: None)
+
+    bars, src = sc._session_5m_bars_try(
+        object(), "NSE_EQ|X", session, symbol="FOO", prefer="ws"
+    )
+    assert src == "rest"
+    assert len(bars) == 1
+    assert bars[0].close == 100.5
+
+
+def test_5_2_freeze_gate_empty_coverage_is_degraded():
+    """5.2 REST empty / low coverage → DEGRADED, no locked freeze."""
+    from backend.services.open_low_high.screener import freeze_gate
+
+    ok, reason = freeze_gate(coverage=0.0, nifty_present=True)
+    assert ok is False
+    assert "coverage" in reason
+
+    ok2, reason2 = freeze_gate(coverage=0.95, nifty_present=True)
+    assert ok2 is True
+    assert reason2 == "ok"
+
+
+def test_5_3_nifty_missing_equities_ok_degraded():
+    """5.3 Nifty missing, equities OK → DEGRADED (19-Nov scenario)."""
+    from backend.services.open_low_high.screener import freeze_gate
+
+    ok, reason = freeze_gate(coverage=0.95, nifty_present=False)
+    assert ok is False
+    assert reason == "nifty_missing"
+
+
+def test_5_4_late_ws_first_tick_untrusted():
+    """5.4 Late WS first tick >5s → UNTRUSTED."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high.screener import _ws_bucket_trusted
+
+    IST = pytz.timezone("Asia/Kolkata")
+    bucket = IST.localize(datetime(2026, 11, 19, 9, 15, 0))
+    late = IST.localize(datetime(2026, 11, 19, 9, 15, 6))
+    early = IST.localize(datetime(2026, 11, 19, 9, 15, 2))
+    assert _ws_bucket_trusted(bucket, late) is False
+    assert _ws_bucket_trusted(bucket, early) is True
+
+
+def test_5_5_ws_keepalive_outside_window_skipped():
+    """5.5 Socket drop/reconnect helper skips outside 09:05–09:29."""
+    from datetime import datetime
+    from unittest.mock import patch
+
+    import pytz
+
+    from backend.services.open_low_high import ws_feed as wf
+
+    IST = pytz.timezone("Asia/Kolkata")
+    with patch.object(wf, "_now", return_value=IST.localize(datetime(2026, 11, 19, 10, 0))):
+        out = wf.resubscribe_olh_ws_keepalive()
+    assert out.get("status") == "skipped"
+
+
+def test_5_6_pdc_null_crosscheck_alerts(monkeypatch):
+    """5.6 Null PDC at 09:00 verify → repair path + alert (no silent null)."""
+    from backend.services.open_low_high import pdc as pdc_mod
+
+    alerts = []
+
+    monkeypatch.setattr(
+        pdc_mod,
+        "fill_equity_prev_close",
+        lambda **kw: {
+            "ok": True,
+            "fail_n": 2,
+            "nifty_prev_close": None,
+            "ok_n": 0,
+        },
+    )
+    monkeypatch.setattr(pdc_mod, "_load_equity_rows", lambda only_null=True: [("AAA", "NSE_EQ|1"), ("BBB", "NSE_EQ|2")])
+    monkeypatch.setattr(pdc_mod, "ensure_pdc_columns", lambda: None)
+    monkeypatch.setattr(pdc_mod, "ohl_log", lambda *a, **k: None)
+
+    def _fake_alert(reason, *, trade_date, **kw):
+        alerts.append((reason, trade_date, kw))
+        return True
+
+    import backend.services.open_low_high.alerts as alerts_mod
+
+    monkeypatch.setattr(alerts_mod, "alert_degraded", _fake_alert)
+    # Also patch the import site used inside the function.
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "backend.services.open_low_high.alerts",
+        type("M", (), {"alert_degraded": staticmethod(_fake_alert)})(),
+    )
+
+    out = pdc_mod.crosscheck_pdc_at_0900(session=__import__("datetime").date(2026, 11, 19))
+    assert out.get("still_null_n") == 2
+    assert out.get("nifty_prev_close") is None
+    assert len(alerts) >= 1
+
+
+def test_freeze_gate_and_config_defaults():
+    from backend.services.open_low_high import config as cfg
+    from backend.services.open_low_high.screener import freeze_gate
+
+    assert cfg.FREEZE_COVERAGE_MIN == 0.90
+    assert cfg.WS_FIRST_TICK_TRUST_SEC == 5
+    assert cfg.CANARY_EQUITY_SHARE == 0.90
+    ok, _ = freeze_gate(coverage=0.90, nifty_present=True)
+    assert ok is True
+    ok2, _ = freeze_gate(coverage=0.899, nifty_present=True)
+    assert ok2 is False

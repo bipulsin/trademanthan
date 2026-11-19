@@ -16,6 +16,27 @@ NO_CACHE="${NO_CACHE:-0}"
 TRADEMANTHAN_REF="${TRADEMANTHAN_REF:-main}"
 TWCTO_DIR="${TWCTO_DIR:-/home/ubuntu/twcto}"
 
+# Deploy / restart guard: block 08:45–09:35 IST (OLH pre-market window).
+# Override: OLH_DEPLOY_GUARD_FORCE=1 or FORCE_DEPLOY=1
+_olh_deploy_guard() {
+  local force="${OLH_DEPLOY_GUARD_FORCE:-${FORCE_DEPLOY:-0}}"
+  if [[ "$force" == "1" || "$force" == "true" || "$force" == "yes" ]]; then
+    echo "[deploy-guard] FORCE override — proceeding inside/outside OLH window"
+    return 0
+  fi
+  local ist_hm
+  ist_hm="$(TZ=Asia/Kolkata date '+%H%M')"
+  # 0845–0935 inclusive of start, exclusive of end minute 35? Spec: 08:45–09:35 → block while H:M in that range.
+  if [[ "$ist_hm" -ge 845 && "$ist_hm" -lt 935 ]]; then
+    echo "[deploy-guard] BLOCKED: IST $(TZ=Asia/Kolkata date '+%H:%M') is inside 08:45–09:35 OLH window." >&2
+    echo "[deploy-guard] Do not restart production during Open Low High. Retry after 09:35 IST." >&2
+    echo "[deploy-guard] Override only if intentional: OLH_DEPLOY_GUARD_FORCE=1 $0" >&2
+    exit 42
+  fi
+  echo "[deploy-guard] OK: IST $(TZ=Asia/Kolkata date '+%H:%M') outside 08:45–09:35"
+}
+_olh_deploy_guard
+
 # Resolve branch tip to commit SHA so Docker src layers re-clone on every app push
 # (avoids stale frontend when TRADEMANTHAN_REF would otherwise stay the string "main").
 _resolve_trademanthan_ref() {

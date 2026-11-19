@@ -71,8 +71,14 @@ ENTRY_SLIPPAGE_FRAC = 0.0002  # 2 bps
 SCREEN_AFTER = time(9, 25, 3)
 FREEZE_BY = time(9, 29, 0)
 HARD_DEADLINE = time(9, 29, 0)
-# Fraction of universe missing equity 09:15 / prev-day (legacy incomplete helper).
-MISSING_DATA_RATE_THRESHOLD = 0.35
+from backend.services.open_low_high.config import (
+    FREEZE_COVERAGE_MIN,
+    MISSING_DATA_RATE_THRESHOLD,
+    WS_FIRST_TICK_TRUST_SEC,
+    WS_TRY_COUNT,
+    WS_TRY_MIN_1M_BARS,
+    WS_TRY_WAIT_SEC,
+)
 
 _run_lock = threading.Lock()
 _last_run: Dict[str, Any] = {}
@@ -88,11 +94,26 @@ def _today() -> date:
     return _now().date()
 
 
+def _token_tail(token: Optional[str]) -> str:
+    t = str(token or "")
+    return t[-4:] if len(t) >= 4 else ("****" if t else "none")
+
+
 def _upstox():
     from backend.config import settings
     from backend.services.upstox_service import UpstoxService
 
-    return UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    try:
+        ux.reload_token_from_storage()
+    except Exception:
+        pass
+    logger.info(
+        "OLH upstox token loaded last4=%s has_token=%s",
+        _token_tail(getattr(ux, "access_token", None)),
+        bool(getattr(ux, "access_token", None)),
+    )
+    return ux
 
 
 def window_status(now: Optional[datetime] = None) -> str:
@@ -176,6 +197,38 @@ def data_quality_incomplete(
     incomplete = (not nifty_ready) or (missing_rate >= float(missing_rate_threshold))
     details["incomplete"] = incomplete
     return incomplete, details
+
+
+def freeze_gate(
+    *,
+    coverage: float,
+    nifty_present: bool,
+    coverage_min: float = FREEZE_COVERAGE_MIN,
+) -> Tuple[bool, str]:
+    """Return ``(may_freeze, reason)``. Freeze only if coverage ≥ min AND Nifty present."""
+    cov = float(coverage or 0.0)
+    if not nifty_present:
+        return False, "nifty_missing"
+    if cov < float(coverage_min):
+        return False, f"coverage_below_{coverage_min:.0%}"
+    return True, "ok"
+
+
+def equity_coverage_from_miss(
+    *,
+    scanned: int,
+    miss_stats: Dict[str, int],
+) -> float:
+    """Share of universe that had usable equity 09:15 bars (approx from miss counters)."""
+    scanned_n = max(int(scanned or 0), 0)
+    if scanned_n <= 0:
+        return 0.0
+    no_bars = int(miss_stats.get("no_bars") or 0)
+    no_0915 = int(miss_stats.get("no_0915") or 0)
+    no_equity_key = int(miss_stats.get("no_equity_key") or 0)
+    # Conservative: each miss counter counts distinct symbols in Phase A path.
+    missing = min(scanned_n, no_bars + no_0915 + no_equity_key)
+    return max(0.0, 1.0 - (float(missing) / float(scanned_n)))
 
 
 def _bars_from_rows(rows: List[Dict[str, Any]], contract: str) -> List[Bar]:
@@ -305,13 +358,33 @@ def _freeze_fut_entry(
     return float(base), method_base
 
 
-def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
-    """Aggregate Upstox WS 1m candles into 5m bars for today's session (gap-fill only)."""
+def _ws_bucket_trusted(
+    bucket_start: datetime,
+    first_1m_ts: datetime,
+    *,
+    trust_sec: int = WS_FIRST_TICK_TRUST_SEC,
+) -> bool:
+    """TRUSTED only if first 1m bar of the 5m bucket is within ``trust_sec`` of bucket open."""
+    delta = (first_1m_ts - bucket_start).total_seconds()
+    return 0.0 <= float(delta) <= float(trust_sec)
+
+
+def _fetch_ws_5m_bars(
+    instrument_key: str,
+    session: date,
+    *,
+    require_trusted: bool = False,
+) -> Tuple[List[Bar], str]:
+    """Aggregate Upstox WS 1m → exchange-aligned 5m (09:15–09:19, 09:20–09:24, …).
+
+    Returns ``(bars, trust)`` where trust is ``TRUSTED`` / ``UNTRUSTED`` / ``none``.
+    UNTRUSTED bars are still returned unless ``require_trusted=True``.
+    """
     rows = _fetch_ws_1m_rows(instrument_key, session)
     if not rows:
-        return []
-    # Aggregate 1m → 5m aligned to :00/:05/:10… IST
-    buckets: Dict[datetime, Dict[str, float]] = {}
+        return [], "none"
+    # Aggregate 1m → 5m aligned to :00/:05/:10… IST; track first 1m ts per bucket.
+    buckets: Dict[datetime, Dict[str, Any]] = {}
     for r in rows:
         ts = _parse_bar_ts(r.get("timestamp"))
         if ts is None:
@@ -322,14 +395,29 @@ def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
         vol = float(r.get("volume") or 0)
         cur = buckets.get(bucket)
         if cur is None:
-            buckets[bucket] = {"open": o, "high": h, "low": l, "close": c, "volume": vol}
+            buckets[bucket] = {
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": vol,
+                "first_1m": ts,
+            }
         else:
             cur["high"] = max(cur["high"], h)
             cur["low"] = min(cur["low"], l)
             cur["close"] = c
             cur["volume"] += vol
+            if ts < cur["first_1m"]:
+                cur["first_1m"] = ts
     out: List[Bar] = []
+    untrusted = False
     for bucket, ohlc in sorted(buckets.items()):
+        trusted = _ws_bucket_trusted(bucket, ohlc["first_1m"])
+        if not trusted:
+            untrusted = True
+            if require_trusted:
+                continue
         out.append(
             Bar(
                 ts=bucket,
@@ -341,7 +429,9 @@ def _fetch_ws_5m_bars(instrument_key: str, session: date) -> List[Bar]:
                 contract=instrument_key,
             )
         )
-    return out
+    if not out:
+        return [], "none"
+    return out, ("UNTRUSTED" if untrusted else "TRUSTED")
 
 
 def _hist_range_end(session: date) -> date:
@@ -355,18 +445,27 @@ def _hist_range_end(session: date) -> date:
 
 
 def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
-    try:
-        raw = upstox.get_historical_candles_by_instrument_key(
-            instrument_key,
-            interval="minutes/5",
-            days_back=5,
-            range_end_date=_hist_range_end(session),
-        )
-    except Exception as exc:
-        logger.info("olh rest 5m %s: %s", instrument_key, exc)
-        raw = None
+    """Today's 5m: prefer V3 intraday for the live session, then historical+merge."""
+    raw = None
+    # Live session: intraday endpoint is the authoritative source for TODAY's bars.
+    if session >= _today():
+        try:
+            raw = upstox._fetch_intraday_candles_v3(instrument_key, "minutes/5")
+        except Exception as exc:
+            logger.info("olh rest intraday 5m %s: %s", instrument_key, exc)
+            raw = None
     if not raw:
-        # Live intraday endpoint as last resort
+        try:
+            raw = upstox.get_historical_candles_by_instrument_key(
+                instrument_key,
+                interval="minutes/5",
+                days_back=5,
+                range_end_date=_hist_range_end(session),
+            )
+        except Exception as exc:
+            logger.info("olh rest 5m %s: %s", instrument_key, exc)
+            raw = None
+    if not raw and session < _today():
         try:
             raw = upstox._fetch_intraday_candles_v3(instrument_key, "minutes/5")
         except Exception:
@@ -434,9 +533,104 @@ def _session_5m_bars(upstox: Any, instrument_key: str, session: date) -> List[Ba
     """Merge WS + REST 5m; REST wins on timestamp conflicts (legacy path)."""
     if not instrument_key:
         return []
-    ws_bars = _fetch_ws_5m_bars(instrument_key, session)
+    ws_bars, _trust = _fetch_ws_5m_bars(instrument_key, session)
     rest_bars = _fetch_rest_5m(upstox, instrument_key, session)
     return _merge_bars(rest_bars, ws_bars)
+
+
+def _record_attempt(
+    session: date,
+    *,
+    symbol: str,
+    instrument_key: str,
+    source: str,
+    status: str,
+    candle_count: int = 0,
+    error: str = "",
+    detail: str = "",
+) -> None:
+    try:
+        from backend.services.open_low_high.persistence import record_fetch_attempt
+
+        record_fetch_attempt(
+            trade_date=session,
+            symbol=symbol,
+            instrument_key=instrument_key,
+            source=source,
+            status=status,
+            candle_count=candle_count,
+            error=error,
+            detail=detail,
+        )
+    except Exception:
+        logger.debug("olh record_fetch_attempt failed", exc_info=True)
+
+
+def _ws_try_once(
+    instrument_key: str,
+    session: date,
+    *,
+    symbol: str,
+    action: str,
+    try_n: int,
+) -> Tuple[List[Bar], str]:
+    """One WS try: optional short wait for ≥N 1m bars, then aggregate; TRUSTED only if early ticks."""
+    from backend.services.open_low_high.ohl_log import ohl_log
+
+    wait = float(WS_TRY_WAIT_SEC)
+    need = max(1, int(WS_TRY_MIN_1M_BARS))
+    if wait > 0:
+        rows = _fetch_ws_1m_rows(instrument_key, session)
+        if len(rows) < need:
+            time_mod.sleep(min(wait, 5.0))
+    bars, trust = _fetch_ws_5m_bars(instrument_key, session, require_trusted=False)
+    src_label = f"ws_try{try_n}"
+    if not bars:
+        ohl_log("failed", action=action, symbol=symbol, source=src_label, detail="no_bars")
+        _record_attempt(
+            session,
+            symbol=symbol,
+            instrument_key=instrument_key,
+            source=src_label,
+            status="empty",
+            detail="no_bars",
+        )
+        return [], "none"
+    if trust != "TRUSTED":
+        ohl_log(
+            "failed",
+            action=action,
+            symbol=symbol,
+            source=src_label,
+            detail=f"UNTRUSTED bars={len(bars)} → REST",
+        )
+        _record_attempt(
+            session,
+            symbol=symbol,
+            instrument_key=instrument_key,
+            source=src_label,
+            status="untrusted",
+            candle_count=len(bars),
+            detail=trust,
+        )
+        return [], "UNTRUSTED"
+    ohl_log(
+        "success",
+        action=action,
+        symbol=symbol,
+        source=src_label,
+        detail=f"TRUSTED bars={len(bars)}",
+    )
+    _record_attempt(
+        session,
+        symbol=symbol,
+        instrument_key=instrument_key,
+        source=src_label,
+        status="ok",
+        candle_count=len(bars),
+        detail=trust,
+    )
+    return bars, "ws"
 
 
 def _session_5m_bars_try(
@@ -448,44 +642,74 @@ def _session_5m_bars_try(
     action: str = "bars_try",
     prefer: str = "ws",
 ) -> Tuple[List[Bar], str]:
-    """Fetch 5m bars with ordered tries (default WS first, then REST). Logs each try."""
+    """Per symbol: WS try1 → WS try2 → REST. Records source + fetch_attempt rows."""
     from backend.services.open_low_high.ohl_log import ohl_log
 
     if not instrument_key:
         ohl_log("skipped", action=action, symbol=symbol, detail="no_instrument_key")
         return [], "none"
 
-    order = ("ws", "rest") if prefer == "ws" else ("rest", "ws")
     collected: List[Bar] = []
     used = "none"
-    for source in order:
-        if source == "ws":
-            bars = _fetch_ws_5m_bars(instrument_key, session)
-        else:
-            bars = _fetch_rest_5m(upstox, instrument_key, session)
-        if bars:
+
+    if prefer == "ws":
+        tries = max(1, int(WS_TRY_COUNT))
+        for i in range(1, tries + 1):
+            bars, src = _ws_try_once(
+                instrument_key, session, symbol=symbol, action=action, try_n=i
+            )
+            if bars:
+                collected = bars
+                used = src
+                break
+        rest = _fetch_rest_5m(upstox, instrument_key, session)
+        if rest:
+            _record_attempt(
+                session,
+                symbol=symbol,
+                instrument_key=instrument_key,
+                source="rest",
+                status="ok",
+                candle_count=len(rest),
+            )
             ohl_log(
                 "success",
                 action=action,
                 symbol=symbol,
-                source=source,
-                detail=f"bars={len(bars)}",
+                source="rest",
+                detail=f"bars={len(rest)}",
             )
             if not collected:
-                collected = bars
-                used = source
+                collected = rest
+                used = "rest"
             else:
-                # Fill gaps from second source; first source wins conflicts.
-                collected = _merge_bars(collected, bars)
+                collected = _merge_bars(collected, rest)
         else:
-            ohl_log(
-                "failed",
-                action=action,
+            _record_attempt(
+                session,
                 symbol=symbol,
-                source=source,
+                instrument_key=instrument_key,
+                source="rest",
+                status="empty",
                 detail="no_bars",
             )
-    return collected, used
+            ohl_log("failed", action=action, symbol=symbol, source="rest", detail="no_bars")
+        return collected, used
+
+    # prefer rest
+    rest = _fetch_rest_5m(upstox, instrument_key, session)
+    if rest:
+        _record_attempt(
+            session,
+            symbol=symbol,
+            instrument_key=instrument_key,
+            source="rest",
+            status="ok",
+            candle_count=len(rest),
+        )
+        return rest, "rest"
+    bars, src = _ws_try_once(instrument_key, session, symbol=symbol, action=action, try_n=1)
+    return bars, src
 
 
 def _screen_one(
@@ -699,6 +923,7 @@ def _screen_one(
         "t2": t2,
         "data_source_logic": "equity",
         "data_source_levels": "future",
+        "data_source": bar_src,
     }
 
 
