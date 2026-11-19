@@ -619,6 +619,78 @@ def test_pdc_column_name():
     assert PDC_DATE_COLUMN == "equity_prev_close_date"
 
 
+def test_pdc_resolve_asof_eod_vs_morning():
+    """EOD stores today's close; 09:00 uses previous trading day."""
+    from datetime import date
+
+    from backend.services.open_low_high.pdc import _resolve_asof
+
+    d = date(2026, 11, 19)
+    assert _resolve_asof(d, eod=True) == date(2026, 11, 19)
+    assert _resolve_asof(d, eod=False) == date(2026, 11, 18)
+    # Next morning (20-Nov) → prior completed session 19-Nov
+    assert _resolve_asof(date(2026, 11, 20), eod=False) == date(2026, 11, 19)
+
+
+def test_pdc_close_on_asof_no_older_hist_mislabel(monkeypatch):
+    """Missing asof hist bar must not return an older session close."""
+    from datetime import date, datetime
+    from types import SimpleNamespace
+
+    import pytz
+
+    from backend.services.open_high_low.bars import Bar
+    from backend.services.open_low_high import pdc as pdc_mod
+
+    IST = pytz.timezone("Asia/Kolkata")
+    asof = date(2026, 11, 19)
+    older = Bar(
+        ts=IST.localize(datetime(2026, 11, 18, 15, 30)),
+        open=1,
+        high=1,
+        low=1,
+        close=1363.0,
+        volume=1,
+        contract="NSE_EQ|X",
+    )
+
+    class FakeUx:
+        def get_historical_candles_by_instrument_key(self, *a, **k):
+            return [{"raw": True}]
+
+        def get_ohlc_data(self, ik):
+            return {"open": 1, "high": 1, "low": 1, "close": 1375.6, "last_price": 1375.6}
+
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._bars_from_rows",
+        lambda rows, ik: [older],
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._hist_range_end",
+        lambda d: d,
+    )
+    monkeypatch.setattr(
+        pdc_mod,
+        "_now",
+        lambda: IST.localize(datetime(2026, 11, 19, 18, 0)),
+    )
+
+    # EOD / same-day: quote fallback
+    pc = pdc_mod._close_on_asof(FakeUx(), "NSE_EQ|X", asof, asof, eod=True)
+    assert pc == 1375.6
+
+    # Morning of 20-Nov looking for 19-Nov: missing hist → None (no older mislabel)
+    monkeypatch.setattr(
+        pdc_mod,
+        "_now",
+        lambda: IST.localize(datetime(2026, 11, 20, 9, 0)),
+    )
+    pc2 = pdc_mod._close_on_asof(
+        FakeUx(), "NSE_EQ|X", date(2026, 11, 19), date(2026, 11, 20), eod=False
+    )
+    assert pc2 is None
+
+
 def test_ws_lock_window_and_merge():
     from datetime import datetime
 
@@ -749,8 +821,11 @@ def test_56_null_pdc_crosscheck_flags_still_null(monkeypatch):
     monkeypatch.setattr(
         pdc_mod,
         "_load_equity_rows",
-        lambda only_null=False: [("ZZNULL", "NSE_EQ|INE000")] if only_null else [],
+        lambda only_null=False, expected_asof=None: (
+            [("ZZNULL", "NSE_EQ|INE000")] if only_null else []
+        ),
     )
+    monkeypatch.setattr(pdc_mod, "get_equity_prev_close", lambda symbol: None)
     alerts = []
     monkeypatch.setattr(
         "backend.services.open_low_high.alerts.alert_degraded",
@@ -766,6 +841,7 @@ def test_56_null_pdc_crosscheck_flags_still_null(monkeypatch):
     out = pdc_mod.crosscheck_pdc_at_0900(session=date(2026, 11, 19))
     assert out.get("still_null_n") == 1
     assert "ZZNULL" in (out.get("still_null_symbols") or [])
+    assert out.get("expected_asof") == "2026-11-18"
     assert alerts, "expected alert on remaining nulls"
 
 
@@ -938,7 +1014,12 @@ def test_5_6_pdc_null_crosscheck_alerts(monkeypatch):
             "ok_n": 0,
         },
     )
-    monkeypatch.setattr(pdc_mod, "_load_equity_rows", lambda only_null=True: [("AAA", "NSE_EQ|1"), ("BBB", "NSE_EQ|2")])
+    monkeypatch.setattr(
+        pdc_mod,
+        "_load_equity_rows",
+        lambda only_null=True, expected_asof=None: [("AAA", "NSE_EQ|1"), ("BBB", "NSE_EQ|2")],
+    )
+    monkeypatch.setattr(pdc_mod, "get_equity_prev_close", lambda symbol: None)
     monkeypatch.setattr(pdc_mod, "ensure_pdc_columns", lambda: None)
     monkeypatch.setattr(pdc_mod, "ohl_log", lambda *a, **k: None)
 

@@ -67,11 +67,36 @@ def _resolve_asof(trade_date: date, *, eod: bool) -> date:
     return previous_trading_day(trade_date)
 
 
-def _load_equity_rows(*, only_null: bool) -> List[Tuple[str, str]]:
+def _load_equity_rows(
+    *,
+    only_null: bool,
+    expected_asof: Optional[date] = None,
+) -> List[Tuple[str, str]]:
+    """Universe rows to (re)fill.
+
+    - ``only_null``: PDC value is null.
+    - ``expected_asof``: also include rows whose ``equity_prev_close_date`` is
+      missing or not equal to the expected session (stale / mislabeled).
+    """
     ensure_pdc_columns()
     db = SessionLocal()
     try:
-        where = f"AND ({PDC_COLUMN} IS NULL)" if only_null else ""
+        clauses: List[str] = []
+        params: Dict[str, Any] = {}
+        if only_null and expected_asof is not None:
+            clauses.append(
+                f"({PDC_COLUMN} IS NULL OR {PDC_DATE_COLUMN} IS NULL "
+                f"OR {PDC_DATE_COLUMN} <> :expected_asof)"
+            )
+            params["expected_asof"] = expected_asof
+        elif only_null:
+            clauses.append(f"({PDC_COLUMN} IS NULL)")
+        elif expected_asof is not None:
+            clauses.append(
+                f"({PDC_DATE_COLUMN} IS NULL OR {PDC_DATE_COLUMN} <> :expected_asof)"
+            )
+            params["expected_asof"] = expected_asof
+        where = f"AND ({' OR '.join(clauses)})" if clauses else ""
         rows = db.execute(
             text(
                 f"""
@@ -85,7 +110,8 @@ def _load_equity_rows(*, only_null: bool) -> List[Tuple[str, str]]:
                   {where}
                 ORDER BY 1
                 """
-            )
+            ),
+            params,
         ).fetchall()
         out: List[Tuple[str, str]] = []
         for r in rows:
@@ -163,7 +189,43 @@ def get_equity_prev_close(symbol: str) -> Optional[float]:
         db.close()
 
 
-def _close_on_asof(upstox: Any, instrument_key: str, asof: date, trade_date: date) -> Optional[float]:
+def _quote_day_close(upstox: Any, instrument_key: str) -> Optional[float]:
+    """Settled/live 1d close from Upstox market-quote OHLC (available before hist day bar)."""
+    try:
+        ohlc = upstox.get_ohlc_data(instrument_key)
+    except Exception as exc:
+        ohl_log(
+            "failed",
+            action="pdc_quote",
+            symbol=instrument_key,
+            source="rest",
+            detail=str(exc)[:160],
+        )
+        return None
+    if not ohlc:
+        return None
+    close = ohlc.get("close") or ohlc.get("last_price")
+    try:
+        return float(close) if close is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _close_on_asof(
+    upstox: Any,
+    instrument_key: str,
+    asof: date,
+    trade_date: date,
+    *,
+    eod: bool = False,
+) -> Optional[float]:
+    """Return close for ``asof`` only — never mislabel an older hist bar as ``asof``.
+
+    Historical ``days/1`` often lags the session by hours after the bell. For EOD /
+    same-calendar-day ``asof``, fall back to market-quote 1d OHLC close. Do **not**
+    silently use a prior session's hist close (that produced 18-Nov values stamped
+    as 19-Nov).
+    """
     from backend.services.open_low_high.screener import _bars_from_rows, _hist_range_end
 
     try:
@@ -181,14 +243,41 @@ def _close_on_asof(upstox: Any, instrument_key: str, asof: date, trade_date: dat
             source="rest",
             detail=str(exc)[:160],
         )
-        return None
+        raw = None
     bars = _bars_from_rows(list(raw or []), instrument_key)
     for b in bars:
         if b.session_date == asof:
             return float(b.close)
-    earlier = [b for b in bars if b.session_date <= asof]
-    if earlier:
-        return float(earlier[-1].close)
+
+    # Same-day / EOD: hist day candle often missing until later; quote has today's close.
+    if eod or asof == _now().date():
+        q = _quote_day_close(upstox, instrument_key)
+        if q is not None:
+            ohl_log(
+                "success",
+                action="pdc_fetch_quote",
+                symbol=instrument_key,
+                source="rest",
+                detail=f"pc={q} asof={asof}",
+            )
+            return q
+        ohl_log(
+            "failed",
+            action="pdc_fetch",
+            symbol=instrument_key,
+            source="rest",
+            detail=f"no hist/quote bar for asof={asof}",
+        )
+        return None
+
+    # Morning / prior session: require exact hist match (no older-bar mislabel).
+    ohl_log(
+        "failed",
+        action="pdc_fetch",
+        symbol=instrument_key,
+        source="rest",
+        detail=f"no hist bar for asof={asof}",
+    )
     return None
 
 
@@ -212,13 +301,18 @@ def fill_equity_prev_close(
     try:
         ensure_pdc_columns()
         upstox = _upstox()
-        rows = _load_equity_rows(only_null=only_null)
+        # Morning repair: only_null also refreshes rows stamped with a wrong asof.
+        expected_for_filter = None if eod else asof
+        rows = _load_equity_rows(
+            only_null=only_null,
+            expected_asof=expected_for_filter if only_null else None,
+        )
         ok = 0
         fail = 0
 
         def _one(item: Tuple[str, str]) -> Tuple[str, Optional[float]]:
             sym, ik = item
-            return sym, _close_on_asof(upstox, ik, asof, trade_date)
+            return sym, _close_on_asof(upstox, ik, asof, trade_date, eod=eod)
 
         with ThreadPoolExecutor(max_workers=max(1, min(max_workers, 8))) as pool:
             futs = [pool.submit(_one, item) for item in rows]
@@ -249,7 +343,18 @@ def fill_equity_prev_close(
 
         nifty_pc = None
         if include_index:
-            nifty_pc = _close_on_asof(upstox, NIFTY_INDEX_KEY, asof, trade_date)
+            nifty_pc = _close_on_asof(upstox, NIFTY_INDEX_KEY, asof, trade_date, eod=eod)
+            if nifty_pc is not None:
+                try:
+                    _write_pdc("NIFTY", nifty_pc, asof)
+                except Exception:
+                    ohl_log(
+                        "failed",
+                        action="pdc_write",
+                        symbol="NIFTY",
+                        source="db",
+                        detail="write failed",
+                    )
             ohl_log(
                 "success" if nifty_pc is not None else "failed",
                 action="pdc_fill_index",
@@ -293,28 +398,44 @@ def fill_equity_prev_close(
 
 
 def crosscheck_pdc_at_0900(*, session: Optional[date] = None) -> Dict[str, Any]:
-    """09:00 IST: any null PDC → fetch and fill (keys from latest arbitrage_master).
+    """09:00 IST: repair null/stale PDC to prior completed session's close.
 
+    As of the morning of ``trade_date``, PDC must equal
+    ``previous_trading_day(trade_date)`` close (e.g. 20-Nov 09:00 → 19-Nov close).
+    Rows with wrong ``equity_prev_close_date`` are re-fetched, not left stale.
     Remaining nulls after repair are logged + alerted — never silently used in screen.
     """
     trade_date = session or _now().date()
-    ohl_log("success", action="pdc_crosscheck_start", detail=f"session={trade_date}")
+    expected = previous_trading_day(trade_date)
+    ohl_log(
+        "success",
+        action="pdc_crosscheck_start",
+        detail=f"session={trade_date} expected_asof={expected}",
+    )
     ensure_pdc_columns()
+    # Full refresh (not only_null): verifies values against prior completed session
+    # even when asof date was already stamped (e.g. EOD wrote an older close under
+    # today's date before hist/quote caught up).
     result = fill_equity_prev_close(
-        session=trade_date, only_null=True, eod=False, include_index=True
+        session=trade_date, only_null=False, eod=False, include_index=True
     )
     result["action"] = "pdc_crosscheck_0900"
-    # Re-check remaining nulls after repair.
-    still_null = _load_equity_rows(only_null=True)
-    result["still_null_n"] = len(still_null)
-    result["still_null_symbols"] = [s for s, _ in still_null[:40]]
-    if still_null or result.get("nifty_prev_close") is None:
+    result["expected_asof"] = expected.isoformat()
+    # Re-check remaining nulls / wrong asof after repair.
+    still_bad = _load_equity_rows(only_null=True, expected_asof=expected)
+    result["still_null_n"] = len(still_bad)
+    result["still_null_symbols"] = [s for s, _ in still_bad[:40]]
+    nifty_pc = get_equity_prev_close("NIFTY")
+    if nifty_pc is not None:
+        result["nifty_prev_close"] = float(nifty_pc)
+    if still_bad or result.get("nifty_prev_close") is None:
         ohl_log(
             "failed",
             action="pdc_crosscheck_nulls",
             detail=(
-                f"still_null={len(still_null)} "
+                f"still_null={len(still_bad)} "
                 f"nifty={result.get('nifty_prev_close')} "
+                f"expected_asof={expected} "
                 f"exclude_from_screen=True"
             ),
         )
@@ -322,10 +443,10 @@ def crosscheck_pdc_at_0900(*, session: Optional[date] = None) -> Dict[str, Any]:
             from backend.services.open_low_high.alerts import alert_degraded
 
             alert_degraded(
-                f"PDC null after 09:00 repair: equities={len(still_null)} "
-                f"nifty={result.get('nifty_prev_close')}",
+                f"PDC null/stale after 09:00 repair: equities={len(still_bad)} "
+                f"nifty={result.get('nifty_prev_close')} expected_asof={expected}",
                 trade_date=trade_date.isoformat(),
-                still_null_n=len(still_null),
+                still_null_n=len(still_bad),
             )
         except Exception:
             pass
@@ -398,26 +519,101 @@ def pdc_completeness(
         db.close()
 
     nifty_pc = get_equity_prev_close("NIFTY")
-    # Nifty may live only in fill result / index path — also accept master row.
-    if nifty_pc is None:
+    nifty_asof: Optional[date] = None
+    db2 = SessionLocal()
+    try:
+        nrow = db2.execute(
+            text(
+                f"""
+                SELECT {PDC_COLUMN}, {PDC_DATE_COLUMN}
+                FROM arbitrage_master
+                WHERE UPPER(TRIM(stock)) = 'NIFTY'
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+        if nrow and nrow[0] is not None:
+            nifty_pc = float(nrow[0])
+            if nrow[1] is not None:
+                nifty_asof = (
+                    nrow[1]
+                    if isinstance(nrow[1], date)
+                    else date.fromisoformat(str(nrow[1])[:10])
+                )
+    except Exception:
+        pass
+    finally:
+        db2.close()
+
+    # Count equities stamped with the expected prior session (morning readiness).
+    asof_ok_n = 0
+    try:
+        db3 = SessionLocal()
         try:
-            from backend.services.open_low_high.screener import _fetch_daily_prev, _upstox
+            arow = db3.execute(
+                text(
+                    f"""
+                    SELECT COUNT(*) FROM arbitrage_master
+                    WHERE {PDC_COLUMN} IS NOT NULL
+                      AND {PDC_DATE_COLUMN} = :exp
+                      AND stock_instrument_key IS NOT NULL
+                      AND TRIM(stock_instrument_key) <> ''
+                      AND UPPER(TRIM(stock)) NOT IN
+                          ('NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY')
+                    """
+                ),
+                {"exp": expected_asof},
+            ).fetchone()
+            asof_ok_n = int((arow[0] if arow else 0) or 0)
+        finally:
+            db3.close()
+    except Exception:
+        asof_ok_n = 0
 
-            _ph, _pl, nifty_pc = _fetch_daily_prev(_upstox(), NIFTY_INDEX_KEY, trade_date)
+    # Same-day EOD may stamp trade_date itself (becomes tomorrow's PDC).
+    eod_today = trade_date == _now().date() and _now().time().hour >= 16
+    if eod_today:
+        try:
+            db4 = SessionLocal()
+            try:
+                arow = db4.execute(
+                    text(
+                        f"""
+                        SELECT COUNT(*) FROM arbitrage_master
+                        WHERE {PDC_COLUMN} IS NOT NULL
+                          AND {PDC_DATE_COLUMN} = :exp
+                          AND stock_instrument_key IS NOT NULL
+                          AND TRIM(stock_instrument_key) <> ''
+                          AND UPPER(TRIM(stock)) NOT IN
+                              ('NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY')
+                        """
+                    ),
+                    {"exp": trade_date},
+                ).fetchone()
+                asof_ok_n = max(asof_ok_n, int((arow[0] if arow else 0) or 0))
+            finally:
+                db4.close()
         except Exception:
-            nifty_pc = None
+            pass
 
-    equities_ok = filled_n >= int(min_equities)
-    nifty_ok = nifty_pc is not None
+    equities_ok = filled_n >= int(min_equities) and asof_ok_n >= int(min_equities)
+    nifty_date_ok = nifty_asof in {expected_asof, trade_date} if nifty_asof else False
+    nifty_ok = nifty_pc is not None and (nifty_date_ok or nifty_asof is None)
+    # Prefer persisted Nifty with correct asof; allow value-only if row missing date
+    # during transition, but require value.
+    if nifty_pc is not None and nifty_asof is not None:
+        nifty_ok = nifty_date_ok
     return {
         "ok": bool(equities_ok and nifty_ok),
         "trade_date": trade_date.isoformat(),
         "expected_asof": expected_asof.isoformat(),
         "min_equities": int(min_equities),
         "equities_filled": filled_n,
+        "equities_asof_ok": asof_ok_n,
         "equities_universe": universe_n,
         "equities_null": null_n,
         "equities_ok": equities_ok,
         "nifty_prev_close": float(nifty_pc) if nifty_pc is not None else None,
+        "nifty_prev_close_date": nifty_asof.isoformat() if nifty_asof else None,
         "nifty_ok": nifty_ok,
     }
