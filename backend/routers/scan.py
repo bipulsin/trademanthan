@@ -4354,31 +4354,51 @@ async def health_check():
         pool_stats = get_db_pool_stats()
         log_db_pool_pressure(logger, "scan_health")
 
-        # Webhook alert volume is only a liveness signal during the cash session
-        # window when TradingView→webhook flow is expected (11:00–15:30 IST,
-        # Mon–Fri). Before 11:00, after 15:30, weekends, and holidays: 0 alerts
-        # must not 503 — so a morning probe (e.g. 09:05 IST) only fails on real
-        # infra faults (DB / pool / Upstox token during probe hours).
+        # IntradayStockOption webhook volume is informational only.
+        # That path has been idle for multi-day stretches (0 rows), so gating
+        # HTTP 503 on ``today_alerts`` caused standing false degraded after
+        # 11:00 IST even when DB/Upstox/instruments were fine.
+        # Soft-warn in-session (11:00–15:30 IST weekdays, non-holiday) so
+        # silence is still visible; never fail the probe for it.
+        # Hard health (200 vs 503): DB, Upstox during IST probe window
+        # (09:00–16:00; skipped/ok off-hours), instruments file, DB pool.
+        # Off-hours expected skips must not 503 — so 09:05 IST returning 503
+        # always means a real hard-check failure.
         from datetime import time as dtime
 
         is_weekday = now.weekday() < 5
-        webhook_expect_window = is_weekday and dtime(11, 0) <= now.time() <= dtime(15, 30)
+        webhook_watch_window = is_weekday and dtime(11, 0) <= now.time() <= dtime(15, 30)
         try:
             from backend.services.market_holiday import should_skip_scheduled_market_jobs_ist
 
             if should_skip_scheduled_market_jobs_ist(now):
-                webhook_expect_window = False
+                webhook_watch_window = False
         except Exception:
             pass
-        webhooks_ok = (today_alerts > 0) or (not webhook_expect_window)
+        if today_alerts > 0:
+            webhooks_status = "ok"
+            webhooks_message = f"{today_alerts} alerts today"
+        elif webhook_watch_window:
+            webhooks_status = "warning"
+            webhooks_message = (
+                f"{today_alerts} alerts today "
+                "(informational — does not degrade /scan/health)"
+            )
+        else:
+            webhooks_status = "ok"
+            webhooks_message = (
+                f"{today_alerts} alerts today "
+                "(off-hours / non-session; webhook volume not required)"
+            )
+
         # Upstox probe already skips off-hours (token_valid=True outside 09–16).
         # During probe hours, a failed token must degrade overall status.
-        upstox_ok = bool(token_valid)
-        is_healthy = bool(db_healthy) and webhooks_ok and upstox_ok
-        if pool_stats.get("stressed"):
-            is_healthy = False
-        if not instruments_exists:
-            is_healthy = False
+        is_healthy = (
+            bool(db_healthy)
+            and bool(token_valid)
+            and bool(instruments_exists)
+            and not pool_stats.get("stressed")
+        )
 
         health_data = {
             "status": "healthy" if is_healthy else "degraded",
@@ -4395,13 +4415,10 @@ async def health_check():
                 },
                 "webhooks": {
                     "today_count": today_alerts,
-                    "status": "ok" if webhooks_ok else "warning",
-                    "message": (
-                        f"{today_alerts} alerts today"
-                        if webhooks_ok or webhook_expect_window
-                        else f"{today_alerts} alerts today (off-hours; not required)"
-                    ),
-                    "expect_alerts": webhook_expect_window,
+                    "status": webhooks_status,
+                    "message": webhooks_message,
+                    "expect_alerts": webhook_watch_window,
+                    "gates_http_status": False,
                 },
                 "instruments_file": {
                     "status": "ok" if instruments_exists else "error",

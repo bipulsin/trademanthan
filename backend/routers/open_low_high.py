@@ -105,16 +105,40 @@ def get_ltp(_user: User = Depends(_auth_user)) -> Dict[str, Any]:
 @router.get("/health")
 def health() -> Dict[str, Any]:
     from backend.services.open_low_high.persistence import ensure_tables, get_day_meta
+    from backend.services.open_low_high.scheduler import _scheduler
     from backend.services.open_low_high.screener import _today, window_status
 
     try:
         ensure_tables()
         meta = get_day_meta(_today())
+        jobs: list[Dict[str, Any]] = []
+        scheduler_running = False
+        try:
+            if _scheduler is not None:
+                scheduler_running = bool(getattr(_scheduler, "running", False))
+                for j in sorted(_scheduler.get_jobs(), key=lambda x: x.id):
+                    jobs.append(
+                        {
+                            "id": j.id,
+                            "name": j.name,
+                            "trigger": str(j.trigger),
+                            "next_run_time": (
+                                j.next_run_time.isoformat() if j.next_run_time else None
+                            ),
+                        }
+                    )
+        except Exception as sched_exc:
+            logger.debug("open_low_high health scheduler dump failed: %s", sched_exc)
         return {
             "ok": True,
             "window": window_status(),
             "trade_date": _today().isoformat(),
             "meta": meta,
+            "scheduler": {
+                "running": scheduler_running,
+                "job_count": len(jobs),
+                "jobs": jobs,
+            },
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
