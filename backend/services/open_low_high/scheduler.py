@@ -42,6 +42,8 @@ _CATCHUP_START = time(9, 20, 0)
 _CATCHUP_END = time(9, 29, 0)
 
 _scheduler: BackgroundScheduler | None = None
+# Serialize startup catch-up so lifespan + accidental double-spawn cannot race.
+_catchup_lock = threading.Lock()
 
 
 def _skip() -> bool:
@@ -138,9 +140,22 @@ def _run_ws_check_0915() -> None:
 
 
 def _run_phase_a() -> None:
+    """Cron / misfire / catch-up entry for Phase A.
+
+    Idempotent when a valid Phase A result already exists for today (skips
+    re-entry from misfire grace or a second catch-up). Intentional 09:24
+    refill uses ``_run_phase_a_refill`` / ``force`` and is unaffected.
+    """
     if _skip():
         return
     try:
+        trade_date = _aware_ist().date()
+        if has_valid_phase_a(trade_date):
+            logger.info(
+                "open_low_high Phase A skipped — already valid for %s",
+                trade_date,
+            )
+            return
         from backend.services.open_low_high.screener import run_phase_a
 
         result = run_phase_a()
@@ -170,10 +185,38 @@ def _run_phase_a_refill() -> None:
         logger.exception("open_low_high Phase A refill failed")
 
 
+def _phase_b_terminal(trade_date) -> bool:
+    """True when Phase B should not be re-entered by cron/misfire/catch-up.
+
+    In-progress ``phase_b`` (waiting on 09:20) is *not* terminal — dense
+    retries must continue. Frozen / partial / non-degraded complete counts.
+    """
+    from backend.services.open_low_high.persistence import get_day_meta
+
+    meta = get_day_meta(trade_date) or {}
+    if meta.get("frozen") and not meta.get("degraded"):
+        return True
+    status = str(meta.get("status") or "").lower()
+    return status in ("frozen", "phase_b_partial")
+
+
 def _run_phase_b() -> None:
+    """Cron / misfire / catch-up entry for Phase B.
+
+    Skips when Phase B is already terminal (frozen / partial). In-progress
+    attempts keep retrying until hard stop; ``run_phase_b`` also holds
+    ``_phase_b_lock`` so concurrent instances return ``busy``.
+    """
     if _skip():
         return
     try:
+        trade_date = _aware_ist().date()
+        if _phase_b_terminal(trade_date):
+            logger.info(
+                "open_low_high Phase B skipped — already terminal for %s",
+                trade_date,
+            )
+            return
         from backend.services.open_low_high.ws_feed import release_ws_lock
         from backend.services.open_low_high.screener import run_phase_b
 
@@ -273,97 +316,119 @@ def run_startup_catchup(*, now: Optional[datetime] = None) -> Dict[str, Any]:
 
     APScheduler ``misfire_grace_time`` is only 60–120s for Phase jobs and does
     **not** reliably replay triggers after a process restart. This hook fills that gap.
+
+    Idempotent: phases with a valid result for today are never re-run. Concurrent
+    catch-up is blocked via ``_catchup_lock``; Phase A/B runners also use
+    non-blocking locks (``busy``) so catch-up cannot overlap a live cron tick.
+    Buffer edges still apply: before ``PHASE_A_START`` / ``PHASE_B_START`` the
+    corresponding phase is not force-started (scheduled retries remain).
     """
     from backend.services.open_low_high.config import PHASE_A_START, PHASE_B_START, PHASE_B_HARD_STOP
 
-    t = _aware_ist(now)
-    trade_date = t.date()
-    tt = t.time()
-    out: Dict[str, Any] = {
-        "ok": True,
-        "trade_date": trade_date.isoformat(),
-        "now": t.isoformat(),
-        "actions": [],
-    }
+    if not _catchup_lock.acquire(blocking=False):
+        return {
+            "ok": True,
+            "skipped": "catchup_busy",
+            "actions": [],
+            "message": "Startup catch-up already running.",
+        }
 
-    if _skip():
-        out["skipped"] = "holiday_or_weekend"
-        return out
+    try:
+        t = _aware_ist(now)
+        trade_date = t.date()
+        tt = t.time()
+        out: Dict[str, Any] = {
+            "ok": True,
+            "trade_date": trade_date.isoformat(),
+            "now": t.isoformat(),
+            "actions": [],
+        }
 
-    if tt < _CATCHUP_START:
-        out["skipped"] = "before_catchup_window"
-        return out
-
-    need_a = not has_valid_phase_a(trade_date)
-    need_b = not has_valid_phase_b(trade_date)
-    out["need_phase_a"] = need_a
-    out["need_phase_b"] = need_b
-
-    # After 09:29: do not auto-run; mark DEGRADED + alert; force/re-screen still allowed.
-    if tt > _CATCHUP_END:
-        if not need_a and not need_b:
-            out["skipped"] = "complete_after_deadline"
+        if _skip():
+            out["skipped"] = "holiday_or_weekend"
             return out
-        missing = []
-        if need_a:
-            missing.append("phase_a")
-        if need_b:
-            missing.append("phase_b")
-        msg = (
-            f"Startup after {PHASE_B_HARD_STOP.strftime('%H:%M')} IST with missing "
-            f"{'+'.join(missing)}; marked DEGRADED (force/re-screen allowed)."
-        )
-        try:
-            from backend.services.open_low_high.alerts import alert_degraded
-            from backend.services.open_low_high.persistence import upsert_day_meta
 
-            upsert_day_meta(
-                trade_date,
-                status="degraded",
-                frozen=False,
-                degraded=True,
-                notes=msg,
-                meta={
-                    "phase": "startup_catchup",
-                    "degraded": True,
-                    "failure_banner": f"DEGRADED — {msg}",
-                    "missing": missing,
-                    "startup_catchup_at": t.isoformat(),
-                },
-            )
-            alert_degraded(msg, trade_date=trade_date.isoformat(), missing=",".join(missing))
-            out["actions"].append("degraded")
-            out["message"] = msg
-        except Exception as exc:
-            logger.exception("open_low_high startup catch-up DEGRADED path failed")
-            out["ok"] = False
-            out["error"] = str(exc)
-        return out
+        if tt < _CATCHUP_START:
+            out["skipped"] = "before_catchup_window"
+            return out
 
-    # Inside 09:20–09:29: run missing phases via the same cron runners (retry loop intact).
-    if need_a and tt >= PHASE_A_START:
-        logger.info(
-            "open_low_high startup catch-up: running Phase A (restart at %s)",
-            t.strftime("%H:%M:%S"),
-        )
-        _run_phase_a()
-        out["actions"].append("phase_a")
         need_a = not has_valid_phase_a(trade_date)
+        need_b = not has_valid_phase_b(trade_date)
         out["need_phase_a"] = need_a
+        out["need_phase_b"] = need_b
 
-    if tt >= PHASE_B_START and not has_valid_phase_b(trade_date):
-        # If Phase A still missing inside B window, A already attempted above when due.
-        logger.info(
-            "open_low_high startup catch-up: running Phase B (restart at %s)",
-            t.strftime("%H:%M:%S"),
-        )
-        _run_phase_b()
-        out["actions"].append("phase_b")
-        out["need_phase_b"] = not has_valid_phase_b(trade_date)
+        # After 09:29: do not auto-run; mark DEGRADED + alert; force/re-screen still allowed.
+        if tt > _CATCHUP_END:
+            if not need_a and not need_b:
+                out["skipped"] = "complete_after_deadline"
+                return out
+            missing = []
+            if need_a:
+                missing.append("phase_a")
+            if need_b:
+                missing.append("phase_b")
+            msg = (
+                f"Startup after {PHASE_B_HARD_STOP.strftime('%H:%M')} IST with missing "
+                f"{'+'.join(missing)}; marked DEGRADED (force/re-screen allowed)."
+            )
+            try:
+                from backend.services.open_low_high.alerts import alert_degraded
+                from backend.services.open_low_high.persistence import upsert_day_meta
 
-    if not out["actions"]:
-        out["skipped"] = "nothing_to_catch_up"
-    return out
+                upsert_day_meta(
+                    trade_date,
+                    status="degraded",
+                    frozen=False,
+                    degraded=True,
+                    notes=msg,
+                    meta={
+                        "phase": "startup_catchup",
+                        "degraded": True,
+                        "failure_banner": f"DEGRADED — {msg}",
+                        "missing": missing,
+                        "startup_catchup_at": t.isoformat(),
+                    },
+                )
+                alert_degraded(msg, trade_date=trade_date.isoformat(), missing=",".join(missing))
+                out["actions"].append("degraded")
+                out["message"] = msg
+            except Exception as exc:
+                logger.exception("open_low_high startup catch-up DEGRADED path failed")
+                out["ok"] = False
+                out["error"] = str(exc)
+            return out
+
+        # Inside 09:20–09:29: run missing phases via the same cron runners (retry loop intact).
+        # Respect phase buffers — do not start A before PHASE_A_START or B before PHASE_B_START.
+        if need_a and tt >= PHASE_A_START:
+            logger.info(
+                "open_low_high startup catch-up: running Phase A (restart at %s)",
+                t.strftime("%H:%M:%S"),
+            )
+            _run_phase_a()
+            out["actions"].append("phase_a")
+            need_a = not has_valid_phase_a(trade_date)
+            out["need_phase_a"] = need_a
+        elif need_a and tt < PHASE_A_START:
+            out["buffer_wait_phase_a"] = PHASE_A_START.strftime("%H:%M:%S")
+
+        if tt >= PHASE_B_START and not has_valid_phase_b(trade_date):
+            # If Phase A still missing inside B window, A already attempted above when due.
+            logger.info(
+                "open_low_high startup catch-up: running Phase B (restart at %s)",
+                t.strftime("%H:%M:%S"),
+            )
+            _run_phase_b()
+            out["actions"].append("phase_b")
+            out["need_phase_b"] = not has_valid_phase_b(trade_date)
+        elif need_b and tt < PHASE_B_START and tt >= _CATCHUP_START:
+            out["buffer_wait_phase_b"] = PHASE_B_START.strftime("%H:%M:%S")
+
+        if not out["actions"]:
+            out["skipped"] = "nothing_to_catch_up"
+        return out
+    finally:
+        _catchup_lock.release()
 
 
 def _spawn_startup_catchup() -> None:

@@ -1185,6 +1185,64 @@ def test_drop_unclosed_bars_fetch_092005_excludes_0920():
     assert len(out3) == 2
 
 
+def test_drop_unclosed_bars_upstox_ist_offset_tz_aware():
+    """Upstox REST returns +05:30 ISO timestamps — both bar.ts and fetch_time must be tz-aware."""
+    from datetime import datetime, time, timedelta
+
+    from backend.services.open_high_low.bars import parse_ts
+    from backend.services.open_low_high.screener import (
+        _bar_end,
+        _bars_from_rows,
+        _drop_unclosed_bars,
+    )
+
+    # Exact shape Upstox historical/intraday candles use.
+    rows = [
+        {
+            "timestamp": "2026-11-20T09:15:00+05:30",
+            "open": 100,
+            "high": 101,
+            "low": 99,
+            "close": 100.5,
+            "volume": 10,
+        },
+        {
+            "timestamp": "2026-11-20T09:20:00+05:30",
+            "open": 100.5,
+            "high": 102,
+            "low": 100,
+            "close": 101,
+            "volume": 12,
+        },
+    ]
+    bars = _bars_from_rows(rows, "NSE_EQ|X")
+    assert len(bars) == 2
+    for b in bars:
+        assert b.ts.tzinfo is not None, "bar timestamps must be tz-aware"
+        # Offset must resolve to IST (+05:30), not naive wall clock.
+        assert b.ts.utcoffset() == timedelta(hours=5, minutes=30)
+
+    fetch = parse_ts("2026-11-20T09:20:05+05:30")
+    assert fetch is not None and fetch.tzinfo is not None
+    assert fetch.utcoffset() == timedelta(hours=5, minutes=30)
+
+    # Closed-bar check uses tz-aware bar_end vs tz-aware fetch_time.
+    assert _bar_end(bars[0].ts).tzinfo is not None
+    assert _bar_end(bars[1].ts) > fetch  # 09:20 bar still open at 09:20:05
+
+    out = _drop_unclosed_bars(bars, fetch_time=fetch)
+    assert len(out) == 1
+    assert out[0].ts.time() == time(9, 15)
+    assert out[0].ts.tzinfo is not None
+
+    # Naive fetch_time is localized to IST inside _drop_unclosed_bars (still comparable).
+    naive_fetch = datetime(2026, 11, 20, 9, 20, 5)
+    assert naive_fetch.tzinfo is None
+    out_naive = _drop_unclosed_bars(bars, fetch_time=naive_fetch)
+    assert len(out_naive) == 1
+    assert out_naive[0].ts.time() == time(9, 15)
+
+
 # --- Startup catch-up after restart (Phase A/B) ---
 
 
@@ -1317,3 +1375,268 @@ def test_startup_catchup_after_0929_marks_degraded(monkeypatch):
     assert out["actions"] == ["degraded"]
     assert calls["a"] == 0 and calls["b"] == 0
     assert calls["meta"] == 1 and calls["alert"] == 1
+
+
+def test_startup_catchup_already_valid_never_reruns(monkeypatch):
+    """Valid Phase A+B today → catch-up is a no-op (idempotent vs misfire/restart)."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 27, 0))
+    calls = {"a": 0, "b": 0}
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: True)
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: True)
+    monkeypatch.setattr(sch, "_run_phase_a", lambda: calls.__setitem__("a", calls["a"] + 1))
+    monkeypatch.setattr(sch, "_run_phase_b", lambda: calls.__setitem__("b", calls["b"] + 1))
+
+    out = sch.run_startup_catchup(now=now)
+    assert out["ok"] is True
+    assert out["actions"] == []
+    assert out.get("skipped") == "nothing_to_catch_up"
+    assert out["need_phase_a"] is False
+    assert out["need_phase_b"] is False
+    assert calls["a"] == 0 and calls["b"] == 0
+
+
+def test_phase_a_misfire_skips_when_already_valid(monkeypatch):
+    """Cron/misfire entry ``_run_phase_a`` must not call screener when Phase A is valid."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+    import backend.services.open_low_high.screener as screener
+
+    IST = pytz.timezone("Asia/Kolkata")
+    calls = {"run": 0}
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: True)
+    monkeypatch.setattr(
+        sch,
+        "_aware_ist",
+        lambda now=None: IST.localize(datetime(2026, 11, 20, 9, 21, 0)),
+    )
+    monkeypatch.setattr(
+        screener,
+        "run_phase_a",
+        lambda **k: calls.__setitem__("run", calls["run"] + 1)
+        or {"ok": True, "status": "phase_a"},
+    )
+
+    sch._run_phase_a()  # real wrapper (not monkeypatched away)
+    assert calls["run"] == 0
+
+
+def test_phase_b_misfire_skips_when_terminal(monkeypatch):
+    """Cron/misfire entry ``_run_phase_b`` skips when Phase B is already frozen/partial."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+    import backend.services.open_low_high.screener as screener
+
+    IST = pytz.timezone("Asia/Kolkata")
+    calls = {"run": 0}
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "_phase_b_terminal", lambda d: True)
+    monkeypatch.setattr(
+        sch,
+        "_aware_ist",
+        lambda now=None: IST.localize(datetime(2026, 11, 20, 9, 26, 0)),
+    )
+    monkeypatch.setattr(
+        screener,
+        "run_phase_b",
+        lambda **k: calls.__setitem__("run", calls["run"] + 1)
+        or {"ok": True, "status": "frozen"},
+    )
+
+    sch._run_phase_b()
+    assert calls["run"] == 0
+
+
+def test_startup_catchup_concurrent_blocked(monkeypatch):
+    """Second catch-up while first holds the lock returns catchup_busy."""
+    from datetime import datetime
+    import threading
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 22, 0))
+    entered = threading.Event()
+    release = threading.Event()
+    calls = {"a": 0}
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: False)
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: True)
+
+    def _slow_a():
+        calls["a"] += 1
+        entered.set()
+        release.wait(timeout=2.0)
+
+    monkeypatch.setattr(sch, "_run_phase_a", _slow_a)
+    monkeypatch.setattr(sch, "_run_phase_b", lambda: None)
+
+    results = {}
+
+    def _first():
+        results["first"] = sch.run_startup_catchup(now=now)
+
+    t = threading.Thread(target=_first)
+    t.start()
+    assert entered.wait(timeout=2.0)
+    second = sch.run_startup_catchup(now=now)
+    release.set()
+    t.join(timeout=2.0)
+
+    assert second.get("skipped") == "catchup_busy"
+    assert second.get("actions") == []
+    assert results["first"]["actions"] == ["phase_a"]
+    assert calls["a"] == 1
+
+
+def test_phase_a_concurrent_lock_returns_busy(monkeypatch):
+    """Overlapping Phase A calls are blocked by _phase_a_lock (busy)."""
+    import threading
+    from datetime import date
+
+    import backend.services.open_low_high.phases as phases
+
+    results = []
+
+    monkeypatch.setattr(phases, "ensure_tables", lambda: None)
+    monkeypatch.setattr(phases, "is_day_frozen", lambda d: False)
+    monkeypatch.setattr(phases, "phase_a_window_status", lambda now=None: "open")
+    monkeypatch.setattr(phases, "_today", lambda: date(2026, 11, 20))
+
+    # Hold the lock the same way a live Phase A run would.
+    assert phases._phase_a_lock.acquire(blocking=False)
+
+    def _blocked():
+        results.append(phases.run_phase_a(force=True, session=date(2026, 11, 20)))
+
+    try:
+        t = threading.Thread(target=_blocked)
+        t.start()
+        t.join(timeout=2.0)
+        assert results and results[0].get("status") == "busy"
+        assert "already running" in (results[0].get("message") or "").lower()
+    finally:
+        phases._phase_a_lock.release()
+
+
+def test_phase_b_concurrent_lock_returns_busy(monkeypatch):
+    """Overlapping Phase B calls are blocked by _phase_b_lock (busy)."""
+    import threading
+    from datetime import date
+
+    import backend.services.open_low_high.phases as phases
+
+    results = []
+    monkeypatch.setattr(phases, "ensure_tables", lambda: None)
+    monkeypatch.setattr(phases, "is_day_frozen", lambda d: False)
+    monkeypatch.setattr(phases, "phase_b_window_status", lambda now=None: "open")
+    monkeypatch.setattr(phases, "_today", lambda: date(2026, 11, 20))
+
+    assert phases._phase_b_lock.acquire(blocking=False)
+    try:
+        t = threading.Thread(
+            target=lambda: results.append(
+                phases.run_phase_b(force=True, session=date(2026, 11, 20))
+            )
+        )
+        t.start()
+        t.join(timeout=2.0)
+        assert results and results[0].get("status") == "busy"
+        assert "already running" in (results[0].get("message") or "").lower()
+    finally:
+        phases._phase_b_lock.release()
+
+
+def test_startup_catchup_092002_respects_phase_a_buffer(monkeypatch):
+    """Restart at 09:20:02 — before Phase A buffer (~09:20:10) → do not run Phase A yet."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+    from backend.services.open_low_high.config import PHASE_A_START, PHASE_B_START
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 20, 2))
+    calls = {"a": 0, "b": 0}
+
+    assert PHASE_A_START.hour == 9 and PHASE_A_START.minute == 20
+    assert PHASE_A_START.second >= 2  # default buffer 10s → 09:20:10
+    assert now.time() < PHASE_A_START
+    assert now.time() < PHASE_B_START
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: False)
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: False)
+    monkeypatch.setattr(sch, "_run_phase_a", lambda: calls.__setitem__("a", calls["a"] + 1))
+    monkeypatch.setattr(sch, "_run_phase_b", lambda: calls.__setitem__("b", calls["b"] + 1))
+
+    out = sch.run_startup_catchup(now=now)
+    assert out["ok"] is True
+    assert out["actions"] == []
+    assert out.get("skipped") == "nothing_to_catch_up"
+    assert out.get("buffer_wait_phase_a") == PHASE_A_START.strftime("%H:%M:%S")
+    assert calls["a"] == 0 and calls["b"] == 0
+    # Scheduled Phase A at PHASE_A_START (+ retries) still apply after the buffer.
+
+
+def test_startup_catchup_092502_respects_phase_b_buffer(monkeypatch):
+    """Restart at 09:25:02 — before Phase B buffer (~09:25:03) → no Phase B; A may catch up."""
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import scheduler as sch
+    from backend.services.open_low_high.config import PHASE_A_START, PHASE_B_START
+
+    IST = pytz.timezone("Asia/Kolkata")
+    now = IST.localize(datetime(2026, 11, 20, 9, 25, 2))
+    calls = {"a": 0, "b": 0}
+    phase_a_ok = {"v": False}
+
+    assert PHASE_B_START.hour == 9 and PHASE_B_START.minute == 25
+    assert PHASE_B_START.second >= 2  # default buffer 3s → 09:25:03
+    assert now.time() >= PHASE_A_START
+    assert now.time() < PHASE_B_START
+
+    monkeypatch.setattr(sch, "_skip", lambda: False)
+    monkeypatch.setattr(sch, "has_valid_phase_a", lambda d: phase_a_ok["v"])
+    monkeypatch.setattr(sch, "has_valid_phase_b", lambda d: False)
+
+    def _run_a():
+        calls["a"] += 1
+        phase_a_ok["v"] = True
+
+    monkeypatch.setattr(sch, "_run_phase_a", _run_a)
+    monkeypatch.setattr(sch, "_run_phase_b", lambda: calls.__setitem__("b", calls["b"] + 1))
+
+    out = sch.run_startup_catchup(now=now)
+    assert out["ok"] is True
+    assert out["actions"] == ["phase_a"]  # A due; B still in buffer
+    assert out.get("buffer_wait_phase_b") == PHASE_B_START.strftime("%H:%M:%S")
+    assert calls["a"] == 1 and calls["b"] == 0
+
+    # Phase A already valid → still wait for Phase B buffer (retries at 09:25:03+).
+    calls["a"] = calls["b"] = 0
+    out2 = sch.run_startup_catchup(now=now)
+    assert out2["actions"] == []
+    assert out2.get("buffer_wait_phase_b") == PHASE_B_START.strftime("%H:%M:%S")
+    assert calls["a"] == 0 and calls["b"] == 0
