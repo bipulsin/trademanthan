@@ -157,6 +157,19 @@ body.olh-page .olh-banner {
     color: var(--text);
     font-size: 0.9rem;
 }
+body.olh-page .olh-banner.is-phase-a {
+    border-color: rgba(212, 160, 23, 0.45);
+    background: rgba(212, 160, 23, 0.1);
+}
+body.olh-page .olh-banner.is-failure {
+    border-color: rgba(220, 80, 80, 0.55);
+    background: rgba(220, 80, 80, 0.12);
+    color: #f0b4b4;
+}
+body.olh-page .olh-pill.is-failure {
+    color: #f0b4b4;
+    border-color: rgba(220, 80, 80, 0.45);
+}
 
 body.olh-page .olh-tabs {
     display: flex;

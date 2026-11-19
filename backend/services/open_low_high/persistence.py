@@ -108,6 +108,12 @@ def ensure_tables() -> None:
         raise
     finally:
         db.close()
+    try:
+        from backend.services.open_low_high.pdc import ensure_pdc_columns
+
+        ensure_pdc_columns()
+    except Exception:
+        logger.exception("open_low_high ensure_pdc_columns failed")
 
 
 def _aware(dt: Optional[datetime] = None) -> datetime:

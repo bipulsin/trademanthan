@@ -456,16 +456,26 @@ def test_window_status_boundaries():
 
     import pytz
 
+    from backend.services.open_low_high.phases import phase_a_window_status, phase_b_window_status
     from backend.services.open_low_high.screener import window_status
 
     IST = pytz.timezone("Asia/Kolkata")
+    # Phase B window drives window_status (Phase A greys can show while waiting).
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 20, 30))) == "waiting"
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 0))) == "waiting"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 5))) == "open"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 3))) == "open"
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 26, 0))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 0))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 30))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 31))) == "past"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 0))) == "open"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 1))) == "past"
+
+    assert phase_a_window_status(IST.localize(datetime(2026, 11, 17, 9, 20, 9))) == "waiting"
+    assert phase_a_window_status(IST.localize(datetime(2026, 11, 17, 9, 20, 10))) == "open"
+    assert phase_a_window_status(IST.localize(datetime(2026, 11, 17, 9, 23, 0))) == "open"
+    assert phase_a_window_status(IST.localize(datetime(2026, 11, 17, 9, 23, 1))) == "past"
+
+    assert phase_b_window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 3))) == "open"
+    assert phase_b_window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 0))) == "open"
+    assert phase_b_window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 1))) == "past"
 
 
 def test_data_quality_incomplete_defers_empty_freeze():
@@ -573,3 +583,61 @@ def test_row_to_dict_does_not_copy_equity_open_as_sl():
     assert equity["sl"] is None
     assert equity["data_source_logic"] == "equity"
     assert equity["data_source_levels"] == "future"
+
+
+def test_ohl_log_filename_and_cleanup(tmp_path, monkeypatch):
+    from datetime import date, datetime
+
+    import pytz
+
+    from backend.services.open_low_high import ohl_log as mod
+
+    IST = pytz.timezone("Asia/Kolkata")
+    monkeypatch.setattr(mod, "_LOG_DIR_CANDIDATES", (tmp_path,))
+    assert mod.ohl_log_filename(date(2026, 11, 19)) == "OHL_Log_19Nov2026"
+    path = mod.ohl_log_path(date(2026, 11, 19))
+    mod.ohl_log("success", action="phase_a_ws", symbol="RELIANCE", source="ws", detail="got 09:15")
+    assert path.exists()
+    text = path.read_text(encoding="utf-8")
+    assert "OHL" in text and "success" in text and "RELIANCE" in text
+
+    # Old file should be deleted; recent kept.
+    old = tmp_path / "OHL_Log_01Nov2026"
+    old.write_text("old\n", encoding="utf-8")
+    recent = tmp_path / "OHL_Log_18Nov2026"
+    recent.write_text("recent\n", encoding="utf-8")
+    out = mod.cleanup_ohl_logs(keep_days=3, now=IST.localize(datetime(2026, 11, 19, 12, 0)))
+    assert "OHL_Log_01Nov2026" in out["deleted"]
+    assert recent.exists()
+    assert not old.exists()
+
+
+def test_pdc_column_name():
+    from backend.services.open_low_high.pdc import PDC_COLUMN, PDC_DATE_COLUMN
+
+    assert PDC_COLUMN == "equity_prev_close"
+    assert PDC_DATE_COLUMN == "equity_prev_close_date"
+
+
+def test_ws_lock_window_and_merge():
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_low_high import ws_feed as wf
+
+    IST = pytz.timezone("Asia/Kolkata")
+    assert wf.in_ws_lock_window(IST.localize(datetime(2026, 11, 19, 9, 14, 59))) is False
+    assert wf.in_ws_lock_window(IST.localize(datetime(2026, 11, 19, 9, 15, 0))) is True
+    assert wf.in_ws_lock_window(IST.localize(datetime(2026, 11, 19, 9, 24, 59))) is True
+    assert wf.in_ws_lock_window(IST.localize(datetime(2026, 11, 19, 9, 25, 0))) is False
+
+    wf.release_ws_lock()
+    with wf._lock:
+        wf._locked_eq_index = {"NSE_EQ|A", "NSE_INDEX|Nifty 50"}
+        wf._lock_engaged = True
+    merged = wf._provider_keys_with_lock(["NSE_FO|1"])
+    assert "NSE_EQ|A" in merged
+    assert "NSE_INDEX|Nifty 50" in merged
+    assert "NSE_FO|1" in merged
+    wf.release_ws_lock()

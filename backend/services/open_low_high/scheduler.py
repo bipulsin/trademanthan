@@ -1,4 +1,18 @@
-"""APScheduler jobs: Open Low High pre-warm + screen (~09:25 IST) with incomplete retries."""
+"""APScheduler jobs: Open Low High reliability timeline (IST Mon–Fri).
+
+Timeline:
+  16:05  EOD ``equity_prev_close`` (PDC) fill on arbitrage_master (+ Nifty)
+  09:00  PDC null cross-check vs instrument keys
+  09:05  Pre-warm WS Equity / Index / Future (only pre-warm stage)
+  09:15  WS warm check for Equity/Index; re-warm if needed; engage WS lock
+  09:20:10–09:23  Phase A (fresh 09:15 5m) — persist grey cards immediately
+  09:24  Phase A refill for symbols still missing 09:15 OHLC
+  09:25:03–09:29  Phase B on Phase A qualifiers only (hard stop 09:29)
+  ~12:00  Delete OHL_Log_* older than 3 days
+
+WS lock 09:15–09:25: EQ/INDEX provider keys are force-merged and never dropped
+from the OLH sidecar subscribe set (see ``ws_feed.py``).
+"""
 from __future__ import annotations
 
 import logging
@@ -13,42 +27,150 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 
 
-def _run_olh_screen() -> None:
+def _skip() -> bool:
     if should_skip_scheduled_market_jobs_ist():
         logger.info("open_low_high: skipped holiday/weekend")
+        return True
+    return False
+
+
+def _run_pdc_eod() -> None:
+    if _skip():
         return
     try:
-        from backend.services.open_low_high.screener import run_screen
+        from backend.services.open_low_high.pdc import fill_pdc_eod
 
-        result = run_screen(force=False)
+        result = fill_pdc_eod()
         logger.info(
-            "open_low_high scheduled screen status=%s kept=%s phase_a=%s freeze_reason=%s",
+            "open_low_high PDC EOD status=%s ok=%s fail=%s column=%s",
             result.get("status"),
-            result.get("kept"),
+            result.get("ok_n"),
+            result.get("fail_n"),
+            result.get("column"),
+        )
+    except Exception:
+        logger.exception("open_low_high PDC EOD failed")
+
+
+def _run_pdc_0900() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.pdc import crosscheck_pdc_at_0900
+
+        result = crosscheck_pdc_at_0900()
+        logger.info(
+            "open_low_high PDC 09:00 status=%s ok=%s fail=%s",
+            result.get("status"),
+            result.get("ok_n"),
+            result.get("fail_n"),
+        )
+    except Exception:
+        logger.exception("open_low_high PDC 09:00 failed")
+
+
+def _run_ws_prewarm_0905() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.ws_feed import prewarm_ws
+
+        result = prewarm_ws(engage_lock=False)
+        logger.info(
+            "open_low_high WS prewarm 09:05 status=%s equity=%s warm=%s",
+            result.get("status"),
+            (result.get("subscribe") or {}).get("equity"),
+            (result.get("warm") or {}).get("warm"),
+        )
+    except Exception:
+        logger.exception("open_low_high WS prewarm 09:05 failed")
+
+
+def _run_ws_check_0915() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.ws_feed import ensure_equity_index_warm_or_rewarm
+
+        result = ensure_equity_index_warm_or_rewarm()
+        logger.info(
+            "open_low_high WS check 09:15 status=%s rewarmed=%s warm=%s",
+            result.get("status"),
+            result.get("rewarmed"),
+            (result.get("warm") or {}).get("warm"),
+        )
+    except Exception:
+        logger.exception("open_low_high WS check 09:15 failed")
+
+
+def _run_phase_a() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.screener import run_phase_a
+
+        result = run_phase_a()
+        logger.info(
+            "open_low_high Phase A status=%s phase_a=%s",
+            result.get("status"),
             result.get("phase_a"),
-            result.get("freeze_reason"),
         )
     except Exception:
-        logger.exception("open_low_high scheduled screen failed")
+        logger.exception("open_low_high Phase A failed")
 
 
-def _run_olh_prewarm() -> None:
-    if should_skip_scheduled_market_jobs_ist():
-        logger.info("open_low_high prewarm: skipped holiday/weekend")
+def _run_phase_a_refill() -> None:
+    if _skip():
         return
     try:
-        from backend.services.open_low_high.screener import prewarm_equity_data
+        from backend.services.open_low_high.screener import run_phase_a_refill
 
-        result = prewarm_equity_data()
+        result = run_phase_a_refill()
         logger.info(
-            "open_low_high prewarm status=%s ok_5m=%s ok_daily=%s nifty_pc=%s",
+            "open_low_high Phase A refill status=%s filled=%s still_missing=%s",
             result.get("status"),
-            result.get("ok_5m"),
-            result.get("ok_daily"),
-            result.get("nifty_prev_close"),
+            result.get("filled"),
+            result.get("still_missing"),
         )
     except Exception:
-        logger.exception("open_low_high prewarm failed")
+        logger.exception("open_low_high Phase A refill failed")
+
+
+def _run_phase_b() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.ws_feed import release_ws_lock
+        from backend.services.open_low_high.screener import run_phase_b
+
+        # Lock window ends at 09:25; release drop-protection (subs may remain).
+        try:
+            release_ws_lock()
+        except Exception:
+            logger.debug("open_low_high WS lock release skipped", exc_info=True)
+        result = run_phase_b()
+        logger.info(
+            "open_low_high Phase B status=%s active=%s failures=%s",
+            result.get("status"),
+            result.get("active"),
+            result.get("phase_b_failures"),
+        )
+    except Exception:
+        logger.exception("open_low_high Phase B failed")
+
+
+def _run_ohl_log_cleanup() -> None:
+    try:
+        from backend.services.open_low_high.ohl_log import cleanup_ohl_logs
+
+        result = cleanup_ohl_logs(keep_days=3)
+        logger.info(
+            "open_low_high OHL log cleanup deleted=%s kept=%s",
+            len(result.get("deleted") or []),
+            result.get("kept"),
+        )
+    except Exception:
+        logger.exception("open_low_high OHL log cleanup failed")
 
 
 def start_open_low_high_scheduler() -> None:
@@ -57,15 +179,59 @@ def start_open_low_high_scheduler() -> None:
         return
     sched = BackgroundScheduler(timezone="Asia/Kolkata")
 
-    # Prefetch equity/Nifty REST before Phase B so ~09:25 is not cold-start nulls.
-    for mid, minute, second in (
-        ("open_low_high_prewarm_0914", 14, 0),
-        ("open_low_high_prewarm_0918", 18, 0),
-        ("open_low_high_prewarm_0921", 21, 0),
-        ("open_low_high_prewarm_0923", 23, 30),
+    # --- PDC ---
+    sched.add_job(
+        _run_pdc_eod,
+        CronTrigger(day_of_week="mon-fri", hour=16, minute=5, timezone="Asia/Kolkata"),
+        id="open_low_high_pdc_eod",
+        name="Open Low High PDC EOD 16:05 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    sched.add_job(
+        _run_pdc_0900,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=0, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_pdc_0900",
+        name="Open Low High PDC cross-check 09:00 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
+    )
+
+    # --- WS pre-warm (09:05 only) + 09:15 check ---
+    sched.add_job(
+        _run_ws_prewarm_0905,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=5, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_ws_prewarm_0905",
+        name="Open Low High WS pre-warm 09:05 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=180,
+    )
+    sched.add_job(
+        _run_ws_check_0915,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=15, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_ws_check_0915",
+        name="Open Low High WS warm check 09:15 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=120,
+    )
+
+    # --- Phase A primary window 09:20:10, 09:21, 09:22, 09:23 ---
+    for minute, second, jid in (
+        (20, 10, "open_low_high_phase_a_092010"),
+        (21, 0, "open_low_high_phase_a_0921"),
+        (22, 0, "open_low_high_phase_a_0922"),
+        (23, 0, "open_low_high_phase_a_0923"),
     ):
         sched.add_job(
-            _run_olh_prewarm,
+            _run_phase_a,
             CronTrigger(
                 day_of_week="mon-fri",
                 hour=9,
@@ -73,50 +239,105 @@ def start_open_low_high_scheduler() -> None:
                 second=second,
                 timezone="Asia/Kolkata",
             ),
-            id=mid,
-            name=f"Open Low High pre-warm 09:{minute:02d}:{second:02d} IST",
+            id=jid,
+            name=f"Open Low High Phase A 09:{minute:02d}:{second:02d} IST",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
-            misfire_grace_time=120,
+            misfire_grace_time=90,
         )
 
-    # Primary screen shortly after 09:20 five-minute bar closes.
+    # --- Phase A refill 09:24 (null 09:15 subset only) ---
     sched.add_job(
-        _run_olh_screen,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=10, timezone="Asia/Kolkata"),
-        id="open_low_high_screen",
-        name="Open Low High screen 09:25:10 IST",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=180,
-    )
-
-    # Dense retries while incomplete (empty Phase A + missing equity REST).
-    # Every 20s from 09:25:30 through 09:29:50; frozen days no-op quickly.
-    sched.add_job(
-        _run_olh_screen,
-        CronTrigger(
-            day_of_week="mon-fri",
-            hour=9,
-            minute="25-29",
-            second="10,30,50",
-            timezone="Asia/Kolkata",
-        ),
-        id="open_low_high_screen_retry",
-        name="Open Low High screen retry 09:25–09:29 IST",
+        _run_phase_a_refill,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=24, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_phase_a_refill_0924",
+        name="Open Low High Phase A refill 09:24 IST",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=90,
     )
 
+    # --- Phase B 09:25:03 then retries through 09:29 ---
+    sched.add_job(
+        _run_phase_b,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=3, timezone="Asia/Kolkata"),
+        id="open_low_high_phase_b_092503",
+        name="Open Low High Phase B 09:25:03 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=120,
+    )
+    # Dense retries: every 30s from 09:25:30–09:29:00 (aligns with REST wait).
+    sched.add_job(
+        _run_phase_b,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute="25-28",
+            second="30",
+            timezone="Asia/Kolkata",
+        ),
+        id="open_low_high_phase_b_retry_30s",
+        name="Open Low High Phase B retry :30 09:25–09:28 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
+    sched.add_job(
+        _run_phase_b,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute="26-29",
+            second="0",
+            timezone="Asia/Kolkata",
+        ),
+        id="open_low_high_phase_b_retry_00s",
+        name="Open Low High Phase B retry :00 09:26–09:29 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
+
+    # --- OHL log 3-day cleanup ---
+    sched.add_job(
+        _run_ohl_log_cleanup,
+        CronTrigger(day_of_week="mon-fri", hour=12, minute=0, timezone="Asia/Kolkata"),
+        id="open_low_high_ohl_log_cleanup",
+        name="Open Low High OHL log cleanup (3d)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+
+    # Remove legacy multi-prewarm / incomplete-freeze job ids if an old process
+    # left them in a long-lived scheduler (replace_existing only covers same ids).
+    for legacy_id in (
+        "open_low_high_prewarm_0914",
+        "open_low_high_prewarm_0918",
+        "open_low_high_prewarm_0921",
+        "open_low_high_prewarm_0923",
+        "open_low_high_screen",
+        "open_low_high_screen_retry",
+    ):
+        try:
+            if sched.get_job(legacy_id):
+                sched.remove_job(legacy_id)
+        except Exception:
+            pass
+
     sched.start()
     _scheduler = sched
     logger.info(
         "open_low_high scheduler started "
-        "(prewarm 09:14/18/21/23:30 + screen 09:25:10 + retry */20s to 09:29)"
+        "(PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
+        "Phase B 09:25:03–09:29; OHL log cleanup 12:00)"
     )
 
 

@@ -324,9 +324,9 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Continuing without MomentX scheduler")
 
         try:
-            logger.info("Starting Open Low High screener scheduler (09:20:30 IST)...")
+            logger.info("Starting Open Low High screener scheduler (WS 09:05, Phase A 09:20, Phase B 09:25)...")
             start_open_low_high_scheduler()
-            logger.info("✅ Open Low High scheduler: STARTED (09:20:30 / 09:21:45 IST)")
+            logger.info("✅ Open Low High scheduler: STARTED (PDC/WS/Phase A+B timeline)")
         except Exception as e:
             logger.error(f"❌ Open Low High scheduler: FAILED - {e}", exc_info=True)
             logger.warning("⚠️ Continuing without Open Low High scheduler")

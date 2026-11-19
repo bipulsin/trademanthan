@@ -377,16 +377,21 @@
       </article>`;
   }
 
-  function setBanner(msg, show) {
+  function setBanner(msg, show, opts) {
     const el = document.getElementById('olhBanner');
     if (!el) return;
     if (!show || !msg) {
       el.hidden = true;
       el.textContent = '';
+      el.classList.remove('is-failure', 'is-phase-a');
       return;
     }
     el.hidden = false;
     el.textContent = msg;
+    const failure = !!(opts && opts.failure);
+    const phaseA = !!(opts && opts.phaseA);
+    el.classList.toggle('is-failure', failure);
+    el.classList.toggle('is-phase-a', phaseA && !failure);
   }
 
   function indexCards(bull, bear) {
@@ -490,7 +495,8 @@
       const st = String(data.status || '—');
       statusEl.textContent = st.toUpperCase();
       statusEl.classList.toggle('is-frozen', !!data.frozen || st === 'frozen');
-      statusEl.classList.toggle('is-waiting', st === 'waiting');
+      statusEl.classList.toggle('is-waiting', st === 'waiting' || st === 'phase_a');
+      statusEl.classList.toggle('is-failure', st === 'phase_b_partial' || st === 'phase_b_failed' || !!data.failure_banner);
     }
     const dateEl = document.getElementById('olhDate');
     if (dateEl) dateEl.textContent = data.trade_date || '—';
@@ -499,7 +505,12 @@
       const raw = data.server_time || '';
       timeEl.textContent = raw ? raw.slice(11, 19) + ' IST' : '—';
     }
-    setBanner(data.message || '', true);
+    const st = String(data.status || '');
+    const failMsg = data.failure_banner || (st === 'phase_b_partial' || st === 'phase_b_failed' ? data.message : '');
+    setBanner(failMsg || data.message || '', true, {
+      failure: !!failMsg,
+      phaseA: st === 'phase_a',
+    });
   }
 
   function patchLiveLtp(bySymbol) {

@@ -1,31 +1,25 @@
 """Live Open Low High screener — universe scan, Phase A/B, freeze + sector tags.
 
-Schedule (IST):
-  ~09:14–09:23  Pre-warm Upstox REST equity/Nifty 5m + prev-day bars.
-  ~09:25:10     Phase A on completed 09:15 bar + Phase B on completed 09:20 bar
-                (Upstox REST 5m preferred; WS 1m→5m fills gaps only).
-  ~09:25–09:29  If Phase A is empty and equity REST is missing, defer freeze and
-                retry every ~20s until data quality OK (hard deadline ~09:29:30).
-                Never persist a frozen-empty day that blocks later screens.
-  After freeze: card list + S1–S3/W1–W3 tags are immutable for the day.
+Schedule (IST) — see ``scheduler.py`` / ``phases.py``:
+  16:05        EOD ``arbitrage_master.equity_prev_close`` (PDC) fill
+  09:00        PDC null cross-check
+  09:05        Pre-warm WS Equity / Index / Future (only pre-warm)
+  09:15        WS warm check + EQ/INDEX lock through 09:25
+  09:20:10–09:23  Phase A on completed 09:15 5m (WS then REST) — grey cards live
+  09:24        Phase A refill for null 09:15 OHLC only
+  09:25:03–09:29  Phase B on Phase A qualifiers only (WS→REST→wait30→REST)
 
 Data split (equity vs stock future):
   - **Algo filters** (Phase A/B, PDH/PDL/prev close, VWAP, doji, wick/body,
     extremes): evaluated on the **underlying NSE equity** 5m + daily bars.
   - **Trade display** (Entry, SL, T1/T2, chart levels): expressed on the
     **front-month stock future**. SL = future 09:15 open; Entry is **frozen**
-    at screen time (prefer ~09:22 future 1m close; else 09:20 future close
+    at Phase B (prefer ~09:22 future 1m close; else 09:20 future close
     ± small directional slippage) and is never overwritten by live LTP;
-    T1/T2 = traditional pivots from **future** prior-day H/L/C. Stored
-    ``first_*`` / ``prev_*`` / VWAP remain equity values for audit.
+    T1/T2 = traditional pivots from **future** prior-day H/L/C.
 
-Phase A passers always persist (Screen + Trade Log). Phase B passers are
-``active=True`` (golden border, sorted to top); Phase A-only are greyed
-candidates.
-
-Phase B uses 09:20 close vs 09:15 close, then a 09:20 wick/body filter
-(≤0.35). The 09:20 bar is only final at 09:25 — screening earlier on a
-forming bar false-negatives confirms that arrive later (seen 2026-11-18 POLYCAB).
+Phase A passers persist immediately (grey). Phase B passers are
+``active=True`` (golden); Wait List 35–90% wick; wick ≤0.35 Active.
 """
 from __future__ import annotations
 
@@ -73,12 +67,11 @@ SECOND_CANDLE = time(9, 20)
 ENTRY_QUOTE_MINUTE = time(9, 22)
 # Small directional slip when freezing from 09:20 future close (fallback).
 ENTRY_SLIPPAGE_FRAC = 0.0002  # 2 bps
-# Window opens once the 09:20 bar has closed (09:25:00); small buffer for WS/REST.
-SCREEN_AFTER = time(9, 25, 5)
-# Keep window "open" through incomplete-data retries (scheduler fires ~every 20s).
-FREEZE_BY = time(9, 29, 30)
-HARD_DEADLINE = time(9, 29, 30)
-# Fraction of universe missing equity 09:15 / prev-day that blocks empty freeze.
+# Phase B window (UI ``window_status`` + force auto-run).
+SCREEN_AFTER = time(9, 25, 3)
+FREEZE_BY = time(9, 29, 0)
+HARD_DEADLINE = time(9, 29, 0)
+# Fraction of universe missing equity 09:15 / prev-day (legacy incomplete helper).
 MISSING_DATA_RATE_THRESHOLD = 0.35
 
 _run_lock = threading.Lock()
@@ -103,7 +96,10 @@ def _upstox():
 
 
 def window_status(now: Optional[datetime] = None) -> str:
-    """waiting | open | past — relative to the 09:25:05–09:29:30 screen window."""
+    """waiting | open | past — Phase B window 09:25:03–09:29 IST.
+
+    Phase A cards may already be on the board while this is still ``waiting``.
+    """
     t = now or _now()
     if t.tzinfo is None:
         t = IST.localize(t)
@@ -435,12 +431,61 @@ def _resolve_equity_key(upstox: Any, row: Dict[str, str], symbol: str) -> str:
 
 
 def _session_5m_bars(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
-    """REST 5m preferred; WS 1m→5m gap-fill only (same merge as future path)."""
+    """Merge WS + REST 5m; REST wins on timestamp conflicts (legacy path)."""
     if not instrument_key:
         return []
     ws_bars = _fetch_ws_5m_bars(instrument_key, session)
     rest_bars = _fetch_rest_5m(upstox, instrument_key, session)
     return _merge_bars(rest_bars, ws_bars)
+
+
+def _session_5m_bars_try(
+    upstox: Any,
+    instrument_key: str,
+    session: date,
+    *,
+    symbol: str = "",
+    action: str = "bars_try",
+    prefer: str = "ws",
+) -> Tuple[List[Bar], str]:
+    """Fetch 5m bars with ordered tries (default WS first, then REST). Logs each try."""
+    from backend.services.open_low_high.ohl_log import ohl_log
+
+    if not instrument_key:
+        ohl_log("skipped", action=action, symbol=symbol, detail="no_instrument_key")
+        return [], "none"
+
+    order = ("ws", "rest") if prefer == "ws" else ("rest", "ws")
+    collected: List[Bar] = []
+    used = "none"
+    for source in order:
+        if source == "ws":
+            bars = _fetch_ws_5m_bars(instrument_key, session)
+        else:
+            bars = _fetch_rest_5m(upstox, instrument_key, session)
+        if bars:
+            ohl_log(
+                "success",
+                action=action,
+                symbol=symbol,
+                source=source,
+                detail=f"bars={len(bars)}",
+            )
+            if not collected:
+                collected = bars
+                used = source
+            else:
+                # Fill gaps from second source; first source wins conflicts.
+                collected = _merge_bars(collected, bars)
+        else:
+            ohl_log(
+                "failed",
+                action=action,
+                symbol=symbol,
+                source=source,
+                detail="no_bars",
+            )
+    return collected, used
 
 
 def _screen_one(
@@ -449,12 +494,18 @@ def _screen_one(
     session: date,
     expiry: date,
     miss_stats: Optional[Dict[str, int]] = None,
+    *,
+    phase_a_only: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Return a Phase A candidate. ``active`` is True only when Phase B also passes.
 
     Screening uses **equity** OHLC; Entry/SL/T1/T2 use the **stock future**.
-    ``miss_stats`` accumulates REST/equity data gaps (not Phase A filter rejects).
+    ``miss_stats`` accumulates data gaps (not Phase A filter rejects).
+    When ``phase_a_only``, skip Phase B / Entry freeze (grey card for early UI).
     """
+    from backend.services.open_low_high.ohl_log import ohl_log
+    from backend.services.open_low_high.pdc import get_equity_prev_close
+
     symbol = str(row.get("symbol") or "").upper()
     if not symbol:
         return None
@@ -462,6 +513,7 @@ def _screen_one(
     equity_ik = _resolve_equity_key(upstox, row, symbol)
     if not equity_ik:
         logger.info("olh skip %s: no equity instrument key", symbol)
+        ohl_log("skipped", action="phase_a_screen", symbol=symbol, detail="no_equity_key")
         _miss_bump(miss_stats, "no_equity_key")
         return None
 
@@ -474,27 +526,49 @@ def _screen_one(
     )
     fut_ik = str(resolved.get("instrument_key") or "").strip()
     if not fut_ik:
+        ohl_log("skipped", action="phase_a_screen", symbol=symbol, detail="no_future_key")
         return None
 
-    # --- Algo path: underlying equity ---
-    eq_bars = _session_5m_bars(upstox, equity_ik, session)
+    # --- Algo path: underlying equity (WS first, then REST) ---
+    eq_bars, bar_src = _session_5m_bars_try(
+        upstox,
+        equity_ik,
+        session,
+        symbol=symbol,
+        action="phase_a_0915",
+        prefer="ws",
+    )
     if not eq_bars:
         _miss_bump(miss_stats, "no_bars")
+        ohl_log("failed", action="phase_a_0915", symbol=symbol, detail="no_bars")
         return None
 
     first = bar_at(eq_bars, session, FIRST_CANDLE)
     second = bar_at(eq_bars, session, SECOND_CANDLE)
     if first is None:
         _miss_bump(miss_stats, "no_0915")
+        ohl_log("failed", action="phase_a_0915", symbol=symbol, source=bar_src, detail="no_0915_bar")
         return None
+    ohl_log(
+        "success",
+        action="phase_a_0915",
+        symbol=symbol,
+        source=bar_src,
+        detail=f"o={first.open} h={first.high} l={first.low} c={first.close}",
+    )
 
     vwap = first_vwap(eq_bars, session, FIRST_CANDLE)
     if vwap is None:
         vwap = first.typical
 
     prev_high, prev_low, prev_close = _fetch_daily_prev(upstox, equity_ik, session)
+    # Prefer arbitrage_master.equity_prev_close when present.
+    master_pdc = get_equity_prev_close(symbol)
+    if master_pdc is not None:
+        prev_close = master_pdc
     if prev_high is None or prev_low is None:
         _miss_bump(miss_stats, "no_prev")
+        ohl_log("failed", action="phase_a_prev", symbol=symbol, detail="no_pdh_pdl")
         return None
 
     phase_a = evaluate_phase_a(
@@ -508,22 +582,10 @@ def _screen_one(
         prev_close=prev_close,
     )
     if phase_a is None:
+        ohl_log("skipped", action="phase_a_filter", symbol=symbol, detail="not_qualified")
         return None
+    ohl_log("success", action="phase_a_filter", symbol=symbol, detail=f"side={phase_a.side}")
 
-    # Phase B on equity 09:20 close confirm + wick/body (window ~09:25:05).
-    second_close: Optional[float] = float(second.close) if second is not None else None
-    phase_b = evaluate_phase_b(
-        phase_a.side,
-        first_close=phase_a.first_close,
-        second_open=float(second.open) if second is not None else None,
-        second_high=float(second.high) if second is not None else None,
-        second_low=float(second.low) if second is not None else None,
-        second_close=second_close,
-    )
-    phase_b_ok = bool(phase_b.ok)
-    wait_list = bool(getattr(phase_b, "wait_list", False)) and not phase_b_ok
-    phase_b_fail_reason = None if phase_b_ok else (phase_b.fail_reason or "Phase B failed")
-    wick_body_ratio = getattr(phase_b, "wick_body_ratio", None)
     olh_badge = open_extreme_badge(
         phase_a.side,
         first_open=phase_a.first_open,
@@ -531,53 +593,78 @@ def _screen_one(
         first_low=phase_a.first_low,
     )
 
+    second_close: Optional[float] = None
+    phase_b_ok = False
+    wait_list = False
+    phase_b_fail_reason: Optional[str] = "Phase B pending" if phase_a_only else "Phase B failed"
+    wick_body_ratio = None
+
+    if not phase_a_only:
+        second_close = float(second.close) if second is not None else None
+        phase_b = evaluate_phase_b(
+            phase_a.side,
+            first_close=phase_a.first_close,
+            second_open=float(second.open) if second is not None else None,
+            second_high=float(second.high) if second is not None else None,
+            second_low=float(second.low) if second is not None else None,
+            second_close=second_close,
+        )
+        phase_b_ok = bool(phase_b.ok)
+        wait_list = bool(getattr(phase_b, "wait_list", False)) and not phase_b_ok
+        phase_b_fail_reason = None if phase_b_ok else (phase_b.fail_reason or "Phase B failed")
+        wick_body_ratio = getattr(phase_b, "wick_body_ratio", None)
+
     # --- Display path: front-month stock future ---
     fut_bars = _session_5m_bars(upstox, fut_ik, session)
     fut_first = bar_at(fut_bars, session, FIRST_CANDLE) if fut_bars else None
     fut_second = bar_at(fut_bars, session, SECOND_CANDLE) if fut_bars else None
 
-    # SL = future 09:15 open (required for trade levels on the FUT chart).
     if fut_first is not None:
         sl = float(fut_first.open)
     else:
-        # Rare: future 09:15 missing — refuse to invent equity SL on FUT scale.
         logger.info("olh %s: no future 09:15 bar for SL; skip display levels", symbol)
         sl = None
 
-    fut_second_close: Optional[float] = (
-        float(fut_second.close) if fut_second is not None else None
-    )
-    fut_first_close: Optional[float] = (
-        float(fut_first.close) if fut_first is not None else None
-    )
-    fut_entry_snap, entry_method = _freeze_fut_entry(
-        side=phase_a.side,
-        fut_ik=fut_ik,
-        session=session,
-        fut_second_close=fut_second_close,
-        fut_first_close=fut_first_close,
-    )
-
-    # T1/T2: pivots from future prior-day H/L/C; reference = future entry snapshot.
+    fut_entry_snap: Optional[float] = None
+    entry_method: Optional[str] = None
     t1: Optional[float] = None
     t2: Optional[float] = None
-    fut_prev_h, fut_prev_l, fut_prev_c = _fetch_daily_prev(upstox, fut_ik, session)
-    if (
-        fut_entry_snap is not None
-        and fut_prev_h is not None
-        and fut_prev_l is not None
-        and fut_prev_c is not None
-    ):
-        try:
-            t1, t2 = next_pivot_targets(
-                phase_a.side,
-                prev_high=float(fut_prev_h),
-                prev_low=float(fut_prev_l),
-                prev_close=float(fut_prev_c),
-                reference=float(fut_entry_snap),
-            )
-        except Exception:
-            logger.debug("olh pivot targets failed %s", symbol, exc_info=True)
+
+    if not phase_a_only:
+        fut_second_close: Optional[float] = (
+            float(fut_second.close) if fut_second is not None else None
+        )
+        fut_first_close: Optional[float] = (
+            float(fut_first.close) if fut_first is not None else None
+        )
+        fut_entry_snap, entry_method = _freeze_fut_entry(
+            side=phase_a.side,
+            fut_ik=fut_ik,
+            session=session,
+            fut_second_close=fut_second_close,
+            fut_first_close=fut_first_close,
+        )
+        fut_prev_h, fut_prev_l, fut_prev_c = _fetch_daily_prev(upstox, fut_ik, session)
+        if (
+            fut_entry_snap is not None
+            and fut_prev_h is not None
+            and fut_prev_l is not None
+            and fut_prev_c is not None
+        ):
+            try:
+                t1, t2 = next_pivot_targets(
+                    phase_a.side,
+                    prev_high=float(fut_prev_h),
+                    prev_low=float(fut_prev_l),
+                    prev_close=float(fut_prev_c),
+                    reference=float(fut_entry_snap),
+                )
+            except Exception:
+                logger.debug("olh pivot targets failed %s", symbol, exc_info=True)
+    else:
+        # Phase A early card: SL from future 09:15 open when available; Entry later.
+        if fut_first is not None:
+            sl = float(fut_first.open)
 
     contract_sym = (
         str(row.get("currmth_symbol") or "").strip()
@@ -590,7 +677,6 @@ def _screen_one(
         "expiry": expiry,
         "instrument_key": fut_ik,
         "equity_instrument_key": equity_ik,
-        # Equity audit fields (algo inputs)
         "prev_close": prev_close,
         "prev_high": prev_high,
         "prev_low": prev_low,
@@ -606,7 +692,6 @@ def _screen_one(
         "phase_b_fail_reason": phase_b_fail_reason,
         "wick_body_ratio": wick_body_ratio,
         "olh_badge": olh_badge,
-        # Future trade levels — Entry frozen at screen (never live-LTP overwritten)
         "sl": sl,
         "entry": fut_entry_snap,
         "entry_method": entry_method,
@@ -781,24 +866,37 @@ def prewarm_equity_data(
         _prewarm_lock.release()
 
 
+def run_phase_a(*, force: bool = False, session: Optional[date] = None, **kwargs: Any) -> Dict[str, Any]:
+    from backend.services.open_low_high.phases import run_phase_a as _run
+
+    return _run(force=force, session=session, **kwargs)
+
+
+def run_phase_a_refill(
+    *, force: bool = False, session: Optional[date] = None, **kwargs: Any
+) -> Dict[str, Any]:
+    from backend.services.open_low_high.phases import run_phase_a_refill as _run
+
+    return _run(force=force, session=session, **kwargs)
+
+
+def run_phase_b(*, force: bool = False, session: Optional[date] = None, **kwargs: Any) -> Dict[str, Any]:
+    from backend.services.open_low_high.phases import run_phase_b as _run
+
+    return _run(force=force, session=session, **kwargs)
+
+
 def run_screen(
     *,
     force: bool = False,
     session: Optional[date] = None,
     max_workers: int = 6,
 ) -> Dict[str, Any]:
-    """Run Phase A+B screen and freeze today's set.
-
-    Outside the 09:25:05–09:29:30 window, refuses unless ``force=True`` (manual/test).
-    If already frozen for the day, returns stored rows without re-scanning.
-
-    Empty Phase A with high missing equity/Nifty REST rate does **not** freeze;
-    returns ``status=incomplete`` so the scheduler can retry until the hard deadline.
-    """
+    """Run Phase A then Phase B (force/manual path). Scheduler uses split jobs."""
+    global _last_run
     ensure_tables()
     trade_date = session or _today()
-    now = _now()
-    win = window_status(now)
+    win = window_status()
 
     if is_day_frozen(trade_date) and not force:
         rows = list_screen_for_date(trade_date)
@@ -819,7 +917,34 @@ def run_screen(
             "message": "Already frozen for today — cards and sector tags immutable.",
         }
 
-    if win == "waiting" and not force:
+    from backend.services.open_low_high.phases import (
+        phase_a_window_status,
+        phase_b_window_status,
+    )
+
+    # Inside Phase A window (not yet Phase B): run A only so greys paint early.
+    if not force and phase_a_window_status() == "open" and phase_b_window_status() == "waiting":
+        result = run_phase_a(force=False, session=trade_date, max_workers=max_workers)
+        _last_run = dict(result)
+        _last_run["at"] = _now().isoformat()
+        return result
+
+    if not force and win == "waiting":
+        rows = list_screen_for_date(trade_date)
+        if rows:
+            bullish = [r for r in rows if r.get("side") == "BULLISH"]
+            bearish = [r for r in rows if r.get("side") == "BEARISH"]
+            return {
+                "ok": True,
+                "status": "phase_a",
+                "trade_date": trade_date.isoformat(),
+                "window": win,
+                "frozen": False,
+                "bullish": bullish,
+                "bearish": bearish,
+                "phase_a": len(rows),
+                "message": f"Phase A on board — {len(rows)} grey candidate(s).",
+            }
         return {
             "ok": True,
             "status": "waiting",
@@ -828,7 +953,7 @@ def run_screen(
             "frozen": False,
             "bullish": [],
             "bearish": [],
-            "message": "Waiting for 09:25 IST screen window (09:20 candle must complete).",
+            "message": "Waiting for Phase A (09:20:10) / Phase B (09:25:03) IST.",
         }
 
     if not _run_lock.acquire(blocking=False):
@@ -838,282 +963,17 @@ def run_screen(
             "trade_date": trade_date.isoformat(),
             "message": "Screen already running.",
         }
-
     try:
-        global _last_run
-        upsert_day_meta(trade_date, status="screening", frozen=False)
-        upstox = _upstox()
-        universe = load_universe()
-        expiry = front_month_expiry(trade_date)
-        logger.info(
-            "olh screen start date=%s expiry=%s symbols=%s force=%s",
-            trade_date,
-            expiry,
-            len(universe),
-            force,
-        )
-
-        results: List[Dict[str, Any]] = []
-        errors = 0
-        miss_stats: Dict[str, int] = {
-            "no_equity_key": 0,
-            "no_bars": 0,
-            "no_0915": 0,
-            "no_prev": 0,
-        }
-        miss_lock = threading.Lock()
-
-        def _one(urow: Dict[str, str]) -> Optional[Dict[str, Any]]:
-            local_miss: Dict[str, int] = {}
-            try:
-                got = _screen_one(upstox, urow, trade_date, expiry, local_miss)
-            except Exception:
-                logger.exception("olh screen symbol failed %s", urow.get("symbol"))
-                return None
-            if local_miss:
-                with miss_lock:
-                    for k, v in local_miss.items():
-                        miss_stats[k] = int(miss_stats.get(k) or 0) + int(v)
-            return got
-
-        # Bounded parallelism to respect Upstox rate limits somewhat.
-        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, 8))) as pool:
-            futs = {pool.submit(_one, u): u for u in universe}
-            for fut in as_completed(futs):
-                try:
-                    got = fut.result()
-                except Exception:
-                    errors += 1
-                    continue
-                if got:
-                    results.append(got)
-                # Soft pacing
-                time_mod.sleep(0.02)
-
-        tagged = _apply_sector_badges(results)
-        for c in tagged:
-            c["frozen"] = True
-
-        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
-        nifty_ready = _nifty_data_ready(nifty_cue, require_0920=True)
-
-        tagged = sort_screen_rows(tagged)
-
-        incomplete, quality = data_quality_incomplete(
-            phase_a_count=len(tagged),
-            scanned=len(universe),
-            miss_stats=miss_stats,
-            nifty_ready=nifty_ready,
-        )
-        past_deadline = _past_hard_deadline(now)
-
-        # Never replace a non-empty frozen day with an empty force scan
-        # (e.g. Upstox historical lag overnight).
-        if not tagged:
-            existing = list_screen_for_date(trade_date)
-            if existing:
-                logger.warning(
-                    "olh force/screen returned 0 rows; keeping existing %s for %s",
-                    len(existing),
-                    trade_date,
-                )
-                meta = get_day_meta(trade_date) or {}
-                nifty = (
-                    (meta.get("meta") if isinstance(meta.get("meta"), dict) else None) or {}
-                )
-                return {
-                    "ok": True,
-                    "status": "frozen",
-                    "trade_date": trade_date.isoformat(),
-                    "window": win,
-                    "frozen": True,
-                    "bullish": [r for r in existing if r.get("side") == "BULLISH"],
-                    "bearish": [r for r in existing if r.get("side") == "BEARISH"],
-                    "meta": meta,
-                    "nifty_gap": nifty.get("nifty_gap"),
-                    "nifty_bias": nifty.get("nifty_bias"),
-                    "nifty_show_on": nifty.get("nifty_show_on"),
-                    "message": (
-                        f"Screen returned 0 qualifiers — kept existing "
-                        f"{len(existing)} rows (data lag?)."
-                    ),
-                    "kept_existing": True,
-                    "data_quality": quality,
-                }
-
-        # Empty Phase A + missing equity/Nifty REST → do not freeze (retry window).
-        if incomplete and not tagged:
-            reason = (
-                "nifty_rest_missing"
-                if not nifty_ready
-                else f"missing_data_rate={quality['missing_rate']:.2%}"
-            )
-            notes = (
-                f"incomplete screened={len(universe)} phase_a=0 "
-                f"missing={quality['data_missing']} rate={quality['missing_rate']:.2%} "
-                f"nifty_ready={nifty_ready} past_deadline={past_deadline} "
-                f"reason={reason} force={force} "
-                f"no_bars={miss_stats.get('no_bars', 0)} "
-                f"no_0915={miss_stats.get('no_0915', 0)} "
-                f"no_prev={miss_stats.get('no_prev', 0)}"
-            )
-            logger.warning(
-                "olh defer empty freeze: %s (retry until hard deadline %s)",
-                notes,
-                HARD_DEADLINE.isoformat(),
-            )
-            day_meta = {
-                "window": win,
-                "expiry": expiry.isoformat(),
-                "active": 0,
-                "wait": 0,
-                "non_active": 0,
-                "candidates": 0,
-                "incomplete": True,
-                "freeze_deferred": True,
-                "freeze_reason": reason,
-                "data_quality": quality,
-                "past_hard_deadline": past_deadline,
-                **nifty_cue,
-            }
-            upsert_day_meta(
-                trade_date,
-                status="incomplete",
-                frozen=False,
-                bullish_count=0,
-                bearish_count=0,
-                notes=notes[:500],
-                meta=day_meta,
-            )
-            payload = {
-                "ok": True,
-                "status": "incomplete",
-                "trade_date": trade_date.isoformat(),
-                "window": win,
-                "frozen": False,
-                "bullish": [],
-                "bearish": [],
-                "scanned": len(universe),
-                "kept": 0,
-                "phase_a": 0,
-                "active": 0,
-                "wait": 0,
-                "non_active": 0,
-                "candidates": 0,
-                "errors": errors,
-                "data_quality": quality,
-                "freeze_reason": reason,
-                "past_hard_deadline": past_deadline,
-                "nifty_gap": nifty_cue.get("nifty_gap"),
-                "nifty_bias": nifty_cue.get("nifty_bias"),
-                "nifty_show_on": nifty_cue.get("nifty_show_on"),
-                "message": (
-                    "Screen deferred — Phase A empty with missing equity/Nifty REST "
-                    f"({reason}). Not freezing; will retry until "
-                    f"{HARD_DEADLINE.strftime('%H:%M:%S')} IST."
-                    if not past_deadline
-                    else (
-                        "Screen incomplete past hard deadline — Phase A empty with "
-                        f"missing equity/Nifty REST ({reason}). Left unfrozen so a "
-                        "later force screen can run when data arrives."
-                    )
-                ),
-            }
-            _last_run = dict(payload)
-            _last_run["at"] = _now().isoformat()
-            return payload
-
-        upsert_screen_rows(trade_date, tagged, frozen=True)
-        bullish = [c for c in tagged if c.get("side") == "BULLISH"]
-        bearish = [c for c in tagged if c.get("side") == "BEARISH"]
-        active_n = sum(1 for c in tagged if c.get("active"))
-        wait_n = sum(1 for c in tagged if c.get("wait_list") and not c.get("active"))
-        non_active_n = len(tagged) - active_n - wait_n
-        candidate_n = wait_n + non_active_n
-        phase_ts = _now()
-        freeze_reason = (
-            "phase_a_qualifiers"
-            if tagged
-            else "empty_phase_a_data_ok"
-        )
-        day_meta = {
-            "window": win,
-            "expiry": expiry.isoformat(),
-            "active": active_n,
-            "wait": wait_n,
-            "non_active": non_active_n,
-            "candidates": candidate_n,
-            "freeze_reason": freeze_reason,
-            "data_quality": quality,
-            **nifty_cue,
-        }
-        upsert_day_meta(
-            trade_date,
-            status="frozen",
-            frozen=True,
-            bullish_count=len(bullish),
-            bearish_count=len(bearish),
-            phase_a_at=phase_ts,
-            phase_b_at=phase_ts,
-            notes=(
-                f"screened={len(universe)} phase_a={len(tagged)} "
-                f"active={active_n} wait={wait_n} non_active={non_active_n} "
-                f"errors={errors} force={force} freeze_reason={freeze_reason} "
-                f"missing_rate={quality['missing_rate']:.2%} nifty_ready={nifty_ready}"
-            ),
-            meta=day_meta,
-        )
-        payload = {
-            "ok": True,
-            "status": "frozen",
-            "trade_date": trade_date.isoformat(),
-            "window": win,
-            "frozen": True,
-            "bullish": bullish,
-            "bearish": bearish,
-            "scanned": len(universe),
-            "kept": active_n,
-            "phase_a": len(tagged),
-            "active": active_n,
-            "wait": wait_n,
-            "non_active": non_active_n,
-            "candidates": candidate_n,
-            "errors": errors,
-            "freeze_reason": freeze_reason,
-            "data_quality": quality,
-            "nifty_gap": nifty_cue.get("nifty_gap"),
-            "nifty_bias": nifty_cue.get("nifty_bias"),
-            "nifty_show_on": nifty_cue.get("nifty_show_on"),
-            "message": (
-                f"Screen complete — {active_n} active, {wait_n} wait, "
-                f"{non_active_n} non-active. Frozen for the day."
-            ),
+        a = run_phase_a(force=True, session=trade_date, max_workers=max_workers)
+        b = run_phase_b(force=True, session=trade_date, max_workers=max_workers)
+        payload = dict(b)
+        payload["phase_a_result"] = {
+            "status": a.get("status"),
+            "phase_a": a.get("phase_a"),
         }
         _last_run = dict(payload)
-        _last_run["at"] = phase_ts.isoformat()
-        logger.info(
-            "olh screen done phase_a=%s active=%s wait=%s non_active=%s "
-            "bull=%s bear=%s freeze_reason=%s missing_rate=%.2f nifty_ready=%s",
-            len(tagged),
-            active_n,
-            wait_n,
-            non_active_n,
-            len(bullish),
-            len(bearish),
-            freeze_reason,
-            quality["missing_rate"],
-            nifty_ready,
-        )
+        _last_run["at"] = _now().isoformat()
         return payload
-    except Exception as exc:
-        logger.exception("olh run_screen failed")
-        upsert_day_meta(trade_date, status="error", frozen=False, notes=str(exc)[:500])
-        return {
-            "ok": False,
-            "status": "error",
-            "trade_date": trade_date.isoformat(),
-            "message": str(exc),
-        }
     finally:
         _run_lock.release()
 
@@ -1164,15 +1024,23 @@ def _enrich_ltp(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
-    """API payload for the live page. Optionally triggers screen inside the window."""
+    """API payload for the live page. Phase A greys return before Phase B freeze."""
     ensure_tables()
     trade_date = _today()
     win = window_status()
     meta = get_day_meta(trade_date)
     frozen = bool(meta and meta.get("frozen")) or is_day_frozen(trade_date)
 
-    if auto_run and not frozen and win == "open":
-        return run_screen(force=False, session=trade_date)
+    if auto_run and not frozen:
+        from backend.services.open_low_high.phases import (
+            phase_a_window_status,
+            phase_b_window_status,
+        )
+
+        if phase_b_window_status() == "open":
+            return run_phase_b(force=False, session=trade_date)
+        if phase_a_window_status() == "open":
+            return run_phase_a(force=False, session=trade_date)
 
     rows = _enrich_ltp(list_screen_for_date(trade_date))
     bullish = [r for r in rows if str(r.get("side") or "").upper() == "BULLISH"]
@@ -1182,33 +1050,52 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
     non_active_n = len(rows) - active_n - wait_n
     grey_n = wait_n + non_active_n
 
+    nifty = (
+        (meta.get("meta") if isinstance(meta, dict) and isinstance(meta.get("meta"), dict) else None)
+        or {}
+    )
+    failure_banner = nifty.get("failure_banner")
     meta_status = str((meta or {}).get("status") or "")
+
     if frozen:
         status = "frozen"
         message = (
             f"Frozen for today — {active_n} active, {wait_n} wait, "
             f"{non_active_n} non-active. Cards and sector tags will not change."
         )
+    elif meta_status in {"phase_b_partial", "phase_b_failed"} or failure_banner:
+        status = meta_status or "phase_b_partial"
+        message = str(failure_banner or (meta or {}).get("notes") or "Phase B incomplete.")
+    elif meta_status == "phase_a" or (rows and not frozen and active_n == 0 and win == "waiting"):
+        status = "phase_a"
+        message = (
+            f"Phase A on board — {len(rows)} grey candidate(s). "
+            f"Phase B from {SCREEN_AFTER.strftime('%H:%M:%S')} IST."
+        )
     elif meta_status == "incomplete":
         status = "incomplete"
         message = (
-            "Screen deferred — equity/Nifty REST incomplete at freeze time. "
-            "Retrying until ~09:29 IST (will not empty-freeze)."
+            "Screen deferred — equity/Nifty data incomplete. Retrying until ~09:29 IST."
         )
-    elif win == "waiting":
+    elif win == "waiting" and not rows:
         status = "waiting"
-        message = "Waiting for 09:15 + 09:20 candles to complete — screen runs ~09:25 IST."
+        message = (
+            "Waiting for Phase A (09:20:10 IST) on the completed 09:15 candle; "
+            "Phase B follows at 09:25:03."
+        )
     elif win == "past" and not rows:
         status = "empty"
         message = "No screen stored for today. Use Refresh (force) or wait for tomorrow's window."
     elif rows:
-        status = "live"
+        status = meta_status or "live"
         message = "Showing stored screen rows."
     else:
         status = "waiting"
         message = "No qualifiers yet."
 
-    nifty = (meta.get("meta") if isinstance(meta, dict) and isinstance(meta.get("meta"), dict) else None) or {}
+    if failure_banner:
+        message = str(failure_banner)
+
     return {
         "ok": True,
         "status": status,
@@ -1221,10 +1108,12 @@ def get_today_state(*, auto_run: bool = True) -> Dict[str, Any]:
         "wait": wait_n,
         "non_active": non_active_n,
         "candidates": grey_n,
+        "phase_a": len(rows),
         "meta": meta,
         "nifty_gap": nifty.get("nifty_gap"),
         "nifty_bias": nifty.get("nifty_bias"),
         "nifty_show_on": nifty.get("nifty_show_on"),
+        "failure_banner": failure_banner,
         "server_time": _now().isoformat(),
         "message": message,
         "last_run": _last_run or None,
