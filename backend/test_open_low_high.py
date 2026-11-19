@@ -464,7 +464,71 @@ def test_window_status_boundaries():
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 25, 5))) == "open"
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 26, 0))) == "open"
     assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 0))) == "open"
-    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 27, 1))) == "past"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 30))) == "open"
+    assert window_status(IST.localize(datetime(2026, 11, 17, 9, 29, 31))) == "past"
+
+
+def test_data_quality_incomplete_defers_empty_freeze():
+    from backend.services.open_low_high.screener import data_quality_incomplete
+
+    # 2026-11-19 style: Phase A=0 because most equities lacked REST bars.
+    incomplete, details = data_quality_incomplete(
+        phase_a_count=0,
+        scanned=145,
+        miss_stats={"no_bars": 120, "no_0915": 10, "no_prev": 5, "no_equity_key": 0},
+        nifty_ready=False,
+    )
+    assert incomplete is True
+    assert details["missing_rate"] >= 0.35
+    assert details["nifty_ready"] is False
+
+    # Legitimate flat day: empty Phase A but equity/Nifty data present.
+    ok_empty, details_ok = data_quality_incomplete(
+        phase_a_count=0,
+        scanned=145,
+        miss_stats={"no_bars": 2, "no_0915": 1, "no_prev": 0, "no_equity_key": 0},
+        nifty_ready=True,
+    )
+    assert ok_empty is False
+    assert details_ok["missing_rate"] < 0.35
+
+    # Any Phase A qualifiers → never treat as incomplete deferral.
+    has_a, _ = data_quality_incomplete(
+        phase_a_count=9,
+        scanned=145,
+        miss_stats={"no_bars": 100, "no_0915": 0, "no_prev": 0, "no_equity_key": 0},
+        nifty_ready=False,
+    )
+    assert has_a is False
+
+
+def test_nifty_data_ready_requires_bars_and_prev_close():
+    from backend.services.open_low_high.screener import _nifty_data_ready
+
+    assert _nifty_data_ready({}) is False
+    assert (
+        _nifty_data_ready(
+            {
+                "nifty_prev_close": 24000.0,
+                "nifty_0915_open": 24010.0,
+                "nifty_0915_close": 24020.0,
+            },
+            require_0920=True,
+        )
+        is False
+    )
+    assert (
+        _nifty_data_ready(
+            {
+                "nifty_prev_close": 24000.0,
+                "nifty_0915_open": 24010.0,
+                "nifty_0915_close": 24020.0,
+                "nifty_0920_close": 24030.0,
+            },
+            require_0920=True,
+        )
+        is True
+    )
 
 
 def test_resolve_equity_key_prefers_universe_nse_eq():
