@@ -39,16 +39,25 @@ FREEZE_COVERAGE_MIN = _env_float("OLH_FREEZE_COVERAGE_MIN", 0.90)
 MISSING_DATA_RATE_THRESHOLD = _env_float("OLH_MISSING_DATA_RATE_THRESHOLD", 0.35)
 
 # WS trust: first 1m of a 5m bucket must start within this many seconds of bucket open.
+# (Legacy soft check; completeness of all five 1m bars is authoritative — see candle_builder.)
 WS_FIRST_TICK_TRUST_SEC = _env_int("OLH_WS_FIRST_TICK_TRUST_SEC", 5)
 # One WS "try" = connect+subscribe + ≥N 1m bars in T seconds for the symbol.
 WS_TRY_MIN_1M_BARS = _env_int("OLH_WS_TRY_MIN_1M_BARS", 1)
 WS_TRY_WAIT_SEC = _env_float("OLH_WS_TRY_WAIT_SEC", 2.0)
 WS_TRY_COUNT = _env_int("OLH_WS_TRY_COUNT", 2)
 
+# Official I1 / market OHLC vs tick-built open cross-check (percent of price).
+OFFICIAL_OPEN_TOLERANCE_PCT = _env_float("OLH_OFFICIAL_OPEN_TOLERANCE_PCT", 0.05)
+# WS vs REST 09:15 compare sample size (equities) + always include Nifty.
+WS_REST_0915_COMPARE_N = _env_int("OLH_WS_REST_0915_COMPARE_N", 10)
+
 # 09:05 canary: token ok, Nifty tick, ≥ this share of equities with ≥1 WS 1m (post 09:15)
 # Pre-open uses provider registration; after 09:15 uses bar share.
 CANARY_EQUITY_SHARE = _env_float("OLH_CANARY_EQUITY_SHARE", 0.90)
 WS_WARM_MIN_EQUITY_SHARE = _env_float("OLH_WS_WARM_MIN_EQUITY_SHARE", 0.15)
+# 09:05 / 09:15 canary: fail loudly if EQ or INDEX ticks in last 60s are 0.
+CANARY_REQUIRE_RECENT_TICKS = _env_bool("OLH_CANARY_REQUIRE_RECENT_TICKS", True)
+CANARY_RECENT_TICK_WINDOW_SEC = _env_int("OLH_CANARY_RECENT_TICK_WINDOW_SEC", 60)
 
 # REST concurrency / pacing inside Phase A/B pools.
 REST_MAX_WORKERS = _env_int("OLH_REST_MAX_WORKERS", 4)

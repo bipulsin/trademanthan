@@ -416,7 +416,10 @@ def _ws_bucket_trusted(
     *,
     trust_sec: int = WS_FIRST_TICK_TRUST_SEC,
 ) -> bool:
-    """TRUSTED only if first 1m bar of the 5m bucket is within ``trust_sec`` of bucket open."""
+    """Legacy soft check: first 1m bar ts within ``trust_sec`` of bucket open.
+
+    Authoritative trust is completeness of all five 1m bars (see ``aggregate_5m_from_1m``).
+    """
     delta = (first_1m_ts - bucket_start).total_seconds()
     return 0.0 <= float(delta) <= float(trust_sec)
 
@@ -427,67 +430,110 @@ def _fetch_ws_5m_bars(
     *,
     require_trusted: bool = False,
 ) -> Tuple[List[Bar], str]:
-    """Aggregate Upstox WS 1m → exchange-aligned 5m (09:15–09:19, 09:20–09:24, …).
+    """Aggregate Upstox WS 1m → exchange-aligned 5m (09:15/09:20/09:25…).
 
-    Returns ``(bars, trust)`` where trust is ``TRUSTED`` / ``UNTRUSTED`` / ``none``.
-    UNTRUSTED bars are still returned unless ``require_trusted=True``.
+    Returns ``(bars, trust)`` where trust is ``TRUSTED`` / ``PARTIAL`` /
+    ``UNTRUSTED`` / ``none``.
+
+    - TRUSTED: all five 1m present for each returned bucket
+    - PARTIAL: some minutes missing (first minute present) — + missing list in logs
+    - UNTRUSTED: first minute of a bucket missing
+
+    Volume/OI may be NULL (index); never gates aggregation.
+    UNTRUSTED/PARTIAL bars are still returned unless ``require_trusted=True``.
     """
+    from backend.services.open_low_high.candle_builder import (
+        TRUST_PARTIAL,
+        TRUST_TRUSTED,
+        TRUST_UNTRUSTED,
+        aggregate_5m_from_1m,
+    )
+    from backend.services.open_low_high.ohl_log import ohl_log
+
     rows = _fetch_ws_1m_rows(instrument_key, session)
     if not rows:
         return [], "none"
-    # Aggregate 1m → 5m aligned to :00/:05/:10… IST; track first 1m ts per bucket.
-    buckets: Dict[datetime, Dict[str, Any]] = {}
+
+    # Normalize rows for aggregator (volume may be NULL — index).
+    norm: List[Dict[str, Any]] = []
     for r in rows:
         ts = _parse_bar_ts(r.get("timestamp"))
         if ts is None:
             continue
-        minute = (ts.minute // 5) * 5
-        bucket = ts.replace(minute=minute, second=0, microsecond=0)
-        o, h, l, c = float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])
-        vol = float(r.get("volume") or 0)
-        cur = buckets.get(bucket)
-        if cur is None:
-            buckets[bucket] = {
-                "open": o,
-                "high": h,
-                "low": l,
-                "close": c,
-                "volume": vol,
-                "first_1m": ts,
-            }
-        else:
-            cur["high"] = max(cur["high"], h)
-            cur["low"] = min(cur["low"], l)
-            cur["close"] = c
-            cur["volume"] += vol
-            if ts < cur["first_1m"]:
-                cur["first_1m"] = ts
+        try:
+            norm.append(
+                {
+                    "timestamp": ts,
+                    "open": float(r["open"]),
+                    "high": float(r["high"]),
+                    "low": float(r["low"]),
+                    "close": float(r["close"]),
+                    "volume": r.get("volume"),  # keep None
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not norm:
+        return [], "none"
+
+    agg = aggregate_5m_from_1m(norm)
     out: List[Bar] = []
-    untrusted = False
-    for bucket, ohlc in sorted(buckets.items()):
-        trusted = _ws_bucket_trusted(bucket, ohlc["first_1m"])
-        if not trusted:
-            untrusted = True
-            if require_trusted:
-                continue
+    worst = TRUST_TRUSTED
+    for a in agg:
+        if a.open <= 0 and a.close <= 0:
+            continue
+        missing_s = ",".join(m.strftime("%H:%M") for m in a.missing_minutes) or "-"
+        present_s = ",".join(m.strftime("%H:%M") for m in a.present_minutes) or "-"
+        logger.info(
+            "olh ws5m ik=%s bucket=%s state=%s source=WS present=%s missing=%s",
+            instrument_key,
+            a.bucket_start.strftime("%H:%M"),
+            a.state,
+            present_s,
+            missing_s,
+        )
+        ohl_log(
+            "success" if a.state == TRUST_TRUSTED else "failed",
+            action="ws5m_aggregate",
+            symbol=instrument_key,
+            source="ws",
+            detail=(
+                f"bucket={a.bucket_start.strftime('%H:%M')} state={a.state} "
+                f"present={present_s} missing={missing_s}"
+            ),
+        )
+        if a.state == TRUST_UNTRUSTED:
+            worst = TRUST_UNTRUSTED
+        elif a.state == TRUST_PARTIAL and worst == TRUST_TRUSTED:
+            worst = TRUST_PARTIAL
+        if require_trusted and a.state != TRUST_TRUSTED:
+            continue
         out.append(
             Bar(
-                ts=bucket,
-                open=ohlc["open"],
-                high=ohlc["high"],
-                low=ohlc["low"],
-                close=ohlc["close"],
-                volume=ohlc["volume"],
+                ts=a.bucket_start,
+                open=a.open,
+                high=a.high,
+                low=a.low,
+                close=a.close,
+                volume=float(a.volume or 0),
                 contract=instrument_key,
             )
         )
     if not out:
         return [], "none"
+    before_n = len(out)
     # Same closed-bar rule as REST: never hand Phase A/B a forming 5m bucket.
     out = _drop_unclosed_bars(out, log_label=f"ws5m:{instrument_key}")
+    logger.info(
+        "olh ws5m drop_unclosed ik=%s before=%s after=%s trust=%s",
+        instrument_key,
+        before_n,
+        len(out),
+        worst,
+    )
     if not out:
         return [], "none"
-    return out, ("UNTRUSTED" if untrusted else "TRUSTED")
+    return out, worst
 
 
 def _hist_range_end(session: date) -> date:
@@ -696,23 +742,24 @@ def _ws_try_once(
         )
         return [], "none"
     if trust != "TRUSTED":
+        # Phase A/B: TRUSTED only else REST (PARTIAL and UNTRUSTED both fall through).
         ohl_log(
             "failed",
             action=action,
             symbol=symbol,
             source=src_label,
-            detail=f"UNTRUSTED bars={len(bars)} → REST",
+            detail=f"{trust} bars={len(bars)} → REST",
         )
         _record_attempt(
             session,
             symbol=symbol,
             instrument_key=instrument_key,
             source=src_label,
-            status="untrusted",
+            status="untrusted" if trust == "UNTRUSTED" else "partial",
             candle_count=len(bars),
             detail=trust,
         )
-        return [], "UNTRUSTED"
+        return [], trust
     ohl_log(
         "success",
         action=action,

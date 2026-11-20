@@ -241,11 +241,16 @@ def check_equity_index_ws_warm(
     keys already have ≥1 WS 1m candle (or feed thread is up with keys registered
     pre-open when the session has not printed bars yet).
 
-    When ``canary=True`` (09:05), require token + Nifty subscribed + (post-open)
-    ≥ CANARY_EQUITY_SHARE equities ticking; alert on failure.
+    When ``canary=True`` (09:05 / 09:15), require token + Nifty subscribed +
+    (post-open) ≥ CANARY_EQUITY_SHARE equities ticking; **fail loudly** if EQ or
+    INDEX ticks in the last 60s are 0.
     """
-    from backend.services.open_low_high.config import CANARY_EQUITY_SHARE
-    from backend.services.upstox_market_feed import feed_status
+    from backend.services.open_low_high.config import (
+        CANARY_EQUITY_SHARE,
+        CANARY_RECENT_TICK_WINDOW_SEC,
+        CANARY_REQUIRE_RECENT_TICKS,
+    )
+    from backend.services.upstox_market_feed import feed_status, get_segment_tick_counts_last_sec
 
     trade_date = session or _now().date()
     bundles = collect_olh_instrument_keys(session=trade_date)
@@ -281,6 +286,15 @@ def check_equity_index_ws_warm(
     except Exception:
         pass
 
+    window = int(CANARY_RECENT_TICK_WINDOW_SEC)
+    recent = {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0}
+    try:
+        recent = get_segment_tick_counts_last_sec(window) or recent
+    except Exception:
+        logger.debug("recent segment ticks unavailable", exc_info=True)
+    eq_ticks_60s = int(recent.get("EQ") or 0)
+    index_ticks_60s = int(recent.get("INDEX") or 0)
+
     tt = _now().time()
     thr = float(CANARY_EQUITY_SHARE if canary else min_equity_share)
     if tt < time(9, 15):
@@ -296,6 +310,26 @@ def check_equity_index_ws_warm(
         if canary and len(equity) < 100:
             warm = False
             reason = "equity_keys_low"
+        # 09:05 canary: fail loudly if EQ or INDEX silent in last 60s (when ticks expected).
+        # Pre-09:00 market is quiet — only enforce from 09:00 onward.
+        if (
+            canary
+            and CANARY_REQUIRE_RECENT_TICKS
+            and tt >= time(9, 0)
+            and (eq_ticks_60s == 0 or index_ticks_60s == 0)
+        ):
+            warm = False
+            reason = (
+                f"zero_ticks_60s EQ={eq_ticks_60s} INDEX={index_ticks_60s}"
+            )
+            logger.error(
+                "olh WS canary FAIL LOUDLY: EQ or INDEX ticks in last %ss are 0 "
+                "(EQ=%s INDEX=%s) at %s",
+                window,
+                eq_ticks_60s,
+                index_ticks_60s,
+                tt.isoformat(),
+            )
     else:
         warm = (
             token_ok
@@ -306,6 +340,21 @@ def check_equity_index_ws_warm(
             and eq_share >= thr
         )
         reason = "bars" if warm else "insufficient_ws_bars"
+        if (
+            canary
+            and CANARY_REQUIRE_RECENT_TICKS
+            and (eq_ticks_60s == 0 or index_ticks_60s == 0)
+        ):
+            warm = False
+            reason = f"zero_ticks_60s EQ={eq_ticks_60s} INDEX={index_ticks_60s}"
+            logger.error(
+                "olh WS canary FAIL LOUDLY: EQ or INDEX ticks in last %ss are 0 "
+                "(EQ=%s INDEX=%s) at %s",
+                window,
+                eq_ticks_60s,
+                index_ticks_60s,
+                tt.isoformat(),
+            )
 
     payload = {
         "ok": True,
@@ -323,6 +372,8 @@ def check_equity_index_ws_warm(
         "equity_share": round(eq_share, 4),
         "equity_share_threshold": thr,
         "nifty_1m_bars": nifty_n,
+        "eq_ticks_60s": eq_ticks_60s,
+        "index_ticks_60s": index_ticks_60s,
         "subscribed": len(bundles.get("all") or []),
         "lock_engaged": is_ws_lock_engaged(),
     }
@@ -333,6 +384,7 @@ def check_equity_index_ws_warm(
         detail=(
             f"warm={warm} reason={reason} eq_share={eq_share:.2%} thr={thr:.0%} "
             f"nifty_bars={nifty_n} provider={provider_n} token_last4={token_last4} "
+            f"EQ_ticks_60s={eq_ticks_60s} INDEX_ticks_60s={index_ticks_60s} "
             f"sub={payload['subscribed']}"
         ),
     )
@@ -341,10 +393,12 @@ def check_equity_index_ws_warm(
             from backend.services.open_low_high.alerts import alert_degraded
 
             alert_degraded(
-                f"09:05 WS canary failed: {reason}",
+                f"WS canary failed: {reason}",
                 trade_date=trade_date.isoformat(),
                 equity_share=round(eq_share, 4),
                 nifty_1m_bars=nifty_n,
+                eq_ticks_60s=eq_ticks_60s,
+                index_ticks_60s=index_ticks_60s,
                 token_last4=token_last4,
             )
         except Exception:
@@ -404,15 +458,16 @@ def resubscribe_olh_ws_keepalive() -> Dict[str, Any]:
 
 
 def ensure_equity_index_warm_or_rewarm(*, session: Optional[date] = None) -> Dict[str, Any]:
-    """09:15 check: engage lock, verify warm, re-subscribe if not."""
+    """09:15 check: engage lock, verify warm (+ recent EQ/INDEX ticks), re-subscribe if not."""
     engage_ws_lock()
     subscribe_olh_ws(include_future=True, engage_lock=True)
-    warm = check_equity_index_ws_warm(session=session)
+    # canary=True enforces loud fail when EQ/INDEX ticks in last 60s are 0.
+    warm = check_equity_index_ws_warm(session=session, canary=True)
     rewarmed = False
     if not warm.get("warm"):
         ohl_log("failed", action="ws_warm_check", source="ws", detail="rewarming")
-        prewarm_ws(engage_lock=True)
-        warm = check_equity_index_ws_warm(session=session)
+        prewarm_ws(engage_lock=True, canary=True)
+        warm = check_equity_index_ws_warm(session=session, canary=True)
         rewarmed = True
     return {
         "ok": True,

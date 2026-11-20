@@ -2025,10 +2025,10 @@ def _run_startup_schema_migrations(db_engine):
                             high DOUBLE PRECISION NOT NULL,
                             low DOUBLE PRECISION NOT NULL,
                             close DOUBLE PRECISION NOT NULL,
-                            oi_open BIGINT NOT NULL,
-                            oi_high BIGINT NOT NULL,
-                            oi_low BIGINT NOT NULL,
-                            oi_close BIGINT NOT NULL,
+                            oi_open BIGINT,
+                            oi_high BIGINT,
+                            oi_low BIGINT,
+                            oi_close BIGINT,
                             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                             CONSTRAINT pk_upstox_ws_intraday_1m PRIMARY KEY (instrument_key, candle_time)
                         )
@@ -2048,7 +2048,7 @@ def _run_startup_schema_migrations(db_engine):
             if "upstox_ws_intraday_1m" in inspect(db_engine).get_table_names():
                 _ws1m_cols = {c["name"] for c in inspect(db_engine).get_columns("upstox_ws_intraday_1m")}
                 for col, typ in (
-                    ("volume", "BIGINT DEFAULT 0"),
+                    ("volume", "BIGINT"),  # NULL when absent (index); never gate OLH
                     ("bid_depth_qty", "BIGINT DEFAULT 0"),
                     ("ask_depth_qty", "BIGINT DEFAULT 0"),
                     ("tbq", "BIGINT DEFAULT 0"),
@@ -2058,6 +2058,30 @@ def _run_startup_schema_migrations(db_engine):
                     if col not in _ws1m_cols and db_engine.dialect.name == "postgresql":
                         conn.execute(text(f"ALTER TABLE upstox_ws_intraday_1m ADD COLUMN {col} {typ}"))
                         print(f"Applied migration: upstox_ws_intraday_1m.{col}")
+                # OI/volume must be nullable so EQ/INDEX LTP-only bars persist (futures still store OI).
+                if db_engine.dialect.name == "postgresql":
+                    for oi_col in ("oi_open", "oi_high", "oi_low", "oi_close", "volume"):
+                        try:
+                            nn = conn.execute(
+                                text(
+                                    """
+                                    SELECT is_nullable FROM information_schema.columns
+                                    WHERE table_name = 'upstox_ws_intraday_1m'
+                                      AND column_name = :c
+                                    """
+                                ),
+                                {"c": oi_col},
+                            ).scalar()
+                            if nn == "NO":
+                                conn.execute(
+                                    text(
+                                        f"ALTER TABLE upstox_ws_intraday_1m "
+                                        f"ALTER COLUMN {oi_col} DROP NOT NULL"
+                                    )
+                                )
+                                print(f"Applied migration: upstox_ws_intraday_1m.{oi_col} nullable")
+                        except Exception:
+                            pass
 
             if "upstox_ws_orderflow_latest" not in table_names and db_engine.dialect.name == "postgresql":
                 conn.execute(

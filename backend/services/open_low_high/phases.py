@@ -470,8 +470,8 @@ def _try_0920_bar(
 
     if source == "ws":
         bars, trust = _fetch_ws_5m_bars(equity_ik, session)
-        if trust == "UNTRUSTED":
-            bars = []  # force REST path
+        if trust in ("UNTRUSTED", "PARTIAL"):
+            bars = []  # Phase B: TRUSTED only else REST
     else:
         bars = _fetch_rest_5m(upstox, equity_ik, session)
     b = bar_at(bars, session, SECOND_CANDLE) if bars else None

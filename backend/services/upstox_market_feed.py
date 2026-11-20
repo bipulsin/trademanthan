@@ -59,7 +59,111 @@ _SEG_TICK_LOCK = threading.Lock()
 _SEG_TICK_MINUTE: Optional[str] = None  # "HH:MM" IST
 _SEG_TICK_COUNTS: Dict[str, int] = {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0}
 _SEG_TICK_KEYS: Dict[str, set] = {"EQ": set(), "INDEX": set(), "FUT": set(), "OTHER": set()}
+# Rolling tick timestamps (mono) per segment for last-60s canary.
+_SEG_TICK_RECENT: Dict[str, List[float]] = {"EQ": [], "INDEX": [], "FUT": [], "OTHER": []}
+_SEG_TICK_RECENT_MAX = 5000
 IST = pytz.timezone("Asia/Kolkata")
+
+
+def _nullable_int(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ltt_to_ist(ltt: Any, fallback: Optional[datetime] = None) -> datetime:
+    """Parse Upstox LTPC ``ltt`` (epoch ms or sec) → tz-aware IST."""
+    fb = fallback or datetime.now(IST)
+    if fb.tzinfo is None:
+        fb = IST.localize(fb)
+    else:
+        fb = fb.astimezone(IST)
+    if ltt is None:
+        return fb
+    try:
+        raw = float(ltt)
+    except (TypeError, ValueError):
+        return fb
+    if raw <= 0:
+        return fb
+    # Heuristic: ms vs sec
+    if raw > 1e12:
+        epoch = raw / 1000.0
+    elif raw > 1e10:
+        epoch = raw / 1000.0
+    else:
+        epoch = raw
+    try:
+        return datetime.fromtimestamp(epoch, tz=IST)
+    except (OSError, OverflowError, ValueError):
+        return fb
+
+
+def _on_closed_1m_persist(candle: Any) -> None:
+    """Persist closed (or PARTIAL-closed) 1m from the shared candle builder."""
+    from backend.services.open_low_high.candle_builder import Candle1m
+
+    if not isinstance(candle, Candle1m):
+        return
+    if candle.tick_count < 1 and candle.candle_source != "i1":
+        return  # ≥1 valid LTP required (I1 seed allowed)
+    minute_iso = candle.minute_start.isoformat()
+    _persist_ws_1m_candle(candle.instrument_key, minute_iso, candle.to_persist_dict())
+    # Official-open cross-check when both tick-built and I1 present on 09:15.
+    if (
+        candle.minute_start.hour == 9
+        and candle.minute_start.minute == 15
+        and candle.i1_open is not None
+        and candle.tick_count >= 1
+    ):
+        try:
+            from backend.services.open_low_high.candle_builder import compare_official_open
+            from backend.services.open_low_high.config import OFFICIAL_OPEN_TOLERANCE_PCT
+
+            compare_official_open(
+                {"open": candle.open, "high": candle.high, "low": candle.low},
+                {"open": candle.i1_open, "high": candle.i1_high, "low": candle.i1_low},
+                tolerance_pct=float(OFFICIAL_OPEN_TOLERANCE_PCT),
+                label=f"{candle.instrument_key}@09:15",
+            )
+        except Exception:
+            logger.debug("official_open cross-check skipped", exc_info=True)
+
+
+def _builder():
+    from backend.services.open_low_high.candle_builder import get_global_builder, set_global_on_closed
+
+    b = get_global_builder()
+    if b._on_closed is None:
+        set_global_on_closed(_on_closed_1m_persist)
+    return b
+
+
+def get_segment_tick_counts_last_sec(window_sec: int = 60) -> Dict[str, int]:
+    """Live tick counts per segment within the last ``window_sec`` (monotonic clock)."""
+    now = time.monotonic()
+    cutoff = now - float(window_sec)
+    with _SEG_TICK_LOCK:
+        out: Dict[str, int] = {}
+        for seg, stamps in _SEG_TICK_RECENT.items():
+            # Prune while counting
+            kept = [t for t in stamps if t >= cutoff]
+            _SEG_TICK_RECENT[seg] = kept[-_SEG_TICK_RECENT_MAX:]
+            out[seg] = len(kept)
+        return out
+
+
+def mark_olh_1m_partial_on_reconnect() -> int:
+    """After WS reconnect, mark in-progress 1m bars PARTIAL and resume."""
+    try:
+        touched = _builder().mark_partial_on_reconnect()
+        return len(touched)
+    except Exception:
+        logger.debug("mark_olh_1m_partial_on_reconnect failed", exc_info=True)
+        return 0
 
 
 def _segment_of_ik(ik: str) -> str:
@@ -99,6 +203,10 @@ def _record_segment_tick(ik: str, now_ist: Optional[datetime] = None) -> None:
             _SEG_TICK_KEYS = {"EQ": set(), "INDEX": set(), "FUT": set(), "OTHER": set()}
         _SEG_TICK_COUNTS[seg] = int(_SEG_TICK_COUNTS.get(seg, 0)) + 1
         _SEG_TICK_KEYS.setdefault(seg, set()).add(ik)
+        recent = _SEG_TICK_RECENT.setdefault(seg, [])
+        recent.append(time.monotonic())
+        if len(recent) > _SEG_TICK_RECENT_MAX:
+            del recent[: len(recent) - _SEG_TICK_RECENT_MAX]
     if flush_payload:
         _flush_segment_tick_minute(flush_payload)
 
@@ -177,6 +285,12 @@ def _reset_ltq_volume_caches_if_new_ist_day() -> None:
 
 
 def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> None:
+    """Persist 1m OHLC. OI/volume may be NULL — never coerce absent OI to block EQ/INDEX."""
+    oi_open = _nullable_int(candle.get("oi_open"))
+    oi_high = _nullable_int(candle.get("oi_high"))
+    oi_low = _nullable_int(candle.get("oi_low"))
+    oi_close = _nullable_int(candle.get("oi_close"))
+    vol = _nullable_int(candle.get("volume"))
     db = SessionLocal()
     try:
         db.execute(
@@ -225,14 +339,27 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
                     high = GREATEST(upstox_ws_intraday_1m.high, EXCLUDED.high),
                     low = LEAST(upstox_ws_intraday_1m.low, EXCLUDED.low),
                     close = EXCLUDED.close,
-                    oi_high = GREATEST(upstox_ws_intraday_1m.oi_high, EXCLUDED.oi_high),
-                    oi_low = LEAST(upstox_ws_intraday_1m.oi_low, EXCLUDED.oi_low),
-                    oi_close = EXCLUDED.oi_close,
-                    volume = GREATEST(COALESCE(upstox_ws_intraday_1m.volume, 0), EXCLUDED.volume),
-                    bid_depth_qty = EXCLUDED.bid_depth_qty,
-                    ask_depth_qty = EXCLUDED.ask_depth_qty,
-                    tbq = EXCLUDED.tbq,
-                    tsq = EXCLUDED.tsq,
+                    oi_open = COALESCE(upstox_ws_intraday_1m.oi_open, EXCLUDED.oi_open),
+                    oi_high = CASE
+                        WHEN EXCLUDED.oi_high IS NULL THEN upstox_ws_intraday_1m.oi_high
+                        WHEN upstox_ws_intraday_1m.oi_high IS NULL THEN EXCLUDED.oi_high
+                        ELSE GREATEST(upstox_ws_intraday_1m.oi_high, EXCLUDED.oi_high)
+                    END,
+                    oi_low = CASE
+                        WHEN EXCLUDED.oi_low IS NULL THEN upstox_ws_intraday_1m.oi_low
+                        WHEN upstox_ws_intraday_1m.oi_low IS NULL THEN EXCLUDED.oi_low
+                        ELSE LEAST(upstox_ws_intraday_1m.oi_low, EXCLUDED.oi_low)
+                    END,
+                    oi_close = COALESCE(EXCLUDED.oi_close, upstox_ws_intraday_1m.oi_close),
+                    volume = CASE
+                        WHEN EXCLUDED.volume IS NULL THEN upstox_ws_intraday_1m.volume
+                        WHEN upstox_ws_intraday_1m.volume IS NULL THEN EXCLUDED.volume
+                        ELSE GREATEST(upstox_ws_intraday_1m.volume, EXCLUDED.volume)
+                    END,
+                    bid_depth_qty = COALESCE(EXCLUDED.bid_depth_qty, upstox_ws_intraday_1m.bid_depth_qty),
+                    ask_depth_qty = COALESCE(EXCLUDED.ask_depth_qty, upstox_ws_intraday_1m.ask_depth_qty),
+                    tbq = COALESCE(EXCLUDED.tbq, upstox_ws_intraday_1m.tbq),
+                    tsq = COALESCE(EXCLUDED.tsq, upstox_ws_intraday_1m.tsq),
                     candle_source = EXCLUDED.candle_source,
                     updated_at = NOW()
                 """
@@ -244,15 +371,15 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
                 "high": float(candle["high"]),
                 "low": float(candle["low"]),
                 "close": float(candle["close"]),
-                "oi_open": int(candle["oi_open"]),
-                "oi_high": int(candle["oi_high"]),
-                "oi_low": int(candle["oi_low"]),
-                "oi_close": int(candle["oi_close"]),
-                "volume": int(candle.get("volume") or 0),
-                "bid_q": int(candle.get("bid_depth_qty") or 0),
-                "ask_q": int(candle.get("ask_depth_qty") or 0),
-                "tbq": int(candle.get("tbq") or 0),
-                "tsq": int(candle.get("tsq") or 0),
+                "oi_open": oi_open,
+                "oi_high": oi_high,
+                "oi_low": oi_low,
+                "oi_close": oi_close,
+                "volume": vol,
+                "bid_q": _nullable_int(candle.get("bid_depth_qty")),
+                "ask_q": _nullable_int(candle.get("ask_depth_qty")),
+                "tbq": _nullable_int(candle.get("tbq")),
+                "tsq": _nullable_int(candle.get("tsq")),
                 "source": str(candle.get("candle_source") or "ltp_tick"),
             },
         )
@@ -262,7 +389,9 @@ def _persist_ws_1m_candle(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
         logger.debug("upstox_market_feed: ws 1m persist failed for %s %s: %s", ik, minute_iso, e)
     finally:
         db.close()
-    _persist_orderflow_1m(ik, minute_iso, candle)
+    # Orderflow archive only when OI/depth present (futures); never required for EQ/INDEX.
+    if oi_close is not None or oi_open is not None:
+        _persist_orderflow_1m(ik, minute_iso, candle)
 
 
 def _persist_orderflow_1m(ik: str, minute_iso: str, candle: Dict[str, Any]) -> None:
@@ -328,63 +457,60 @@ def _persist_orderflow_1m(ik: str, minute_iso: str, candle: Dict[str, Any]) -> N
 def _update_ws_1m_candle(
     ik: str,
     ltp: float,
-    oi: int,
+    oi: Optional[int],
     now_mono: float,
     *,
-    volume: int = 0,
-    bid_depth_qty: int = 0,
-    ask_depth_qty: int = 0,
-    tbq: int = 0,
-    tsq: int = 0,
+    exchange_ts: Optional[datetime] = None,
+    volume: Optional[int] = None,
+    bid_depth_qty: Optional[int] = None,
+    ask_depth_qty: Optional[int] = None,
+    tbq: Optional[int] = None,
+    tsq: Optional[int] = None,
     candle_source: str = "ltp_tick",
 ) -> None:
-    now_ist = datetime.now(IST)
-    minute_start = now_ist.replace(second=0, microsecond=0)
+    """Build 1m from LTP + exchange ts. OI/volume optional — never gate persist."""
+    from backend.services.open_low_high.candle_builder import TickEvent
+
+    ts = exchange_ts or datetime.now(IST)
+    if ts.tzinfo is None:
+        ts = IST.localize(ts)
+    else:
+        ts = ts.astimezone(IST)
+    minute_start = ts.replace(second=0, microsecond=0)
     minute_iso = minute_start.isoformat()
+
+    vol_n = _nullable_int(volume)
+    if vol_n is not None and vol_n <= 0:
+        vol_n = None  # absent / unknown — never store fake zero as "volume present"
+    builder = _builder()
+    candle = builder.ingest_tick(
+        TickEvent(
+            instrument_key=ik,
+            ltp=float(ltp),
+            exchange_ts=ts,
+            oi=_nullable_int(oi),
+            volume=vol_n,
+            bid_depth_qty=_nullable_int(bid_depth_qty),
+            ask_depth_qty=_nullable_int(ask_depth_qty),
+            tbq=_nullable_int(tbq),
+            tsq=_nullable_int(tsq),
+            candle_source=candle_source,
+        )
+    )
+    # Also keep legacy in-memory map for any readers; flush closed bars + debounce in-progress.
+    builder.flush_closed()
+    if candle is None:
+        return
+    c = candle.to_persist_dict()
     k = (ik, minute_iso)
     with _CANDLE_LOCK:
-        c = _WS_1M_STATE.get(k)
-        if not c:
-            c = {
-                "open": float(ltp),
-                "high": float(ltp),
-                "low": float(ltp),
-                "close": float(ltp),
-                "oi_open": int(oi),
-                "oi_high": int(oi),
-                "oi_low": int(oi),
-                "oi_close": int(oi),
-                "volume": int(volume),
-                "bid_depth_qty": int(bid_depth_qty),
-                "ask_depth_qty": int(ask_depth_qty),
-                "tbq": int(tbq),
-                "tsq": int(tsq),
-                "candle_source": candle_source,
-            }
-            _WS_1M_STATE[k] = c
-        else:
-            c["high"] = max(float(c["high"]), float(ltp))
-            c["low"] = min(float(c["low"]), float(ltp))
-            c["close"] = float(ltp)
-            c["oi_high"] = max(int(c["oi_high"]), int(oi))
-            c["oi_low"] = min(int(c["oi_low"]), int(oi))
-            c["oi_close"] = int(oi)
-            if volume > 0:
-                c["volume"] = max(int(c.get("volume") or 0), int(volume))
-            if bid_depth_qty > 0:
-                c["bid_depth_qty"] = int(bid_depth_qty)
-            if ask_depth_qty > 0:
-                c["ask_depth_qty"] = int(ask_depth_qty)
-            if tbq > 0:
-                c["tbq"] = int(tbq)
-            if tsq > 0:
-                c["tsq"] = int(tsq)
-            if candle_source == "i1":
-                c["candle_source"] = "i1"
-        last_flush = float(_WS_1M_LAST_FLUSH.get(k) or 0.0)
-        if now_mono - last_flush >= _flush_debounce_sec():
-            _persist_ws_1m_candle(ik, minute_iso, c)
-            _WS_1M_LAST_FLUSH[k] = now_mono
+        _WS_1M_STATE[k] = c
+        # Persist in-progress with ≥1 LTP (debounce); closed bars persist via on_closed.
+        if candle.state == "IN_PROGRESS" or candle.state == "PARTIAL":
+            last_flush = float(_WS_1M_LAST_FLUSH.get(k) or 0.0)
+            if now_mono - last_flush >= _flush_debounce_sec():
+                _persist_ws_1m_candle(ik, minute_iso, c)
+                _WS_1M_LAST_FLUSH[k] = now_mono
 
 
 def _persist_orderflow_latest(ik: str, fields: Dict[str, Any]) -> None:
@@ -535,18 +661,29 @@ def _extract_i1_bars_from_feed_value(feed_val: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def _ltt_from_mff(mff: Optional[Dict[str, Any]]) -> Any:
+    if not isinstance(mff, dict):
+        return None
+    ltpc = mff.get("ltpc")
+    if not isinstance(ltpc, dict):
+        return None
+    return ltpc.get("ltt")
+
+
 def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
-    """Parse OI, LTP, depth, tbq/tsq from one WS feed entry."""
+    """Parse OI, LTP, LTT, depth, tbq/tsq from one WS feed entry."""
     oi, ltp = _extract_oi_ltp_from_feed_value(feed_val)
     mff = _market_ff_from_feed(feed_val)
     bid_q = ask_q = 0
     depth_ratio = 1.0
     tbq = tsq = 0
     ltq = 0
+    ltt = None
     best_bid = best_ask = None
     if mff:
         bid_q, ask_q, depth_ratio = _depth_from_mff(mff)
         ltq = _ltq_from_mff(mff)
+        ltt = _ltt_from_mff(mff)
         best_bid, best_ask = _best_bid_ask(mff)
         try:
             tbq = int(float(mff.get("tbq") or 0))
@@ -557,6 +694,7 @@ def _extract_feed_fields(feed_val: Any) -> Dict[str, Any]:
     return {
         "oi": oi,
         "ltp": ltp,
+        "ltt": ltt,
         "ltq": ltq,
         "best_bid": best_bid,
         "best_ask": best_ask,
@@ -653,20 +791,24 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
             if row.get("oi") is None and row.get("ltp") is None:
                 continue
             _OI_LTP_BY_KEY[ik] = row
-            tick_vol = _accumulate_ltq_volume(ik, minute_iso, int(parsed.get("ltq") or 0))
+            exch_ts = _ltt_to_ist(parsed.get("ltt"), now_ist)
+            # Bucket volume by *exchange* minute (not wall clock).
+            exch_minute_iso = exch_ts.replace(second=0, microsecond=0).isoformat()
+            tick_vol = _accumulate_ltq_volume(ik, exch_minute_iso, int(parsed.get("ltq") or 0))
             # Persist 1m on LTP alone — EQ/INDEX often have no OI; requiring both
             # previously dropped all cash/index bars (futures-only DB symptom).
             if eff_ltp is not None:
                 _update_ws_1m_candle(
                     ik,
                     float(eff_ltp),
-                    int(eff_oi or 0),
+                    _nullable_int(eff_oi),  # None for EQ/INDEX — never coerce to 0 gate
                     now,
-                    volume=tick_vol,
-                    bid_depth_qty=int(row.get("bid_depth_qty") or 0),
-                    ask_depth_qty=int(row.get("ask_depth_qty") or 0),
-                    tbq=int(row.get("tbq") or 0),
-                    tsq=int(row.get("tsq") or 0),
+                    exchange_ts=exch_ts,
+                    volume=tick_vol if tick_vol > 0 else None,
+                    bid_depth_qty=int(row.get("bid_depth_qty") or 0) or None,
+                    ask_depth_qty=int(row.get("ask_depth_qty") or 0) or None,
+                    tbq=int(row.get("tbq") or 0) or None,
+                    tsq=int(row.get("tsq") or 0) or None,
                     candle_source="ltp_tick" if tick_vol <= 0 else "ltp_ltq",
                 )
             for i1 in parsed.get("i1_bars") or []:
@@ -679,10 +821,26 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                         dt = IST.localize(dt)
                     else:
                         dt = dt.astimezone(IST)
-                    minute_iso = dt.replace(second=0, microsecond=0).isoformat()
+                    minute_start = dt.replace(second=0, microsecond=0)
+                    minute_iso = minute_start.isoformat()
                 except (TypeError, ValueError):
                     continue
-                oi_val = int(eff_oi or prev.get("oi") or 0)
+                # Store I1 alongside tick-built (does not overwrite tick OHLC).
+                try:
+                    _builder().attach_i1(
+                        ik,
+                        minute_start,
+                        open_=float(i1["open"]),
+                        high=float(i1["high"]),
+                        low=float(i1["low"]),
+                        close=float(i1["close"]),
+                        volume=int(i1["volume"]) if i1.get("volume") else None,
+                    )
+                    _builder().flush_closed()
+                except Exception:
+                    logger.debug("i1 attach failed %s", ik, exc_info=True)
+                oi_val = _nullable_int(eff_oi if eff_oi is not None else prev.get("oi"))
+                i1_vol = int(i1["volume"]) if i1.get("volume") else None
                 candle = {
                     "open": i1["open"],
                     "high": i1["high"],
@@ -692,16 +850,25 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                     "oi_high": oi_val,
                     "oi_low": oi_val,
                     "oi_close": oi_val,
-                    "volume": int(i1.get("volume") or 0),
-                    "bid_depth_qty": int(row.get("bid_depth_qty") or 0),
-                    "ask_depth_qty": int(row.get("ask_depth_qty") or 0),
-                    "tbq": int(row.get("tbq") or 0),
-                    "tsq": int(row.get("tsq") or 0),
+                    "volume": i1_vol,
+                    "bid_depth_qty": int(row.get("bid_depth_qty") or 0) or None,
+                    "ask_depth_qty": int(row.get("ask_depth_qty") or 0) or None,
+                    "tbq": int(row.get("tbq") or 0) or None,
+                    "tsq": int(row.get("tsq") or 0) or None,
                     "candle_source": "i1",
                 }
+                # Only seed persist from I1 when no tick-built bar yet for this minute.
                 with _CANDLE_LOCK:
-                    _WS_1M_STATE[(ik, minute_iso)] = candle
-                _persist_ws_1m_candle(ik, minute_iso, candle)
+                    existing = _WS_1M_STATE.get((ik, minute_iso))
+                    if existing and existing.get("candle_source") != "i1":
+                        # Keep tick-built OHLC; annotate source remains ltp_*
+                        existing["i1_open"] = i1["open"]
+                        existing["i1_high"] = i1["high"]
+                        existing["i1_low"] = i1["low"]
+                        existing["i1_close"] = i1["close"]
+                    else:
+                        _WS_1M_STATE[(ik, minute_iso)] = candle
+                        _persist_ws_1m_candle(ik, minute_iso, candle)
             try:
                 _persist_orderflow_latest(ik, {**row, "oi": eff_oi, "ltp": eff_ltp})
             except Exception:
@@ -848,6 +1015,15 @@ async def _run_connection_loop(batches: List[List[str]]) -> None:
                 mark_feed_reconnect()
             except Exception:
                 pass
+            try:
+                n_partial = mark_olh_1m_partial_on_reconnect()
+                if n_partial:
+                    logger.warning(
+                        "upstox_market_feed: reconnect marked %s in-progress 1m PARTIAL",
+                        n_partial,
+                    )
+            except Exception:
+                logger.debug("olh reconnect PARTIAL mark skipped", exc_info=True)
             await _subscribe_and_listen(ws_url, batches)
         except asyncio.CancelledError:
             raise
