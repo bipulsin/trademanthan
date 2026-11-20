@@ -44,6 +44,15 @@ _last_phase_a: Dict[str, Any] = {}
 _last_phase_b: Dict[str, Any] = {}
 
 
+def is_phase_a_busy() -> bool:
+    """True when Phase A holds ``_phase_a_lock`` (non-blocking probe)."""
+    acquired = _phase_a_lock.acquire(blocking=False)
+    if acquired:
+        _phase_a_lock.release()
+        return False
+    return True
+
+
 def _now() -> datetime:
     return datetime.now(IST)
 

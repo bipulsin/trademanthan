@@ -67,3 +67,58 @@ def alert_degraded(reason: str, *, trade_date: str, **kwargs: Any) -> bool:
         reason,
         meta={k: kwargs[k] for k in list(kwargs)[:10]},
     )
+
+
+def alert_coverage_checkpoint(label: str) -> bool:
+    """Independent 09:21 / 09:26 coverage pulse (not gated on Phase A/B completion).
+
+    If Phase A is still holding the lock, say so with coverage-so-far from DB rows.
+    """
+    from datetime import datetime
+
+    import pytz
+
+    from backend.services.open_high_low.data import load_universe
+    from backend.services.open_low_high.ohl_log import ohl_log
+    from backend.services.open_low_high.persistence import list_screen_for_date
+    from backend.services.open_low_high.phases import is_phase_a_busy
+
+    IST = pytz.timezone("Asia/Kolkata")
+    trade_date = datetime.now(IST).date()
+    universe_n = 145
+    try:
+        universe_n = max(1, len(load_universe() or []))
+    except Exception:
+        pass
+    rows = []
+    try:
+        rows = list_screen_for_date(trade_date) or []
+    except Exception:
+        rows = []
+    # Symbols with a usable 09:15 open (Phase A persisted greys).
+    with_0915 = {
+        str(r.get("symbol") or "").upper()
+        for r in rows
+        if r.get("first_open") is not None
+    }
+    n = len(with_0915)
+    busy = False
+    try:
+        busy = bool(is_phase_a_busy())
+    except Exception:
+        busy = False
+    if busy:
+        body = f"Phase A still running, coverage so far: {n}/{universe_n}"
+    else:
+        body = f"coverage so far: {n}/{universe_n} (Phase A not busy)"
+    ohl_log(
+        "success",
+        action="coverage_alert",
+        source=label,
+        detail=body,
+    )
+    return send_olh_alert(
+        f"Coverage {label} {trade_date.isoformat()}",
+        body,
+        meta={"with_0915": n, "universe": universe_n, "phase_a_busy": busy},
+    )

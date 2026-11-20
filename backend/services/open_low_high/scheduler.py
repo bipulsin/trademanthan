@@ -17,6 +17,9 @@ Startup catch-up (explicit — not APScheduler misfire alone):
 One-day REST canary (2026-11-20 IST): 09:20:05, :30, 09:21:00, 09:25:05, :30
   — 3 equities + Nifty; logs to OHL_Log / app logger (see ``rest_canary.py``).
 
+Coverage alerts (own timers, independent of Phase A/B): 09:21 and 09:26 IST.
+  If Phase A is busy → "Phase A still running, coverage so far: n/145".
+
 WS lock 09:15–09:25: EQ/INDEX provider keys are force-merged and never dropped
 from the OLH sidecar subscribe set (see ``ws_feed.py``).
 """
@@ -248,6 +251,28 @@ def _run_ohl_log_cleanup() -> None:
         )
     except Exception:
         logger.exception("open_low_high OHL log cleanup failed")
+
+
+def _run_coverage_alert_0921() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.alerts import alert_coverage_checkpoint
+
+        alert_coverage_checkpoint("09:21")
+    except Exception:
+        logger.exception("open_low_high coverage alert 09:21 failed")
+
+
+def _run_coverage_alert_0926() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.alerts import alert_coverage_checkpoint
+
+        alert_coverage_checkpoint("09:26")
+    except Exception:
+        logger.exception("open_low_high coverage alert 09:26 failed")
 
 
 def _run_rest_canary() -> None:
@@ -611,6 +636,28 @@ def start_open_low_high_scheduler() -> None:
         misfire_grace_time=600,
     )
 
+    # --- Coverage alerts (own timers; independent of Phase A/B) ---
+    sched.add_job(
+        _run_coverage_alert_0921,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=21, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_coverage_alert_0921",
+        name="Open Low High coverage alert 09:21 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
+    sched.add_job(
+        _run_coverage_alert_0926,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=26, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_coverage_alert_0926",
+        name="Open Low High coverage alert 09:26 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
+
     # --- One-day REST lag canary 2026-11-20 (09:20:05/30, 09:21:00, 09:25:05/30 IST) ---
     from backend.services.open_low_high.rest_canary import CANARY_DATE, CANARY_TIMES
 
@@ -661,7 +708,8 @@ def start_open_low_high_scheduler() -> None:
     logger.info(
         "open_low_high scheduler started "
         "(PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
-        "Phase B 09:25:03–09:29; startup catch-up 09:20–09:29 / DEGRADED after; "
+        "Phase B 09:25:03–09:29; coverage alerts 09:21+09:26; "
+        "startup catch-up 09:20–09:29 / DEGRADED after; "
         "OHL log cleanup 12:00; REST canary %s jobs=%s)",
         CANARY_DATE.isoformat(),
         canary_ids,

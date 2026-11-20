@@ -54,7 +54,90 @@ _WS_1M_STATE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 _WS_1M_LAST_FLUSH: Dict[Tuple[str, str], float] = {}
 # Per-minute sum of last-traded quantities (ltq) when I1 bar volume is absent.
 _MINUTE_LTQ_VOL: Dict[Tuple[str, str], int] = {}
+# Per-IST-minute tick counts by segment (EQ / INDEX / FUT / OTHER) for OLH diagnosis.
+_SEG_TICK_LOCK = threading.Lock()
+_SEG_TICK_MINUTE: Optional[str] = None  # "HH:MM" IST
+_SEG_TICK_COUNTS: Dict[str, int] = {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0}
+_SEG_TICK_KEYS: Dict[str, set] = {"EQ": set(), "INDEX": set(), "FUT": set(), "OTHER": set()}
 IST = pytz.timezone("Asia/Kolkata")
+
+
+def _segment_of_ik(ik: str) -> str:
+    u = (ik or "").upper()
+    if u.startswith("NSE_EQ|") or u.startswith("NSE_EQ:"):
+        return "EQ"
+    if u.startswith("NSE_INDEX|") or u.startswith("NSE_INDEX:"):
+        return "INDEX"
+    if u.startswith("NSE_FO|") or u.startswith("NSE_FO:"):
+        return "FUT"
+    return "OTHER"
+
+
+def _record_segment_tick(ik: str, now_ist: Optional[datetime] = None) -> None:
+    """Count live ticks per segment; flush prior minute to host-persisted OHL log (09:00–09:30)."""
+    global _SEG_TICK_MINUTE, _SEG_TICK_COUNTS, _SEG_TICK_KEYS
+    t = now_ist or datetime.now(IST)
+    if t.tzinfo is None:
+        t = IST.localize(t)
+    else:
+        t = t.astimezone(IST)
+    minute_key = t.strftime("%H:%M")
+    seg = _segment_of_ik(ik)
+    flush_payload: Optional[Dict[str, Any]] = None
+    with _SEG_TICK_LOCK:
+        if _SEG_TICK_MINUTE is None:
+            _SEG_TICK_MINUTE = minute_key
+        elif minute_key != _SEG_TICK_MINUTE:
+            flush_payload = {
+                "minute": _SEG_TICK_MINUTE,
+                "counts": dict(_SEG_TICK_COUNTS),
+                "keys": {k: len(v) for k, v in _SEG_TICK_KEYS.items()},
+                "day": t.strftime("%Y-%m-%d"),
+            }
+            _SEG_TICK_MINUTE = minute_key
+            _SEG_TICK_COUNTS = {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0}
+            _SEG_TICK_KEYS = {"EQ": set(), "INDEX": set(), "FUT": set(), "OTHER": set()}
+        _SEG_TICK_COUNTS[seg] = int(_SEG_TICK_COUNTS.get(seg, 0)) + 1
+        _SEG_TICK_KEYS.setdefault(seg, set()).add(ik)
+    if flush_payload:
+        _flush_segment_tick_minute(flush_payload)
+
+
+def _flush_segment_tick_minute(payload: Dict[str, Any]) -> None:
+    """Persist one minute's segment tick counts outside the ephemeral container FS when possible."""
+    minute = str(payload.get("minute") or "")
+    counts = payload.get("counts") or {}
+    keys = payload.get("keys") or {}
+    detail = (
+        f"minute={minute} EQ_ticks={counts.get('EQ', 0)} EQ_keys={keys.get('EQ', 0)} "
+        f"INDEX_ticks={counts.get('INDEX', 0)} INDEX_keys={keys.get('INDEX', 0)} "
+        f"FUT_ticks={counts.get('FUT', 0)} FUT_keys={keys.get('FUT', 0)} "
+        f"OTHER_ticks={counts.get('OTHER', 0)}"
+    )
+    logger.info("upstox_market_feed seg_ticks %s", detail)
+    # Host-persist only for the OLH morning window 09:00–09:30 IST.
+    try:
+        hh, mm = (int(x) for x in minute.split(":", 1))
+    except Exception:
+        return
+    if hh != 9 or mm > 30:
+        return
+    try:
+        from backend.services.open_low_high.ohl_log import ohl_log, ohl_logs_dir, ohl_log_filename
+
+        ohl_log("success", action="ws_seg_ticks", source="ws", detail=detail)
+        # Extra durable file next to OHL_Log (same host-mounted dir).
+        base = ohl_log_filename()
+        seg_name = (
+            f"WS_SegTicks_{base[len('OHL_Log_'):]}"
+            if base.startswith("OHL_Log_")
+            else f"WS_SegTicks_{base}.txt"
+        )
+        path = ohl_logs_dir() / seg_name
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')} | {detail}\n")
+    except Exception:
+        logger.debug("seg_ticks host persist skipped", exc_info=True)
 
 
 def _flush_debounce_sec() -> float:
@@ -544,6 +627,8 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
             ltp = parsed.get("ltp")
             if oi is None and ltp is None and not parsed.get("i1_bars"):
                 continue
+            # Count every accepted feed update (pre-persist) so EQ/INDEX silence is visible.
+            _record_segment_tick(ik, now_ist)
             prev = _OI_LTP_BY_KEY.get(ik, {})
             eff_oi = int(oi) if oi is not None else prev.get("oi")
             eff_ltp = float(ltp) if ltp is not None else prev.get("ltp")
@@ -569,11 +654,13 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
                 continue
             _OI_LTP_BY_KEY[ik] = row
             tick_vol = _accumulate_ltq_volume(ik, minute_iso, int(parsed.get("ltq") or 0))
-            if eff_oi is not None and eff_ltp is not None:
+            # Persist 1m on LTP alone — EQ/INDEX often have no OI; requiring both
+            # previously dropped all cash/index bars (futures-only DB symptom).
+            if eff_ltp is not None:
                 _update_ws_1m_candle(
                     ik,
                     float(eff_ltp),
-                    int(eff_oi),
+                    int(eff_oi or 0),
                     now,
                     volume=tick_vol,
                     bid_depth_qty=int(row.get("bid_depth_qty") or 0),

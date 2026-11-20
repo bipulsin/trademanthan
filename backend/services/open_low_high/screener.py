@@ -267,12 +267,23 @@ def _drop_unclosed_bars(
     fetch_time: Optional[datetime] = None,
     *,
     bar_minutes: int = 5,
+    log_label: str = "",
 ) -> List[Bar]:
     """Phase A/B REST+WS path: drop candles whose bar_end is still after fetch_time.
 
     Example: fetch at 09:20:05 must NOT return the 09:20 bar (bar_end 09:25).
     """
+    before_n = len(bars or [])
     if not bars:
+        if log_label:
+            logger.info(
+                "olh drop_unclosed_bars label=%s before=%s after=0 fetch=%s",
+                log_label,
+                before_n,
+                (fetch_time or _now()).isoformat()
+                if hasattr((fetch_time or _now()), "isoformat")
+                else fetch_time,
+            )
         return []
     ft = fetch_time if fetch_time is not None else _now()
     if ft.tzinfo is None:
@@ -287,6 +298,14 @@ def _drop_unclosed_bars(
             continue
         if _bar_end(b.ts, bar_minutes) <= ft:
             kept.append(b)
+    if log_label or before_n != len(kept):
+        logger.info(
+            "olh drop_unclosed_bars label=%s before=%s after=%s fetch=%s",
+            log_label or "-",
+            before_n,
+            len(kept),
+            ft.isoformat(),
+        )
     return kept
 
 
@@ -465,7 +484,7 @@ def _fetch_ws_5m_bars(
     if not out:
         return [], "none"
     # Same closed-bar rule as REST: never hand Phase A/B a forming 5m bucket.
-    out = _drop_unclosed_bars(out)
+    out = _drop_unclosed_bars(out, log_label=f"ws5m:{instrument_key}")
     if not out:
         return [], "none"
     return out, ("UNTRUSTED" if untrusted else "TRUSTED")
@@ -502,13 +521,17 @@ def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]
             )
         except Exception as exc:
             logger.info(
-                "olh rest intraday 5m %s session=%s: %s",
+                "olh rest intraday 5m %s session=%s exception_type=%s: %s",
                 instrument_key,
                 session.isoformat(),
+                type(exc).__name__,
                 exc,
             )
             raw = None
-        return _drop_unclosed_bars(_bars_from_rows(list(raw or []), instrument_key))
+        return _drop_unclosed_bars(
+            _bars_from_rows(list(raw or []), instrument_key),
+            log_label=f"rest5m_intraday:{instrument_key}",
+        )
 
     # Previous calendar sessions: historical is authoritative.
     try:
@@ -525,7 +548,12 @@ def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]
             len(raw or []),
         )
     except Exception as exc:
-        logger.info("olh rest 5m %s: %s", instrument_key, exc)
+        logger.info(
+            "olh rest 5m %s exception_type=%s: %s",
+            instrument_key,
+            type(exc).__name__,
+            exc,
+        )
         raw = None
     if not raw:
         try:
@@ -539,8 +567,10 @@ def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]
         except Exception:
             raw = None
     # Historical sessions are fully closed; still apply filter for safety.
-    return _drop_unclosed_bars(_bars_from_rows(list(raw or []), instrument_key))
-
+    return _drop_unclosed_bars(
+        _bars_from_rows(list(raw or []), instrument_key),
+        log_label=f"rest5m_hist:{instrument_key}",
+    )
 
 def _fetch_daily_prev(
     upstox: Any, instrument_key: str, session: date

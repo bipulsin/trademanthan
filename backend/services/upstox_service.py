@@ -452,6 +452,24 @@ class UpstoxService:
             timeout=timeout,
         )
 
+    @staticmethod
+    def _rate_limit_header_snip(response: Any) -> str:
+        """Compact rate-limit / retry headers for non-200 candle diagnostics."""
+        try:
+            headers = getattr(response, "headers", None) or {}
+        except Exception:
+            return "{}"
+        out = {}
+        for k, v in headers.items():
+            lk = str(k).lower()
+            if (
+                "rate" in lk
+                or "limit" in lk
+                or lk in ("retry-after", "x-ratelimit-remaining", "x-ratelimit-limit", "x-ratelimit-reset")
+            ):
+                out[str(k)] = str(v)
+        return str(out) if out else "{}"
+
     def make_api_request(
         self,
         url: str,
@@ -469,7 +487,7 @@ class UpstoxService:
             method: HTTP method (GET, POST, or DELETE with JSON body)
             params: Query parameters
             data: Request body data
-            timeout: Request timeout in seconds
+            timeout: Request timeout in seconds (connect+read via requests)
             max_retries: Maximum number of retries
         
         Returns:
@@ -491,7 +509,9 @@ class UpstoxService:
                             # Shared candle budget exhausted — skip rather than blow
                             # the per-user limit. Caller treats None as "no data".
                             logger.warning(
-                                "⏱️ Candle rate-limit DENIED (no Upstox call) url=%s",
+                                "upstox_http outcome=rate_limit_denied status=none "
+                                "exception_type=CandleBudgetDenied body=None "
+                                "rate_limit_headers={} url=%s",
                                 url[:220],
                             )
                             return None
@@ -524,16 +544,27 @@ class UpstoxService:
                     )
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
+
+                status = int(response.status_code)
+                body_snip = (response.text or "")[:300]
+                rl_snip = self._rate_limit_header_snip(response)
                 
                 # Handle different status codes
-                if response.status_code == 200:
+                if status == 200:
                     # Check if response is actually JSON (not HTML error page)
                     content_type = response.headers.get('Content-Type', '').lower()
                     if 'application/json' not in content_type:
                         # Check if response body looks like HTML
                         response_text = response.text[:100] if response.text else ""
                         if response_text.strip().startswith('<!DOCTYPE') or response_text.strip().startswith('<html'):
-                            logger.error(f"❌ API returned HTML instead of JSON for {url}: {response_text[:200]}")
+                            logger.error(
+                                "upstox_http outcome=html_instead_of_json status=%s "
+                                "body=%s rate_limit_headers=%s url=%s",
+                                status,
+                                body_snip,
+                                rl_snip,
+                                url[:220],
+                            )
                             last_error = "HTML response instead of JSON"
                             if attempt < max_retries - 1:
                                 time.sleep(1)
@@ -545,84 +576,130 @@ class UpstoxService:
                         # Return data (let caller validate success status)
                         return response_data
                     except ValueError as json_err:
-                        # Response is not valid JSON
-                        logger.error(f"❌ Invalid JSON response for {url}: {str(json_err)}")
-                        logger.error(f"   Response preview: {response.text[:200]}")
+                        logger.error(
+                            "upstox_http outcome=invalid_json status=%s "
+                            "exception_type=%s body=%s rate_limit_headers=%s url=%s",
+                            status,
+                            type(json_err).__name__,
+                            body_snip,
+                            rl_snip,
+                            url[:220],
+                        )
                         last_error = "Invalid JSON response"
                         break
                 
-                elif response.status_code == 401:
-                    # Token expired
-                    logger.warning(f"🔑 Token expired (attempt {attempt + 1}/{max_retries}) for {url}")
-                    
-                    # Try to reload token from storage (faster)
+                elif status == 401:
+                    logger.warning(
+                        "upstox_http outcome=unauthorized status=401 "
+                        "body=%s rate_limit_headers=%s url=%s attempt=%s/%s",
+                        body_snip,
+                        rl_snip,
+                        url[:220],
+                        attempt + 1,
+                        max_retries,
+                    )
                     if self.reload_token_from_storage():
                         logger.info("✅ Token reloaded from storage, retrying...")
-                        time.sleep(0.5)  # Small delay before retry
+                        time.sleep(0.5)
                         continue
-                    
-                    # If not available in storage, log warning
                     logger.error("❌ Token reload failed - manual token refresh needed")
                     last_error = "Token expired and reload failed"
                     break
                 
-                elif response.status_code == 429:
-                    # Rate limit exceeded
-                    wait_time = min(2 ** attempt, 8)  # Exponential backoff, max 8s
-                    logger.warning(f"⏱️ Rate limit (429) for {url}, waiting {wait_time}s...")
+                elif status == 429:
+                    wait_time = min(2 ** attempt, 8)
+                    logger.warning(
+                        "upstox_http outcome=rate_limited status=429 "
+                        "body=%s rate_limit_headers=%s wait_s=%s url=%s",
+                        body_snip,
+                        rl_snip,
+                        wait_time,
+                        url[:220],
+                    )
                     time.sleep(wait_time)
                     continue
                 
-                elif response.status_code == 400:
-                    # Bad request - don't retry; return parsed JSON so callers can extract error message
+                elif status == 400:
                     try:
                         body = response.json()
                         if isinstance(body, dict):
-                            logger.error(f"❌ Bad request (400) for {url}: {body.get('message') or body.get('error') or response.text[:200]}")
+                            logger.error(
+                                "upstox_http outcome=bad_request status=400 "
+                                "body=%s rate_limit_headers=%s url=%s",
+                                str(body)[:300],
+                                rl_snip,
+                                url[:220],
+                            )
                             return body
                     except Exception:
                         pass
-                    logger.error(f"❌ Bad request (400) for {url}: {response.text[:200]}")
+                    logger.error(
+                        "upstox_http outcome=bad_request status=400 "
+                        "body=%s rate_limit_headers=%s url=%s",
+                        body_snip,
+                        rl_snip,
+                        url[:220],
+                    )
                     last_error = response.text[:300] if response.text else "Bad request"
                     break
                 
-                elif response.status_code == 404:
-                    # Not found - don't retry
-                    logger.error(f"❌ Resource not found (404): {url}")
+                elif status == 404:
+                    logger.error(
+                        "upstox_http outcome=not_found status=404 "
+                        "body=%s rate_limit_headers=%s url=%s",
+                        body_snip,
+                        rl_snip,
+                        url[:220],
+                    )
                     last_error = "Resource not found"
                     break
                 
-                elif response.status_code == 409:
-                    # Conflict - typically means API endpoint unavailable (e.g., after market hours)
-                    # Don't retry, just return None gracefully
-                    response_preview = response.text[:200] if response.text else "No response body"
-                    # Check if response is HTML (error page) instead of JSON
-                    if response_preview.strip().startswith('<!DOCTYPE') or response_preview.strip().startswith('<html'):
-                        logger.warning(f"⚠️ HTTP 409 Conflict for {url}: API returned HTML error page (likely unavailable after market hours)")
-                    else:
-                        logger.warning(f"⚠️ HTTP 409 Conflict for {url}: {response_preview}")
+                elif status == 409:
+                    logger.warning(
+                        "upstox_http outcome=conflict status=409 "
+                        "body=%s rate_limit_headers=%s url=%s",
+                        body_snip,
+                        rl_snip,
+                        url[:220],
+                    )
                     last_error = "Conflict (API unavailable)"
                     break
                 
-                elif response.status_code >= 500:
-                    # Server error - retry
-                    logger.warning(f"⚠️ Server error ({response.status_code}) for {url}, retrying...")
+                elif status >= 500:
+                    logger.warning(
+                        "upstox_http outcome=server_error status=%s "
+                        "body=%s rate_limit_headers=%s url=%s",
+                        status,
+                        body_snip,
+                        rl_snip,
+                        url[:220],
+                    )
                     time.sleep(1)
                     continue
                 
                 else:
-                    # Other errors - check if response is HTML (error page)
-                    response_preview = response.text[:200] if response.text else "No response body"
-                    if response_preview.strip().startswith('<!DOCTYPE') or response_preview.strip().startswith('<html'):
-                        logger.error(f"❌ HTTP {response.status_code} for {url}: API returned HTML error page instead of JSON")
-                        last_error = f"HTTP {response.status_code} (HTML error page)"
-                    else:
-                        logger.error(f"❌ HTTP {response.status_code} for {url}: {response_preview}")
-                        last_error = f"HTTP {response.status_code}"
+                    logger.error(
+                        "upstox_http outcome=http_error status=%s "
+                        "body=%s rate_limit_headers=%s url=%s",
+                        status,
+                        body_snip,
+                        rl_snip,
+                        url[:220],
+                    )
+                    last_error = f"HTTP {status}"
                     break
             
-            except requests.exceptions.Timeout:
-                logger.warning(f"⏱️ Request timeout (attempt {attempt + 1}/{max_retries}) for {url}")
+            except requests.exceptions.Timeout as e:
+                logger.warning(
+                    "upstox_http outcome=timeout status=none "
+                    "exception_type=%s body=None rate_limit_headers={} "
+                    "timeout_s=%s attempt=%s/%s url=%s",
+                    type(e).__name__,
+                    timeout,
+                    attempt + 1,
+                    max_retries,
+                    url[:220],
+                )
                 last_error = "Timeout"
                 if attempt < max_retries - 1:
                     time.sleep(1)
@@ -630,7 +707,16 @@ class UpstoxService:
                 break
             
             except requests.exceptions.ConnectionError as e:
-                logger.warning(f"🔌 Connection error (attempt {attempt + 1}/{max_retries}) for {url}")
+                logger.warning(
+                    "upstox_http outcome=connection_error status=none "
+                    "exception_type=%s body=%s rate_limit_headers={} "
+                    "attempt=%s/%s url=%s",
+                    type(e).__name__,
+                    str(e)[:300],
+                    attempt + 1,
+                    max_retries,
+                    url[:220],
+                )
                 last_error = "Connection error"
                 if attempt < max_retries - 1:
                     time.sleep(2)
@@ -638,17 +724,34 @@ class UpstoxService:
                 break
             
             except requests.exceptions.RequestException as e:
-                logger.error(f"❌ Request exception for {url}: {str(e)}")
+                logger.error(
+                    "upstox_http outcome=request_exception status=none "
+                    "exception_type=%s body=%s rate_limit_headers={} url=%s",
+                    type(e).__name__,
+                    str(e)[:300],
+                    url[:220],
+                )
                 last_error = str(e)
                 break
             
             except Exception as e:
-                logger.error(f"❌ Unexpected error for {url}: {str(e)}")
+                logger.error(
+                    "upstox_http outcome=unexpected_exception status=none "
+                    "exception_type=%s body=%s rate_limit_headers={} url=%s",
+                    type(e).__name__,
+                    str(e)[:300],
+                    url[:220],
+                )
                 last_error = str(e)
                 break
         
         # All retries failed
-        logger.error(f"❌ All {max_retries} attempts failed for {url}: {last_error}")
+        logger.error(
+            "upstox_http outcome=all_retries_failed status=none "
+            "exception_type=ExhaustedRetries body=%s rate_limit_headers={} url=%s",
+            str(last_error)[:300],
+            url[:220],
+        )
         return None
 
     def place_order(
@@ -1527,18 +1630,22 @@ class UpstoxService:
                 )
                 return structured
             logger.warning(
-                "⚠️ V3 intraday HTTP 200 empty candles instrument_key=%s interval=%s body=%s",
+                "upstox_http outcome=200_empty_candles status=200 "
+                "exception_type=none body=%s rate_limit_headers={} "
+                "instrument_key=%s interval=%s",
+                str(data)[:300],
                 instrument_key,
                 iv,
-                str(data)[:300],
             )
             return structured  # empty list
         body_snip = str(data)[:300] if data is not None else "None (non-200/timeout/429-deny/exception)"
         logger.warning(
-            "⚠️ V3 intraday no candle data instrument_key=%s interval=%s body=%s",
+            "upstox_http outcome=no_candle_data status=non_200_or_none "
+            "exception_type=none body=%s rate_limit_headers={} "
+            "instrument_key=%s interval=%s",
+            body_snip,
             instrument_key,
             iv,
-            body_snip,
         )
         return None
 

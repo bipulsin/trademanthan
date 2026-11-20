@@ -48,7 +48,6 @@ def run_rest_canary(
     from backend.services.open_high_low.data import load_universe
     from backend.services.open_low_high.ohl_log import ohl_log
     from backend.services.open_low_high.screener import (
-        _fetch_rest_5m,
         _resolve_equity_key,
         _token_tail,
         _upstox,
@@ -98,7 +97,28 @@ def run_rest_canary(
             results.append(entry)
             continue
         try:
-            bars = _fetch_rest_5m(ux, ik, trade_date)
+            from backend.services.open_low_high.screener import (
+                _bars_from_rows,
+                _drop_unclosed_bars,
+            )
+
+            # Single intraday probe — classify None / empty / drop vs usable session bars.
+            raw = None
+            raw_exc = None
+            try:
+                raw = ux._fetch_intraday_candles_v3(ik, "minutes/5")
+            except Exception as exc:
+                raw_exc = exc
+            raw_n = len(raw) if isinstance(raw, list) else None
+            entry["raw_candle_count"] = raw_n
+            bars = (
+                _drop_unclosed_bars(
+                    _bars_from_rows(list(raw or []), ik),
+                    log_label=f"rest_canary:{sym}",
+                )
+                if isinstance(raw, list)
+                else []
+            )
             day_bars = [b for b in bars if b.session_date == trade_date]
             entry["candle_count"] = len(day_bars)
             if day_bars:
@@ -109,6 +129,14 @@ def run_rest_canary(
                 entry["delay_sec_after_bar_close"] = round(
                     (now - bar_close).total_seconds(), 1
                 )
+            elif raw_exc is not None:
+                entry["http_status"] = f"exception:{type(raw_exc).__name__}"
+            elif raw is None:
+                entry["http_status"] = "none_timeout_429_or_budget_denied"
+            elif isinstance(raw, list) and len(raw) == 0:
+                entry["http_status"] = "200_empty_candles"
+            elif raw_n and not day_bars:
+                entry["http_status"] = "200_no_session_bars_after_drop"
             else:
                 entry["http_status"] = "200_empty_or_no_session_bars"
             ohl_log(
@@ -117,7 +145,8 @@ def run_rest_canary(
                 symbol=sym,
                 source=tag,
                 detail=(
-                    f"count={entry['candle_count']} latest={entry['latest_ts']} "
+                    f"count={entry['candle_count']} raw={entry.get('raw_candle_count')} "
+                    f"latest={entry['latest_ts']} "
                     f"status={entry['http_status']} "
                     f"delay_s={entry['delay_sec_after_bar_close']} "
                     f"token_last4={token_last4}"
@@ -130,7 +159,10 @@ def run_rest_canary(
                 action="rest_canary",
                 symbol=sym,
                 source=tag,
-                detail=f"error={exc} token_last4={token_last4}",
+                detail=(
+                    f"exception_type={type(exc).__name__} error={exc} "
+                    f"token_last4={token_last4}"
+                ),
             )
         results.append(entry)
         logger.info(
