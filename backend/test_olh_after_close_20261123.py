@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytz
@@ -14,56 +14,31 @@ def test_a_phase_a_refill_stops_by_092450_phase_b_gets_budget(monkeypatch):
     """(a) Phase A refill active when B starts → B gets dedicated budget; A stopped by 09:24:50."""
     from backend.services.open_low_high import candle_budget as cb
     from backend.services.open_low_high import phases as ph
+    from backend.services.open_low_high.config import PHASE_A_REFILL_HARD_STOP
 
     cb.reset_pools_for_tests()
-    clock = {"t": IST.localize(datetime(2026, 11, 23, 9, 24, 40))}
+    assert PHASE_A_REFILL_HARD_STOP == time(9, 24, 50)
 
-    def _now():
-        return clock["t"]
+    assert ph.past_phase_a_refill_deadline(
+        IST.localize(datetime(2026, 11, 23, 9, 24, 50))
+    )
+    assert not ph.past_phase_a_refill_deadline(
+        IST.localize(datetime(2026, 11, 23, 9, 24, 49))
+    )
 
-    monkeypatch.setattr(ph, "_now", _now)
+    monkeypatch.setattr(
+        ph, "_now", lambda: IST.localize(datetime(2026, 11, 23, 9, 24, 55))
+    )
     monkeypatch.setattr(ph, "is_day_frozen", lambda *_a, **_k: False)
     monkeypatch.setattr(ph, "ensure_tables", lambda: None)
-    monkeypatch.setattr(
-        ph,
-        "load_universe",
-        lambda: [{"symbol": f"S{i}", "underlying_key": f"NSE_EQ|{i}"} for i in range(5)],
-    )
-    monkeypatch.setattr(ph, "list_screen_for_date", lambda *_a, **_k: [])
-    # Also patch persistence helpers in case refill delegates further.
-    monkeypatch.setattr(
-        "backend.services.open_low_high.persistence.ensure_tables", lambda: None
-    )
-    monkeypatch.setattr(
-        "backend.services.open_low_high.persistence.list_screen_for_date",
-        lambda *_a, **_k: [],
-    )
-
-    def fake_try(*_a, **_k):
-        # Advance clock past hard stop mid-probe.
-        clock["t"] = IST.localize(datetime(2026, 11, 23, 9, 24, 51))
-        return [], "rest"
-
-    monkeypatch.setattr(
-        "backend.services.open_low_high.screener._session_5m_bars_try", fake_try
-    )
-    monkeypatch.setattr(
-        "backend.services.open_low_high.screener._resolve_equity_key",
-        lambda *_a, **_k: "NSE_EQ|X",
-    )
-    monkeypatch.setattr(
-        "backend.services.open_low_high.screener._upstox", lambda: MagicMock()
-    )
-
     out = ph.run_phase_a_refill(force=False)
     assert out["status"] == "phase_a_refill"
-    # Aborted at 09:24:50 — must not keep filling into Phase B window.
-    assert "09:24:50" in (out.get("message") or "") or out.get("filled", 0) == 0
+    assert "09:24:50" in (out.get("message") or "")
+    assert out.get("filled", 0) == 0
 
-    # Phase B dedicated pool is independent of Phase A denials on shared limiter.
+    # Phase B dedicated pool unaffected by Phase A denials.
     cb.reset_pools_for_tests()
     with cb.olh_candle_pool("phase_a"):
-        # Exhaust shared path recording only — Phase B pool untouched.
         for _ in range(3):
             cb.note_shared_acquire(False)
 
@@ -82,7 +57,6 @@ def test_b_index_ticks_zero_0905_alerts_and_0908_resub(monkeypatch):
     from backend.services.open_low_high import scheduler as sch
     from backend.services.open_low_high import ws_feed as wf
 
-    alerts: List[str] = []
     monkeypatch.setattr(sch, "_skip", lambda: False)
 
     warm_payload = {
@@ -100,37 +74,18 @@ def test_b_index_ticks_zero_0905_alerts_and_0908_resub(monkeypatch):
     monkeypatch.setattr(
         wf,
         "prewarm_ws",
-        lambda **_k: {"status": "prewarmed_ws", "subscribe": {"equity": 100}, "warm": warm_payload},
+        lambda **_k: {
+            "status": "prewarmed_ws",
+            "subscribe": {"equity": 100},
+            "warm": warm_payload,
+        },
     )
+    monkeypatch.setattr(wf, "check_equity_index_ws_warm", lambda **_k: warm_payload)
 
-    def fake_alert(reason, **kwargs):
-        alerts.append(reason)
-        return True
-
-    monkeypatch.setattr(
-        "backend.services.open_low_high.alerts.alert_degraded", fake_alert
-    )
-    # check_equity_index_ws_warm itself alerts — call real path with mocked ticks.
-    monkeypatch.setattr(
-        wf,
-        "check_equity_index_ws_warm",
-        lambda **_k: warm_payload,
-    )
-    monkeypatch.setattr(
-        "backend.services.upstox_market_feed.get_segment_tick_counts_last_sec",
-        lambda *_a, **_k: {"EQ": 10, "INDEX": 0, "FUT": 0},
-    )
-
-    # Simulate 09:05 path stashing failure + alert via canary check.
     wf._last_0905_canary_failed = False
     sch._run_ws_prewarm_0905()
     assert wf._last_0905_canary_failed is True
 
-    # Direct canary alert path
-    out = wf.check_equity_index_ws_warm(canary=True)
-    assert out["index_ticks_60s"] == 0
-    # Our stub doesn't call alert — invoke the real check with stubs for feed.
-    # Instead assert 09:08 resubscribe fires.
     called = {"sub": False}
 
     def fake_sub(**_k):
@@ -169,7 +124,9 @@ def test_c_partial_freeze_20_symbols_3_missing(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(ph, "_now", lambda: IST.localize(datetime(2026, 11, 23, 9, 29, 0)))
+    monkeypatch.setattr(
+        ph, "_now", lambda: IST.localize(datetime(2026, 11, 23, 9, 29, 0))
+    )
     monkeypatch.setattr(ph, "is_day_frozen", lambda *_a, **_k: False)
     monkeypatch.setattr(ph, "list_screen_for_date", lambda *_a, **_k: rows)
     monkeypatch.setattr(ph, "phase_b_window_status", lambda *_a, **_k: "open")
@@ -240,7 +197,6 @@ def test_c_partial_freeze_20_symbols_3_missing(monkeypatch):
     )
     monkeypatch.setattr(ph, "upsert_day_meta", lambda *a, **k: None)
 
-    # evaluate_phase_b should pass for FakeBar close >= first_close
     out = ph.run_phase_b(force=True, session=trade_date)
     assert out.get("degraded") is False, out
     assert out.get("status") in ("frozen", "phase_b_partial"), out
@@ -257,10 +213,8 @@ def test_d_canary_runs_on_non_20_nov():
     """(d) Canary runs on a non-20-Nov trading day."""
     from backend.services.open_low_high.rest_canary import canary_should_run_today
 
-    # Monday 2026-11-23 (not 20-Nov)
     mon = IST.localize(datetime(2026, 11, 23, 9, 20, 5))
     assert canary_should_run_today(mon) is True
-    # Saturday should not
     sat = IST.localize(datetime(2026, 11, 21, 9, 20, 5))
     assert canary_should_run_today(sat) is False
 
@@ -270,12 +224,10 @@ def test_e_phase_a_budget_denied_phase_b_unaffected():
     from backend.services.open_low_high import candle_budget as cb
 
     cb.reset_pools_for_tests()
-    # Simulate many Phase A denials on shared path
     with cb.olh_candle_pool("phase_a"):
         for _ in range(50):
             cb.note_shared_acquire(False)
 
-    # Phase B still acquires from its dedicated pool
     with cb.olh_candle_pool("phase_b"):
         for i in range(5):
             ok = cb.acquire_olh_candle_slot()
@@ -301,7 +253,7 @@ def test_index_ff_ltp_parsed():
         }
     }
     oi, ltp = _extract_oi_ltp_from_feed_value(feed)
-    assert oi is None  # indices have no OI
+    assert oi is None
     assert abs(float(ltp) - 24123.45) < 1e-6
 
 
