@@ -146,6 +146,8 @@ def run_phase_a(
 
     try:
         upstox = _upstox()
+        # Nifty cue BEFORE universe REST thrash — rate-limit was starving index on 23-Nov.
+        nifty_cue_early = _evaluate_nifty_header_cue(upstox, trade_date)
         universe = load_universe()
         if refill_only_symbols is not None:
             want = {s.upper() for s in refill_only_symbols}
@@ -208,10 +210,34 @@ def run_phase_a(
                 (str(r.get("symbol") or "").upper(), str(r.get("side") or "").upper()): r
                 for r in existing
             }
+            _preserve_b = (
+                "second_close",
+                "second_open",
+                "second_high",
+                "second_low",
+                "entry",
+                "entry_method",
+                "t1",
+                "t2",
+                "active",
+                "phase_b_ok",
+                "wait_list",
+                "phase_b_fail_reason",
+                "wick_body_ratio",
+                "olh_badge",
+            )
             for r in results:
-                by_key[
-                    (str(r.get("symbol") or "").upper(), str(r.get("side") or "").upper())
-                ] = r
+                key = (
+                    str(r.get("symbol") or "").upper(),
+                    str(r.get("side") or "").upper(),
+                )
+                old = by_key.get(key)
+                # Phase A-only cards must not wipe a prior Phase B evaluation.
+                if old and old.get("second_close") is not None and r.get("second_close") is None:
+                    for fld in _preserve_b:
+                        if old.get(fld) is not None:
+                            r[fld] = old[fld]
+                by_key[key] = r
             results = list(by_key.values())
         elif not results and existing:
             # Transient empty pass — do not wipe board.
@@ -245,7 +271,10 @@ def run_phase_a(
             pass
         tagged = sort_screen_rows(tagged)
 
-        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
+        # Prefer pre-scan cue; refresh only if early fetch missed 09:15/prev.
+        nifty_cue = nifty_cue_early
+        if not _nifty_data_ready(nifty_cue, require_0920=False):
+            nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
         # Phase A nifty cue: 09:20 not required yet.
         nifty_ok = _nifty_data_ready(nifty_cue, require_0920=False)
         from backend.services.open_low_high.screener import (
@@ -379,6 +408,22 @@ def run_phase_a_refill(
     if is_day_frozen(trade_date) and not force:
         return {"ok": True, "status": "frozen", "filled": 0, "message": "Frozen — refill skipped."}
 
+    # Never compete with Phase B for Upstox REST — 23-Nov root cause (refill no_bars
+    # overlapped 09:25–09:29 and starved every qualifier's 09:20 fetch).
+    if phase_b_window_status() == "open" and not force:
+        ohl_log(
+            "skipped",
+            action="phase_a_refill_start",
+            detail="phase_b_window_open",
+        )
+        return {
+            "ok": True,
+            "status": "phase_a_refill",
+            "filled": 0,
+            "still_missing": 0,
+            "message": "Phase A refill skipped — Phase B window owns REST.",
+        }
+
     upstox = _upstox()
     universe = load_universe()
     existing = list_screen_for_date(trade_date)
@@ -390,6 +435,13 @@ def run_phase_a_refill(
     # Strict subset: 09:15 OHLC still null/empty (filter rejects with bars are skipped).
     missing: Set[str] = set()
     for urow in universe:
+        if phase_b_window_status() == "open" and not force:
+            ohl_log(
+                "skipped",
+                action="phase_a_refill_probe",
+                detail=f"abort_for_phase_b probed={len(missing)}",
+            )
+            break
         sym = str(urow.get("symbol") or "").upper()
         if not sym or sym in have_0915:
             continue
@@ -468,19 +520,51 @@ def _try_0920_bar(
 ) -> Optional[Any]:
     from backend.services.open_low_high.screener import SECOND_CANDLE, _fetch_rest_5m, _fetch_ws_5m_bars
 
+    bars: List[Any] = []
+    trust = "none"
+    src_tag = source
     if source == "ws":
         bars, trust = _fetch_ws_5m_bars(equity_ik, session)
-        if trust in ("UNTRUSTED", "PARTIAL"):
-            bars = []  # Phase B: TRUSTED only else REST
-    else:
-        bars = _fetch_rest_5m(upstox, equity_ik, session)
+        b = bar_at(bars, session, SECOND_CANDLE) if bars else None
+        # Prefer TRUSTED; accept PARTIAL when the 09:20 bucket itself is present.
+        # UNTRUSTED / missing 09:20 → fall through to REST (caller retries source=rest).
+        if b is not None and trust in ("TRUSTED", "PARTIAL"):
+            ohl_log(
+                "success",
+                action="phase_b_0920",
+                symbol=symbol,
+                source=source,
+                detail=f"got 09:20 trust={trust}",
+            )
+            return b
+        times = ",".join(
+            getattr(x, "ts", datetime.min).strftime("%H:%M")
+            for x in (bars or [])[:8]
+        ) or "-"
+        ohl_log(
+            "failed",
+            action="phase_b_0920",
+            symbol=symbol,
+            source=source,
+            detail=f"miss 09:20 trust={trust} bars={len(bars or [])} times={times}",
+        )
+        return None
+
+    bars = _fetch_rest_5m(upstox, equity_ik, session)
     b = bar_at(bars, session, SECOND_CANDLE) if bars else None
+    times = ",".join(
+        getattr(x, "ts", datetime.min).strftime("%H:%M") for x in (bars or [])[:8]
+    ) or "-"
     ohl_log(
         "success" if b is not None else "failed",
         action="phase_b_0920",
         symbol=symbol,
-        source=source,
-        detail="got 09:20" if b is not None else "miss 09:20",
+        source=src_tag,
+        detail=(
+            f"got 09:20 bars={len(bars or [])}"
+            if b is not None
+            else f"miss 09:20 bars={len(bars or [])} times={times}"
+        ),
     )
     return b
 
@@ -500,6 +584,7 @@ def run_phase_b(
         _evaluate_nifty_header_cue,
         _fetch_daily_prev,
         _freeze_fut_entry,
+        _nifty_data_ready,
         _session_5m_bars,
         _upstox,
     )
@@ -583,6 +668,16 @@ def run_phase_b(
             "success",
             action="phase_b_start",
             detail=f"qualifiers={len(phase_a_rows)} force={force}",
+        )
+        # Nifty first (before qualifier REST) so freeze-gate is not starved by rate limits.
+        nifty_cue_early = _evaluate_nifty_header_cue(upstox, trade_date)
+        ohl_log(
+            "success" if _nifty_data_ready(nifty_cue_early, require_0920=True) else "failed",
+            action="phase_b_nifty",
+            detail=(
+                f"gap={nifty_cue_early.get('nifty_gap')} bias={nifty_cue_early.get('nifty_bias')} "
+                f"c0920={nifty_cue_early.get('nifty_0920_close')}"
+            ),
         )
 
         # Map symbol → 09:20 equity bar via WS → REST → (wait 30s) → REST (cohort-level).
@@ -741,9 +836,11 @@ def run_phase_b(
         complete = len(still_missing) == 0
         past = past_phase_b_deadline() or force
 
-        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
-        from backend.services.open_low_high.screener import _nifty_data_ready, freeze_gate
+        from backend.services.open_low_high.screener import freeze_gate
 
+        nifty_cue = nifty_cue_early
+        if not _nifty_data_ready(nifty_cue, require_0920=True):
+            nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
         nifty_ok = _nifty_data_ready(nifty_cue, require_0920=True)
         # Coverage among Phase A cohort that received 09:20.
         cohort_n = max(len(tagged), 1)

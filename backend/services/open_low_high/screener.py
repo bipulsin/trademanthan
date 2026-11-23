@@ -7,7 +7,7 @@ Schedule (IST) — see ``scheduler.py`` / ``phases.py``:
   09:15        WS warm check + EQ/INDEX lock through 09:25
   09:20:10–09:23  Phase A on completed 09:15 5m (WS then REST) — grey cards live
   09:24        Phase A refill for null 09:15 OHLC only
-  09:25:03–09:29  Phase B on Phase A qualifiers only (WS→REST→wait30→REST)
+  09:25:15–09:29  Phase B on Phase A qualifiers only (WS→REST→wait30→REST)
 
 Data split (equity vs stock future):
   - **Algo filters** (Phase A/B, PDH/PDL/prev close, VWAP, doji, wick/body,
@@ -67,18 +67,21 @@ SECOND_CANDLE = time(9, 20)
 ENTRY_QUOTE_MINUTE = time(9, 22)
 # Small directional slip when freezing from 09:20 future close (fallback).
 ENTRY_SLIPPAGE_FRAC = 0.0002  # 2 bps
-# Phase B window (UI ``window_status`` + force auto-run).
-SCREEN_AFTER = time(9, 25, 3)
-FREEZE_BY = time(9, 29, 0)
-HARD_DEADLINE = time(9, 29, 0)
 from backend.services.open_low_high.config import (
     FREEZE_COVERAGE_MIN,
     MISSING_DATA_RATE_THRESHOLD,
+    PHASE_B_HARD_STOP,
+    PHASE_B_START,
     WS_FIRST_TICK_TRUST_SEC,
     WS_TRY_COUNT,
     WS_TRY_MIN_1M_BARS,
     WS_TRY_WAIT_SEC,
 )
+
+# Phase B window (UI ``window_status`` + force auto-run) — keep in sync with config.
+SCREEN_AFTER = PHASE_B_START
+FREEZE_BY = PHASE_B_HARD_STOP
+HARD_DEADLINE = PHASE_B_HARD_STOP
 
 _run_lock = threading.Lock()
 _last_run: Dict[str, Any] = {}
@@ -546,11 +549,45 @@ def _hist_range_end(session: date) -> date:
     return max(session + timedelta(days=2), _today() + timedelta(days=1))
 
 
+def _fetch_rest_5m_historical_session(
+    upstox: Any, instrument_key: str, session: date
+) -> List[Bar]:
+    """Historical 5m for one session (closed bars). Used when intraday lags/empties."""
+    raw = None
+    try:
+        raw = upstox.get_historical_candles_by_instrument_key(
+            instrument_key,
+            interval="minutes/5",
+            days_back=5,
+            range_end_date=_hist_range_end(session),
+        )
+        logger.info(
+            "olh rest 5m endpoint=historical_session instrument=%s session=%s bars=%s",
+            instrument_key,
+            session.isoformat(),
+            len(raw or []),
+        )
+    except Exception as exc:
+        logger.info(
+            "olh rest historical_session 5m %s session=%s exception_type=%s: %s",
+            instrument_key,
+            session.isoformat(),
+            type(exc).__name__,
+            exc,
+        )
+        raw = None
+    bars = _bars_from_rows(list(raw or []), instrument_key)
+    day = [b for b in bars if getattr(b, "session_date", None) == session]
+    return _drop_unclosed_bars(day, log_label=f"rest5m_hist_session:{instrument_key}")
+
+
 def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]:
     """Session 5m bars from Upstox REST.
 
-    - **Today (live):** V3 **intraday** only
-      (``/v3/historical-candle/intraday/{key}/minutes/5``). Never historical.
+    - **Today (live):** V3 **intraday** first
+      (``/v3/historical-candle/intraday/{key}/minutes/5``). If the closed 09:20
+      bar is still missing after bar-end (09:25), fall back to **historical**
+      for the session (intraday can lag or return empty under rate pressure).
     - **Previous days:** V3/V2 **historical**
       (``get_historical_candles_by_instrument_key``); intraday fallback only if
       historical returns empty.
@@ -574,10 +611,23 @@ def _fetch_rest_5m(upstox: Any, instrument_key: str, session: date) -> List[Bar]
                 exc,
             )
             raw = None
-        return _drop_unclosed_bars(
+        bars = _drop_unclosed_bars(
             _bars_from_rows(list(raw or []), instrument_key),
             log_label=f"rest5m_intraday:{instrument_key}",
         )
+        # After 09:25 IST, closed 09:20 must be present; otherwise try historical.
+        now = _now()
+        need_0920 = now.time() >= time(9, 25, 0)
+        if need_0920 and bar_at(bars, session, SECOND_CANDLE) is None:
+            hist = _fetch_rest_5m_historical_session(upstox, instrument_key, session)
+            if hist:
+                bars = _merge_bars(hist, bars)
+                logger.info(
+                    "olh rest 5m intraday_miss_0920 used_historical instrument=%s bars=%s",
+                    instrument_key,
+                    len(bars),
+                )
+        return bars
 
     # Previous calendar sessions: historical is authoritative.
     try:

@@ -74,6 +74,29 @@
     return x.toLocaleString('en-IN', { maximumFractionDigits: 2 });
   }
 
+  /** Phase A greys before 09:20 confirm — not a hard failure. */
+  function isPhaseBPending(card) {
+    const r = String((card && card.phase_b_fail_reason) || '').trim();
+    if (r === 'Phase B pending') return true;
+    if (card && card.second_close == null && !r && !card.active && !card.phase_b_ok) return true;
+    return false;
+  }
+
+  function is0920Missing(card) {
+    return /09:20 data missing/i.test(String((card && card.phase_b_fail_reason) || ''));
+  }
+
+  /** Entry/T1/T2: avoid blank "—" that reads as "No data" while Phase B is pending/missing. */
+  function fmtLevel(n, card) {
+    if (n != null && n !== '') {
+      const x = Number(n);
+      if (Number.isFinite(x)) return fmt(x);
+    }
+    if (isPhaseBPending(card)) return 'pending';
+    if (is0920Missing(card)) return 'no 09:20';
+    return '—';
+  }
+
   function escapeHtml(s) {
     return String(s)
       .replace(/&/g, '&amp;')
@@ -188,10 +211,12 @@
 
   function phaseBPanelValue(card) {
     if (card.active || card.phase_b_ok) return 'Phase B OK · Active';
+    if (isPhaseBPending(card)) return 'Awaiting 09:20 · Phase B';
     const r = phaseBReason(card);
     if (isWaitList(card)) {
       return r ? 'Wait List · ' + r : 'Wait List (wick 35–90%)';
     }
+    if (is0920Missing(card)) return '09:20 data missing';
     return r || 'Non-Active';
   }
 
@@ -360,13 +385,13 @@
           </button>
           <div class="olh-entry-wrap">
             <span class="olh-k">Entry</span>
-            <span class="olh-v olh-entry" data-olh-entry>${fmt(entry)}</span>
+            <span class="olh-v olh-entry" data-olh-entry>${fmtLevel(entry, card)}</span>
           </div>
         </div>
         <div class="olh-card-row olh-card-row2">
           <div><span class="olh-k">SL</span> <span class="olh-v">${fmt(sl)}</span></div>
-          <div><span class="olh-k">T1</span> <span class="olh-v">${fmt(card.t1)}</span></div>
-          <div><span class="olh-k">T2</span> <span class="olh-v">${fmt(card.t2)}</span></div>
+          <div><span class="olh-k">T1</span> <span class="olh-v">${fmtLevel(card.t1, card)}</span></div>
+          <div><span class="olh-k">T2</span> <span class="olh-v">${fmtLevel(card.t2, card)}</span></div>
         </div>
         <div class="olh-card-meta">
           <span class="olh-side-chip ${bull ? 'bull' : 'bear'}">${bull ? 'BULL' : 'BEAR'}</span>
@@ -675,10 +700,10 @@
               {
                 title: 'OPEN LOW HIGH',
                 metrics: [
-                  { key: 'entry', label: 'Entry', value: fmt(entryValue(card)) },
+                  { key: 'entry', label: 'Entry', value: fmtLevel(entryValue(card), card) },
                   { key: 'sl', label: 'SL', value: fmt(slValue(card)) },
-                  { key: 't1', label: 'T1', value: fmt(card.t1) },
-                  { key: 't2', label: 'T2', value: fmt(card.t2) },
+                  { key: 't1', label: 'T1', value: fmtLevel(card.t1, card) },
+                  { key: 't2', label: 'T2', value: fmtLevel(card.t2, card) },
                   { key: 'state', label: 'State', value: stateLabel(card) },
                   { key: 'phase_b', label: 'Phase B', value: phaseBPanelValue(card) },
                 ],
@@ -739,10 +764,10 @@
             <td>${escapeHtml(stateLabel(r))}</td>
             <td class="olh-log-reason">${escapeHtml(phaseBReason(r))}</td>
             <td>${escapeHtml(r.contract || '')}</td>
-            <td>${fmt(entryValue(r))}</td>
+            <td>${fmtLevel(entryValue(r), r)}</td>
             <td>${fmt(slValue(r))}</td>
-            <td>${fmt(r.t1)}</td>
-            <td>${fmt(r.t2)}</td>
+            <td>${fmtLevel(r.t1, r)}</td>
+            <td>${fmtLevel(r.t2, r)}</td>
             <td>${escapeHtml(r.olh_badge || '')}</td>
             <td>${escapeHtml(r.sector_badge_display || r.sector_badge || '')}</td>
           </tr>`;

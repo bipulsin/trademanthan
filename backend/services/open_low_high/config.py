@@ -28,7 +28,8 @@ def _env_int(name: str, default: int) -> int:
 
 # --- Phase windows (buffer after candle close) ---
 PHASE_A_BUFFER_SEC = _env_int("OLH_PHASE_A_BUFFER_SEC", 10)  # 09:20:00 + buffer → 09:20:10
-PHASE_B_BUFFER_SEC = _env_int("OLH_PHASE_B_BUFFER_SEC", 3)  # 09:25:00 + buffer → 09:25:03
+# Give Upstox intraday time to publish the closed 09:20 5m (was 3s; too tight + REST thrash).
+PHASE_B_BUFFER_SEC = _env_int("OLH_PHASE_B_BUFFER_SEC", 15)  # 09:25:00 + buffer → 09:25:15
 PHASE_A_START = time(9, 20, max(0, min(59, PHASE_A_BUFFER_SEC)))
 PHASE_B_START = time(9, 25, max(0, min(59, PHASE_B_BUFFER_SEC)))
 PHASE_B_HARD_STOP = time(9, 29, 0)

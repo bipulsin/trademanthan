@@ -7,7 +7,7 @@ Timeline:
   09:15  WS warm check for Equity/Index; re-warm if needed; engage WS lock
   09:20:10–09:23  Phase A (fresh 09:15 5m) — persist grey cards immediately
   09:24  Phase A refill for symbols still missing 09:15 OHLC
-  09:25:03–09:29  Phase B on Phase A qualifiers only (hard stop 09:29)
+  09:25:15–09:29  Phase B on Phase A qualifiers only (hard stop 09:29)
   ~12:00  Delete OHL_Log_* older than 3 days
 
 Startup catch-up (explicit — not APScheduler misfire alone):
@@ -579,12 +579,21 @@ def start_open_low_high_scheduler() -> None:
         misfire_grace_time=90,
     )
 
-    # --- Phase B 09:25:03 then retries through 09:29 ---
+    # --- Phase B 09:25:15 then retries through 09:29 ---
+    from backend.services.open_low_high.config import PHASE_B_BUFFER_SEC
+
+    _pb_sec = max(0, min(59, int(PHASE_B_BUFFER_SEC)))
     sched.add_job(
         _run_phase_b,
-        CronTrigger(day_of_week="mon-fri", hour=9, minute=25, second=3, timezone="Asia/Kolkata"),
-        id="open_low_high_phase_b_092503",
-        name="Open Low High Phase B 09:25:03 IST",
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute=25,
+            second=_pb_sec,
+            timezone="Asia/Kolkata",
+        ),
+        id="open_low_high_phase_b_0925",
+        name=f"Open Low High Phase B 09:25:{_pb_sec:02d} IST",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -708,7 +717,7 @@ def start_open_low_high_scheduler() -> None:
     logger.info(
         "open_low_high scheduler started "
         "(PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
-        "Phase B 09:25:03–09:29; coverage alerts 09:21+09:26; "
+        "Phase B 09:25:15–09:29; coverage alerts 09:21+09:26; "
         "startup catch-up 09:20–09:29 / DEGRADED after; "
         "OHL log cleanup 12:00; REST canary %s jobs=%s)",
         CANARY_DATE.isoformat(),
