@@ -209,14 +209,159 @@ def test_c_partial_freeze_20_symbols_3_missing(monkeypatch):
     assert len(with_entry) == 17, len(with_entry)
 
 
+def test_e2e_ws_drop_8_of_20_phase_a_denied_phase_b_partial(monkeypatch):
+    """E2E: WS drops 8/20, Phase A REST denied, Phase B @ 09:25:03.
+
+    12 symbols get Entry/T1/T2; 8 marked ``09:20 data missing`` individually;
+    day not DEGRADED when coverage (12/20=0.60) ≥ FREEZE_COVERAGE_MIN.
+    """
+    from backend.services.open_low_high import candle_budget as cb
+    from backend.services.open_low_high import phases as ph
+    from backend.services.open_low_high import screener as scr
+
+    cb.reset_pools_for_tests()
+    # Coverage floor at 60% so 12/20 freezes without DEGRADED.
+    monkeypatch.setattr(ph, "FREEZE_COVERAGE_MIN", 0.60)
+    monkeypatch.setattr(scr, "FREEZE_COVERAGE_MIN", 0.60)
+
+    trade_date = date(2026, 11, 23)
+    rows = []
+    for i in range(20):
+        rows.append(
+            {
+                "symbol": f"S{i:02d}",
+                "side": "BULLISH",
+                "equity_instrument_key": f"NSE_EQ|{i}",
+                "instrument_key": f"NSE_FO|{i}",
+                "first_open": 100.0,
+                "first_high": 101.0,
+                "first_low": 99.0,
+                "first_close": 100.5,
+                "prev_high": 102.0,
+                "prev_low": 98.0,
+                "prev_close": 100.0,
+            }
+        )
+
+    # Phase B window open from 09:25:03.
+    monkeypatch.setattr(
+        ph, "_now", lambda: IST.localize(datetime(2026, 11, 23, 9, 25, 3))
+    )
+    monkeypatch.setattr(ph, "is_day_frozen", lambda *_a, **_k: False)
+    monkeypatch.setattr(ph, "list_screen_for_date", lambda *_a, **_k: rows)
+    monkeypatch.setattr(ph, "phase_b_window_status", lambda *_a, **_k: "open")
+    monkeypatch.setattr(ph, "past_phase_b_deadline", lambda *_a, **_k: True)
+    monkeypatch.setattr(ph, "ensure_tables", lambda: None)
+    monkeypatch.setattr(ph.time_mod, "sleep", lambda *_a, **_k: None)
+
+    # 8 symbols: WS EQ dropped and REST never fills 09:20.
+    ws_drop = {f"S{i:02d}" for i in range(12, 20)}
+
+    class FakeBar:
+        def __init__(self):
+            self.open = 100.5
+            self.high = 100.9
+            self.low = 100.4
+            self.close = 100.8
+
+    def fake_try(upstox, ik, session, *, symbol, source):
+        if symbol in ws_drop:
+            return None  # WS miss + REST miss for these 8
+        if source == "ws":
+            return FakeBar()
+        # Phase B REST fallback unused for the 12 (WS already filled).
+        return FakeBar()
+
+    monkeypatch.setattr(ph, "_try_0920_bar", fake_try)
+
+    # Phase A REST budget exhausted (shared/phase_a denials) — must not starve Phase B.
+    with cb.olh_candle_pool("phase_a"):
+        for _ in range(40):
+            cb.note_shared_acquire(False)
+
+    nifty_cue = {
+        "nifty_gap": 0.1,
+        "nifty_bias": "BULLISH",
+        "nifty_0915_close": 24000.0,
+        "nifty_0920_close": 24010.0,
+        "nifty_prev_close": 23900.0,
+    }
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._evaluate_nifty_header_cue",
+        lambda *_a, **_k: nifty_cue,
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._nifty_data_ready",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._upstox", lambda: MagicMock()
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._session_5m_bars",
+        lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._freeze_fut_entry",
+        lambda **_k: (101.0, "test"),
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._fetch_daily_prev",
+        lambda *_a, **_k: (102.0, 98.0, 100.0),
+    )
+    monkeypatch.setattr(
+        "backend.services.open_low_high.screener._apply_sector_badges",
+        lambda x: x,
+    )
+
+    saved: Dict[str, Any] = {}
+
+    def fake_merge(td, tagged, *, frozen, preserve_valid_levels=True):
+        saved["tagged"] = tagged
+        saved["frozen"] = frozen
+        return len(tagged)
+
+    monkeypatch.setattr(
+        "backend.services.open_low_high.persistence.upsert_screen_rows_merge",
+        fake_merge,
+    )
+    monkeypatch.setattr(ph, "upsert_day_meta", lambda *a, **k: None)
+
+    out = ph.run_phase_b(force=True, session=trade_date)
+    assert out.get("degraded") is False, out
+    assert out.get("coverage", 0) >= 0.60, out
+    assert out.get("status") in ("frozen", "phase_b_partial"), out
+    assert saved.get("frozen") is True
+
+    tagged = saved.get("tagged") or []
+    with_levels = [
+        r
+        for r in tagged
+        if r.get("entry") is not None and r.get("t1") is not None and r.get("t2") is not None
+    ]
+    marked = [
+        r for r in tagged if r.get("phase_b_fail_reason") == "09:20 data missing"
+    ]
+    assert len(marked) == 8, [(r.get("symbol"), r.get("phase_b_fail_reason")) for r in marked]
+    assert len(with_levels) == 12, len(with_levels)
+    assert {r["symbol"] for r in marked} == ws_drop
+
+    snap = cb.usage_snapshot()
+    a_denied = sum(v.get("denied", 0) for v in (snap.get("phase_a") or {}).values())
+    assert a_denied >= 40
+
+
 def test_d_canary_runs_on_non_20_nov():
-    """(d) Canary runs on a non-20-Nov trading day."""
+    """(d) Daily trading-day canary — not pinned to 2026-11-20."""
     from backend.services.open_low_high.rest_canary import canary_should_run_today
 
     mon = IST.localize(datetime(2026, 11, 23, 9, 20, 5))
     assert canary_should_run_today(mon) is True
     sat = IST.localize(datetime(2026, 11, 21, 9, 20, 5))
     assert canary_should_run_today(sat) is False
+    # 2026-11-24 = Guru Nanak Jayanti (NSE holiday): cron still listed, gate skips.
+    assert canary_should_run_today(IST.localize(datetime(2026, 11, 24, 9, 20, 5))) is False
+    assert canary_should_run_today(IST.localize(datetime(2026, 11, 25, 9, 20, 5))) is True
 
 
 def test_e_phase_a_budget_denied_phase_b_unaffected():
