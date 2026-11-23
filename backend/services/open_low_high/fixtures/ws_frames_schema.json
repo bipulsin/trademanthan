@@ -1,0 +1,130 @@
+{
+  "_meta": {
+    "source": "Upstox MarketDataFeedV3 protobuf schema + MessageToDict conventions",
+    "raw_frames_recorded": false,
+    "note": "No raw WS frames were retained from 2026-11-23. Payloads below mirror proto FullFeed/Feed unions used by upstox_market_feed._extract_* helpers. Real recording lands under OLH_RAW_RECORD_DIR once enabled.",
+    "handled_feed_types": [
+      "fullFeed.marketFF",
+      "fullFeed.indexFF",
+      "ltpc",
+      "firstLevelWithGreeks"
+    ],
+    "unhandled_feed_types": [
+      "empty_feed",
+      "unknown_union_key"
+    ]
+  },
+  "frames": [
+    {
+      "label": "EQ_marketFF",
+      "segment": "EQ",
+      "instrument_key": "NSE_EQ|INE002A01018",
+      "feed": {
+        "fullFeed": {
+          "marketFF": {
+            "ltpc": {"ltp": 2450.5, "ltt": 1763867100123, "ltq": 25, "cp": 2440.0},
+            "marketOHLC": {
+              "ohlc": [
+                {
+                  "interval": "I1",
+                  "open": 2448.0,
+                  "high": 2451.0,
+                  "low": 2447.5,
+                  "close": 2450.5,
+                  "vol": 12000,
+                  "ts": "2026-11-23T09:15:00+05:30"
+                }
+              ]
+            },
+            "tbq": 15000,
+            "tsq": 12000,
+            "oi": null
+          }
+        }
+      }
+    },
+    {
+      "label": "INDEX_indexFF",
+      "segment": "INDEX",
+      "instrument_key": "NSE_INDEX|Nifty 50",
+      "feed": {
+        "fullFeed": {
+          "indexFF": {
+            "ltpc": {"ltp": 24123.45, "ltt": 1763867100456, "ltq": 0, "cp": 24090.0},
+            "marketOHLC": {
+              "ohlc": [
+                {
+                  "interval": "I1",
+                  "open": 24100.0,
+                  "high": 24130.0,
+                  "low": 24095.0,
+                  "close": 24123.45,
+                  "vol": 0,
+                  "ts": "2026-11-23T09:15:00+05:30"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "label": "FUT_marketFF",
+      "segment": "FUT",
+      "instrument_key": "NSE_FO|51234",
+      "feed": {
+        "fullFeed": {
+          "marketFF": {
+            "ltpc": {"ltp": 2455.0, "ltt": 1763867100789, "ltq": 50, "cp": 2445.0},
+            "oi": 1250000,
+            "tbq": 8000,
+            "tsq": 7500,
+            "marketOHLC": {
+              "ohlc": [
+                {
+                  "interval": "I1",
+                  "open": 2450.0,
+                  "high": 2456.0,
+                  "low": 2449.0,
+                  "close": 2455.0,
+                  "vol": 5000,
+                  "ts": "2026-11-23T09:15:00+05:30"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "label": "OPT_firstLevelWithGreeks",
+      "segment": "OTHER",
+      "instrument_key": "NSE_FO|OPT999",
+      "feed": {
+        "firstLevelWithGreeks": {
+          "ltpc": {"ltp": 120.5, "ltt": 1763867100999, "ltq": 75},
+          "oi": 50000,
+          "iv": 0.18,
+          "optionGreeks": {"delta": 0.45, "theta": -0.02, "gamma": 0.01, "vega": 0.12, "rho": 0.01}
+        }
+      }
+    },
+    {
+      "label": "LTPC_only",
+      "segment": "EQ",
+      "instrument_key": "NSE_EQ|INE467B01029",
+      "feed": {
+        "ltpc": {"ltp": 980.25, "ltt": 1763867101111, "ltq": 10}
+      }
+    },
+    {
+      "label": "UNKNOWN_union",
+      "segment": "OTHER",
+      "instrument_key": "NSE_EQ|UNKNOWN_KEY",
+      "feed": {
+            "mysteryFeed": {"foo": 1}
+      },
+      "expect_unknown": true
+    }
+  ]
+}

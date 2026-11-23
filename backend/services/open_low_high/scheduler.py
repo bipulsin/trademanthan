@@ -56,6 +56,73 @@ def _skip() -> bool:
     return False
 
 
+def _run_readiness_0850() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.config import OLH_READINESS_ENABLED
+        from backend.services.open_low_high.readiness import run_readiness_0850
+
+        if not OLH_READINESS_ENABLED:
+            return
+        result = run_readiness_0850(send_alert=True)
+        logger.info(
+            "open_low_high readiness_0850 go=%s red=%s failures=%s",
+            result.get("go"),
+            result.get("red"),
+            result.get("failures"),
+        )
+    except Exception:
+        logger.exception("open_low_high readiness_0850 failed")
+
+
+def _run_eq_silent_stall_pulse() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.silent_stall import check_eq_silent_stall
+
+        result = check_eq_silent_stall(force=False)
+        if result.get("stalled"):
+            logger.warning(
+                "open_low_high eq_silent_stall action=%s attempts=%s",
+                result.get("action"),
+                result.get("attempts"),
+            )
+    except Exception:
+        logger.exception("open_low_high eq_silent_stall pulse failed")
+
+
+def _run_daily_reconcile_1545() -> None:
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.config import OLH_DAILY_RECONCILE_ENABLED
+        from backend.services.open_low_high.daily_reconcile import run_daily_reconcile
+
+        if not OLH_DAILY_RECONCILE_ENABLED:
+            return
+        result = run_daily_reconcile(send_alert=True)
+        logger.info(
+            "open_low_high daily_reconcile mismatches=%s checked=%s",
+            result.get("mismatch_count"),
+            result.get("checked"),
+        )
+    except Exception:
+        logger.exception("open_low_high daily_reconcile failed")
+
+
+def _run_raw_record_prune() -> None:
+    """Retention prune — safe on holidays (no market REST)."""
+    try:
+        from backend.services.open_low_high.raw_recording import prune_old_recordings
+
+        result = prune_old_recordings()
+        logger.info("open_low_high raw_record prune removed=%s", result.get("removed"))
+    except Exception:
+        logger.exception("open_low_high raw_record prune failed")
+
+
 def _run_pdc_eod() -> None:
     if _skip():
         return
@@ -563,6 +630,60 @@ def start_open_low_high_scheduler() -> None:
         misfire_grace_time=300,
     )
 
+    # --- 08:50 readiness go/no-go ---
+    sched.add_job(
+        _run_readiness_0850,
+        CronTrigger(day_of_week="mon-fri", hour=8, minute=50, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_readiness_0850",
+        name="Open Low High readiness 08:50 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=120,
+    )
+
+    # --- EQ silent-stall pulse every 20s-ish via 15s cron 09:15–09:30 ---
+    sched.add_job(
+        _run_eq_silent_stall_pulse,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute="15-30",
+            second="0,20,40",
+            timezone="Asia/Kolkata",
+        ),
+        id="open_low_high_eq_silent_stall",
+        name="Open Low High EQ silent-stall pulse 09:15–09:30 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=15,
+    )
+
+    # --- 15:45 daily WS vs REST reconcile ---
+    sched.add_job(
+        _run_daily_reconcile_1545,
+        CronTrigger(day_of_week="mon-fri", hour=15, minute=45, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_daily_reconcile_1545",
+        name="Open Low High daily reconcile 15:45 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+
+    # --- Raw recording retention prune (daily 16:30; OK on holidays) ---
+    sched.add_job(
+        _run_raw_record_prune,
+        CronTrigger(day_of_week="mon-fri", hour=16, minute=30, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_raw_record_prune",
+        name="Open Low High raw record prune 16:30 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+
     # --- WS pre-warm (09:05 only) + 09:15 check ---
     sched.add_job(
         _run_ws_prewarm_0905,
@@ -784,10 +905,11 @@ def start_open_low_high_scheduler() -> None:
     ]
     logger.info(
         "open_low_high scheduler started "
-        "(PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
-        "Phase B 09:25:15–09:29; coverage alerts 09:21+09:26; "
+        "(readiness 08:50; PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
+        "Phase B 09:25:15–09:29; coverage alerts 09:21+09:26; EQ silent-stall 09:15–09:30; "
         "startup catch-up 09:20–09:29 / DEGRADED after; "
-        "OHL log cleanup 12:00; daily REST canary jobs=%s; WS 09:08 resub)",
+        "OHL log cleanup 12:00; daily REST canary jobs=%s; WS 09:08 resub; "
+        "reconcile 15:45; raw prune 16:30)",
         canary_ids,
     )
 

@@ -773,6 +773,33 @@ def _ingest_feed_response_dict(d: Dict[str, Any]) -> None:
     now = time.monotonic()
     now_ist = datetime.now(IST)
     minute_iso = now_ist.replace(second=0, microsecond=0).isoformat()
+    # Staging: optional raw frame recording 09:00–09:35 + feed-type contract metrics.
+    try:
+        from backend.services.open_low_high.raw_recording import record_ws_frame
+
+        record_ws_frame(d, now=now_ist)
+    except Exception:
+        pass
+    try:
+        from backend.services.open_low_high.feed_contract import note_feed_observation
+
+        sub: set = set()
+        try:
+            if _LAST_KEYS_SIG:
+                sub |= set(_LAST_KEYS_SIG)
+            for _pk in _PROVIDER_KEYS.values():
+                sub |= set(_pk)
+        except Exception:
+            sub = set()
+        for raw_key, feed_val in feeds.items():
+            note_feed_observation(
+                _normalize_ik(str(raw_key)),
+                feed_val,
+                subscribed_keys=sub or None,
+                now=now_ist,
+            )
+    except Exception:
+        pass
     with _CACHE_LOCK:
         for raw_key, feed_val in feeds.items():
             ik = _normalize_ik(str(raw_key))

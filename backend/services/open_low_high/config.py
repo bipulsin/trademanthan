@@ -95,3 +95,23 @@ OLH_LOG_HOST_DIR = (os.getenv("OLH_LOG_HOST_DIR") or "").strip()
 # Host-persisted OHL logs (survive container rebuild); empty → try known mount paths.
 OLH_LOG_HOST_DIR = (os.getenv("OLH_LOG_HOST_DIR") or "").strip()
 OLH_FETCH_ATTEMPTS_ENABLED = _env_bool("OLH_FETCH_ATTEMPTS_ENABLED", True)
+
+# --- Reliability program (staging-friendly; defaults safe for prod) ---
+# Raw WS/REST recording 09:00–09:35 → persistent volume, 14-day retention.
+OLH_RAW_RECORD_ENABLED = _env_bool("OLH_RAW_RECORD_ENABLED", False)
+OLH_RAW_RECORD_DIR = (os.getenv("OLH_RAW_RECORD_DIR") or "data/olh_raw_recordings").strip()
+OLH_RAW_RECORD_RETENTION_DAYS = _env_int("OLH_RAW_RECORD_RETENTION_DAYS", 14)
+OLH_RAW_RECORD_START = time(9, 0, 0)
+OLH_RAW_RECORD_END = time(9, 35, 0)
+
+# EQ silent-stall watchdog (connected but EQ ticks=0).
+OLH_EQ_STALL_ENABLED = _env_bool("OLH_EQ_STALL_ENABLED", True)
+OLH_EQ_STALL_SEC = _env_int("OLH_EQ_STALL_SEC", 20)
+OLH_EQ_STALL_MAX_ATTEMPTS = _env_int("OLH_EQ_STALL_MAX_ATTEMPTS", 3)
+
+# 08:50 readiness + 15:45 daily reconcile (scheduler hooks).
+OLH_READINESS_ENABLED = _env_bool("OLH_READINESS_ENABLED", True)
+OLH_DAILY_RECONCILE_ENABLED = _env_bool("OLH_DAILY_RECONCILE_ENABLED", True)
+
+# Dress rehearsal / fault injection (never auto-on in prod).
+OLH_REHEARSAL_MODE = _env_bool("OLH_REHEARSAL_MODE", False)
