@@ -33,6 +33,7 @@ _lock = threading.RLock()
 _locked_eq_index: Set[str] = set()
 _lock_engaged: bool = False
 _last_subscribe: Dict[str, Any] = {}
+_last_0905_canary_failed: bool = False
 
 
 def _now() -> datetime:

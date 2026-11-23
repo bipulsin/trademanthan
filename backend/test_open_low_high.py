@@ -1131,16 +1131,16 @@ def test_rest_canary_date_gate():
     import pytz
 
     from backend.services.open_low_high.rest_canary import (
-        CANARY_DATE,
         CANARY_TIMES,
         canary_should_run_today,
     )
 
     IST = pytz.timezone("Asia/Kolkata")
-    assert CANARY_DATE.isoformat() == "2026-11-20"
     assert len(CANARY_TIMES) == 5
-    assert canary_should_run_today(IST.localize(datetime(2026, 11, 20, 9, 20, 5)))
-    assert not canary_should_run_today(IST.localize(datetime(2026, 11, 19, 9, 20, 5)))
+    # Daily trading-day canary (not pinned to 2026-11-20).
+    assert canary_should_run_today(IST.localize(datetime(2026, 11, 23, 9, 20, 5)))  # Mon
+    assert canary_should_run_today(IST.localize(datetime(2026, 11, 19, 9, 20, 5)))  # Thu
+    assert not canary_should_run_today(IST.localize(datetime(2026, 11, 21, 9, 20, 5)))  # Sat
 
 
 def test_drop_unclosed_bars_fetch_092005_excludes_0920():

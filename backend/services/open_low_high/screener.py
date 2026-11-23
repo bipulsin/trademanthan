@@ -1385,7 +1385,27 @@ def run_screen(
             "message": "Screen already running.",
         }
     try:
-        a = run_phase_a(force=True, session=trade_date, max_workers=max_workers)
+        # Force/repair: only refill symbols still missing 09:15; Phase B skips
+        # already-evaluated qualifiers and never overwrites valid Entry/T1/T2.
+        from backend.services.open_low_high.phases import run_phase_a_refill
+
+        existing = list_screen_for_date(trade_date)
+        missing_a = {
+            str(r.get("symbol") or "").upper()
+            for r in existing
+            if r.get("first_close") is None
+        }
+        if not existing:
+            a = run_phase_a(force=True, session=trade_date, max_workers=max_workers)
+        elif missing_a:
+            a = run_phase_a_refill(force=True, session=trade_date, max_workers=max_workers)
+        else:
+            a = {
+                "ok": True,
+                "status": "phase_a",
+                "phase_a": len(existing),
+                "message": "Force screen — Phase A already complete; skipped.",
+            }
         b = run_phase_b(force=True, session=trade_date, max_workers=max_workers)
         payload = dict(b)
         payload["phase_a_result"] = {

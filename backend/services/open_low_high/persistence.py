@@ -345,6 +345,74 @@ def upsert_screen_rows(trade_date: date, rows: List[Dict[str, Any]], *, frozen: 
         db.close()
 
 
+_PRESERVE_LEVEL_FIELDS = (
+    "entry",
+    "t1",
+    "t2",
+    "sl",
+    "entry_method",
+    "second_close",
+    "second_open",
+    "second_high",
+    "second_low",
+    "active",
+    "phase_b_ok",
+    "wait_list",
+    "wick_body_ratio",
+    "olh_badge",
+)
+
+
+def upsert_screen_rows_merge(
+    trade_date: date,
+    rows: List[Dict[str, Any]],
+    *,
+    frozen: bool,
+    preserve_valid_levels: bool = True,
+) -> int:
+    """Upsert by (symbol, side) without wiping the rest of the day.
+
+    When ``preserve_valid_levels`` is True, never overwrite a non-null Entry/T1/T2
+    (or other Phase B fields) with null — force/retry repairs only fill gaps.
+    """
+    ensure_tables()
+    existing = list_screen_for_date(trade_date)
+    by_key = {
+        (str(r.get("symbol") or "").upper(), str(r.get("side") or "").upper()): dict(r)
+        for r in existing
+    }
+    for row in rows:
+        key = (
+            str(row.get("symbol") or "").upper(),
+            str(row.get("side") or "").upper(),
+        )
+        if not key[0]:
+            continue
+        merged = dict(by_key.get(key) or {})
+        incoming = dict(row)
+        if preserve_valid_levels and merged:
+            for fld in _PRESERVE_LEVEL_FIELDS:
+                old_v = merged.get(fld)
+                new_v = incoming.get(fld)
+                # Keep prior valid levels when incoming clears them.
+                if old_v is not None and new_v is None:
+                    incoming[fld] = old_v
+            # Do not demote a successful Phase B eval to "09:20 data missing"
+            # when the prior row already has second_close + levels.
+            if (
+                merged.get("second_close") is not None
+                and incoming.get("second_close") is None
+                and incoming.get("phase_b_fail_reason") == "09:20 data missing"
+            ):
+                for fld in _PRESERVE_LEVEL_FIELDS:
+                    if merged.get(fld) is not None:
+                        incoming[fld] = merged[fld]
+                incoming["phase_b_fail_reason"] = merged.get("phase_b_fail_reason")
+        merged.update(incoming)
+        by_key[key] = merged
+    return upsert_screen_rows(trade_date, list(by_key.values()), frozen=frozen)
+
+
 def upsert_day_meta(
     trade_date: date,
     *,

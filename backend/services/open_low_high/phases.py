@@ -28,6 +28,7 @@ IST = pytz.timezone("Asia/Kolkata")
 
 from backend.services.open_low_high.config import (
     FREEZE_COVERAGE_MIN,
+    PHASE_A_REFILL_HARD_STOP,
     PHASE_A_START,
     PHASE_B_HARD_STOP,
     PHASE_B_START,
@@ -100,6 +101,16 @@ def past_phase_b_deadline(now: Optional[datetime] = None) -> bool:
     return t.time() >= PHASE_B_HARD_STOP
 
 
+def past_phase_a_refill_deadline(now: Optional[datetime] = None) -> bool:
+    """True at/after 09:24:50 — Phase A refill must stop (Phase B owns REST)."""
+    t = now or _now()
+    if t.tzinfo is None:
+        t = IST.localize(t)
+    else:
+        t = t.astimezone(IST)
+    return t.time() >= PHASE_A_REFILL_HARD_STOP
+
+
 def run_phase_a(
     *,
     force: bool = False,
@@ -145,6 +156,41 @@ def run_phase_a(
         return {"ok": False, "status": "busy", "message": "Phase A already running."}
 
     try:
+        from backend.services.open_low_high.candle_budget import olh_candle_pool
+
+        with olh_candle_pool("phase_a"):
+            return _run_phase_a_body(
+                force=force,
+                trade_date=trade_date,
+                win=win,
+                max_workers=max_workers,
+                refill_only_symbols=refill_only_symbols,
+            )
+    except Exception as exc:
+        logger.exception("OHL phase_a failed")
+        ohl_log("failed", action="phase_a_done", detail=str(exc)[:160])
+        return {"ok": False, "status": "error", "message": str(exc)}
+    finally:
+        _phase_a_lock.release()
+
+
+def _run_phase_a_body(
+    *,
+    force: bool,
+    trade_date: date,
+    win: str,
+    max_workers: int,
+    refill_only_symbols: Optional[Set[str]],
+) -> Dict[str, Any]:
+    from backend.services.open_low_high.screener import (
+        _apply_sector_badges,
+        _evaluate_nifty_header_cue,
+        _nifty_data_ready,
+        _screen_one,
+        _upstox,
+    )
+
+    try:
         upstox = _upstox()
         # Nifty cue BEFORE universe REST thrash — rate-limit was starving index on 23-Nov.
         nifty_cue_early = _evaluate_nifty_header_cue(upstox, trade_date)
@@ -166,18 +212,29 @@ def run_phase_a(
             "no_prev": 0,
         }
         miss_lock = threading.Lock()
+        abort_refill = {"flag": False}
 
         def _one(urow: Dict[str, str]) -> Optional[Dict[str, Any]]:
+            from backend.services.open_low_high.candle_budget import olh_candle_pool
+
+            if refill_only_symbols is not None and past_phase_a_refill_deadline():
+                abort_refill["flag"] = True
+                return None
+            if refill_only_symbols is not None and phase_b_window_status() == "open":
+                abort_refill["flag"] = True
+                return None
             local_miss: Dict[str, int] = {}
             try:
-                got = _screen_one(
-                    upstox,
-                    urow,
-                    trade_date,
-                    expiry,
-                    local_miss,
-                    phase_a_only=True,
-                )
+                # TLS pool must be set on the worker thread (not inherited).
+                with olh_candle_pool("phase_a"):
+                    got = _screen_one(
+                        upstox,
+                        urow,
+                        trade_date,
+                        expiry,
+                        local_miss,
+                        phase_a_only=True,
+                    )
             except Exception:
                 logger.exception("OHL phase_a symbol failed %s", urow.get("symbol"))
                 ohl_log(
@@ -196,6 +253,17 @@ def run_phase_a(
         with ThreadPoolExecutor(max_workers=max(1, min(max_workers, 8))) as pool:
             futs = [pool.submit(_one, u) for u in universe]
             for fut in as_completed(futs):
+                if abort_refill["flag"] or (
+                    refill_only_symbols is not None and past_phase_a_refill_deadline()
+                ):
+                    ohl_log(
+                        "skipped",
+                        action="phase_a_refill_abort",
+                        detail="past_09:24:50_or_phase_b_open",
+                    )
+                    for pending in futs:
+                        pending.cancel()
+                    break
                 try:
                     got = fut.result()
                 except Exception:
@@ -381,11 +449,9 @@ def run_phase_a(
         )
         return payload
     except Exception as exc:
-        logger.exception("OHL phase_a failed")
+        logger.exception("OHL phase_a body failed")
         ohl_log("failed", action="phase_a_done", detail=str(exc)[:160])
         return {"ok": False, "status": "error", "message": str(exc)}
-    finally:
-        _phase_a_lock.release()
 
 
 def run_phase_a_refill(
@@ -423,91 +489,129 @@ def run_phase_a_refill(
             "still_missing": 0,
             "message": "Phase A refill skipped — Phase B window owns REST.",
         }
-
-    upstox = _upstox()
-    universe = load_universe()
-    existing = list_screen_for_date(trade_date)
-    have_0915: Set[str] = set()
-    for r in existing:
-        if r.get("first_open") is not None and r.get("first_close") is not None:
-            have_0915.add(str(r.get("symbol") or "").upper())
-
-    # Strict subset: 09:15 OHLC still null/empty (filter rejects with bars are skipped).
-    missing: Set[str] = set()
-    for urow in universe:
-        if phase_b_window_status() == "open" and not force:
-            ohl_log(
-                "skipped",
-                action="phase_a_refill_probe",
-                detail=f"abort_for_phase_b probed={len(missing)}",
-            )
-            break
-        sym = str(urow.get("symbol") or "").upper()
-        if not sym or sym in have_0915:
-            continue
-        ik = _resolve_equity_key(upstox, urow, sym)
-        if not ik:
-            missing.add(sym)
-            ohl_log("skipped", action="phase_a_refill_probe", symbol=sym, detail="no_equity_key")
-            continue
-        bars, _src = _session_5m_bars_try(
-            upstox, ik, trade_date, symbol=sym, action="phase_a_refill_probe"
+    if past_phase_a_refill_deadline() and not force:
+        ohl_log(
+            "skipped",
+            action="phase_a_refill_start",
+            detail="past_09:24:50",
         )
-        first = bar_at(bars, trade_date, FIRST_CANDLE) if bars else None
-        if first is None:
-            missing.add(sym)
-            ohl_log("skipped", action="phase_a_refill_probe", symbol=sym, detail="still_null_0915")
-        else:
-            ohl_log(
-                "skipped",
-                action="phase_a_refill_probe",
-                symbol=sym,
-                source=_src,
-                detail="has_0915_not_phase_a_qualifier",
-            )
-    ohl_log(
-        "success",
-        action="phase_a_refill_start",
-        detail=f"missing={len(missing)} have={len(have_0915)}",
-    )
-    if not missing:
         return {
             "ok": True,
             "status": "phase_a_refill",
             "filled": 0,
             "still_missing": 0,
-            "message": "Phase A refill — nothing missing.",
+            "message": "Phase A refill skipped — hard stop 09:24:50 IST.",
         }
 
-    before = len(existing)
-    result = run_phase_a(
-        force=True,
-        session=trade_date,
-        max_workers=max_workers,
-        refill_only_symbols=missing,
-    )
-    after_rows = list_screen_for_date(trade_date)
-    filled = max(0, len(after_rows) - before)
-    # Recompute still missing among the refill set.
-    have2 = {
-        str(r.get("symbol") or "").upper()
-        for r in after_rows
-        if r.get("first_close") is not None
-    }
-    still = sorted(s for s in missing if s not in have2)
-    result["status"] = "phase_a_refill"
-    result["filled"] = filled
-    result["still_missing"] = len(still)
-    result["still_missing_symbols"] = still[:40]
-    result["message"] = (
-        f"Phase A refill — filled≈{filled}, still missing 09:15={len(still)}."
-    )
-    ohl_log(
-        "success",
-        action="phase_a_refill_done",
-        detail=f"filled={filled} still={len(still)}",
-    )
-    return result
+    from backend.services.open_low_high.candle_budget import olh_candle_pool
+
+    with olh_candle_pool("phase_a"):
+        upstox = _upstox()
+        universe = load_universe()
+        existing = list_screen_for_date(trade_date)
+        have_0915: Set[str] = set()
+        for r in existing:
+            if r.get("first_open") is not None and r.get("first_close") is not None:
+                have_0915.add(str(r.get("symbol") or "").upper())
+
+        # Strict subset: 09:15 OHLC still null/empty — never retry symbols with valid bars.
+        missing: Set[str] = set()
+        for urow in universe:
+            if past_phase_a_refill_deadline() and not force:
+                ohl_log(
+                    "skipped",
+                    action="phase_a_refill_probe",
+                    detail=f"abort_09:24:50 probed={len(missing)}",
+                )
+                break
+            if phase_b_window_status() == "open" and not force:
+                ohl_log(
+                    "skipped",
+                    action="phase_a_refill_probe",
+                    detail=f"abort_for_phase_b probed={len(missing)}",
+                )
+                break
+            sym = str(urow.get("symbol") or "").upper()
+            if not sym or sym in have_0915:
+                continue
+            ik = _resolve_equity_key(upstox, urow, sym)
+            if not ik:
+                missing.add(sym)
+                ohl_log("skipped", action="phase_a_refill_probe", symbol=sym, detail="no_equity_key")
+                continue
+            bars, _src = _session_5m_bars_try(
+                upstox, ik, trade_date, symbol=sym, action="phase_a_refill_probe"
+            )
+            first = bar_at(bars, trade_date, FIRST_CANDLE) if bars else None
+            if first is None:
+                missing.add(sym)
+                ohl_log("skipped", action="phase_a_refill_probe", symbol=sym, detail="still_null_0915")
+            else:
+                ohl_log(
+                    "skipped",
+                    action="phase_a_refill_probe",
+                    symbol=sym,
+                    source=_src,
+                    detail="has_0915_not_phase_a_qualifier",
+                )
+        ohl_log(
+            "success",
+            action="phase_a_refill_start",
+            detail=f"missing={len(missing)} have={len(have_0915)}",
+        )
+        if not missing:
+            return {
+                "ok": True,
+                "status": "phase_a_refill",
+                "filled": 0,
+                "still_missing": 0,
+                "message": "Phase A refill — nothing missing.",
+            }
+
+        if past_phase_a_refill_deadline() and not force:
+            ohl_log(
+                "skipped",
+                action="phase_a_refill_start",
+                detail=f"abort_09:24:50 before_fill missing={len(missing)}",
+            )
+            return {
+                "ok": True,
+                "status": "phase_a_refill",
+                "filled": 0,
+                "still_missing": len(missing),
+                "still_missing_symbols": sorted(missing)[:40],
+                "message": "Phase A refill aborted at 09:24:50 before fill.",
+            }
+
+        before = len(existing)
+        result = run_phase_a(
+            force=True,
+            session=trade_date,
+            max_workers=max_workers,
+            refill_only_symbols=missing,
+        )
+        after_rows = list_screen_for_date(trade_date)
+        filled = max(0, len(after_rows) - before)
+        # Recompute still missing among the refill set.
+        have2 = {
+            str(r.get("symbol") or "").upper()
+            for r in after_rows
+            if r.get("first_close") is not None
+        }
+        still = sorted(s for s in missing if s not in have2)
+        result["status"] = "phase_a_refill"
+        result["filled"] = filled
+        result["still_missing"] = len(still)
+        result["still_missing_symbols"] = still[:40]
+        result["message"] = (
+            f"Phase A refill — filled≈{filled}, still missing 09:15={len(still)}."
+        )
+        ohl_log(
+            "success",
+            action="phase_a_refill_done",
+            detail=f"filled={filled} still={len(still)}",
+        )
+        return result
 
 
 def _try_0920_bar(
@@ -518,6 +622,7 @@ def _try_0920_bar(
     symbol: str,
     source: str,
 ) -> Optional[Any]:
+    from backend.services.open_low_high.candle_budget import olh_candle_pool
     from backend.services.open_low_high.screener import SECOND_CANDLE, _fetch_rest_5m, _fetch_ws_5m_bars
 
     bars: List[Any] = []
@@ -550,7 +655,8 @@ def _try_0920_bar(
         )
         return None
 
-    bars = _fetch_rest_5m(upstox, equity_ik, session)
+    with olh_candle_pool("phase_b"):
+        bars = _fetch_rest_5m(upstox, equity_ik, session)
     b = bar_at(bars, session, SECOND_CANDLE) if bars else None
     times = ",".join(
         getattr(x, "ts", datetime.min).strftime("%H:%M") for x in (bars or [])[:8]
@@ -663,6 +769,8 @@ def run_phase_b(
                 "message": msg,
             }
 
+        from backend.services.open_low_high.candle_budget import olh_candle_pool
+
         upstox = _upstox()
         ohl_log(
             "success",
@@ -670,7 +778,9 @@ def run_phase_b(
             detail=f"qualifiers={len(phase_a_rows)} force={force}",
         )
         # Nifty first (before qualifier REST) so freeze-gate is not starved by rate limits.
-        nifty_cue_early = _evaluate_nifty_header_cue(upstox, trade_date)
+        # Dedicated Phase B budget — Phase A must never consume these slots.
+        with olh_candle_pool("phase_b"):
+            nifty_cue_early = _evaluate_nifty_header_cue(upstox, trade_date)
         ohl_log(
             "success" if _nifty_data_ready(nifty_cue_early, require_0920=True) else "failed",
             action="phase_b_nifty",
@@ -857,16 +967,29 @@ def run_phase_b(
         should_freeze = bool(want_close and may_freeze and len(tagged) > 0)
         degraded = bool(want_close and not should_freeze)
 
+        from backend.services.open_low_high.persistence import upsert_screen_rows_merge
+
         if should_freeze:
             for c in tagged:
                 c["frozen"] = True
-            upsert_screen_rows(trade_date, tagged, frozen=True)
+            # Merge: never delete/overwrite valid Entry/T1/T2 on symbols not in update set.
+            upsert_screen_rows_merge(
+                trade_date,
+                tagged,
+                frozen=True,
+                preserve_valid_levels=True,
+            )
         else:
             for c in tagged:
                 c["frozen"] = False
             # Idempotent: never wipe non-empty board with empty.
             if tagged:
-                upsert_screen_rows(trade_date, tagged, frozen=False)
+                upsert_screen_rows_merge(
+                    trade_date,
+                    tagged,
+                    frozen=False,
+                    preserve_valid_levels=True,
+                )
 
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
         bearish = [c for c in tagged if c.get("side") == "BEARISH"]

@@ -500,47 +500,70 @@ class UpstoxService:
         _rate_limited_url = "/historical-candle" in url
 
         for attempt in range(max_retries):
+            _olh_slot_held = False
             try:
                 if _rate_limited_url:
                     try:
+                        from backend.services.open_low_high.candle_budget import (
+                            acquire_olh_candle_slot,
+                            note_shared_acquire,
+                            release_olh_candle_slot,
+                        )
                         from backend.services.upstox_rate_limiter import acquire_candle_slot
 
-                        if not acquire_candle_slot():
-                            # Shared candle budget exhausted — skip rather than blow
-                            # the per-user limit. Caller treats None as "no data".
+                        olh = acquire_olh_candle_slot()
+                        if olh is True:
+                            _olh_slot_held = True
+                        elif olh is False:
                             logger.warning(
                                 "upstox_http outcome=rate_limit_denied status=none "
                                 "exception_type=CandleBudgetDenied body=None "
-                                "rate_limit_headers={} url=%s",
+                                "rate_limit_headers={} pool=olh url=%s",
                                 url[:220],
                             )
                             return None
+                        else:
+                            granted = acquire_candle_slot()
+                            try:
+                                note_shared_acquire(bool(granted))
+                            except Exception:
+                                pass
+                            if not granted:
+                                # Shared candle budget exhausted — skip rather than blow
+                                # the per-user limit. Caller treats None as "no data".
+                                logger.warning(
+                                    "upstox_http outcome=rate_limit_denied status=none "
+                                    "exception_type=CandleBudgetDenied body=None "
+                                    "rate_limit_headers={} url=%s",
+                                    url[:220],
+                                )
+                                return None
                     except Exception:
                         pass
 
                 headers = self.get_headers()
-                
+
                 # Make request
                 if method.upper() == "GET":
                     response = requests.get(
                         url,
                         headers=headers,
                         params=params,
-                        timeout=timeout
+                        timeout=timeout,
                     )
                 elif method.upper() == "POST":
                     response = requests.post(
                         url,
                         headers=headers,
                         json=data,
-                        timeout=timeout
+                        timeout=timeout,
                     )
                 elif method.upper() == "DELETE":
                     response = requests.delete(
                         url,
                         headers=headers,
                         json=data,
-                        timeout=timeout
+                        timeout=timeout,
                     )
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
@@ -744,6 +767,17 @@ class UpstoxService:
                 )
                 last_error = str(e)
                 break
+            finally:
+                if _olh_slot_held:
+                    try:
+                        from backend.services.open_low_high.candle_budget import (
+                            release_olh_candle_slot,
+                        )
+
+                        release_olh_candle_slot()
+                    except Exception:
+                        pass
+                    _olh_slot_held = False
         
         # All retries failed
         logger.error(

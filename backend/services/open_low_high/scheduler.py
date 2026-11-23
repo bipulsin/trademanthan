@@ -14,8 +14,8 @@ Startup catch-up (explicit — not APScheduler misfire alone):
   09:20–09:29 IST restart with missing Phase A/B → run the same runners immediately.
   After 09:29 with missing/invalid phase → DEGRADED + alert (force/re-screen still allowed).
 
-One-day REST canary (2026-11-20 IST): 09:20:05, :30, 09:21:00, 09:25:05, :30
-  — 3 equities + Nifty; logs to OHL_Log / app logger (see ``rest_canary.py``).
+Daily trading-day REST canary: 09:20:05, :30, 09:21:00, 09:25:05, :30
+  — 3 equities + Nifty; dedicated canary budget; logs to OHL_Log (see ``rest_canary.py``).
 
 Coverage alerts (own timers, independent of Phase A/B): 09:21 and 09:26 IST.
   If Phase A is busy → "Phase A still running, coverage so far: n/145".
@@ -98,15 +98,72 @@ def _run_ws_prewarm_0905() -> None:
         from backend.services.open_low_high.ws_feed import prewarm_ws
 
         result = prewarm_ws(engage_lock=False, canary=True)
+        warm = result.get("warm") or {}
         logger.info(
-            "open_low_high WS prewarm 09:05 status=%s equity=%s warm=%s canary=%s",
+            "open_low_high WS prewarm 09:05 status=%s equity=%s warm=%s canary=%s "
+            "EQ_ticks=%s INDEX_ticks=%s",
             result.get("status"),
             (result.get("subscribe") or {}).get("equity"),
-            (result.get("warm") or {}).get("warm"),
-            (result.get("warm") or {}).get("canary"),
+            warm.get("warm"),
+            warm.get("canary"),
+            warm.get("eq_ticks_60s"),
+            warm.get("index_ticks_60s"),
         )
+        # Stash canary failure so 09:08 can force one resubscribe.
+        try:
+            from backend.services.open_low_high import ws_feed as _wf
+
+            _wf._last_0905_canary_failed = (  # noqa: SLF001
+                not bool(warm.get("warm"))
+                or int(warm.get("eq_ticks_60s") or 0) == 0
+                or int(warm.get("index_ticks_60s") or 0) == 0
+            )
+        except Exception:
+            pass
     except Exception:
         logger.exception("open_low_high WS prewarm 09:05 failed")
+
+
+def _run_ws_resubscribe_0908() -> None:
+    """If 09:05 canary saw EQ/INDEX ticks=0, resubscribe once at 09:08."""
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.ws_feed import (
+            check_equity_index_ws_warm,
+            resubscribe_olh_ws_keepalive,
+            subscribe_olh_ws,
+        )
+        from backend.services.open_low_high import ws_feed as _wf
+
+        failed = bool(getattr(_wf, "_last_0905_canary_failed", False))
+        warm_now = check_equity_index_ws_warm(canary=True)
+        still_zero = (
+            int(warm_now.get("eq_ticks_60s") or 0) == 0
+            or int(warm_now.get("index_ticks_60s") or 0) == 0
+        )
+        if not (failed or still_zero):
+            logger.info("open_low_high WS 09:08 resubscribe skipped (ticks ok)")
+            return
+        logger.error(
+            "open_low_high WS 09:08 forced resubscribe — EQ/INDEX ticks still 0 "
+            "(0905_failed=%s EQ=%s INDEX=%s)",
+            failed,
+            warm_now.get("eq_ticks_60s"),
+            warm_now.get("index_ticks_60s"),
+        )
+        sub = subscribe_olh_ws(include_future=True, engage_lock=False)
+        warm2 = check_equity_index_ws_warm(canary=True)
+        logger.info(
+            "open_low_high WS 09:08 resubscribe done sub=%s warm=%s EQ=%s INDEX=%s",
+            sub.get("subscribed"),
+            warm2.get("warm"),
+            warm2.get("eq_ticks_60s"),
+            warm2.get("index_ticks_60s"),
+        )
+        _ = resubscribe_olh_ws_keepalive
+    except Exception:
+        logger.exception("open_low_high WS 09:08 resubscribe failed")
 
 
 def _run_ws_keepalive() -> None:
@@ -276,7 +333,7 @@ def _run_coverage_alert_0926() -> None:
 
 
 def _run_rest_canary() -> None:
-    """One-day REST lag canary (2026-11-20); no-op on other dates."""
+    """Daily trading-day REST lag canary (dedicated canary budget)."""
     try:
         from backend.services.open_low_high.rest_canary import (
             canary_should_run_today,
@@ -284,11 +341,13 @@ def _run_rest_canary() -> None:
         )
 
         if not canary_should_run_today():
-            logger.info("open_low_high rest_canary skipped (not canary date)")
+            logger.info("open_low_high rest_canary skipped (non-trading day)")
             return
         if _skip():
             return
-        result = run_rest_canary()
+        now = datetime.now(IST)
+        label = now.strftime("%H:%M:%S")
+        result = run_rest_canary(label=label)
         logger.info(
             "open_low_high rest_canary done probe_at=%s n=%s token_last4=%s",
             result.get("probe_at"),
@@ -542,6 +601,17 @@ def start_open_low_high_scheduler() -> None:
         coalesce=True,
         misfire_grace_time=60,
     )
+    # One-shot 09:08 resubscribe when 09:05 canary saw EQ/INDEX ticks=0.
+    sched.add_job(
+        _run_ws_resubscribe_0908,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=8, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_ws_resub_0908",
+        name="Open Low High WS resubscribe 09:08 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
 
     # --- Phase A primary window 09:20:10, 09:21, 09:22, 09:23 ---
     for minute, second, jid in (
@@ -667,24 +737,22 @@ def start_open_low_high_scheduler() -> None:
         misfire_grace_time=60,
     )
 
-    # --- One-day REST lag canary 2026-11-20 (09:20:05/30, 09:21:00, 09:25:05/30 IST) ---
-    from backend.services.open_low_high.rest_canary import CANARY_DATE, CANARY_TIMES
+    # --- Daily trading-day REST lag canary (09:20:05/30, 09:21:00, 09:25:05/30 IST) ---
+    from backend.services.open_low_high.rest_canary import CANARY_TIMES
 
     for tt in CANARY_TIMES:
         jid = f"open_low_high_rest_canary_{tt.hour:02d}{tt.minute:02d}{tt.second:02d}"
         sched.add_job(
             _run_rest_canary,
             CronTrigger(
-                year=CANARY_DATE.year,
-                month=CANARY_DATE.month,
-                day=CANARY_DATE.day,
+                day_of_week="mon-fri",
                 hour=tt.hour,
                 minute=tt.minute,
                 second=tt.second,
                 timezone="Asia/Kolkata",
             ),
             id=jid,
-            name=f"OLH REST canary {CANARY_DATE.isoformat()} {tt.isoformat()} IST",
+            name=f"OLH REST canary daily {tt.isoformat()} IST",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
@@ -719,8 +787,7 @@ def start_open_low_high_scheduler() -> None:
         "(PDC 16:05/09:00; WS 09:05+09:15; Phase A 09:20:10–09:23 + refill 09:24; "
         "Phase B 09:25:15–09:29; coverage alerts 09:21+09:26; "
         "startup catch-up 09:20–09:29 / DEGRADED after; "
-        "OHL log cleanup 12:00; REST canary %s jobs=%s)",
-        CANARY_DATE.isoformat(),
+        "OHL log cleanup 12:00; daily REST canary jobs=%s; WS 09:08 resub)",
         canary_ids,
     )
 

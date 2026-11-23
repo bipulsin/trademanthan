@@ -33,9 +33,22 @@ PHASE_B_BUFFER_SEC = _env_int("OLH_PHASE_B_BUFFER_SEC", 15)  # 09:25:00 + buffer
 PHASE_A_START = time(9, 20, max(0, min(59, PHASE_A_BUFFER_SEC)))
 PHASE_B_START = time(9, 25, max(0, min(59, PHASE_B_BUFFER_SEC)))
 PHASE_B_HARD_STOP = time(9, 29, 0)
+# Hard stop for Phase A refill — must finish before Phase B owns REST.
+PHASE_A_REFILL_HARD_STOP = time(9, 24, 50)
 
 # FREEZE GATE: require coverage of symbols with usable 09:15 equity bars + Nifty present.
 FREEZE_COVERAGE_MIN = _env_float("OLH_FREEZE_COVERAGE_MIN", 0.90)
+
+# --- Dedicated REST budgets (Phase B / canary never share Phase A slots) ---
+# 2026-11-23: shared limiter → 540 CandleBudgetDenied while Phase B starved.
+PHASE_B_RL_PER_SEC = _env_int("OLH_PHASE_B_RL_PER_SEC", 4)
+PHASE_B_RL_PER_MIN = _env_int("OLH_PHASE_B_RL_PER_MIN", 80)
+PHASE_B_RL_SEMAPHORE = _env_int("OLH_PHASE_B_RL_SEMAPHORE", 4)
+PHASE_B_RL_MAX_WAIT_SEC = _env_int("OLH_PHASE_B_RL_MAX_WAIT_SEC", 45)
+CANARY_RL_PER_SEC = _env_int("OLH_CANARY_RL_PER_SEC", 1)
+CANARY_RL_PER_MIN = _env_int("OLH_CANARY_RL_PER_MIN", 20)
+CANARY_RL_SEMAPHORE = _env_int("OLH_CANARY_RL_SEMAPHORE", 1)
+CANARY_RL_MAX_WAIT_SEC = _env_int("OLH_CANARY_RL_MAX_WAIT_SEC", 15)
 # Legacy empty-Phase-A incomplete helper (miss rate among scanned).
 MISSING_DATA_RATE_THRESHOLD = _env_float("OLH_MISSING_DATA_RATE_THRESHOLD", 0.35)
 

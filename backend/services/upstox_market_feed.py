@@ -568,13 +568,21 @@ def _normalize_ik(key: str) -> str:
 
 
 def _market_ff_from_feed(feed_val: Any) -> Optional[Dict[str, Any]]:
+    """Return MarketFullFeed **or** IndexFullFeed (indices use ``indexFF``).
+
+    2026-11-23: INDEX ticks were 0 all morning because only ``marketFF`` was
+    parsed — Upstox v3 puts NSE_INDEX under ``fullFeed.indexFF`` (ltpc + ohlc).
+    """
     if not isinstance(feed_val, dict):
         return None
     ff = feed_val.get("fullFeed") or feed_val.get("full_feed")
     if not isinstance(ff, dict):
         return None
     mff = ff.get("marketFF") or ff.get("marketFf") or ff.get("market_ff")
-    return mff if isinstance(mff, dict) else None
+    if isinstance(mff, dict):
+        return mff
+    iff = ff.get("indexFF") or ff.get("indexFf") or ff.get("index_ff")
+    return iff if isinstance(iff, dict) else None
 
 
 def _best_bid_ask(mff: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
@@ -715,21 +723,29 @@ def _extract_oi_ltp_from_feed_value(feed_val: Any) -> Tuple[Optional[int], Optio
     oi: Optional[int] = None
     ltp: Optional[float] = None
 
-    ff = feed_val.get("fullFeed") or feed_val.get("full_feed")
-    if isinstance(ff, dict):
-        mff = ff.get("marketFF") or ff.get("marketFf") or ff.get("market_ff")
-        if isinstance(mff, dict):
-            if mff.get("oi") is not None:
-                try:
-                    oi = int(float(mff["oi"]))
-                except (TypeError, ValueError):
-                    pass
-            ltpc = mff.get("ltpc")
-            if isinstance(ltpc, dict) and ltpc.get("ltp") is not None:
-                try:
-                    ltp = float(ltpc["ltp"])
-                except (TypeError, ValueError):
-                    pass
+    # Prefer shared helper so IndexFullFeed (indexFF) is not skipped.
+    mff = _market_ff_from_feed(feed_val)
+    if isinstance(mff, dict):
+        if mff.get("oi") is not None:
+            try:
+                oi = int(float(mff["oi"]))
+            except (TypeError, ValueError):
+                pass
+        ltpc = mff.get("ltpc")
+        if isinstance(ltpc, dict) and ltpc.get("ltp") is not None:
+            try:
+                ltp = float(ltpc["ltp"])
+            except (TypeError, ValueError):
+                pass
+
+    # Top-level ltpc (ltpc-only mode) — rare but valid for index/EQ.
+    if ltp is None:
+        top = feed_val.get("ltpc")
+        if isinstance(top, dict) and top.get("ltp") is not None:
+            try:
+                ltp = float(top["ltp"])
+            except (TypeError, ValueError):
+                pass
 
     if oi is None or ltp is None:
         flg = feed_val.get("firstLevelWithGreeks") or feed_val.get("first_level_with_greeks")
@@ -960,6 +976,28 @@ def _authorize_ws_url(access_token: str) -> Optional[str]:
         return None
 
 
+def _prioritize_subscribe_keys(combined: List[str]) -> List[str]:
+    """Put NSE_INDEX (+ a head of NSE_EQ) first so they land in chunk 0.
+
+    Upstox WS accepts ~100 keys/sub message (``_CHUNK``). Sorted merge put
+    INDEX near the end; if later chunks failed, INDEX never subscribed →
+    ticks=0 all morning (2026-11-23).
+    """
+    index: List[str] = []
+    equity: List[str] = []
+    other: List[str] = []
+    for k in combined:
+        u = (k or "").upper()
+        if u.startswith("NSE_INDEX|") or u.startswith("NSE_INDEX:"):
+            index.append(k)
+        elif u.startswith("NSE_EQ|") or u.startswith("NSE_EQ:"):
+            equity.append(k)
+        else:
+            other.append(k)
+    # INDEX first, then EQ, then FO/other — still unique.
+    return list(dict.fromkeys(index + equity + other))
+
+
 async def _subscribe_and_listen(ws_url: str, batches: List[List[str]]) -> None:
     ssl_context = ssl.create_default_context()
     async with websockets.connect(
@@ -969,17 +1007,62 @@ async def _subscribe_and_listen(ws_url: str, batches: List[List[str]]) -> None:
         ping_interval=20,
         ping_timeout=120,
     ) as ws:
-        for batch in batches:
+        for bi, batch in enumerate(batches):
             if _STOP_EVENT.is_set():
                 return
+            guid = str(uuid.uuid4())
             msg = {
-                "guid": str(uuid.uuid4()),
+                "guid": guid,
                 "method": "sub",
                 "data": {"mode": "full", "instrumentKeys": batch},
             }
+            index_in_batch = [
+                k
+                for k in batch
+                if str(k).upper().startswith("NSE_INDEX|")
+                or str(k).upper().startswith("NSE_INDEX:")
+            ]
+            logger.info(
+                "upstox_market_feed: subscribe payload chunk=%s/%s n=%s mode=full "
+                "guid=%s index_keys=%s sample=%s",
+                bi + 1,
+                len(batches),
+                len(batch),
+                guid,
+                index_in_batch,
+                batch[:3],
+            )
             await ws.send(json.dumps(msg).encode("utf-8"))
+            # Brief window for sub ack / early ticks (log non-binary text acks).
+            try:
+                ack_raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
+                if isinstance(ack_raw, (bytes, bytearray)):
+                    _decode_and_ingest(bytes(ack_raw))
+                    logger.info(
+                        "upstox_market_feed: subscribe ack chunk=%s binary_len=%s "
+                        "(ingested; likely feed not JSON ack)",
+                        bi + 1,
+                        len(ack_raw),
+                    )
+                else:
+                    text = str(ack_raw)[:500]
+                    logger.info(
+                        "upstox_market_feed: subscribe ack chunk=%s text=%s",
+                        bi + 1,
+                        text,
+                    )
+            except asyncio.TimeoutError:
+                logger.info(
+                    "upstox_market_feed: subscribe ack chunk=%s none within 0.5s "
+                    "(Upstox often silent on sub)",
+                    bi + 1,
+                )
             await asyncio.sleep(0.15)
-        logger.info("upstox_market_feed: subscribed %s chunks, listening", len(batches))
+        logger.info(
+            "upstox_market_feed: subscribed %s chunks (mode=full, ~%s keys/chunk), listening",
+            len(batches),
+            _CHUNK,
+        )
         while not _STOP_EVENT.is_set():
             raw = await asyncio.wait_for(ws.recv(), timeout=180)
             if isinstance(raw, bytes):
@@ -1068,7 +1151,8 @@ def _start_feed_thread(combined: List[str]) -> None:
 
     _STOP_EVENT = threading.Event()
     _LAST_KEYS_SIG = sig
-    batches = [combined[i : i + _CHUNK] for i in range(0, len(combined), _CHUNK)]
+    ordered = _prioritize_subscribe_keys(list(combined))
+    batches = [ordered[i : i + _CHUNK] for i in range(0, len(ordered), _CHUNK)]
     _FEED_THREAD = threading.Thread(
         target=_thread_main,
         args=(batches,),
