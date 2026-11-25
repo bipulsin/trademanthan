@@ -848,6 +848,22 @@ def _session_5m_bars_try(
     collected: List[Bar] = []
     used = "none"
 
+    # 2026-11-25: when WS ticks=0 at 09:16 (or canary self-check), skip useless WS tries.
+    try:
+        from backend.services.open_low_high.force_rest import is_force_rest_reserved
+
+        if is_force_rest_reserved() and prefer == "ws":
+            prefer = "rest"
+            ohl_log(
+                "success",
+                action=action,
+                symbol=symbol,
+                source="rest_forced",
+                detail="force_rest_reserved skip_ws",
+            )
+    except Exception:
+        pass
+
     if prefer == "ws":
         tries = max(1, int(WS_TRY_COUNT))
         for i in range(1, tries + 1):

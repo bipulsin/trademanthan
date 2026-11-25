@@ -529,6 +529,21 @@ class UpstoxService:
                             except Exception:
                                 pass
                             if not granted:
+                                # 2026-11-25: shared empty at Phase A — escalate to
+                                # reserved phase_a lane immediately (no hard-stop wait).
+                                try:
+                                    from backend.services.open_low_high.candle_budget import (
+                                        current_pool,
+                                        fallback_phase_a_reserved_after_shared_deny,
+                                    )
+
+                                    if current_pool() in ("phase_a", "shared"):
+                                        if fallback_phase_a_reserved_after_shared_deny():
+                                            _olh_slot_held = True
+                                            granted = True
+                                except Exception:
+                                    pass
+                            if not granted:
                                 # Shared candle budget exhausted — skip rather than blow
                                 # the per-user limit. Caller treats None as "no data".
                                 logger.warning(

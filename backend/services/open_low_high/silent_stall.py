@@ -144,12 +144,19 @@ def check_eq_silent_stall(
         _last_status = out
         return out
 
-    # EQ silent while we expect ticks (market open window heuristic: 09:15–15:30)
+    # EQ silent while we expect ticks. Armed only from 09:15:05 (not 09:15:00)
+    # so the open-print race does not false-fire (2026-11-25 approval).
     tt = t.time()
     from datetime import time as dtime
 
-    if not (dtime(9, 15) <= tt <= dtime(15, 30)):
-        out["skipped"] = "outside_cash_session"
+    from backend.services.open_low_high.config import OLH_EQ_STALL_ARM
+
+    arm = OLH_EQ_STALL_ARM or dtime(9, 15, 5)
+    if not (arm <= tt <= dtime(15, 30)):
+        out["skipped"] = "outside_cash_session" if tt < arm else "outside_cash_session"
+        if tt < arm:
+            out["skipped"] = "pre_arm"
+            out["arm_at"] = arm.isoformat()
         _last_status = out
         return out
 

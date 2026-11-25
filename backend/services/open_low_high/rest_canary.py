@@ -29,6 +29,28 @@ CANARY_TIMES: Tuple[time, ...] = (
 CANARY_CLOCKS = CANARY_TIMES
 DEFAULT_SYMBOLS = ("RELIANCE", "TCS", "INFY")
 
+# Last canary snapshot for Phase A self-check (bars present?).
+_LAST_CANARY: Dict[str, Any] = {}
+
+
+def last_canary_had_0915_bars() -> bool:
+    """True if the most recent canary saw ≥1 closed 09:15 bar on any symbol."""
+    snap = _LAST_CANARY or {}
+    if snap.get("has_0915"):
+        return True
+    for row in snap.get("results") or []:
+        latest = str(row.get("latest") or row.get("latest_ts") or "")
+        raw = int(row.get("raw_before") or row.get("candle_count") or 0)
+        if "09:15" in latest and raw > 0:
+            return True
+        if int(row.get("raw_after_drop") or 0) > 0 and "09:15" in latest:
+            return True
+    return False
+
+
+def last_canary_snapshot() -> Dict[str, Any]:
+    return dict(_LAST_CANARY)
+
 
 def canary_should_run_today(now: Optional[datetime] = None) -> bool:
     """True on NSE trading days (Mon–Fri minus known holidays)."""
@@ -251,6 +273,13 @@ def run_rest_canary(
             except Exception:
                 pass
 
+    has_0915 = False
+    for row in results:
+        latest = str(row.get("latest") or "")
+        raw_after = int(row.get("raw_after_drop") or row.get("candle_count") or 0)
+        if raw_after > 0 and "09:15" in latest:
+            has_0915 = True
+            break
     payload = {
         "ok": True,
         "probe_at": tag,
@@ -259,11 +288,21 @@ def run_rest_canary(
         "now_ist": now.isoformat(),
         "token_last4": token_last4,
         "results": results,
+        "has_0915": has_0915,
+    }
+    global _LAST_CANARY
+    _LAST_CANARY = {
+        "at": now.isoformat(),
+        "tag": tag,
+        "token_last4": token_last4,
+        "has_0915": has_0915,
+        "results": results,
     }
     logger.info(
-        "olh rest_canary done probe_at=%s token_last4=%s n=%s",
+        "olh rest_canary done probe_at=%s token_last4=%s n=%s has_0915=%s",
         tag,
         token_last4,
         len(results),
+        has_0915,
     )
     return payload

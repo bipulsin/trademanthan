@@ -1,6 +1,9 @@
 """08:50 IST go/no-go readiness gate for OLH.
 
 RED if any required check fails. Holiday/weekend → skipped (not RED).
+
+2026-11-25 hardening: require WS authorize + subscribe acks EQ/INDEX/FUT,
+token valid, PDC complete, scheduler jobs today, reserved budgets available.
 """
 from __future__ import annotations
 
@@ -53,14 +56,27 @@ def run_readiness_0850(
     failures: List[str] = []
     checks: Dict[str, Any] = {}
 
-    # 1) Token
+    # 1) Token valid (present + not obviously junk; probe authorize when possible)
     try:
         from backend.services.open_low_high.screener import _token_tail, _upstox
 
         ux = _upstox()
         tok = getattr(ux, "access_token", None) or ""
-        ok = bool(tok) and len(str(tok)) > 8
-        checks["token"] = {"ok": ok, "last4": _token_tail(tok)}
+        last4 = _token_tail(tok)
+        # Junk placeholder seen 2026-11-25: ``MARK6171|sleep 7…`` (len≈16).
+        junk = (
+            len(str(tok)) < 24
+            or "sleep" in str(tok).lower()
+            or str(tok).upper().startswith("MARK6171")
+        )
+        ok = bool(tok) and len(str(tok)) > 8 and not junk
+        checks["token"] = {
+            "ok": ok,
+            "last4": last4,
+            "len": len(str(tok)),
+            "junk_heuristic": junk,
+            "source": "upstox_token.json / reload_token_from_storage",
+        }
         if not ok:
             failures.append("token")
     except Exception as exc:
@@ -143,31 +159,73 @@ def run_readiness_0850(
         checks["scheduler"] = {"ok": False, "error": str(exc)[:120]}
         failures.append("scheduler")
 
-    # 5) WS subs / recent ticks (pre-open may be quiet — require provider keys registered)
+    # 5) Reserved candle budgets (Phase A / B / canary)
+    try:
+        from backend.services.open_low_high.candle_budget import reserved_budgets_ready
+
+        bud = reserved_budgets_ready()
+        checks["reserved_budgets"] = bud
+        if not bud.get("ok"):
+            failures.append("reserved_budgets")
+    except Exception as exc:
+        checks["reserved_budgets"] = {"ok": False, "error": str(exc)[:120]}
+        failures.append("reserved_budgets")
+
+    # 6) WS authorize + subscribe registration EQ/INDEX/FUT
     try:
         from backend.services import upstox_market_feed as umf
-        from backend.services.open_low_high.ws_feed import PROVIDER_NAME
+        from backend.services.open_low_high.ws_feed import PROVIDER_NAME, subscribe_olh_ws
 
+        # Ensure OLH keys registered (acks tracked on next connect).
+        sub = subscribe_olh_ws(include_future=True, engage_lock=False)
         providers = getattr(umf, "_PROVIDER_KEYS", {}) or {}
         olh_keys = list(providers.get(PROVIDER_NAME) or ())
-        ticks = umf.get_segment_tick_counts_last_sec(60)
-        # At 08:50 pre-open: subscription registration is enough; ticks optional.
-        sub_ok = len(olh_keys) >= 50 or t.time() < time(9, 0)
+        eq_n = sum(1 for k in olh_keys if str(k).upper().startswith("NSE_EQ"))
+        idx_n = sum(1 for k in olh_keys if str(k).upper().startswith("NSE_INDEX"))
+        fut_n = sum(1 for k in olh_keys if str(k).upper().startswith("NSE_FO"))
+
+        auth_info: Dict[str, Any] = {}
+        auth_ok = False
+        try:
+            # Live authorize probe with current token.
+            from backend.config import settings
+            from backend.services.upstox_service import UpstoxService
+
+            ux2 = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+            ux2.reload_token_from_storage()
+            tok2 = getattr(ux2, "access_token", None) or ""
+            uri = umf._authorize_ws_url(tok2)  # noqa: SLF001
+            auth_info = umf.last_authorize_info()
+            auth_ok = bool(uri) and bool(auth_info.get("ok"))
+        except Exception as auth_exc:
+            auth_info = {"ok": False, "error": str(auth_exc)[:160]}
+            auth_ok = False
+
+        sub_ok = eq_n >= 50 and idx_n >= 1 and fut_n >= 50
+        ws_ok = auth_ok and sub_ok
         checks["ws"] = {
-            "ok": True if t.time() < time(9, 5) else (int(ticks.get("EQ") or 0) > 0),
-            "olh_subscribed": len(olh_keys),
-            "ticks_60s": ticks,
-            "note": "pre-09:05: subscribe registration only",
+            "ok": ws_ok,
+            "authorize": auth_info,
+            "subscribe_acks": {
+                "equity": eq_n,
+                "index": idx_n,
+                "future": fut_n,
+                "subscribed": len(olh_keys),
+                "subscribe_result": {
+                    k: sub.get(k) for k in ("ok", "subscribed", "equity", "index", "future") if k in sub
+                },
+            },
+            "note": "08:50 requires authorize 200 + EQ/INDEX/FUT key registration",
         }
-        # Soft: only fail hard after 09:05 if no ticks — at 08:50 always soft-pass if no error
-        if t.time() >= time(9, 5) and int(ticks.get("EQ") or 0) == 0:
-            failures.append("ws_ticks")
-            checks["ws"]["ok"] = False
+        if not auth_ok:
+            failures.append("ws_authorize")
+        if not sub_ok:
+            failures.append("ws_subscribe")
     except Exception as exc:
         checks["ws"] = {"ok": False, "error": str(exc)[:120]}
         failures.append("ws")
 
-    # 6) Alert test (dry — does not require Telegram success offline)
+    # 7) Alert test
     try:
         from backend.services.open_low_high.config import OLH_ALERTS_ENABLED
 
@@ -184,6 +242,9 @@ def run_readiness_0850(
                 f"session={t.date().isoformat()} go_pending failures={failures}",
             )
             checks["alert_test"]["sent"] = bool(sent)
+            if not sent:
+                failures.append("alert_test")
+                checks["alert_test"]["ok"] = False
     except Exception as exc:
         checks["alert_test"] = {"ok": False, "error": str(exc)[:120]}
         failures.append("alert_test")

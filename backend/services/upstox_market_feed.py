@@ -20,7 +20,7 @@ import ssl
 import threading
 import time
 import uuid
-from datetime import datetime, time as dt_time
+from datetime import datetime, timedelta, time as dt_time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
@@ -246,6 +246,58 @@ def _flush_segment_tick_minute(payload: Dict[str, Any]) -> None:
             fh.write(f"{datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')} | {detail}\n")
     except Exception:
         logger.debug("seg_ticks host persist skipped", exc_info=True)
+
+
+def flush_zero_tick_minute_if_needed(now: Optional[datetime] = None) -> bool:
+    """Write a WS_SegTicks row for the *previous* minute even when ticks=0.
+
+    ``_record_segment_tick`` only flushes on the next tick; a silent morning
+    left no ``WS_SegTicks_25Nov2026``. Scheduler pulses this each minute 09:00–09:30.
+    """
+    global _SEG_TICK_MINUTE, _SEG_TICK_COUNTS, _SEG_TICK_KEYS
+    t = now or datetime.now(IST)
+    if t.tzinfo is None:
+        t = IST.localize(t)
+    else:
+        t = t.astimezone(IST)
+    if t.hour != 9 or t.minute > 30:
+        return False
+    cur = t.strftime("%H:%M")
+    # Flush the prior minute (e.g. at 09:16:02 flush 09:15).
+    prior = t.replace(second=0, microsecond=0) - timedelta(minutes=1)
+    prior_key = prior.strftime("%H:%M")
+    if prior.hour != 9 or prior.minute > 30:
+        return False
+    with _SEG_TICK_LOCK:
+        # If we already advanced past prior via real ticks, nothing to do.
+        if _SEG_TICK_MINUTE is not None and _SEG_TICK_MINUTE != prior_key and _SEG_TICK_MINUTE != cur:
+            # Already flushed earlier minutes.
+            pass
+        if _SEG_TICK_MINUTE == prior_key:
+            payload = {
+                "minute": prior_key,
+                "counts": dict(_SEG_TICK_COUNTS),
+                "keys": {k: len(v) for k, v in _SEG_TICK_KEYS.items()},
+                "day": t.strftime("%Y-%m-%d"),
+            }
+            _SEG_TICK_MINUTE = cur
+            _SEG_TICK_COUNTS = {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0}
+            _SEG_TICK_KEYS = {"EQ": set(), "INDEX": set(), "FUT": set(), "OTHER": set()}
+        elif _SEG_TICK_MINUTE is None or _SEG_TICK_MINUTE == cur:
+            # No ticks all minute — synthesize a zero row for prior.
+            payload = {
+                "minute": prior_key,
+                "counts": {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0},
+                "keys": {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0},
+                "day": t.strftime("%Y-%m-%d"),
+            }
+            _SEG_TICK_MINUTE = cur
+            _SEG_TICK_COUNTS = {"EQ": 0, "INDEX": 0, "FUT": 0, "OTHER": 0}
+            _SEG_TICK_KEYS = {"EQ": set(), "INDEX": set(), "FUT": set(), "OTHER": set()}
+        else:
+            return False
+    _flush_segment_tick_minute(payload)
+    return True
 
 
 def _flush_debounce_sec() -> float:
@@ -966,8 +1018,25 @@ def _decode_and_ingest(binary: bytes) -> None:
         logger.debug("upstox_market_feed: decode skip: %s", e)
 
 
+# Last authorize probe (for readiness / forensics).
+_LAST_AUTHORIZE: Dict[str, Any] = {}
+_AUTH_RECOVERY_ATTEMPTS = 0
+_AUTH_RECOVERY_DAY: Optional[str] = None
+
+
+def last_authorize_info() -> Dict[str, Any]:
+    return dict(_LAST_AUTHORIZE)
+
+
+def _token_last4(token: Optional[str]) -> str:
+    t = str(token or "")
+    return t[-4:] if len(t) >= 4 else ("****" if t else "none")
+
+
 def _authorize_ws_url(access_token: str) -> Optional[str]:
-    global _FEED_LAST_ERROR
+    """Authorize Market Data Feed v3. Logs status+body; records token last4."""
+    global _FEED_LAST_ERROR, _LAST_AUTHORIZE
+    last4 = _token_last4(access_token)
     try:
         r = requests.get(
             "https://api.upstox.com/v3/feed/market-data-feed/authorize",
@@ -977,14 +1046,41 @@ def _authorize_ws_url(access_token: str) -> Optional[str]:
             },
             timeout=20,
         )
-        data = r.json() if r.content else {}
-        if r.status_code == 401:
-            _FEED_LAST_ERROR = "authorize 401 — token may be expired"
-            logger.warning("upstox_market_feed: authorize 401")
+        body_text = (r.text or "")[:500]
+        try:
+            data = r.json() if r.content else {}
+        except Exception:
+            data = {}
+        _LAST_AUTHORIZE = {
+            "status_code": r.status_code,
+            "body": body_text,
+            "token_last4": last4,
+            "ok": False,
+            "at": datetime.now(IST).isoformat(),
+        }
+        if r.status_code in (401, 403):
+            _FEED_LAST_ERROR = (
+                f"authorize {r.status_code} — token may be expired/invalid "
+                f"last4={last4} body={body_text[:200]}"
+            )
+            logger.warning(
+                "upstox_market_feed: authorize %s last4=%s body=%s",
+                r.status_code,
+                last4,
+                body_text[:300],
+            )
+            _LAST_AUTHORIZE["auth_error"] = True
             return None
         if r.status_code != 200 or (data.get("status") or "").lower() != "success":
-            _FEED_LAST_ERROR = str(data.get("message") or data.get("error") or r.text)[:300]
-            logger.warning("upstox_market_feed: authorize failed: %s", _FEED_LAST_ERROR)
+            _FEED_LAST_ERROR = str(
+                data.get("message") or data.get("error") or body_text
+            )[:300]
+            logger.warning(
+                "upstox_market_feed: authorize failed status=%s last4=%s body=%s",
+                r.status_code,
+                last4,
+                _FEED_LAST_ERROR,
+            )
             return None
         inner = data.get("data") or {}
         uri = (
@@ -996,11 +1092,89 @@ def _authorize_ws_url(access_token: str) -> Optional[str]:
             _FEED_LAST_ERROR = "authorize: missing redirect URI"
             return None
         _FEED_LAST_ERROR = None
+        _LAST_AUTHORIZE["ok"] = True
+        logger.info(
+            "upstox_market_feed: authorize ok status=%s last4=%s",
+            r.status_code,
+            last4,
+        )
         return str(uri).strip()
     except Exception as e:
         _FEED_LAST_ERROR = str(e)
+        _LAST_AUTHORIZE = {
+            "status_code": None,
+            "body": str(e)[:300],
+            "token_last4": last4,
+            "ok": False,
+            "at": datetime.now(IST).isoformat(),
+        }
         logger.warning("upstox_market_feed: authorize exception: %s", e)
         return None
+
+
+def _recover_token_after_auth_failure(ux: Any) -> bool:
+    """Bounded 401/403 recovery: reload storage + refresh_access_token; alert."""
+    global _AUTH_RECOVERY_ATTEMPTS, _AUTH_RECOVERY_DAY
+    from backend.services.open_low_high.config import OLH_WS_AUTH_MAX_ATTEMPTS
+
+    day = datetime.now(IST).strftime("%Y-%m-%d")
+    if _AUTH_RECOVERY_DAY != day:
+        _AUTH_RECOVERY_DAY = day
+        _AUTH_RECOVERY_ATTEMPTS = 0
+    max_attempts = int(OLH_WS_AUTH_MAX_ATTEMPTS or 5)
+    if _AUTH_RECOVERY_ATTEMPTS >= max_attempts:
+        logger.warning(
+            "upstox_market_feed: auth recovery attempt limit %s reached",
+            max_attempts,
+        )
+        return False
+    _AUTH_RECOVERY_ATTEMPTS += 1
+    reason = _FEED_LAST_ERROR or "authorize 401/403"
+    logger.warning(
+        "upstox_market_feed: auth recovery attempt=%s/%s reason=%s",
+        _AUTH_RECOVERY_ATTEMPTS,
+        max_attempts,
+        reason[:160],
+    )
+    try:
+        from backend.services.open_low_high.alerts import send_olh_alert
+        from backend.services.open_low_high.ohl_log import ohl_log
+
+        ohl_log(
+            "failed",
+            action="ws_authorize_recovery",
+            source="ws",
+            detail=f"attempt={_AUTH_RECOVERY_ATTEMPTS} reason={reason[:120]}",
+        )
+        send_olh_alert(
+            "WS authorize 401/403 recovery",
+            f"attempt={_AUTH_RECOVERY_ATTEMPTS}/{max_attempts}\n{reason[:400]}",
+            meta={
+                "attempt": _AUTH_RECOVERY_ATTEMPTS,
+                "token_last4": _token_last4(getattr(ux, "access_token", None)),
+            },
+        )
+    except Exception:
+        logger.debug("ws auth recovery alert failed", exc_info=True)
+
+    reloaded = False
+    try:
+        reloaded = bool(ux.reload_token_from_storage())
+    except Exception:
+        reloaded = False
+    refreshed = None
+    try:
+        refreshed = ux.refresh_access_token()
+    except Exception:
+        refreshed = None
+    ok = bool(getattr(ux, "access_token", None)) and (reloaded or bool(refreshed))
+    logger.info(
+        "upstox_market_feed: auth recovery done reloaded=%s refreshed=%s last4=%s",
+        reloaded,
+        bool(refreshed),
+        _token_last4(getattr(ux, "access_token", None)),
+    )
+    return ok
 
 
 def _prioritize_subscribe_keys(combined: List[str]) -> List[str]:
@@ -1112,13 +1286,26 @@ async def _run_connection_loop(batches: List[List[str]]) -> None:
             continue
         ws_url = _authorize_ws_url(token)
         if not ws_url:
-            ux.reload_token_from_storage()
+            # 401/403 → bounded refresh + re-authorize (2026-11-25: authorize 401 all morning).
+            auth = last_authorize_info()
+            if auth.get("auth_error") or (
+                isinstance(auth.get("status_code"), int)
+                and int(auth["status_code"]) in (401, 403)
+            ):
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _recover_token_after_auth_failure(ux)
+                )
+            else:
+                ux.reload_token_from_storage()
             await asyncio.sleep(min(backoff, 60.0))
             backoff = min(backoff * 1.5, 120.0)
             continue
         backoff = 2.0
         try:
-            logger.info("upstox_market_feed: websocket connecting")
+            logger.info(
+                "upstox_market_feed: websocket connecting last4=%s",
+                _token_last4(token),
+            )
             try:
                 from backend.services.rocket_ws_live import mark_feed_reconnect
 
@@ -1335,6 +1522,7 @@ def feed_status() -> Dict[str, Any]:
         "thread_alive": alive,
         "cached_instruments": n,
         "last_error": _FEED_LAST_ERROR,
+        "last_authorize": last_authorize_info(),
         "universe_keys": len(_LAST_KEYS_SIG or ()),
         "base_keys": len(_BASE_KEYS_SIG or ()),
         "provider_keys": {n: len(k) for n, k in _PROVIDER_KEYS.items()},

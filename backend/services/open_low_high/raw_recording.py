@@ -2,6 +2,12 @@
 
 Retention: 14 days (configurable). Size estimate documented in ``estimate_daily_bytes``.
 Staging-safe: no-op when ``OLH_RAW_RECORD_ENABLED`` is false (default).
+
+Path resolution (2026-11-25 fix)
+--------------------------------
+Production previously set ``OLH_RAW_RECORD_DIR=/home/ubuntu/trademanthan/data/...``
+which does **not** exist inside the app container. Prefer writable candidates:
+``/app/data/olh_raw_recordings`` (compose ``./data`` mount), then env, then cwd.
 """
 from __future__ import annotations
 
@@ -10,10 +16,9 @@ import json
 import logging
 import os
 import threading
-import time
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pytz
 
@@ -29,10 +34,6 @@ from backend.services.open_low_high.config import (
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
-# Rough size model (145 EQ + Nifty + ~145 FUT, full mode, 09:00–09:35):
-# ~80–150 msg/s peak × ~400–1200 B decoded JSON after MessageToDict ≈ 2–8 MB/min
-# × 35 min ≈ 70–280 MB/day WS; REST canary/phase samples ≈ 2–10 MB/day.
-# Estimate mid: ~150 MB/day × 14d ≈ ~2.1 GB volume.
 ESTIMATE_WS_MB_PER_DAY = 150
 ESTIMATE_REST_MB_PER_DAY = 5
 
@@ -41,6 +42,7 @@ _ws_fh = None  # type: ignore
 _ws_path: Optional[Path] = None
 _ws_day: Optional[date] = None
 _bytes_written_today = 0
+_resolved_root: Optional[Path] = None
 
 
 def estimate_daily_bytes() -> Dict[str, Any]:
@@ -55,10 +57,78 @@ def estimate_daily_bytes() -> Dict[str, Any]:
     }
 
 
+def _candidate_roots() -> List[Path]:
+    env = (OLH_RAW_RECORD_DIR or "").strip()
+    cands: List[Path] = []
+    # Prefer known writable container mounts first when env looks like a host-only path.
+    preferred = [
+        Path("/app/data/olh_raw_recordings"),
+        Path("/home/ubuntu/twcto/data/olh_raw_recordings"),
+        Path("data/olh_raw_recordings"),
+    ]
+    if env:
+        env_p = Path(env)
+        # Host path that only exists on the VM outside Docker → skip for mkdir priority.
+        host_only = str(env_p).startswith("/home/ubuntu/trademanthan")
+        if not host_only:
+            cands.append(env_p)
+        cands.extend(preferred)
+        if host_only:
+            cands.append(env_p)  # last resort
+    else:
+        cands.extend(preferred)
+    # Dedupe preserving order
+    seen = set()
+    out: List[Path] = []
+    for p in cands:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
 def recording_root() -> Path:
-    root = Path(OLH_RAW_RECORD_DIR or "data/olh_raw_recordings")
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    """Return a writable recording root (creates dir). Caches first success."""
+    global _resolved_root
+    if _resolved_root is not None:
+        try:
+            _resolved_root.mkdir(parents=True, exist_ok=True)
+            return _resolved_root
+        except OSError:
+            _resolved_root = None
+    errors: List[str] = []
+    for root in _candidate_roots():
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            probe = root / ".olh_raw_write_probe"
+            probe.write_text("ok", encoding="utf-8")
+            try:
+                probe.unlink()
+            except OSError:
+                pass
+            _resolved_root = root
+            if str(root) != (OLH_RAW_RECORD_DIR or ""):
+                logger.warning(
+                    "olh raw_recording using writable root=%s (configured=%s)",
+                    root,
+                    OLH_RAW_RECORD_DIR,
+                )
+            return root
+        except OSError as exc:
+            errors.append(f"{root}:{exc}")
+            continue
+    # Last resort cwd-relative
+    fallback = Path("data/olh_raw_recordings")
+    fallback.mkdir(parents=True, exist_ok=True)
+    _resolved_root = fallback
+    logger.error(
+        "olh raw_recording fell back to %s; candidates failed: %s",
+        fallback,
+        "; ".join(errors)[:400],
+    )
+    return fallback
 
 
 def in_record_window(now: Optional[datetime] = None) -> bool:
@@ -190,7 +260,6 @@ def prune_old_recordings(*, retention_days: Optional[int] = None) -> Dict[str, A
         except ValueError:
             continue
         if d < cutoff:
-            # Remove files then dir
             for p in child.rglob("*"):
                 if p.is_file():
                     try:
@@ -206,9 +275,12 @@ def prune_old_recordings(*, retention_days: Optional[int] = None) -> Dict[str, A
 
 
 def recording_status() -> Dict[str, Any]:
+    root = recording_root()
     return {
         "enabled": OLH_RAW_RECORD_ENABLED,
-        "dir": str(recording_root()),
+        "configured_dir": OLH_RAW_RECORD_DIR,
+        "dir": str(root),
+        "writable": os.access(root, os.W_OK),
         "in_window": in_record_window(),
         "bytes_written_today": _bytes_written_today,
         "estimate": estimate_daily_bytes(),

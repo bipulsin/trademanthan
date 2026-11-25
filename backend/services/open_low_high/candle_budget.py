@@ -9,17 +9,27 @@ Each denied acquire logged ``CandleBudgetDenied``; ~**540** denials piled up
 while Phase B's 20 qualifier 09:20 fetches returned ``bars=0`` → all cards
 ``09:20 data missing`` / DEGRADED.
 
+Why (2026-11-25 forensics)
+-------------------------
+Phase A still drew from the **shared** pool. By 09:20 the 30-min shared window
+was empty (PDC + FO/warm burned ~120/min from 09:00). ``phase_a`` logged
+``granted=0 denied=tens`` while the dedicated **canary** pool still fetched
+real 09:15 bars. Fix: dedicated Phase A pool + shared yields to OLH 09:10–09:30
++ auto-fallback to reserved lane when shared denies under Phase A TLS.
+
 Fix
 ---
-- ``phase_b`` pool: separate SlidingWindowRateLimiter + semaphore. Phase A
-  never draws from it. Active 09:25:03–09:29 IST (and force Phase B).
-- ``canary`` pool: tiny dedicated budget so morning REST canaries never steal
-  Phase A/B slots.
-- ``phase_a`` / default: shared process limiter (unchanged for other jobs).
+- ``phase_a`` / ``phase_b`` / ``canary`` pools: separate SlidingWindowRateLimiter
+  + semaphore. Never draw from shared 30-min window.
+- Shared / non-OLH callers yield during OLH priority window (see
+  ``upstox_rate_limiter``).
+- If shared denies while TLS pool is ``phase_a``, escalate to reserved
+  ``phase_a`` lane immediately (do not wait for hard stop).
 - Per-phase per-minute usage logs (granted / denied).
 
 Limits (env-overridable via ``open_low_high.config`` / settings):
-  Phase B: OLH_PHASE_B_RL_PER_SEC (default 4), PER_MIN (80), SEMAPHORE (4)
+  Phase A: OLH_PHASE_A_RL_PER_SEC (5), PER_MIN (120), SEMAPHORE (6)
+  Phase B: OLH_PHASE_B_RL_PER_SEC (4), PER_MIN (80), SEMAPHORE (4)
   Canary:  OLH_CANARY_RL_PER_SEC (1), PER_MIN (20), SEMAPHORE (1)
 """
 from __future__ import annotations
@@ -29,7 +39,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 import pytz
 
@@ -42,6 +52,7 @@ POOL_SHARED = "shared"
 POOL_PHASE_A = "phase_a"
 POOL_PHASE_B = "phase_b"
 POOL_CANARY = "canary"
+DEDICATED_POOLS = frozenset({POOL_PHASE_A, POOL_PHASE_B, POOL_CANARY})
 
 _tls = threading.local()
 _pools: Dict[str, SlidingWindowRateLimiter] = {}
@@ -52,6 +63,9 @@ _init_lock = threading.Lock()
 _usage: Dict[str, Dict[str, Dict[str, int]]] = {}
 _usage_lock = threading.Lock()
 _last_usage_log_minute: Dict[str, str] = {}
+
+# Fallback counters (shared deny → reserved phase_a)
+_fallback_to_reserved = 0
 
 
 def _cfg_int(name: str, default: int) -> int:
@@ -64,7 +78,12 @@ def _cfg_int(name: str, default: int) -> int:
 
 
 def _build_pool(name: str) -> Tuple[SlidingWindowRateLimiter, threading.BoundedSemaphore]:
-    if name == POOL_PHASE_B:
+    if name == POOL_PHASE_A:
+        per_sec = max(1, _cfg_int("PHASE_A_RL_PER_SEC", 5))
+        per_min = max(per_sec, _cfg_int("PHASE_A_RL_PER_MIN", 120))
+        sem_n = max(1, _cfg_int("PHASE_A_RL_SEMAPHORE", 6))
+        max_wait = float(_cfg_int("PHASE_A_RL_MAX_WAIT_SEC", 60))
+    elif name == POOL_PHASE_B:
         per_sec = max(1, _cfg_int("PHASE_B_RL_PER_SEC", 4))
         per_min = max(per_sec, _cfg_int("PHASE_B_RL_PER_MIN", 80))
         sem_n = max(1, _cfg_int("PHASE_B_RL_SEMAPHORE", 4))
@@ -75,13 +94,11 @@ def _build_pool(name: str) -> Tuple[SlidingWindowRateLimiter, threading.BoundedS
         sem_n = max(1, _cfg_int("CANARY_RL_SEMAPHORE", 1))
         max_wait = float(_cfg_int("CANARY_RL_MAX_WAIT_SEC", 15))
     else:
-        # phase_a uses shared limiter via acquire_candle_slot — no local pool.
         raise ValueError(f"no dedicated pool for {name}")
     lim = SlidingWindowRateLimiter(
         [(per_sec, 1.0), (per_min, 60.0)],
         min_interval=1.0 / float(per_sec),
     )
-    # Stash max_wait on limiter for acquire helpers
     lim._olh_max_wait = max_wait  # type: ignore[attr-defined]
     return lim, threading.BoundedSemaphore(sem_n)
 
@@ -102,6 +119,23 @@ def _ensure_pool(name: str) -> Tuple[SlidingWindowRateLimiter, threading.Bounded
 
 def current_pool() -> str:
     return str(getattr(_tls, "pool", None) or POOL_SHARED)
+
+
+def reserved_budgets_ready() -> Dict[str, Any]:
+    """Readiness helper — ensure Phase A/B/canary pools can be constructed."""
+    out: Dict[str, Any] = {"ok": True, "pools": {}}
+    for name in (POOL_PHASE_A, POOL_PHASE_B, POOL_CANARY):
+        try:
+            lim, sem = _ensure_pool(name)
+            out["pools"][name] = {
+                "ok": True,
+                "semaphore": getattr(sem, "_initial_value", None),
+                "max_wait": getattr(lim, "_olh_max_wait", None),
+            }
+        except Exception as exc:
+            out["ok"] = False
+            out["pools"][name] = {"ok": False, "error": str(exc)[:120]}
+    return out
 
 
 @contextmanager
@@ -133,10 +167,8 @@ def _record(pool: str, granted: bool) -> None:
             row["granted"] += 1
         else:
             row["denied"] += 1
-        # Log once per pool per minute when activity happens.
         last = _last_usage_log_minute.get(pool)
         if last != mk:
-            # Flush previous minute if any
             if last and last in by_min:
                 prev = by_min[last]
                 logger.info(
@@ -147,7 +179,6 @@ def _record(pool: str, granted: bool) -> None:
                     prev.get("denied", 0),
                 )
             _last_usage_log_minute[pool] = mk
-        # Also log current rolling counts every 25 events in-minute
         total = int(row["granted"]) + int(row["denied"])
         if total > 0 and total % 25 == 0:
             logger.info(
@@ -166,18 +197,23 @@ def usage_snapshot() -> Dict[str, Dict[str, Dict[str, int]]]:
 
 def reset_pools_for_tests() -> None:
     """Test helper — clear dedicated limiters and metrics."""
-    global _pools, _semaphores, _usage, _last_usage_log_minute
+    global _pools, _semaphores, _usage, _last_usage_log_minute, _fallback_to_reserved
     with _init_lock:
         _pools = {}
         _semaphores = {}
     with _usage_lock:
         _usage = {}
         _last_usage_log_minute = {}
+    _fallback_to_reserved = 0
     _tls.pool = None
+    if hasattr(_tls, "sem_releasers"):
+        _tls.sem_releasers = []
+    if hasattr(_tls, "force_reserved"):
+        _tls.force_reserved = False
 
 
 def release_olh_candle_slot() -> None:
-    """Release Phase B / canary semaphore held for an in-flight HTTP call."""
+    """Release Phase A / B / canary semaphore held for an in-flight HTTP call."""
     releasers = getattr(_tls, "sem_releasers", None)
     if not releasers:
         return
@@ -189,20 +225,7 @@ def release_olh_candle_slot() -> None:
             logger.debug("olh candle sem release failed", exc_info=True)
 
 
-def acquire_olh_candle_slot() -> Optional[bool]:
-    """Acquire for dedicated OLH pools.
-
-    Returns:
-      True / False when this thread is in ``phase_b`` or ``canary`` (handled here).
-      None when pool is shared/phase_a — caller should use ``acquire_candle_slot``.
-
-    On True, caller **must** invoke ``release_olh_candle_slot`` after the HTTP
-    attempt (success or fail) so the concurrency semaphore is freed.
-    """
-    pool = current_pool()
-    if pool not in (POOL_PHASE_B, POOL_CANARY):
-        return None
-
+def _acquire_dedicated(pool: str) -> bool:
     lim, sem = _ensure_pool(pool)
     max_wait = float(getattr(lim, "_olh_max_wait", 45.0))
     got_sem = sem.acquire(blocking=True, timeout=max_wait)
@@ -237,9 +260,63 @@ def acquire_olh_candle_slot() -> Optional[bool]:
     return True
 
 
+def acquire_olh_candle_slot() -> Optional[bool]:
+    """Acquire for dedicated OLH pools.
+
+    Returns:
+      True / False when this thread is in ``phase_a`` / ``phase_b`` / ``canary``.
+      None when pool is shared — caller should use ``acquire_candle_slot``.
+
+    On True, caller **must** invoke ``release_olh_candle_slot`` after the HTTP
+    attempt (success or fail) so the concurrency semaphore is freed.
+    """
+    pool = current_pool()
+    if pool not in DEDICATED_POOLS:
+        # Explicit force-reserved (e.g. after shared deny under Phase A TLS).
+        if getattr(_tls, "force_reserved", False):
+            pool = POOL_PHASE_A
+        else:
+            return None
+    return _acquire_dedicated(pool)
+
+
+def fallback_phase_a_reserved_after_shared_deny() -> bool:
+    """Shared denied under Phase A → immediately take reserved Phase A lane.
+
+    Returns True if reserved slot granted (caller must release_olh_candle_slot).
+    """
+    global _fallback_to_reserved
+    pool = current_pool()
+    if pool not in (POOL_PHASE_A, POOL_SHARED):
+        return False
+    # Prefer phase_a TLS; if somehow on shared during phase_a window, still escalate.
+    _tls.force_reserved = True
+    try:
+        ok = _acquire_dedicated(POOL_PHASE_A)
+    finally:
+        _tls.force_reserved = False
+    if ok:
+        _fallback_to_reserved += 1
+        logger.warning(
+            "olh_candle_budget fallback shared→reserved pool=phase_a count=%s",
+            _fallback_to_reserved,
+        )
+        try:
+            from backend.services.open_low_high.ohl_log import ohl_log
+
+            ohl_log(
+                "success",
+                action="candle_budget_fallback_reserved",
+                detail=f"shared_denied→phase_a_reserved count={_fallback_to_reserved}",
+            )
+        except Exception:
+            pass
+    return ok
+
+
 def note_shared_acquire(granted: bool, *, phase_hint: Optional[str] = None) -> None:
     """Record shared-limiter outcome under phase_a / shared for per-minute logs."""
-    if current_pool() in (POOL_PHASE_B, POOL_CANARY):
+    if current_pool() in DEDICATED_POOLS:
         return
     pool = phase_hint or (
         POOL_PHASE_A if current_pool() == POOL_PHASE_A else POOL_SHARED

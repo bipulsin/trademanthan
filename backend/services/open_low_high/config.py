@@ -39,8 +39,13 @@ PHASE_A_REFILL_HARD_STOP = time(9, 24, 50)
 # FREEZE GATE: require coverage of symbols with usable 09:15 equity bars + Nifty present.
 FREEZE_COVERAGE_MIN = _env_float("OLH_FREEZE_COVERAGE_MIN", 0.90)
 
-# --- Dedicated REST budgets (Phase B / canary never share Phase A slots) ---
+# --- Dedicated REST budgets (Phase A / Phase B / canary never share shared slots) ---
 # 2026-11-23: shared limiter → 540 CandleBudgetDenied while Phase B starved.
+# 2026-11-25: Phase A on shared → granted=0 at 09:20 while canary pool still got bars.
+PHASE_A_RL_PER_SEC = _env_int("OLH_PHASE_A_RL_PER_SEC", 5)
+PHASE_A_RL_PER_MIN = _env_int("OLH_PHASE_A_RL_PER_MIN", 120)
+PHASE_A_RL_SEMAPHORE = _env_int("OLH_PHASE_A_RL_SEMAPHORE", 6)
+PHASE_A_RL_MAX_WAIT_SEC = _env_int("OLH_PHASE_A_RL_MAX_WAIT_SEC", 60)
 PHASE_B_RL_PER_SEC = _env_int("OLH_PHASE_B_RL_PER_SEC", 4)
 PHASE_B_RL_PER_MIN = _env_int("OLH_PHASE_B_RL_PER_MIN", 80)
 PHASE_B_RL_SEMAPHORE = _env_int("OLH_PHASE_B_RL_SEMAPHORE", 4)
@@ -49,6 +54,10 @@ CANARY_RL_PER_SEC = _env_int("OLH_CANARY_RL_PER_SEC", 1)
 CANARY_RL_PER_MIN = _env_int("OLH_CANARY_RL_PER_MIN", 20)
 CANARY_RL_SEMAPHORE = _env_int("OLH_CANARY_RL_SEMAPHORE", 1)
 CANARY_RL_MAX_WAIT_SEC = _env_int("OLH_CANARY_RL_MAX_WAIT_SEC", 15)
+# Non-OLH shared candle callers yield during this IST window.
+OLH_PRIORITY_YIELD_START = time(9, 10, 0)
+OLH_PRIORITY_YIELD_END = time(9, 30, 0)
+OLH_PRIORITY_YIELD_ENABLED = _env_bool("OLH_PRIORITY_YIELD_ENABLED", True)
 # Legacy empty-Phase-A incomplete helper (miss rate among scanned).
 MISSING_DATA_RATE_THRESHOLD = _env_float("OLH_MISSING_DATA_RATE_THRESHOLD", 0.35)
 
@@ -98,16 +107,26 @@ OLH_FETCH_ATTEMPTS_ENABLED = _env_bool("OLH_FETCH_ATTEMPTS_ENABLED", True)
 
 # --- Reliability program (staging-friendly; defaults safe for prod) ---
 # Raw WS/REST recording 09:00–09:35 → persistent volume, 14-day retention.
+# Prefer container mount ``/app/data/olh_raw_recordings`` (host ./data) — NOT a
+# host path like /home/ubuntu/trademanthan/... which is invisible inside Docker.
 OLH_RAW_RECORD_ENABLED = _env_bool("OLH_RAW_RECORD_ENABLED", False)
-OLH_RAW_RECORD_DIR = (os.getenv("OLH_RAW_RECORD_DIR") or "data/olh_raw_recordings").strip()
+OLH_RAW_RECORD_DIR = (
+    os.getenv("OLH_RAW_RECORD_DIR") or "/app/data/olh_raw_recordings"
+).strip()
 OLH_RAW_RECORD_RETENTION_DAYS = _env_int("OLH_RAW_RECORD_RETENTION_DAYS", 14)
 OLH_RAW_RECORD_START = time(9, 0, 0)
 OLH_RAW_RECORD_END = time(9, 35, 0)
 
-# EQ silent-stall watchdog (connected but EQ ticks=0).
+# EQ silent-stall watchdog (connected but EQ ticks=0). Armed from 09:15:05.
 OLH_EQ_STALL_ENABLED = _env_bool("OLH_EQ_STALL_ENABLED", True)
 OLH_EQ_STALL_SEC = _env_int("OLH_EQ_STALL_SEC", 20)
 OLH_EQ_STALL_MAX_ATTEMPTS = _env_int("OLH_EQ_STALL_MAX_ATTEMPTS", 3)
+OLH_EQ_STALL_ARM = time(9, 15, 5)
+
+# WS auth recovery bounds.
+OLH_WS_AUTH_MAX_ATTEMPTS = _env_int("OLH_WS_AUTH_MAX_ATTEMPTS", 5)
+# 09:16: if WS ticks=0 → force Phase A onto REST reserved lane.
+OLH_WS_ZERO_FORCE_REST_AT = time(9, 16, 0)
 
 # 08:50 readiness + 15:45 daily reconcile (scheduler hooks).
 OLH_READINESS_ENABLED = _env_bool("OLH_READINESS_ENABLED", True)

@@ -249,6 +249,101 @@ def _run_ws_keepalive() -> None:
         logger.exception("open_low_high WS keepalive failed")
 
 
+def _run_ws_zero_force_rest_0916() -> None:
+    """09:16: if WS ticks=0 → switch Phase A to REST reserved budget immediately."""
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.force_rest import set_force_rest_reserved
+        from backend.services.open_low_high.ohl_log import ohl_log
+        from backend.services.upstox_market_feed import get_segment_tick_counts_last_sec
+
+        ticks = get_segment_tick_counts_last_sec(window_sec=60)
+        eq_n = int(ticks.get("EQ") or 0)
+        idx_n = int(ticks.get("INDEX") or 0)
+        if eq_n > 0 or idx_n > 0:
+            logger.info(
+                "open_low_high 09:16 WS ticks present EQ=%s INDEX=%s — no force REST",
+                eq_n,
+                idx_n,
+            )
+            ohl_log(
+                "success",
+                action="ws_0916_ticks_ok",
+                source="ws",
+                detail=f"EQ={eq_n} INDEX={idx_n}",
+            )
+            return
+        st = set_force_rest_reserved(
+            "ws_ticks_zero_at_0916",
+            at="09:16:00",
+        )
+        ohl_log(
+            "success",
+            action="ws_0916_force_rest_reserved",
+            source="ws",
+            detail=f"EQ=0 INDEX=0 → force_rest_reserved reason={st.get('reason')}",
+        )
+        logger.error(
+            "open_low_high 09:16 WS ticks=0 — Phase A forced onto REST reserved budget"
+        )
+        try:
+            from backend.services.open_low_high.alerts import send_olh_alert
+
+            send_olh_alert(
+                "WS ticks=0 at 09:16 → REST reserved",
+                f"EQ={eq_n} INDEX={idx_n}; Phase A will skip WS tries and use reserved candle pool",
+            )
+        except Exception:
+            pass
+        # Also run first-bar REST check (Nifty + 5 stocks) under canary/reserved.
+        _run_first_bar_check_0916()
+    except Exception:
+        logger.exception("open_low_high 09:16 WS-zero force REST failed")
+
+
+def _run_first_bar_check_0916() -> None:
+    """09:16 first-bar check: Nifty + 5 equities via REST canary pool."""
+    if _skip():
+        return
+    try:
+        from backend.services.open_low_high.ohl_log import ohl_log
+        from backend.services.open_low_high.rest_canary import run_rest_canary
+
+        result = run_rest_canary(
+            symbols=("RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"),
+            label="09:16:00",
+        )
+        has = bool(result.get("has_0915"))
+        ohl_log(
+            "success" if has else "failed",
+            action="first_bar_0916",
+            detail=f"has_0915={has} n={len(result.get('results') or [])}",
+        )
+        logger.info("open_low_high first-bar 09:16 has_0915=%s", has)
+        if not has:
+            from backend.services.open_low_high.alerts import send_olh_alert
+
+            send_olh_alert(
+                "First-bar 09:16 FAIL",
+                "Nifty + 5 stocks lacked 09:15 bars on REST canary probe",
+            )
+    except Exception:
+        logger.exception("open_low_high first-bar 09:16 failed")
+
+
+def _run_zero_tick_minute_pulse() -> None:
+    """Persist EQ/INDEX/FUT=0 minutes so silence is visible without tick arrivals."""
+    if _skip():
+        return
+    try:
+        from backend.services.upstox_market_feed import flush_zero_tick_minute_if_needed
+
+        flush_zero_tick_minute_if_needed()
+    except Exception:
+        logger.debug("zero-tick minute pulse failed", exc_info=True)
+
+
 def _run_ws_check_0915() -> None:
     if _skip():
         return
@@ -642,22 +737,60 @@ def start_open_low_high_scheduler() -> None:
         misfire_grace_time=120,
     )
 
-    # --- EQ silent-stall pulse every 20s-ish via 15s cron 09:15–09:30 ---
+    # --- EQ silent-stall pulse; armed in code from 09:15:05 ---
     sched.add_job(
         _run_eq_silent_stall_pulse,
         CronTrigger(
             day_of_week="mon-fri",
             hour=9,
             minute="15-30",
-            second="0,20,40",
+            second="5,20,40",
             timezone="Asia/Kolkata",
         ),
         id="open_low_high_eq_silent_stall",
-        name="Open Low High EQ silent-stall pulse 09:15–09:30 IST",
+        name="Open Low High EQ silent-stall pulse 09:15:05–09:30 IST",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=15,
+    )
+    # Persist zero-tick minutes even when no ticks arrive (09:00–09:30).
+    sched.add_job(
+        _run_zero_tick_minute_pulse,
+        CronTrigger(
+            day_of_week="mon-fri",
+            hour=9,
+            minute="0-30",
+            second=2,
+            timezone="Asia/Kolkata",
+        ),
+        id="open_low_high_zero_tick_minute",
+        name="Open Low High zero-tick minute persist 09:00–09:30 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=10,
+    )
+    # 09:16: WS ticks=0 → force REST reserved + first-bar check.
+    sched.add_job(
+        _run_ws_zero_force_rest_0916,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=16, second=0, timezone="Asia/Kolkata"),
+        id="open_low_high_ws_zero_force_rest_0916",
+        name="Open Low High WS-zero→REST 09:16 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+    )
+    sched.add_job(
+        _run_first_bar_check_0916,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=16, second=5, timezone="Asia/Kolkata"),
+        id="open_low_high_first_bar_0916",
+        name="Open Low High first-bar check 09:16 IST",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
     )
 
     # --- 15:45 daily WS vs REST reconcile ---

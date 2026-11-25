@@ -152,6 +152,7 @@ _denied = 0
 _denied_yield_scheduled = 0
 _denied_yield_headroom = 0
 _denied_yield_chart = 0
+_denied_yield_olh = 0
 _scheduled_acquired = 0
 _chart_acquired = 0
 
@@ -318,15 +319,39 @@ def chart_candle_priority() -> Iterator[None]:
                 _chart_waiters = max(0, _chart_waiters - 1)
 
 
+def _in_olh_priority_window() -> bool:
+    """True during OLH morning priority window (default 09:10–09:30 IST)."""
+    try:
+        from backend.services.open_low_high import config as olh_cfg
+        import pytz
+        from datetime import datetime
+
+        if not bool(getattr(olh_cfg, "OLH_PRIORITY_YIELD_ENABLED", True)):
+            return False
+        IST = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(IST).time()
+        start = getattr(olh_cfg, "OLH_PRIORITY_YIELD_START", None)
+        end = getattr(olh_cfg, "OLH_PRIORITY_YIELD_END", None)
+        if start is None or end is None:
+            return False
+        return start <= now < end
+    except Exception:
+        return False
+
+
 def acquire_candle_slot() -> bool:
     """Reserve a candle-request slot under the shared budget.
 
     Returns True if the caller may send the request, or False if the budget is
     exhausted and the request should be skipped (no Upstox call). Always returns
     True when disabled via ``UPSTOX_CANDLE_RATE_LIMIT_ENABLED``.
+
+    Non-OLH callers **yield** during the OLH priority window (09:10–09:30 IST)
+    so Phase A/B/canary reserved pools own Upstox candle capacity.
     """
     global _acquired, _total_wait, _throttled, _denied
     global _denied_yield_scheduled, _denied_yield_headroom, _denied_yield_chart
+    global _denied_yield_olh
     global _scheduled_acquired, _chart_acquired
     try:
         from backend.config import settings
@@ -340,6 +365,13 @@ def acquire_candle_slot() -> bool:
     if not chart and _chart_priority_pending():
         _denied += 1
         _denied_yield_chart += 1
+        return False
+
+    # OLH morning priority: shared (non-chart) callers yield 09:10–09:30 IST.
+    # Dedicated OLH pools never call this function.
+    if not chart and _in_olh_priority_window():
+        _denied += 1
+        _denied_yield_olh += 1
         return False
 
     scheduled_worker = _is_scheduled_worker()
@@ -394,7 +426,7 @@ def _log_candle_rl_stats() -> None:
     logger.info(
         "candle rate limiter: %d granted, %d denied(skipped), %d throttled, "
         "%.1fs total wait (yield_sched=%d yield_headroom=%d yield_chart=%d "
-        "scheduled_grants=%d chart_grants=%d)",
+        "yield_olh=%d scheduled_grants=%d chart_grants=%d)",
         _acquired,
         _denied,
         _throttled,
@@ -402,6 +434,7 @@ def _log_candle_rl_stats() -> None:
         _denied_yield_scheduled,
         _denied_yield_headroom,
         _denied_yield_chart,
+        _denied_yield_olh,
         _scheduled_acquired,
         _chart_acquired,
     )
@@ -416,10 +449,12 @@ def stats() -> dict:
         "denied_yield_to_scheduled": _denied_yield_scheduled,
         "denied_yield_headroom": _denied_yield_headroom,
         "denied_yield_chart": _denied_yield_chart,
+        "denied_yield_olh": _denied_yield_olh,
         "scheduled_acquired": _scheduled_acquired,
         "chart_acquired": _chart_acquired,
         "chart_priority_pending": _chart_priority_pending(),
         "scheduled_warm_active": _scheduled_warm_active(),
+        "olh_priority_window": _in_olh_priority_window(),
     }
     try:
         lim = _get_limiter()

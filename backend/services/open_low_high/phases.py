@@ -353,6 +353,76 @@ def _run_phase_a_body(
         coverage = equity_coverage_from_miss(scanned=len(universe), miss_stats=miss_stats)
         may_freeze, gate_reason = freeze_gate(coverage=coverage, nifty_present=nifty_ok)
 
+        # Self-check: Phase A bars=0 while REST canary healthy → force reserved retry once.
+        if len(tagged) == 0 and refill_only_symbols is None:
+            try:
+                from backend.services.open_low_high.force_rest import (
+                    is_force_rest_reserved,
+                    set_force_rest_reserved,
+                )
+                from backend.services.open_low_high.rest_canary import (
+                    last_canary_had_0915_bars,
+                )
+
+                canary_ok = bool(last_canary_had_0915_bars())
+                already = is_force_rest_reserved()
+                if canary_ok:
+                    set_force_rest_reserved(
+                        "phase_a_zero_while_canary_healthy",
+                        at=_now().isoformat(),
+                    )
+                    ohl_log(
+                        "success",
+                        action="phase_a_canary_self_check",
+                        detail=(
+                            "bars=0 canary_healthy → force_rest_reserved "
+                            f"retry already={already}"
+                        ),
+                    )
+                    retry_results: List[Dict[str, Any]] = []
+                    with ThreadPoolExecutor(
+                        max_workers=max(1, min(max_workers, 8))
+                    ) as pool2:
+                        futs2 = [pool2.submit(_one, u) for u in universe]
+                        for fut in as_completed(futs2):
+                            try:
+                                got = fut.result()
+                            except Exception:
+                                continue
+                            if got:
+                                retry_results.append(got)
+                    if retry_results:
+                        results = retry_results
+                        tagged = []
+                        for c in results:
+                            card = dict(c)
+                            card["active"] = False
+                            card["phase_b_ok"] = False
+                            card["frozen"] = False
+                            tagged.append(card)
+                        try:
+                            tagged = _apply_sector_badges(tagged)
+                            for c in tagged:
+                                c["frozen"] = False
+                        except Exception:
+                            pass
+                        tagged = sort_screen_rows(tagged)
+                        coverage = equity_coverage_from_miss(
+                            scanned=len(universe), miss_stats=miss_stats
+                        )
+                        nifty_cue = _evaluate_nifty_header_cue(upstox, trade_date)
+                        nifty_ok = _nifty_data_ready(nifty_cue, require_0920=False)
+                        may_freeze, gate_reason = freeze_gate(
+                            coverage=coverage, nifty_present=nifty_ok
+                        )
+                        ohl_log(
+                            "success",
+                            action="phase_a_reserved_retry",
+                            detail=f"phase_a={len(tagged)} after canary self-check",
+                        )
+            except Exception:
+                logger.exception("phase_a canary self-check failed")
+
         upsert_screen_rows(trade_date, tagged, frozen=False)
         bullish = [c for c in tagged if c.get("side") == "BULLISH"]
         bearish = [c for c in tagged if c.get("side") == "BEARISH"]

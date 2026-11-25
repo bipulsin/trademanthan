@@ -71,16 +71,24 @@ export OLH_RAW_RECORD_DIR=/home/ubuntu/twcto/data/olh_raw_recordings   # persist
 | Key | Default | Purpose |
 |-----|---------|---------|
 | `OLH_RAW_RECORD_ENABLED` | false | WS/REST capture 09:00–09:35 |
-| `OLH_RAW_RECORD_DIR` | `data/olh_raw_recordings` | Persistent volume path |
+| `OLH_RAW_RECORD_DIR` | `/app/data/olh_raw_recordings` | Container-writable mount (not host-only paths) |
 | `OLH_RAW_RECORD_RETENTION_DAYS` | 14 | Prune age |
 | `OLH_EQ_STALL_ENABLED` | true | EQ silent-stall watchdog |
 | `OLH_EQ_STALL_SEC` | 20 | No EQ ticks → stall |
 | `OLH_EQ_STALL_MAX_ATTEMPTS` | 3 | Resub attempt cap / day |
+| `OLH_EQ_STALL_ARM` | 09:15:05 | Stall watchdog arm time |
 | `OLH_READINESS_ENABLED` | true | 08:50 go/no-go |
 | `OLH_DAILY_RECONCILE_ENABLED` | true | 15:45 WS vs REST |
 | `OLH_REHEARSAL_MODE` | false | Marker only |
 | `OLH_DEPLOY_GUARD_FORCE` | false | Override 08:45–09:35 deploy guard |
 | `OLH_ALERTS_ENABLED` | true | Telegram alerts |
+| `OLH_PHASE_A_RL_PER_SEC` / `_PER_MIN` / `_SEMAPHORE` | 5 / 120 / 6 | Dedicated Phase A candle budget |
+| `OLH_PHASE_B_RL_*` | 4 / 80 / 4 | Dedicated Phase B budget |
+| `OLH_CANARY_RL_*` | 1 / 20 / 1 | Dedicated canary budget |
+| `OLH_PRIORITY_YIELD_ENABLED` | true | Non-OLH shared candle callers yield 09:10–09:30 |
+| `OLH_WS_AUTH_MAX_ATTEMPTS` | 5 | Bounded authorize 401/403 recovery |
+
+**Prod env note (2026-11-25):** set `OLH_RAW_RECORD_DIR=/app/data/olh_raw_recordings` (host `./data` mount). Do **not** use `/home/ubuntu/trademanthan/...` inside the container.
 
 ## Independent watchdog (separate process)
 
