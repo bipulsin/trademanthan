@@ -1,7 +1,33 @@
 # OLH Reliability Runbook (one page)
 
-**NO production deploy until user reviews.** Never deploy/restart 08:45–09:35 IST on a trading day.  
-**2026-11-24** = NSE holiday (Guru Nanak Jayanti) → dress rehearsal day. Jobs for **2026-11-25** stay registered; holiday gate skips alerts/REST.
+Never deploy/restart **08:45–09:35 IST** on a trading day.
+
+## 2026-11-25 forensics (DEGRADED Phase A=0)
+
+### Root causes
+1. **WS 401 / junk token** — `upstox_token.json` held `MARK6171|sleep 7...` (last4=`ep 7`, file mtime 2026-11-24T23:57:54). `authorize` returned **401** all morning (`UDAPI100050 Invalid token`). Same token source as REST canary (`token_last4=ep 7`). EQ/INDEX ticks=0 despite 291 subscribed keys.
+2. **Shared candle budget starved Phase A** — shared pool ran at **~120 grants/min** from 09:00 (PDC fills + day/intraday warmers). By ~09:13 denials appear; Phase A (still on **shared**) logged REST `no_bars` while dedicated **canary** pool fetched real 09:15 bars (RELIANCE/TCS/INFY/NIFTY).
+3. **EQ stall armed too early** — fired at **09:15:00** (now **09:15:05**).
+
+### Shared budget consumers before 09:20 (evidence)
+| Minute IST | shared granted≈ | Notes |
+|------------|-----------------|-------|
+| 09:00–09:12 | 120/min | Cap saturated every minute |
+| 09:13 | 47 granted / 3+ denied | First `CandleBudgetDenied` (day + intraday URLs) |
+| 09:00+ | PDC `pdc_fill` | Dominant early consumer in OHL_Log |
+| 09:10 | Pre-market F&O watchlist | Scheduler job |
+| 09:12 | Stock Options contract rollover | Day candles |
+| 09:15 | Arbitrage LTP / Index Price / OLH warm | Concurrent with stall |
+
+Going forward: `candle_rl job_usage job=… minute=… granted=… denied=…` tags named jobs.
+
+### Alerts 08:45–09:30 (all `sent` in OHL_Log)
+Readiness RED (pdc), DEGRADED canaries 09:05/09:08/09:15, EQ silent-stall ×3, Coverage 09:21/09:26, Phase A degraded, DEGRADED 09:29. **None suppressed** — Telegram send returned success to `@TradeWithCTO`. If not seen by user: check channel mute / bot permissions / wrong chat, not app suppress.
+
+### Upstox isolation (limits)
+- REST rate limits: **per API, per user** (not per app). Historical/other: 50/s, 500/min, 2000/30m.
+- Market Data Feed V3: **2 WS connections per user** (5 with Upstox Plus); full mode ≤2000 keys/connection.
+- A second Upstox **app** under the same login does **not** raise caps. Optional env: `OLH_UPSTOX_API_KEY` / `_SECRET` / `_TOKEN_FILE` (only useful with a **different user** or Plus).
 
 ## Morning force actions (exact commands)
 
@@ -87,8 +113,9 @@ export OLH_RAW_RECORD_DIR=/home/ubuntu/twcto/data/olh_raw_recordings   # persist
 | `OLH_CANARY_RL_*` | 1 / 20 / 1 | Dedicated canary budget |
 | `OLH_PRIORITY_YIELD_ENABLED` | true | Non-OLH shared candle callers yield 09:10–09:30 |
 | `OLH_WS_AUTH_MAX_ATTEMPTS` | 5 | Bounded authorize 401/403 recovery |
+| `OLH_UPSTOX_API_KEY` / `_SECRET` / `_TOKEN_FILE` | empty | Optional dedicated OLH Upstox app (limits still per-user) |
 
-**Prod env note (2026-11-25):** set `OLH_RAW_RECORD_DIR=/app/data/olh_raw_recordings` (host `./data` mount). Do **not** use `/home/ubuntu/trademanthan/...` inside the container.
+**Prod env note:** set `OLH_RAW_RECORD_DIR=/app/data/olh_raw_recordings` (host `./data` mount). Do **not** use `/home/ubuntu/trademanthan/...` inside the container. Prefer `OLH_RAW_RECORD_ENABLED=1` once the mount is writable.
 
 ## Independent watchdog (separate process)
 

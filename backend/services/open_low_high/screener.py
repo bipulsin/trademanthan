@@ -104,17 +104,34 @@ def _token_tail(token: Optional[str]) -> str:
 
 def _upstox():
     from backend.config import settings
+    from backend.services.open_low_high import config as olh_cfg
     from backend.services.upstox_service import UpstoxService
 
-    ux = UpstoxService(settings.UPSTOX_API_KEY, settings.UPSTOX_API_SECRET)
+    api_key = olh_cfg.OLH_UPSTOX_API_KEY or settings.UPSTOX_API_KEY
+    api_secret = olh_cfg.OLH_UPSTOX_API_SECRET or settings.UPSTOX_API_SECRET
+    ux = UpstoxService(api_key, api_secret)
+    token_file = olh_cfg.OLH_UPSTOX_TOKEN_FILE
     try:
-        ux.reload_token_from_storage()
+        if token_file:
+            import json
+            from pathlib import Path
+
+            raw = json.loads(Path(token_file).read_text(encoding="utf-8"))
+            tok = raw.get("access_token") or raw.get("token") or ""
+            if tok:
+                ux.access_token = tok
+        else:
+            ux.reload_token_from_storage()
     except Exception:
-        pass
+        try:
+            ux.reload_token_from_storage()
+        except Exception:
+            pass
     logger.info(
-        "OLH upstox token loaded last4=%s has_token=%s",
+        "OLH upstox token loaded last4=%s has_token=%s dedicated_app=%s",
         _token_tail(getattr(ux, "access_token", None)),
         bool(getattr(ux, "access_token", None)),
+        bool(olh_cfg.OLH_UPSTOX_API_KEY),
     )
     return ux
 

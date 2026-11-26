@@ -1516,6 +1516,8 @@ def feed_status() -> Dict[str, Any]:
     with _CACHE_LOCK:
         n = len(_OI_LTP_BY_KEY)
     alive = _FEED_THREAD is not None and _FEED_THREAD.is_alive()
+    # Upstox Market Data Feed V3: 2 concurrent WS connections per *user*
+    # (5 with Upstox Plus). This process keeps a single feed thread.
     return {
         "enabled": getattr(settings, "UPSTOX_MARKET_FEED_ENABLED", True),
         "stale_after_sec": _stale_after_sec(),
@@ -1526,6 +1528,10 @@ def feed_status() -> Dict[str, Any]:
         "universe_keys": len(_LAST_KEYS_SIG or ()),
         "base_keys": len(_BASE_KEYS_SIG or ()),
         "provider_keys": {n: len(k) for n, k in _PROVIDER_KEYS.items()},
+        "concurrent_feed_threads": 1 if alive else 0,
+        "upstox_ws_connection_limit_per_user": 2,
+        "upstox_ws_connection_limit_plus": 5,
+        "note": "WS + REST share one Upstox user; limits are per-user not per-app",
     }
 
 

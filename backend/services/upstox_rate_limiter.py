@@ -156,6 +156,10 @@ _denied_yield_olh = 0
 _scheduled_acquired = 0
 _chart_acquired = 0
 
+# Per-job per-minute shared-budget attribution (forensics / morning post-mortems).
+_job_usage: dict = {}
+_job_usage_lock = threading.Lock()
+
 # Open-chart fetches in flight. Background candle callers yield while this is > 0.
 _chart_waiters = 0
 _chart_waiters_lock = threading.Lock()
@@ -190,10 +194,64 @@ def scheduled_candle_worker() -> Iterator[None]:
         _tls.scheduled_worker = prev
 
 
+def current_candle_job() -> str:
+    """Thread-local job name for shared-budget attribution (or anonymous/chart)."""
+    name = getattr(_tls, "job_name", None)
+    if name:
+        return str(name)
+    if _is_chart_priority():
+        return "chart"
+    return "anonymous"
+
+
+def _record_job_usage(job: str, granted: bool) -> None:
+    """Attribute a shared-slot grant/deny to a named job for per-minute forensics."""
+    try:
+        import pytz
+        from datetime import datetime
+
+        mk = datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M")
+    except Exception:
+        import time as _time
+
+        mk = _time.strftime("%H:%M")
+    name = (job or "anonymous")[:80]
+    with _job_usage_lock:
+        by_min = _job_usage.setdefault(name, {})
+        row = by_min.setdefault(mk, {"granted": 0, "denied": 0})
+        if granted:
+            row["granted"] += 1
+        else:
+            row["denied"] += 1
+        total = int(row["granted"]) + int(row["denied"])
+        if total in (25, 50, 100, 120) or total % 50 == 0:
+            logger.info(
+                "candle_rl job_usage job=%s minute=%s granted=%s denied=%s",
+                name,
+                mk,
+                row["granted"],
+                row["denied"],
+            )
+
+
+def job_usage_snapshot() -> dict:
+    with _job_usage_lock:
+        return {
+            j: {m: dict(v) for m, v in mins.items()} for j, mins in _job_usage.items()
+        }
+
+
+def current_candle_job() -> str:
+    """Name of the job currently holding candle_warm_execution (or anonymous)."""
+    return str(getattr(_tls, "job_name", None) or "anonymous")
+
+
 @contextmanager
 def candle_warm_execution(execution: str) -> Iterator[None]:
     """Wrap a scheduled candle warm: priority mode + long max_wait for workers."""
     global _scheduled_warm_depth
+    prev_job = getattr(_tls, "job_name", None)
+    _tls.job_name = str(execution or "") or None
     is_scheduled = is_scheduled_warm_execution(execution)
     if is_scheduled:
         with _scheduled_warm_depth_lock:
@@ -202,6 +260,7 @@ def candle_warm_execution(execution: str) -> Iterator[None]:
     try:
         yield
     finally:
+        _tls.job_name = prev_job
         if is_scheduled:
             set_candle_rl_max_wait_override(None)
             with _scheduled_warm_depth_lock:
@@ -361,10 +420,12 @@ def acquire_candle_slot() -> bool:
     except Exception:
         pass
 
+    job = str(getattr(_tls, "job_name", None) or ("chart" if _is_chart_priority() else "anonymous"))
     chart = _is_chart_priority()
     if not chart and _chart_priority_pending():
         _denied += 1
         _denied_yield_chart += 1
+        _record_job_usage(job, False)
         return False
 
     # OLH morning priority: shared (non-chart) callers yield 09:10–09:30 IST.
@@ -372,17 +433,20 @@ def acquire_candle_slot() -> bool:
     if not chart and _in_olh_priority_window():
         _denied += 1
         _denied_yield_olh += 1
+        _record_job_usage(job, False)
         return False
 
     scheduled_worker = _is_scheduled_worker()
     if _scheduled_warm_active() and not scheduled_worker and not chart:
         _denied += 1
         _denied_yield_scheduled += 1
+        _record_job_usage(job, False)
         return False
 
     if not scheduled_worker and not chart and _headroom_exhausted():
         _denied += 1
         _denied_yield_headroom += 1
+        _record_job_usage(job, False)
         return False
 
     if chart:
@@ -390,6 +454,7 @@ def acquire_candle_slot() -> bool:
         _total_wait += waited
         _acquired += 1
         _chart_acquired += 1
+        _record_job_usage("chart", bool(granted))
         _log_candle_rl_stats()
         return granted
 
@@ -415,6 +480,7 @@ def acquire_candle_slot() -> bool:
             _scheduled_acquired += 1
         if waited > 0.01:
             _throttled += 1
+    _record_job_usage(job, bool(granted))
     _log_candle_rl_stats()
     return granted
 

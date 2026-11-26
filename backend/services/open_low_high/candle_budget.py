@@ -61,8 +61,11 @@ _init_lock = threading.Lock()
 
 # Metrics: pool -> minute_key -> {granted, denied}
 _usage: Dict[str, Dict[str, Dict[str, int]]] = {}
+# Shared job attribution: job -> minute_key -> {granted, denied}
+_job_usage: Dict[str, Dict[str, Dict[str, int]]] = {}
 _usage_lock = threading.Lock()
 _last_usage_log_minute: Dict[str, str] = {}
+_last_job_usage_log_minute: Optional[str] = None
 
 # Fallback counters (shared deny → reserved phase_a)
 _fallback_to_reserved = 0
@@ -158,7 +161,8 @@ def _minute_key(now: Optional[datetime] = None) -> str:
     return t.strftime("%H:%M")
 
 
-def _record(pool: str, granted: bool) -> None:
+def _record(pool: str, granted: bool, *, job: Optional[str] = None) -> None:
+    global _last_job_usage_log_minute
     mk = _minute_key()
     with _usage_lock:
         by_min = _usage.setdefault(pool, {})
@@ -189,21 +193,63 @@ def _record(pool: str, granted: bool) -> None:
                 row["denied"],
             )
 
+        # Shared job attribution (calls per job per minute).
+        if pool == POOL_SHARED or job:
+            jname = str(job or "untagged")
+            try:
+                if not job:
+                    from backend.services.upstox_rate_limiter import current_candle_job
+
+                    jname = current_candle_job()
+            except Exception:
+                jname = str(job or "untagged")
+            j_by = _job_usage.setdefault(jname, {})
+            j_row = j_by.setdefault(mk, {"granted": 0, "denied": 0})
+            if granted:
+                j_row["granted"] += 1
+            else:
+                j_row["denied"] += 1
+            if _last_job_usage_log_minute != mk:
+                if _last_job_usage_log_minute:
+                    parts = []
+                    for jn, mins in _job_usage.items():
+                        prevj = mins.get(_last_job_usage_log_minute)
+                        if not prevj:
+                            continue
+                        parts.append(
+                            f"{jn}:g={prevj.get('granted', 0)}/d={prevj.get('denied', 0)}"
+                        )
+                    if parts:
+                        logger.info(
+                            "olh_candle_budget jobs minute=%s %s",
+                            _last_job_usage_log_minute,
+                            " ".join(parts[:20]),
+                        )
+                _last_job_usage_log_minute = mk
+
 
 def usage_snapshot() -> Dict[str, Dict[str, Dict[str, int]]]:
     with _usage_lock:
         return {p: {m: dict(v) for m, v in mins.items()} for p, mins in _usage.items()}
 
 
+def job_usage_snapshot() -> Dict[str, Dict[str, Dict[str, int]]]:
+    with _usage_lock:
+        return {j: {m: dict(v) for m, v in mins.items()} for j, mins in _job_usage.items()}
+
+
 def reset_pools_for_tests() -> None:
     """Test helper — clear dedicated limiters and metrics."""
-    global _pools, _semaphores, _usage, _last_usage_log_minute, _fallback_to_reserved
+    global _pools, _semaphores, _usage, _job_usage, _last_usage_log_minute
+    global _last_job_usage_log_minute, _fallback_to_reserved
     with _init_lock:
         _pools = {}
         _semaphores = {}
     with _usage_lock:
         _usage = {}
+        _job_usage = {}
         _last_usage_log_minute = {}
+        _last_job_usage_log_minute = None
     _fallback_to_reserved = 0
     _tls.pool = None
     if hasattr(_tls, "sem_releasers"):

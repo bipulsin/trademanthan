@@ -134,3 +134,11 @@ OLH_DAILY_RECONCILE_ENABLED = _env_bool("OLH_DAILY_RECONCILE_ENABLED", True)
 
 # Dress rehearsal / fault injection (never auto-on in prod).
 OLH_REHEARSAL_MODE = _env_bool("OLH_REHEARSAL_MODE", False)
+
+# Optional dedicated Upstox app for OLH (isolation). Rate limits and WS
+# connections are still **per user**, not per app — a second app under the same
+# Upstox login does NOT raise REST/WS caps. Only useful if a different Upstox
+# user (or Upstox Plus) is wired here. Empty → share the process default app.
+OLH_UPSTOX_API_KEY = (os.getenv("OLH_UPSTOX_API_KEY") or "").strip()
+OLH_UPSTOX_API_SECRET = (os.getenv("OLH_UPSTOX_API_SECRET") or "").strip()
+OLH_UPSTOX_TOKEN_FILE = (os.getenv("OLH_UPSTOX_TOKEN_FILE") or "").strip()

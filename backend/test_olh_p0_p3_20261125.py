@@ -261,3 +261,41 @@ def test_phase_a_and_b_complete_via_reserved_when_shared_empty(monkeypatch):
     assert sum(v.get("granted", 0) for v in (snap.get("phase_a") or {}).values()) >= 10
     assert sum(v.get("granted", 0) for v in (snap.get("phase_b") or {}).values()) >= 5
     assert sum(v.get("denied", 0) for v in (snap.get("phase_a") or {}).values()) == 0
+
+
+def test_job_usage_attributed_on_shared_acquire(monkeypatch):
+    from backend.services import upstox_rate_limiter as rl
+
+    monkeypatch.setattr(rl, "_LIMITER", rl.SlidingWindowRateLimiter([(100, 1.0)]))
+    monkeypatch.setattr(rl, "_in_olh_priority_window", lambda: False)
+    monkeypatch.setattr(rl, "_headroom_exhausted", lambda: False)
+    monkeypatch.setattr(rl, "_scheduled_warm_active", lambda: False)
+    with rl.candle_warm_execution("scheduled_aux_0905"):
+        with rl.scheduled_candle_worker():
+            assert rl.acquire_candle_slot() is True
+    snap = rl.job_usage_snapshot()
+    assert any(
+        sum(v.get("granted", 0) for v in mins.values()) >= 1
+        for j, mins in snap.items()
+        if j == "scheduled_aux_0905"
+    )
+
+
+def test_job_usage_tags_shared_acquires(monkeypatch):
+    from backend.services import upstox_rate_limiter as rl
+
+    monkeypatch.setattr(rl, "_LIMITER", rl.SlidingWindowRateLimiter([(100, 1.0)]))
+    monkeypatch.setattr(rl, "_in_olh_priority_window", lambda: False)
+    with rl.candle_warm_execution("unit_test_job"):
+        assert rl.acquire_candle_slot() is True
+    snap = rl.job_usage_snapshot()
+    assert "unit_test_job" in snap
+    assert sum(v.get("granted", 0) for v in snap["unit_test_job"].values()) >= 1
+
+
+def test_feed_status_reports_ws_limits():
+    from backend.services import upstox_market_feed as umf
+
+    st = umf.feed_status()
+    assert st.get("upstox_ws_connection_limit_per_user") == 2
+    assert "last_authorize" in st
