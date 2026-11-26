@@ -3,11 +3,12 @@
 Retention: 14 days (configurable). Size estimate documented in ``estimate_daily_bytes``.
 Staging-safe: no-op when ``OLH_RAW_RECORD_ENABLED`` is false (default).
 
-Path resolution (2026-11-25 fix)
---------------------------------
-Production previously set ``OLH_RAW_RECORD_DIR=/home/ubuntu/trademanthan/data/...``
-which does **not** exist inside the app container. Prefer writable candidates:
-``/app/data/olh_raw_recordings`` (compose ``./data`` mount), then env, then cwd.
+Path resolution (2026-11-25 / 26 fix)
+------------------------------------
+paperclip ``twcto_docker`` bind-mounts ``./data`` →
+``/home/ubuntu/trademanthan/data`` inside the app container. That path **is**
+the durable volume. ``/app/data/...`` is ephemeral unless separately mounted.
+Configured env is tried first; then known mount candidates; first writable wins.
 """
 from __future__ import annotations
 
@@ -58,25 +59,23 @@ def estimate_daily_bytes() -> Dict[str, Any]:
 
 
 def _candidate_roots() -> List[Path]:
+    """Ordered writable roots.
+
+    On paperclip compose, ``./data`` is bind-mounted at
+    ``/home/ubuntu/trademanthan/data`` (not ``/app/data``). Prefer the configured
+    env path first when it is writable; fall back to known mounts.
+    """
     env = (OLH_RAW_RECORD_DIR or "").strip()
-    cands: List[Path] = []
-    # Prefer known writable container mounts first when env looks like a host-only path.
     preferred = [
-        Path("/app/data/olh_raw_recordings"),
+        Path("/home/ubuntu/trademanthan/data/olh_raw_recordings"),  # twcto ./data mount
         Path("/home/ubuntu/twcto/data/olh_raw_recordings"),
+        Path("/app/data/olh_raw_recordings"),  # ephemeral unless separately mounted
         Path("data/olh_raw_recordings"),
     ]
+    cands: List[Path] = []
     if env:
-        env_p = Path(env)
-        # Host path that only exists on the VM outside Docker → skip for mkdir priority.
-        host_only = str(env_p).startswith("/home/ubuntu/trademanthan")
-        if not host_only:
-            cands.append(env_p)
-        cands.extend(preferred)
-        if host_only:
-            cands.append(env_p)  # last resort
-    else:
-        cands.extend(preferred)
+        cands.append(Path(env))
+    cands.extend(preferred)
     # Dedupe preserving order
     seen = set()
     out: List[Path] = []

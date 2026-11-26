@@ -115,7 +115,7 @@ export OLH_RAW_RECORD_DIR=/home/ubuntu/twcto/data/olh_raw_recordings   # persist
 | `OLH_WS_AUTH_MAX_ATTEMPTS` | 5 | Bounded authorize 401/403 recovery |
 | `OLH_UPSTOX_API_KEY` / `_SECRET` / `_TOKEN_FILE` | empty | Optional dedicated OLH Upstox app (limits still per-user) |
 
-**Prod env note:** set `OLH_RAW_RECORD_DIR=/app/data/olh_raw_recordings` (host `./data` mount). Do **not** use `/home/ubuntu/trademanthan/...` inside the container. Prefer `OLH_RAW_RECORD_ENABLED=1` once the mount is writable.
+**Prod env note (paperclip compose):** `./data` is mounted at `/home/ubuntu/trademanthan/data` inside the app container — set `OLH_RAW_RECORD_DIR=/home/ubuntu/trademanthan/data/olh_raw_recordings`. `/app/data/...` is ephemeral unless separately mounted.
 
 ## Independent watchdog (separate process)
 

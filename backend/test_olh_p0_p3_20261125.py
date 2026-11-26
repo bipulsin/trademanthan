@@ -239,6 +239,19 @@ def test_raw_recording_prefers_writable_path(tmp_path, monkeypatch):
         bad.chmod(0o755)
 
 
+def test_raw_recording_keeps_trademanthan_mount_first(tmp_path, monkeypatch):
+    """paperclip mounts ./data at /home/ubuntu/trademanthan/data — must not skip it."""
+    import backend.services.open_low_high.raw_recording as rr
+
+    mount = tmp_path / "trademanthan_data" / "olh_raw_recordings"
+    mount.mkdir(parents=True)
+    monkeypatch.setattr(rr, "OLH_RAW_RECORD_DIR", str(mount))
+    monkeypatch.setattr(rr, "_resolved_root", None)
+    roots = rr._candidate_roots()
+    assert roots[0] == mount
+    assert rr.recording_root() == mount
+
+
 def test_phase_a_and_b_complete_via_reserved_when_shared_empty(monkeypatch):
     """Shared empty at 09:20 but OLH completes A+B via reserved pools."""
     from backend.services.open_low_high import candle_budget as cb

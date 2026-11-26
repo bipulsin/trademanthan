@@ -107,11 +107,11 @@ OLH_FETCH_ATTEMPTS_ENABLED = _env_bool("OLH_FETCH_ATTEMPTS_ENABLED", True)
 
 # --- Reliability program (staging-friendly; defaults safe for prod) ---
 # Raw WS/REST recording 09:00–09:35 → persistent volume, 14-day retention.
-# Prefer container mount ``/app/data/olh_raw_recordings`` (host ./data) — NOT a
-# host path like /home/ubuntu/trademanthan/... which is invisible inside Docker.
+# paperclip compose mounts ./data → /home/ubuntu/trademanthan/data (not /app/data).
 OLH_RAW_RECORD_ENABLED = _env_bool("OLH_RAW_RECORD_ENABLED", False)
 OLH_RAW_RECORD_DIR = (
-    os.getenv("OLH_RAW_RECORD_DIR") or "/app/data/olh_raw_recordings"
+    os.getenv("OLH_RAW_RECORD_DIR")
+    or "/home/ubuntu/trademanthan/data/olh_raw_recordings"
 ).strip()
 OLH_RAW_RECORD_RETENTION_DAYS = _env_int("OLH_RAW_RECORD_RETENTION_DAYS", 14)
 OLH_RAW_RECORD_START = time(9, 0, 0)
